@@ -1,0 +1,127 @@
+fix-cite-lock-005 — serve source picker claims `unpinned` for an unreadable lockfile
+
+Task: CITE-LOCK-005 (reproduced in
+/home/jorb/work/refdes/in-prog-logs/current-main-resweep-cite-state.tsv line 3),
+implemented at this worktree's pinned origin/main HEAD 8b6a52e.
+
+Status: finished. Three files changed, four regression tests added, all
+verified through the real serve HTTP surface.
+
+## 1. The bug, confirmed at HEAD
+
+`citations.read_lockfile` (citations.py:1161) returns `({}, exc)` when the
+lockfile is present but not readable as one, reporting the reason once as an
+ERROR diagnostic (guarded by `project._lockfile_reported`). `build` memoizes
+*the records regardless* — `run_calcs` at build.py:1544
+(`project._source_lock, _problem = citations_mod.read_lockfile(project)`) and
+`_run_item_calcs` at build.py:1387-1390 both keep the `{}`. Serve snapshots
+come from `loader.load_readonly` = load_tree + build, so by the time any
+request lands, `project._source_lock == {}` is already memoized.
+
+`serve/sources._lockfile` checked the memo *before* anything else
+(sources.py:96-98): a memo hit returned `{}` and never reached its own
+`SourceRefusal` raise. The picker then rendered every citation `unpinned` with
+a "run 'refdes fetch ...' to pin it" remedy — the exact claim the function's
+docstring (sources.py:92-94) forbids, and what the probe in the resweep tsv
+recorded.
+
+Red test first: `test_an_unreadable_lockfile_refuses_the_picker_...` on
+fetched-then-corrupted `.refdes/citations.yaml` returned
+`200` with `state: unpinned` on the file at HEAD. Verified with
+`PYTHONPATH=src python -m pytest tests/test_serve_sources.py -k unreadable`
+(the shared venv's editable install points at /home/jorb/work/refdes, so
+PYTHONPATH=src is mandatory for any test run in this worktree).
+
+## 2. The fix (narrow, memo-preserving, diagnostic-preserving)
+
+- `citations.read_lockfile` now keeps the failure beside the memo it hands
+  out: `project._lockfile_problem = exc` on the failure path, cleared to
+  `None` on a successful read. This is the same pattern the function already
+  uses for `_lockfile_reported`; the returned tuple is unchanged, so no
+  existing caller's contract moves. Docstring gains the memo-reader's rule.
+- `serve/sources._lockfile` checks `project._lockfile_problem` on the memo
+  hit and raises `SourceRefusal(str(problem))` — the lockfile's own sentence
+  with `.refdes/citations.yaml:line` prefix (`LockfileError.__str__`) —
+  without re-reading the file. The cold path (no memo) is unchanged.
+- `serve/api._item_sources` wraps `files_payload` in the same
+  `except SourceRefusal -> _refused(exc)` the other three source routes
+  already do. This was a latent 500: `_api` (server.py:826) calls
+  `api.handle` with no try/except, so the moment `files_payload` could raise,
+  the file-list route would have killed the handler thread. The entries,
+  propose and page routes, and the accept route (edit.py:654), already
+  caught it; accept now refuses with the lockfile's reason at step 1
+  (`accept_plan`) instead of reaching step 2 (`stage_source_pins`), which
+  would have refused anyway through the strict writer-side `load_lockfile`.
+
+Why not "don't memoize `{}` in build": `build` legitimately evaluates with
+empty records after a failed read (read_lockfile's non-fatal posture), and
+skipping the memo would re-read a corrupt file once per item in
+`_run_item_calcs`. The problem, not the records, is the thing that was being
+lost.
+
+## 3. Tests (tests/test_serve_sources.py, new section)
+
+All through the live `EditorApp` + `Client` like the rest of the file:
+
+- files route is 422 `refused` naming `.refdes/citations.yaml` / "not a
+  mapping", and the payload contains no `unpinned`/`no fetched record` lie;
+- entries and both propose calls (bare and with unit) 422 with the same
+  reason;
+- two requests later the snapshot project still carries exactly one ERROR
+  diagnostic on the lockfile (dedupe preserved, refused from the memo, no
+  re-read/re-report);
+- control: a well-formed empty `citations: {}` lockfile is still ordinary
+  `unpinned` 200 — the refusal is for unreadable, not for empty.
+
+## 4. Gates (all with PYTHONPATH=src)
+
+- new tests red-then-green: `-k "unreadable or readable_empty"` showed the
+  200/unpinned lie at HEAD before the fix, 4 passed after.
+- targeted: test_serve_sources / test_serve_sources_accept /
+  test_serve_pdf_sources / test_citations / test_calc_sources —
+  235 passed, 1 skipped.
+- full suite: `python -m pytest -q` — 3606 passed, 2 skipped, exit 0
+  (270.61 s). Run started only after all three source fixes were in the
+  worktree, so it covers the patch.
+- ruff scoped to the four touched files: 11 findings, byte-identical to the
+  same files at HEAD dumped via `git show` into .scratch/cite005-head —
+  zero new findings (the 11 are the pre-existing default-rule-set residue
+  AGENTS.md warns about).
+
+## 4b. Stale `_lockfile_problem` — reviewed, not reachable
+
+Question reviewed: can a memo hit in `serve/sources._lockfile` pair a
+*successful* read's records with a later failed read's problem (or the
+reverse), so the refusal or the acceptance is stale?
+
+- Success clears: `read_lockfile` sets `project._lockfile_problem = None`
+  on every successful read, so a repaired-and-re-read project never keeps
+  a stale refusal.
+- The pair is written together: both memo writers in build keep records and
+  problem in lockstep — `run_calcs` (build.py:1544) always takes both from
+  the same `read_lockfile` call; `_run_item_calcs` (build.py:1387-1390)
+  only reads when the memo is absent, so whatever is memoised came from the
+  read that also set/cleared the problem. The only other `read_lockfile`
+  callers (verify, `stage_source_pins`' fallback, cli.py:1709) never write
+  `_source_lock`.
+- Serve reachability: a snapshot project is built once by `load_readonly`
+  and every picker request hits the memo; editor accepts run against fresh
+  candidate projects; a snapshot rebuild is a fresh Project object (no
+  attribute bleed). A mid-build lockfile swap is the one shape that could
+  pair good records with a later failure, and `serve/state.py` already
+  reloads when input hashes change during a build — and the direction of
+  any such residue is the safe one: refuse rather than claim `unpinned`.
+
+Conclusion: no code change needed beyond the clear-on-success.
+
+## 5. Difficulties / notes
+
+- Environment: the shared venv editable-installs refdes from the main
+  checkout. Any verification here must pin PYTHONPATH=src or it silently
+  tests main's code; the `refdes.__file__` echo was checked before trusting
+  any run.
+- `ruff check .` is not a valid gate (AGENTS.md); scoped run on the touched
+  files below.
+- The poisoned memo is per-snapshot-object: a snapshot rebuild produces a new
+  Project, so a repaired lockfile is read fresh by the next snapshot; no
+  cross-project bleed of `_lockfile_problem`.

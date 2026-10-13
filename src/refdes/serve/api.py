@@ -329,7 +329,13 @@ def _item_sources(app, ref: str, query: dict[str, list[str]]) -> tuple[int, dict
     item, _handle = _find_item(project, ref)
     if item is None:
         return 404, {"error": f"no item matches {ref!r}"}
-    return 200, sources_mod.files_payload(project, item)
+    try:
+        return 200, sources_mod.files_payload(project, item)
+    except sources_mod.SourceRefusal as exc:
+        # The file list reads the lockfile before it can name any pin state,
+        # and an unreadable one refuses the whole answer -- which is a 422 in
+        # the same vocabulary the other three source routes already speak.
+        return _refused(exc)
 
 
 def _source_entries(app, ref: str, query: dict[str, list[str]]) -> tuple[int, dict]:

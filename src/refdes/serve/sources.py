@@ -92,9 +92,20 @@ def _lockfile(project: Project) -> dict[str, dict]:
     which is this module's own vocabulary for "this read is not answerable" and
     becomes a 422 the panel renders. Not an empty mapping: the picker would then
     list every citation as unpinned, which is a claim about a file nobody read.
+
+    The memo can be poisoned by exactly that confusion: `build` memoises
+    `read_lockfile`'s records on the project even when the read failed, and on
+    that path the records it hands back are `{}` -- so a memo hit is checked
+    against `project._lockfile_problem`, which `read_lockfile` keeps beside it,
+    before the mapping is believed. The refusal then names the lockfile's own
+    reason without re-reading the file, and the build's single ERROR diagnostic
+    stays the project's only one.
     """
     records = getattr(project, "_source_lock", None)
     if records is not None:
+        problem = getattr(project, "_lockfile_problem", None)
+        if problem is not None:
+            raise SourceRefusal(str(problem))
         return records
     records, problem = citations_mod.read_lockfile(project)
     if problem is not None:

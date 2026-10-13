@@ -1260,14 +1260,24 @@ def read_lockfile(project: Project) -> tuple[dict[str, dict], LockfileError | No
     lockfile neither may overwrite: `fetch` would write a fresh record for what
     it just fetched and drop every pin it could not read, which is the one
     outcome this file exists to prevent.
+
+    A reader that memoises the returned records on the project -- `build`
+    keeps them as `project._source_lock` -- must beside the memo consult
+    `project._lockfile_problem`, which this function sets to the failure and
+    clears on a successful read: a memoised `{}` from a failed read is
+    indistinguishable from an empty lockfile, and a memo-reader that trusts the
+    mapping alone claims every citation unpinned from a file it never read.
     """
     try:
-        return load_lockfile(project), None
+        records = load_lockfile(project)
     except LockfileError as exc:
         if not getattr(project, "_lockfile_reported", False):
             project._lockfile_reported = True
             project.error(exc.message, file=LOCKFILE, line=exc.line)
+        project._lockfile_problem = exc
         return {}, exc
+    project._lockfile_problem = None
+    return records, None
 
 
 def lockfile_text(records: dict[str, dict]) -> str:
