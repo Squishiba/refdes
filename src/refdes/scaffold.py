@@ -528,6 +528,23 @@ def _edit_presets_list(raw_text: str, mutate) -> str:
     return raw_text[: match.start()] + new_span + raw_text[match.end() :]
 
 
+def _config_write_target(config_path: str) -> str:
+    """Where the atomic preset write should actually land for ``config_path``.
+
+    ``textio.atomic_write_text`` swaps a same-directory temp into place with
+    ``os.replace``, and ``rename`` replaces the *symlink itself* rather than
+    following it -- unlike the truncate-on-open ``write_text`` it replaced,
+    which wrote through the link. A project that keeps ``refdes-project.yaml``
+    as a symlink (e.g. to ``actual-project.yaml``) would therefore lose the
+    link and leave the file behind it untouched. Resolving to the link's
+    target keeps both halves of the old behavior: the symlink stays a symlink,
+    and the bytes land in the real file. For an ordinary (non-symlink) config
+    this is just its absolute path -- same basename, same directory, same mode
+    -- so the write is unchanged (add/remove-preset, WRITE-ATOMIC-003 review).
+    """
+    return os.path.realpath(config_path)
+
+
 def _read_settings(config_path: str) -> tuple[dict[str, Any], str]:
     """`refdes-project.yaml` as `(mapping, raw text)`, refusing a repeated key.
 
@@ -574,7 +591,10 @@ def add_preset(project_root: str, preset_name: str) -> None:
     # write goes through `atomic_write_text`: a truncate-on-open that fails
     # mid-write (ENOSPC) used to leave a half-written config behind while the
     # refusal below claimed the presets line was "exactly as it was" -- the
-    # same-directory temp plus rename means the refusal is now true.
+    # same-directory temp plus rename means the refusal is now true. It writes
+    # to the resolved target so a symlinked `refdes-project.yaml` keeps being a
+    # symlink and the change lands in the file behind it (`rename` would
+    # otherwise replace the link itself).
     raw, raw_text = _read_settings(config_path)
     standard_cfg = _read_standard_cfg(raw)
 
@@ -595,7 +615,7 @@ def add_preset(project_root: str, preset_name: str) -> None:
 
     new_text = _edit_presets_list(raw_text, lambda lst: lst + [preset_name])
     try:
-        textio.atomic_write_text(config_path, new_text)
+        textio.atomic_write_text(_config_write_target(config_path), new_text)
     except OSError as exc:
         raise Refused(
             destination_refusal(
@@ -663,9 +683,11 @@ def remove_preset(project_root: str, preset_name: str) -> list:
     # Last, so the scratch copy is already gone when this is refused and the
     # refusal leaves no litter behind. Atomic for the same reason as the other
     # two writes here: a truncate that failed mid-write used to destroy the
-    # config while this refusal said "Nothing changed."
+    # config while this refusal said "Nothing changed." As in `add_preset` it
+    # writes the resolved target, so a symlinked config keeps being a symlink
+    # and the removal lands in the real file behind it.
     try:
-        textio.atomic_write_text(config_path, new_text)
+        textio.atomic_write_text(_config_write_target(config_path), new_text)
     except OSError as exc:
         raise Refused(
             destination_refusal(

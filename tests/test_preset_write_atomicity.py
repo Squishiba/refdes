@@ -30,6 +30,9 @@ from refdes import scaffold as scaffold_mod
 # chmod is not a thing on Windows; the mode-preservation test needs it.
 needs_chmod = pytest.mark.skipif(os.name == "nt", reason="needs POSIX chmod bits")
 
+# Symlinks need POSIX (or elevated Windows privileges), same as `probe.py`.
+needs_symlink = pytest.mark.skipif(os.name == "nt", reason="needs POSIX symlinks")
+
 # The temp `textio.atomic_write_text` makes for a target is named
 # `.{target basename}.refdes-tmp-{random}`, so a scratch-copy temp and a
 # real-config temp are told apart by their prefix.
@@ -46,6 +49,26 @@ def _init_preset_project(tmp_path, presets: list[str]) -> str:
     for preset in presets:
         scaffold_mod.add_preset(str(tmp_path), preset)
     return str(config)
+
+
+def _symlink_preset_project(tmp_path, presets: list[str]) -> tuple[str, str]:
+    """The same hardware@2 project, but its `refdes-project.yaml` is a symlink
+    to a real `actual-project.yaml` beside it.
+
+    The WRITE-ATOMIC-003 review regression's exact shape: the command is
+    pointed at the marker, but the bytes it must edit live behind the link.
+    Returns `(marker, real)` -- pass `marker` to the CLI, check the bytes on
+    `real`.
+    """
+    scaffold_mod.init(str(tmp_path))
+    marker = tmp_path / "refdes-project.yaml"
+    real = tmp_path / "actual-project.yaml"
+    real.write_text(marker.read_text().replace("version: 3", "version: 2"))
+    marker.unlink()
+    marker.symlink_to(real.name)
+    for preset in presets:
+        scaffold_mod.add_preset(str(tmp_path), preset)
+    return str(marker), str(real)
 
 
 class _FailingDisk:
@@ -243,3 +266,135 @@ def test_add_preset_keeps_the_existing_configs_mode(tmp_path, capsys):
     with open(config, encoding="utf-8") as fh:
         assert "design-debate" in fh.read()
     _no_litter(tmp_path)
+
+
+# ----------------------------------------------------- symlinked config target
+#
+# WRITE-ATOMIC-003 review regression. `atomic_write_text` renames a temp over
+# its target, and `rename` swaps the *symlink itself* for the temp rather than
+# following it -- the opposite of the truncate-on-open `write_text` it
+# replaced, which wrote through the link. So on a branch that pointed at the
+# symlink, `add-preset` replaced `refdes-project.yaml` with a regular file and
+# left `actual-project.yaml` untouched (`.scratch/review_atomic_symlink/
+# probe.py`: marker_symlink False, target_changed False). The fix resolves the
+# write to the link's target, so the link survives and the bytes land behind
+# it. These three pin both halves: success keeps the link and edits the real
+# file, and a failed atomic write through the link still changes nothing.
+
+# The real write now targets the resolved `actual-project.yaml`, so its temp
+# carries that basename -- tell it apart from the marker and the scratch copy.
+REAL_TMP_PREFIX = ".actual-project.yaml.refdes-tmp-"
+
+
+@needs_symlink
+def test_add_preset_through_a_symlink_keeps_the_link_and_edits_the_target(
+    tmp_path, capsys
+):
+    """Successful add through a symlinked config: the marker is still a
+    symlink, the preset landed in the file behind it, and it reads back
+    through the link."""
+    marker, real = _symlink_preset_project(tmp_path, presets=[])
+    with open(real, "rb") as fh:
+        before = fh.read()
+
+    status = cli_mod.main(
+        ["-c", marker, "standard", "add-preset", "design-debate"]
+    )
+
+    captured = capsys.readouterr()
+    assert status == 0, captured.out + captured.err
+    assert os.path.islink(marker), "the symlink must not be replaced by a file"
+    with open(real, "rb") as fh:
+        after = fh.read()
+    assert after != before, "the write must land in the file behind the link"
+    assert b"design-debate" in after
+    with open(marker, "rb") as fh:  # reads through the link
+        assert b"design-debate" in fh.read()
+    _no_litter(tmp_path)
+
+
+@needs_symlink
+def test_remove_preset_through_a_symlink_keeps_the_link_and_edits_the_target(
+    tmp_path, capsys
+):
+    """The same through remove-preset, which also runs the scratch-copy
+    simulation first: the marker stays a symlink and the real file loses the
+    preset, with no scratch or temp litter."""
+    marker, real = _symlink_preset_project(tmp_path, presets=["design-debate"])
+    with open(real, "rb") as fh:
+        before = fh.read()
+    assert b"design-debate" in before
+
+    status = cli_mod.main(
+        ["-c", marker, "standard", "remove-preset", "design-debate"]
+    )
+
+    captured = capsys.readouterr()
+    assert status == 0, captured.out + captured.err
+    assert os.path.islink(marker), "the symlink must not be replaced by a file"
+    with open(real, "rb") as fh:
+        after = fh.read()
+    assert after != before and b"design-debate" not in after
+    _no_litter(tmp_path)
+
+
+@needs_symlink
+@pytest.mark.parametrize("at_write", [True, False], ids=["at-write", "at-fsync"])
+def test_add_preset_failure_through_a_symlink_changes_nothing(
+    tmp_path, capsys, monkeypatch, at_write
+):
+    """A failed atomic write aimed at the resolved target: the real file
+    behind the link is byte-identical, the marker is still a symlink (a rename
+    of the link itself would have changed that), and the refusal is true."""
+    marker, real = _symlink_preset_project(tmp_path, presets=[])
+    with open(real, "rb") as fh:
+        before = fh.read()
+    disk = _FailingDisk(
+        monkeypatch, lambda name: name.startswith(REAL_TMP_PREFIX)
+    )
+    disk.install(at_write=at_write)
+
+    status = cli_mod.main(
+        ["-c", marker, "standard", "add-preset", "design-debate"]
+    )
+
+    captured = capsys.readouterr()
+    assert status == 2, captured.out + captured.err
+    assert "cannot write refdes-project.yaml" in captured.err, captured.err
+    assert "exactly as it was" in captured.err, captured.err
+    with open(real, "rb") as fh:
+        assert fh.read() == before
+    assert os.path.islink(marker), "a refused write must not have replaced the link"
+    _no_litter(tmp_path)
+    assert disk.temp_survivors(tmp_path) == []
+
+
+@needs_symlink
+@pytest.mark.parametrize("at_write", [True, False], ids=["at-write", "at-fsync"])
+def test_remove_preset_real_failure_through_a_symlink_changes_nothing(
+    tmp_path, capsys, monkeypatch, at_write
+):
+    """remove-preset with the failure aimed only at the resolved real write:
+    the scratch simulation still runs and is cleaned up, then the real write
+    fails -- the real file is untouched, the link intact, nothing left behind,
+    so "Nothing changed." holds through the symlink too."""
+    marker, real = _symlink_preset_project(tmp_path, presets=["design-debate"])
+    with open(real, "rb") as fh:
+        before = fh.read()
+    disk = _FailingDisk(
+        monkeypatch, lambda name: name.startswith(REAL_TMP_PREFIX)
+    )
+    disk.install(at_write=at_write)
+
+    status = cli_mod.main(
+        ["-c", marker, "standard", "remove-preset", "design-debate"]
+    )
+
+    captured = capsys.readouterr()
+    assert status == 2, captured.out + captured.err
+    assert "still selected. Nothing changed." in captured.err, captured.err
+    with open(real, "rb") as fh:
+        assert fh.read() == before
+    assert os.path.islink(marker), "a refused write must not have replaced the link"
+    _no_litter(tmp_path)
+    assert disk.temp_survivors(tmp_path) == []

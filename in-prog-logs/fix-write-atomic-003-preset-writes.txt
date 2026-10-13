@@ -118,3 +118,96 @@ Limits
     runs anywhere.
   - Windows behavior of atomic_write_text (replace over read-only file) is
     inherited from the existing #162 helper, not newly tested.
+
+========================================================================
+Review regression (follow-up pass, 2026-10-13) — symlinked config target
+========================================================================
+Status: FINISHED (targeted + concrete-risk tests green; limits at bottom).
+
+Regression found (review of commit 1a9ca20)
+-------------------------------------------
+The atomic-write switch regressed symlinked configs. textio.atomic_write_text
+ends in `os.replace(tmp, path)` (src/refdes/textio.py:298); `rename(2)`
+replaces the *symlink itself* with the regular temp file rather than following
+it. The truncate-on-open textio.write_text it replaced used open(path, "w"),
+which DID follow the link. So for a project whose refdes-project.yaml is a
+symlink to actual-project.yaml in the same directory, add-preset/remove-preset
+now replaced the symlink with a regular file and left actual-project.yaml
+untouched — it lost the symlink and edited the wrong (new) file. The ENOSPC
+protection, mode preservation and clean refusal the fix added were still fine;
+only the symlink path regressed.
+
+Reproduction (.scratch/review_atomic_symlink/probe.py, run against this
+worktree's src with PYTHONPATH=<worktree>/src, refdes.__file__ checked):
+  baseline @8b6a52e : marker_symlink True,  target_changed True, marker_has_preset True
+  branch   @1a9ca20 : marker_symlink False, target_changed False, marker_has_preset True
+
+Fix (narrow, call-site)
+-----------------------
+src/refdes/scaffold.py: added _config_write_target(config_path) returning
+os.path.realpath(config_path), and pointed the two REAL config writes (add_preset
+and the remove_preset final write) at it. The remove-preset scratch simulation
+copy is deliberately NOT resolved — it is an ephemeral regular file next to the
+marker, written and removed by name.
+  - os.replace then lands on the resolved real file, so the symlink keeps
+    pointing at it and the bytes go behind the link (rename replaces the file,
+    the link is by name so it still resolves).
+  - For an ordinary (non-symlink) config realpath is just the absolute path:
+    same directory (temp created there), same basename (temp prefix), same
+    mode (os.stat). No-op for the common case — verified by the pre-existing
+    atomicity/mode/refusal tests still passing.
+
+Why narrow and not textio.atomic_write_text
+--------------------------------------------
+atomic_write_text is shared with ids.py (id-ledger write) and revise.py (source
+rewrites + rollback). Changing its rename semantics there would alter two
+untested-by-this-issue writers at once and its own read-only/dir checks. The
+task said a narrow call-site resolution of the real config target may be
+better; the evidence (blast radius + the realpath no-op for non-symlinks)
+supports the call-site fix. atomic_write_text is left unchanged.
+
+Tests (tests/test_preset_write_atomicity.py, appended)
+------------------------------------------------------
+  - test_add_preset_through_a_symlink_keeps_the_link_and_edits_the_target
+  - test_remove_preset_through_a_symlink_keeps_the_link_and_edits_the_target
+  - test_add_preset_failure_through_a_symlink_changes_nothing[at-write,at-fsync]
+    (ENOSPC aimed at .actual-project.yaml.refdes-tmp- : the resolved target's
+     temp — real file byte-identical, link intact, refusal "exactly as it was")
+  - test_remove_preset_real_failure_through_a_symlink_changes_nothing[at-write,at-fsync]
+    (same aim; simulation still runs + scratch removed, then real write fails)
+All 4 (6 parametrized) FAIL against the pre-fix write-to-config_path code and
+PASS with the fix — verified by temporarily reverting both write sites (copy
+to .scratch, never git stash) and re-running -k symlink: 6 failed.
+
+Runs
+----
+  - tests/test_preset_write_atomicity.py : 13 passed (7 original + 6 new).
+  - targeted: + test_readonly_explicit_writes.py, test_scaffold.py,
+    test_eol_fidelity.py, test_no_write.py, test_exit_codes.py,
+    test_config_duplicate_keys.py — 229 passed.
+  - concrete-risk guard (other atomic_write_text consumers): tests/test_ids.py,
+    test_revise.py, test_revise_migrations.py, test_revise_cli.py — 153 passed
+    (scaffold.py-only change; run to confirm no cross-contamination).
+  - ruff scoped: `ruff check src/refdes/scaffold.py
+    tests/test_preset_write_atomicity.py` → All checks passed (repo-wide not
+    green per AGENTS.md; scoped to the two touched files).
+  - CLI verified end-to-end (not just the library): `refdes standard
+    add-preset`/`remove-preset` in a dir with refdes-project.yaml symlinked to
+    actual-project.yaml — exit 0 both, symlink still a symlink, presets line
+    updated in actual-project.yaml, no scratch/.refdes-tmp litter. CLI resolved
+    via PYTHONPATH=<worktree>/src; refdes.cli.__file__ confirmed under the
+    worktree src.
+
+Limits (this pass)
+------------------
+  - realpath is resolved once at the real-write call site; it does not re-resolve
+    if the link is swapped between the read and the write (unchanged TOCTOU
+    window from the original code).
+  - Symlink tests skip on Windows (os.name == "nt") like probe.py needs POSIX.
+  - Cross-directory / cross-filesystem symlinks: the temp is created in the
+    resolved target's directory (os.path.dirname of realpath), so rename stays
+    same-directory; a link resolving outside the project dir is written in the
+    target's dir — out of the reproduced same-directory scope but handled
+    consistently.
+  - Still only the add/remove-preset writes; the broader PERM-OWNER-* findings
+    and other write_text sites remain out of scope as before.
