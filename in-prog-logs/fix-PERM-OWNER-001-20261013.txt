@@ -1,0 +1,52 @@
+Task: fix PERM-OWNER-001 (from in-prog-logs/current-main-resweep-write-permissions.tsv,
+which lives in the shared main checkout /home/jorb/work/refdes/in-prog-logs/, not in
+this worktree -- read it there). Branch fix/seal-new-file-mode-20261013 on main 8b6a52e.
+
+Finding confirmed: seal.py save_seals wrote through tempfile.NamedTemporaryFile
+(creates 0600) and copied the old file's mode only under `if os.path.exists(path)`,
+so the FIRST seal file in a tree kept 0600 while siblings written by ordinary
+open() calls (.refdes/schema.json via textio.write_text, .refdes-write.lock)
+landed at the umask default.
+
+Repro (this worktree's src via PYTHONPATH, venv console script; the venv's
+__editable__ .pth is a plain path line so PYTHONPATH shadows it -- verified
+refdes.__file__ resolves to the worktree):
+  .scratch/fix-perm-owner-001-20261013/proj1, hardware@3 + refdes-schema.yaml
+  overlay `types: log: sealing: build` (the stock hardware@3 log is
+  sealing: history and never seals at build -- first thing learned),
+  items/log.yaml with LOG-001, `umask 002 && refdes -c ... build` -> exit 0,
+  .refdes/log-seal.yaml at 600 beside schema.json/.refdes-write.lock at 664.
+
+Fix (src/refdes/seal.py only; textio.atomic_write_text has the identical gap as
+PERM-OWNER-002 and serve/edit.py:952 as a third instance -- deliberately NOT
+touched per the "avoid changing unrelated atomic writers" instruction):
+  - new _umask_respecting_mode() helper: 0o666 & ~umask, umask read via the
+    set-and-restore os.umask round-trip leaving 022 in place during the window
+    (pip idiom) instead of a wide-open 000. save_seals is only reached from
+    single-threaded CLI flows (all serve in-process builds pass
+    seal_write=False -- checked serve/edit.py:358 and server.py), but the
+    restrictive window costs nothing.
+  - else-branch: chmod the temp to that mode before os.replace; existing-file
+    branch unchanged (still copies the target's mode verbatim).
+
+Post-fix CLI verification (proj2/proj3 in .scratch): fresh build under umask
+002 -> seal file 664 = siblings; chmod 600 then rebuild -> stays 600; fresh
+build under umask 022 -> 644 = siblings.
+
+Tests (tests/test_seal.py, "file modes" section): parametrized new-file
+002->664 / 022->644, and a rewrite-preservation case pinning 0640 (neither
+umask default) across a save_seals rewrite. Negative check done by temporarily
+stubbing the else-branch (`elif False`) in place: the two new-file cases fail,
+preservation case keeps passing (it guards the untouched branch), fix restored,
+23/23 green.
+
+Scoped runs: tests/test_seal.py + test_history_seal.py + test_revise.py +
+test_checks_keys.py + test_calc_rewrite.py + test_sealing_optin_note.py
+(save_seals' callers: build/verify, revise carry-forward, calc-rewrite)
+-> 162 passed. Full suite not run: the change is one else-branch inside
+save_seals and every caller file is covered above.
+ruff: tests/test_seal.py --select I clean; the two findings ruff reports in
+seal.py (TRY004 at :157, UP017 at :320) are pre-existing at HEAD on untouched
+lines, left alone per AGENTS.md.
+
+Finished: yes. Not pushed; commit is local on the branch.

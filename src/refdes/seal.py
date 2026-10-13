@@ -218,6 +218,18 @@ def format_seals(seals: Seals, reseals: list[dict] | None = None) -> str:
     return _HEADER + yaml.safe_dump(data, sort_keys=True, default_flow_style=False)
 
 
+def _umask_respecting_mode() -> int:
+    """The mode a plain ``open(path, "w")`` gives a *new* file: 0666 minus the
+    process umask. ``os.umask`` has no read-only form, so the value is read by
+    the set-and-restore round-trip, leaving the safe 022 in place during the
+    window rather than a wide-open 000 (the pip idiom). This lives here, not
+    in a shared writer, because the only new-file default any other writer
+    needs has to come from its own call site's semantics."""
+    mask = os.umask(0o022)
+    os.umask(mask)
+    return 0o666 & ~mask
+
+
 def save_seals(
     project: Project, seals: Seals, board: str = "", *, events: list[dict] | None = None
 ) -> bool:
@@ -256,6 +268,13 @@ def save_seals(
                 os.fsync(fh.fileno())
             if os.path.exists(path):
                 os.chmod(temporary, os.stat(path).st_mode & 0o777)
+            else:
+                # A *new* seal file would otherwise keep the temp file's 0600
+                # and be unreadable by the group its siblings get: under a
+                # 002 umask `.refdes/schema.json` and the write lock land
+                # 0664 while the seal file -- the one that carries the
+                # append-only guarantee -- sat at 0600 (PERM-OWNER-001).
+                os.chmod(temporary, _umask_respecting_mode())
             os.replace(temporary, path)
         finally:
             if temporary is not None and os.path.exists(temporary):

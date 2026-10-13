@@ -6,8 +6,10 @@ Split out of the original monolithic tests/test_refdes.py.
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
 from conftest import write_project_config
 from helpers import _build_at
 
@@ -627,3 +629,49 @@ def test_a_corrupt_seal_file_is_a_clean_cli_error_not_a_traceback(sealed_board_p
     assert "log-seal-board-a.yaml" in err
     assert "seal file is not valid UTF-8" in err
     assert "Traceback" not in err
+
+
+# ---------------------------------------------------------------- file modes
+# PERM-OWNER-001: `save_seals` writes through a NamedTemporaryFile, which
+# creates at 0600. It copies the old file's mode before `os.replace` so a
+# rewrite never changes what a group-shared `.refdes/` already reads -- but
+# with no old file there was nothing to copy, and the first seal file in a
+# tree kept the temp's 0600 while its siblings (`schema.json`, the write
+# lock), written by ordinary `open()` calls, landed at the umask default.
+# Under a 002 umask that left the file carrying the append-only guarantee as
+# the one file in `.refdes/` the group could not read.
+
+
+@contextmanager
+def _umask(mask: int):
+    previous = os.umask(mask)
+    try:
+        yield
+    finally:
+        os.umask(previous)
+
+
+@pytest.mark.parametrize(
+    ("umask", "expected"),
+    [(0o002, 0o664), (0o022, 0o644)],
+)
+def test_a_new_seal_file_gets_the_umask_default_mode(sealed_flat_project, umask, expected):
+    project = load_project(config_path=str(sealed_flat_project / "refdes-project.yaml"))
+    path = seal.seal_path(project)
+    assert not os.path.exists(path)
+    with _umask(umask):
+        assert seal.save_seals(project, {"LOG-001": "0" * 16})
+    assert os.stat(path).st_mode & 0o777 == expected
+
+
+def test_a_rewritten_seal_file_keeps_the_mode_it_had(sealed_flat_project):
+    """The other half: the new-file default must not start overwriting a mode
+    someone deliberately set. 0640 is neither umask default, so a rewrite
+    that recomputed instead of copied would land 0664 and fail here."""
+    project = load_project(config_path=str(sealed_flat_project / "refdes-project.yaml"))
+    path = seal.seal_path(project)
+    with _umask(0o002):
+        assert seal.save_seals(project, {"LOG-001": "0" * 16})
+        os.chmod(path, 0o640)
+        assert seal.save_seals(project, {"LOG-001": "1" * 16})
+    assert os.stat(path).st_mode & 0o777 == 0o640
