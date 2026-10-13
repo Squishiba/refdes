@@ -570,7 +570,11 @@ def add_preset(project_root: str, preset_name: str) -> None:
     # translated it again -- adding one preset to an LF config rewrote the
     # whole file to CRLF on Windows, and adding one to a CRLF config rewrote it
     # to LF on Linux. `_edit_presets_list` is a comment-preserving span edit on
-    # the raw text precisely so nothing outside `presets: [...]` moves.
+    # the raw text precisely so nothing outside `presets: [...]` moves. The
+    # write goes through `atomic_write_text`: a truncate-on-open that fails
+    # mid-write (ENOSPC) used to leave a half-written config behind while the
+    # refusal below claimed the presets line was "exactly as it was" -- the
+    # same-directory temp plus rename means the refusal is now true.
     raw, raw_text = _read_settings(config_path)
     standard_cfg = _read_standard_cfg(raw)
 
@@ -591,7 +595,7 @@ def add_preset(project_root: str, preset_name: str) -> None:
 
     new_text = _edit_presets_list(raw_text, lambda lst: lst + [preset_name])
     try:
-        textio.write_text(config_path, new_text)
+        textio.atomic_write_text(config_path, new_text)
     except OSError as exc:
         raise Refused(
             destination_refusal(
@@ -631,10 +635,14 @@ def remove_preset(project_root: str, preset_name: str) -> list:
     # Outside the try, deliberately: a refusal here means the copy was never
     # written, so the `finally` has nothing to clean up and must not be
     # reached -- and nothing has been changed either way, so the same refusal
-    # answers for both this write and the real one below.
+    # answers for both this write and the real one below. The copy is written
+    # atomically (same-directory temp, rename on success, temp unlinked on
+    # failure), so a mid-write ENOSPC takes its partial file with it: the
+    # "Nothing changed." below stays true, with no truncated `.scratch` or
+    # temp left in the project root.
     scratch_path = config_path + ".scratch"
     try:
-        textio.write_text(scratch_path, new_text)
+        textio.atomic_write_text(scratch_path, new_text)
     except OSError as exc:
         raise Refused(
             destination_refusal(
@@ -653,9 +661,11 @@ def remove_preset(project_root: str, preset_name: str) -> list:
         os.remove(scratch_path)
 
     # Last, so the scratch copy is already gone when this is refused and the
-    # refusal leaves no litter behind.
+    # refusal leaves no litter behind. Atomic for the same reason as the other
+    # two writes here: a truncate that failed mid-write used to destroy the
+    # config while this refusal said "Nothing changed."
     try:
-        textio.write_text(config_path, new_text)
+        textio.atomic_write_text(config_path, new_text)
     except OSError as exc:
         raise Refused(
             destination_refusal(
