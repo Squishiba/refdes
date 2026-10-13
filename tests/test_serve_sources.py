@@ -24,6 +24,7 @@ from helpers import _build_at
 from serve_support import Client, snapshot_tree
 
 from refdes import build as build_mod
+from refdes import citations as citations_mod
 from refdes import cli as cli_mod
 from refdes.serve.server import EditorApp
 
@@ -1138,6 +1139,45 @@ def test_an_unreadable_lockfile_is_one_diagnostic_and_stays_refused(tmp_path):
         ]
         assert len(lockfile_errors) == 1
         assert "not a mapping" in lockfile_errors[0].message
+    finally:
+        app.stop()
+
+
+def test_a_lockfile_repaired_mid_build_does_not_unpoison_the_memo(tmp_path, monkeypatch):
+    # The reverse interleaving (review of 403ab84): `run_calcs` (build.py:1544)
+    # memoizes {} + the problem from the corrupt read; `verify`
+    # (citations.py:1496) reads again without writing the memo. If the file is
+    # repaired between the two reads of one build, a success that cleared the
+    # problem beside a still-memoized `{}` would hand the picker the unpinned
+    # lie again. Deterministic, not a race: the wrapper repairs the file right
+    # after the first failing read, and the first snapshot load compares no
+    # pre/post input hashes (state.py builds with before=None), so a served
+    # model can really hold this state.
+    root = make_root(tmp_path)
+    fetch(root)
+    repaired = lock_bytes(root)
+    (root / ".refdes" / "citations.yaml").write_text(
+        CORRUPT_LOCKFILE, encoding="utf-8", newline=""
+    )
+
+    real_read = citations_mod.read_lockfile
+
+    def read_and_repair(project):
+        records, problem = real_read(project)
+        if problem is not None:
+            (root / ".refdes" / "citations.yaml").write_bytes(repaired)
+        return records, problem
+
+    monkeypatch.setattr(citations_mod, "read_lockfile", read_and_repair)
+    app = start(root)
+    try:
+        client = Client(app)
+        # The model was built against the unreadable read, so the pin state it
+        # can honestly show is the refusal -- never the empty memo's unpinned
+        # claim, however readable the file on disk went afterwards.
+        status, payload = client.api_get(sources_url("DEC-001"))
+        assert status == 422, payload
+        assert "not a mapping" in payload["reason"]
     finally:
         app.stop()
 

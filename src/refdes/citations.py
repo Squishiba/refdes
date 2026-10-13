@@ -1262,22 +1262,23 @@ def read_lockfile(project: Project) -> tuple[dict[str, dict], LockfileError | No
     outcome this file exists to prevent.
 
     A reader that memoises the returned records on the project -- `build`
-    keeps them as `project._source_lock` -- must beside the memo consult
-    `project._lockfile_problem`, which this function sets to the failure and
-    clears on a successful read: a memoised `{}` from a failed read is
-    indistinguishable from an empty lockfile, and a memo-reader that trusts the
-    mapping alone claims every citation unpinned from a file it never read.
+    keeps them as `project._source_lock` -- must memoise this call's problem
+    with them, as one pair (`build` writes `project._lockfile_problem` from
+    the same call), and a reader of that memo must trust the pair only
+    together: a memoised `{}` from a failed read is indistinguishable from an
+    empty lockfile, and one trusted alone claims every citation unpinned from
+    a file nobody read. This function deliberately keeps the pair nowhere --
+    it is also called by readers that own no memo (`verify`, the drift scan),
+    and a success at one of those must not clear a problem that belongs to
+    another reader's memo.
     """
     try:
-        records = load_lockfile(project)
+        return load_lockfile(project), None
     except LockfileError as exc:
         if not getattr(project, "_lockfile_reported", False):
             project._lockfile_reported = True
             project.error(exc.message, file=LOCKFILE, line=exc.line)
-        project._lockfile_problem = exc
         return {}, exc
-    project._lockfile_problem = None
-    return records, None
 
 
 def lockfile_text(records: dict[str, dict]) -> str:

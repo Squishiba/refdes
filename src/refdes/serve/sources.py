@@ -95,11 +95,14 @@ def _lockfile(project: Project) -> dict[str, dict]:
 
     The memo can be poisoned by exactly that confusion: `build` memoises
     `read_lockfile`'s records on the project even when the read failed, and on
-    that path the records it hands back are `{}` -- so a memo hit is checked
-    against `project._lockfile_problem`, which `read_lockfile` keeps beside it,
-    before the mapping is believed. The refusal then names the lockfile's own
-    reason without re-reading the file, and the build's single ERROR diagnostic
-    stays the project's only one.
+    that path the records it hands back are `{}`. `build` therefore memoises
+    that read's problem with its records, as one pair in
+    `project._source_lock`/`project._lockfile_problem` written by the same
+    statement, and a memo hit trusts the pair only together -- a later
+    successful read by a memo-less reader (`verify`, the drift scan) must not
+    clear the problem beside a memo it did not write. The refusal then names
+    the lockfile's own reason without re-reading the file, and the build's
+    single ERROR diagnostic stays the project's only one.
     """
     records = getattr(project, "_source_lock", None)
     if records is not None:

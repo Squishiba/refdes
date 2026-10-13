@@ -125,3 +125,46 @@ Conclusion: no code change needed beyond the clear-on-success.
 - The poisoned memo is per-snapshot-object: a snapshot rebuild produces a new
   Project, so a repaired lockfile is read fresh by the next snapshot; no
   cross-project bleed of `_lockfile_problem`.
+
+## 6. Follow-up review (of 403ab84): the reverse interleaving
+
+The §4b review above missed one interleaving, and the reviewer was right:
+`read_lockfile` clearing `_lockfile_problem` on success is itself a hazard,
+because `citations.verify` (citations.py:1496) reads the lockfile a second
+time *without* owning the memo. Sequence: `run_calcs` reads the corrupt file
+and memoises the pair `({}, exc)`; the file is repaired; `verify` reads
+successfully; the first fix's success-clear zeroed the problem while
+`_source_lock` stayed `{}` — the poisoned `{}` trusted alone again, the
+unpinned lie reborn. And `serve/state._build` computes `before` only when a
+snapshot already exists (state.py:191-194), so the first load has no pre/post
+comparison and a snapshot built this way survives.
+
+Reproduced deterministically (no race): the new test wraps
+`citations_mod.read_lockfile`, repairs the file the moment a read reports a
+problem (so run_calcs sees corrupt, verify sees repaired), starts the real
+EditorApp — and on 403ab84's code the files route answered `200` with the
+unpinned rows. Red at 403ab84, green after this follow-up.
+
+The design change: `read_lockfile` keeps the pair nowhere. The memo owner
+is build, so build's two `_source_lock` write sites (run_calcs :1548,
+_run_item_calcs :1390-1394) are the only writers, each writing records and
+problem from one call, as one pair. A success at a memo-less reader can no
+longer unpoison a memo it did not write; a failure there likewise cannot
+poison one. The reader in serve/sources `_lockfile` trusts the pair only
+together — unchanged from 403ab84.
+
+Semantics chosen for the repaired-mid-build snapshot: the picker REFUSES
+(the model's calcs ran against the unreadable read; the next poll rebuild
+picks the good file), rather than showing the fresh on-disk state the
+in-memory model never saw. Not fixed here, by scope: state._build's
+first-load gap itself (`before=None` at :191) — the pair design makes the
+gap survivable, and narrowing the retry loop to also re-hash on first load
+would change serve's build semantics beyond this bug.
+
+Follow-up gates (full suite green at 403ab84; this change is
+pairing-only): new test red-then-green; targeted
+test_serve_sources / test_serve_sources_accept / test_serve_pdf_sources /
+test_calc_sources / test_citations / test_build — 271 passed, 1 skipped;
+test_lockfile_corruption + test_citations_lockfile_locking — 143 passed;
+ruff on the touched files: byte-identical findings to the same files at
+HEAD (zero new).

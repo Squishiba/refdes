@@ -1385,10 +1385,14 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
     extracted so the scheduler can call it in dependency order. `item._env`
     is populated here and cached; the scheduler guarantees every item this
     one references has already been evaluated (or failed) before it runs."""
+    # The same pair the scheduler's entry writes: a memoised read's records
+    # and its problem travel together, or a poisoned `{}` reads as "nothing
+    # is pinned" (serve/sources.py `_lockfile`).
     records = getattr(project, "_source_lock", None)
     if records is None:
-        records, _problem = citations_mod.read_lockfile(project)
+        records, problem = citations_mod.read_lockfile(project)
         project._source_lock = records
+        project._lockfile_problem = problem
     source_resolved: dict[tuple[str, str], tuple[str, str | None]] = {}
     item._source_uses = []
     env: dict[str, calc.Value] = {
@@ -1542,7 +1546,11 @@ def run_calcs(project: Project) -> None:
     outside the cycle gets one note naming the upstream failure rather than
     N restatements of it."""
     by_key = _key_index(project)
-    project._source_lock, _problem = citations_mod.read_lockfile(project)
+    # Records and problem are memoised as one pair, from one read: a memo
+    # reader (the serve source picker) must never see one read's records
+    # beside another read's problem -- a `{}` from a failed read trusted
+    # alone claims every citation unpinned (serve/sources.py `_lockfile`).
+    project._source_lock, project._lockfile_problem = citations_mod.read_lockfile(project)
     # Identity -> "visiting" (on the current DFS path) or "done" (env ready
     # or failed). Items are unhashable-by-value here, so id() is the key.
     state: dict[int, str] = {}
