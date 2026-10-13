@@ -1,0 +1,145 @@
+# IMAGE-ASSET-006 — site.assets: root confinement
+
+Task: implement the focused fix for IMAGE-ASSET-006 (found by the
+current-main resweep): `site.assets: ['../']` loaded clean, and the serve
+poller's `project_inputs`/`asset_files` (`serve/state.py`) walked and
+content-hashed files outside the project root. Reproduction reference:
+`/home/jorb/work/refdes/in-prog-logs/current-main-resweep-image-digests.tsv`
+(read-only) and the probe pattern in its `probe_img006.py` row.
+
+Base: origin/main @ 8b6a52e, branch `fix/site-assets-root-confinement-20261013`.
+
+## What was reproduced (before the fix)
+
+Probe at `.scratch/img006/probe_img006.py` (this worktree's src forced via
+`sys.path.insert(0)`, since the shared venv's editable install points at
+main's src — bare `refdes`/`python3 -c "import refdes"` resolves to
+`/home/jorb/work/refdes/src`; with the worktree src first on the path the
+worktree code is what runs, verified both ways):
+
+- `refdes check` (run as `PYTHONPATH=src python3 -m refdes.cli check`, the
+  global `-c` form also exercised): exit 0, "0 items, 0 errors, 0 warnings".
+- `schema.load_project` produced `asset_dirs == ['../']`.
+- `serve.state.project_inputs` listed `proj/../secret.txt` and
+  `content_hashes` computed the byte-matched sha256 of that outside file.
+
+## The rule chosen
+
+Single consistent rule, two layers, both keyed on the same containment idea
+already used by `citations.classify` (src/refdes/citations.py:178-199) and
+`serve/upload._validate_dest`: project-relative, slash-separated, no
+traversal, and *inside the root by real path*.
+
+1. **Config half** — `schema._confined_asset_dirs`, called from
+   `load_project` on `site.assets:`. A SchemaError at load (voice:
+   `refdes-project.yaml: site.assets entry '../' escapes the project
+   root; declare a directory under it`) for: backslashes, absolute
+   entries, lexical traversal (`..` after normpath), the root itself in
+   any spelling (`.`, `""`, `a/..`, or a symlink resolving to the root —
+   it would walk `_site/` and `.refdes/` back into the published assets),
+   and real paths leaving the root (symlink escapes at load). Entries are
+   canonicalized (`./pics/../shots/` -> `shots`), so the readers see one
+   spelling. A *missing* directory still passes the load — its absence
+   stays the build's existing `not a directory` warning.
+2. **Runtime half** — `build.walk_site_assets`, one generator all three
+   asset walks now share (review round 1: the load check alone cannot see
+   the tree move after load; review round 2: filtering after enumerating
+   is already reading the outside tree):
+   - a *declared directory* whose realpath is not strictly under the root
+     is not entered by `os.walk` at all (post-load retarget, including
+     intermediate segments);
+   - each *file* is realpath-checked at walk time and yielded as
+     contained/not;
+   - `serve.state.asset_files` (poller watch set, and the picker's
+     `api._images` list through it) takes only contained files, silently;
+   - `collect_static_assets` warns naming an escaped directory once or an
+     escaped file per file, and registers neither;
+   - `_search_image_matches` (also used by the HASH_FORMAT 5 image hash
+     pass) cannot bare-resolve through an escaping symlink, so the build
+     reports the honest unresolved error instead.
+
+Watcher and build cannot drift because they literally call the same
+function; `serve.upload._on_search_path` (realpath comparison against the
+declared dirs) stays consistent with it: files the search skips are not on
+its search path either.
+
+## Files touched
+
+- `src/refdes/schema.py` — `_confined_asset_dirs` + its call in
+  `load_project` + `import posixpath`.
+- `src/refdes/build.py` — `walk_site_assets` (shared, confined walk),
+  `_search_image_matches` and `collect_static_assets` now read it;
+  `from collections.abc import Iterator`.
+- `src/refdes/serve/state.py` — `asset_files` now projects
+  `walk_site_assets` into the contained set.
+- `src/refdes/model.py` — the stale `site.assets: raw config` comment on
+  `Project.asset_dirs`.
+- `tests/test_site_assets_confinement.py` — new, 21 tests.
+
+## Tests
+
+- Targeted: `tests/test_site_assets_confinement.py` — 21 passed. Load-time
+  refusals (traversal forms, absolute, backslash, root-itself forms,
+  symlink-out, symlink-to-root); canonicalization; valid assets still
+  build/publish/resolve (mirrors the image-search suite's happy path);
+  poller-never-hashes-outside-bytes; runtime: file symlink out is not
+  watched/hashed/published and cannot satisfy the bare-name search;
+  retargeted directory is *never entered by os.walk* (walk-call spy) and
+  warns naming it; interior symlinks (dir-to-inside, file-to-inside)
+  still work.
+- Related suites: image search/hash, render assets, serve images/state/
+  upload/preview-decorations, theme, config split — 278 passed, 1 skipped
+  (pre-existing nt skip).
+- Full suite: `python3 -m pytest -q -p no:cacheprovider` at this exact
+  diff (started after the last code/test edit; the only later write was
+  this log, which pytest does not import): 3623 passed, 2 skipped,
+  exit 0, 264.95s. The 2 skips are pre-existing platform guards (nt
+  symlink / case-insensitive fs).
+- `refdes schema` / `refdes check` on fixture projects in
+  `.scratch/img006/proj/` per AGENTS.md before making schema/CLI claims:
+  valid two-config projects print schema, check exits 0; `assets: ["../"]`
+  now exits 2 with `configuration error: refdes-project.yaml: site.assets
+  entry '../' escapes the project root; declare a directory under it`.
+- ruff: no new findings — every finding on the touched files (build.py:3
+  I001, schema.py I001/RUF010/FURB192, model.py x3) reproduces on the
+  pristine `git show HEAD:` copies, i.e. all pre-existing (matches
+  AGENTS.md's "~99 findings, no clean baseline" note).
+
+## Difficulties
+
+- The shared venv's editable install points at main's checkout: every CLI/
+  runtime claim above was made with this worktree's `src` first on
+  `sys.path`/`PYTHONPATH` (`python3 -m refdes.cli`, global `-c` before the
+  subcommand — `check --config` is not a thing), and `refdes.__file__`
+  printed to confirm which tree answered.
+- The first three runtime symlink tests were silently green-ish in the
+  wrong direction: a `../` link from `figures/` lands at the project root,
+  not outside it — the outside files needed `../../`. Caught by the
+  assertions failing, fixed, re-verified.
+- Two review rounds shaped the runtime layer (see rule section): load-only
+  checking missed post-load symlink moves; post-walk file filtering missed
+  the directory-enumeration leak. Both addressed; spy test pins the
+  second.
+
+## Known limits (precise)
+
+- TOCTOU: between any realpath check and the syscall that follows (or
+  during one poll step), the tree can be swapped again; the shared walk
+  shrinks the window from "since the config loaded" to one step, not to
+  zero. Documented in `walk_site_assets`' docstring.
+- Confinement here covers `site.assets:` (config and the walks over it).
+  Not in this finding's scope, still unvalidated config paths: `site.pages`,
+  `site.out`, and `imports:` item paths could also be traversal-capable —
+  separate findings if confirmed. Likewise a body `![](../../x.png)`
+  multi-segment src resolving outside the root via `_local_image_path` is
+  the image-src family (IMAGE-ASSET-001/002 neighborhood), not the
+  `site.assets:` walk this commit confines.
+- Upload overwriting an *existing* file that is itself an escaping symlink
+  is upload.py's (`_validate_dest` checks the directory, not an existing
+  target file); not touched here.
+
+## Status
+
+Finished: implemented, tested, committed (see git log for the hash;
+Co-authored-by: Qwen3.8-Flash-Next). No push, no PR, no stash, no shared-
+main changes. Probes kept under `.scratch/img006/`.

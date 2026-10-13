@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import difflib
 import os
+import posixpath
 from typing import Any
 
 from . import calc, dates, standards, theme as theme_mod
@@ -104,6 +105,66 @@ def _legacy_config_error() -> SchemaError:
 
 def _settings_error(message: str) -> SchemaError:
     return SchemaError(f"{PROJECT_SETTINGS_NAME}: {message}")
+
+
+def _confined_asset_dirs(assets: list[str], root: str) -> list[str]:
+    """`site.assets:` directories, confined to the project root (IMAGE-ASSET-006).
+
+    This is the configuration half of a two-layer rule: every asset reader
+    walks `Project.asset_dirs` -- the build's bulk copy
+    (`collect_static_assets`) and bare-name image search, the serve poller's
+    revision hashes (`serve.state.asset_files`), the upload search-path
+    check -- so refusing an escaping entry here is what stops a project from
+    *declaring* the outside, while `build.walk_site_assets` re-checks each
+    walked file's real path, which is what catches a symlink retargeted in
+    the tree after the load. The rule here is `citations.classify`'s (src/
+    refdes/citations.py): a declared directory is slash-separated,
+    project-relative, free of traversal, and lands inside the root *by real
+    path*, which is what a symlink actually names at load time. A
+    not-yet-created directory passes -- its absence is the build's own
+    `not a directory` warning -- and a symlink that lands inside the root
+    is an interior detail, not an escape. The root itself is refused in
+    either spelling (`.`, or a symlink resolving to it): it would walk the
+    output directory back into the assets. Entries come back canonicalized,
+    so `./a` and `a/../b` reach the readers as `a` and `b`.
+    """
+    confined: list[str] = []
+    root_real = os.path.realpath(root)
+    for rel_dir in assets:
+        if "\\" in rel_dir:
+            raise _settings_error(
+                f"site.assets entry {rel_dir!r} contains a backslash; asset "
+                "directories are project-relative and slash-separated"
+            )
+        if rel_dir.startswith("/"):
+            raise _settings_error(
+                f"site.assets entry {rel_dir!r} is absolute; asset directories "
+                "must be relative to the project root"
+            )
+        canon = posixpath.normpath(rel_dir)
+        if canon == ".":
+            raise _settings_error(
+                f"site.assets entry {rel_dir!r} is the project root itself; "
+                "declare a directory under it"
+            )
+        if canon == ".." or canon.startswith("../"):
+            raise _settings_error(
+                f"site.assets entry {rel_dir!r} escapes the project root; "
+                "declare a directory under it"
+            )
+        resolved = os.path.realpath(os.path.join(root, canon))
+        if resolved == root_real:
+            raise _settings_error(
+                f"site.assets entry {rel_dir!r} resolves to the project root "
+                "itself (via a symlink?); declare a directory under it"
+            )
+        if not resolved.startswith(root_real + os.sep):
+            raise _settings_error(
+                f"site.assets entry {rel_dir!r} resolves outside the project "
+                "root (via a symlink?)"
+            )
+        confined.append(canon)
+    return confined
 
 
 def _standard_pin(raw: dict[str, Any]) -> tuple[str, int | None]:
@@ -728,6 +789,12 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     equations = _load_equations(raw)
 
     site = blocks["site"]
+    # Not a filesystem check of existence -- a confinement check: every asset
+    # walk takes its directories from Project.asset_dirs, so refusing an
+    # escaping entry here is what keeps the build's copies, the poller's
+    # hashes, and the upload search path from ever being pointed at the
+    # outside (build.walk_site_assets re-checks the tree itself per file).
+    site["assets"] = _confined_asset_dirs(site["assets"], root)
     id_cfg = blocks["id"]
     units = blocks["units"]
     default_on_change = blocks["on_change"]["default"]

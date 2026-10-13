@@ -966,7 +966,10 @@ class Project:
     # files must keep working unrewritten, so those never hash). Keyed by
     # source so the same image referenced from many items/pages hashes once.
     assets: dict[str, str] = field(default_factory=dict)
-    asset_dirs: list[str] = field(default_factory=list)  # site.assets: raw config
+    # site.assets:, confined to the project root and canonicalized at load
+    # (schema._confined_asset_dirs); every asset walk reads this list and
+    # re-checks each file's real path at walk time (build.walk_site_assets).
+    asset_dirs: list[str] = field(default_factory=list)
     # Per-item image resolution results, recorded as a side effect of the
     # build's own `_process_images` pass (no second search, no new
     # evaluation): item id -> [{"src": as written, "ok": bool, "rel":
