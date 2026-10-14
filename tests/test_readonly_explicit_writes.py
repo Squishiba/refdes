@@ -1125,13 +1125,48 @@ def test_id_keeps_the_read_only_marker_for_a_permission_denial_with_no_errno(
     assert "No space left on device" not in said, said
 
 
+def test_id_reports_a_permission_class_carrying_a_non_permission_errno_by_errno(
+    pending_id_project, monkeypatch, capsys
+):
+    """The explicit-errno edge at the command level: `PermissionError` built
+    with a non-permission errno is a permission *class* wearing a
+    non-permission *number*, and the number is the fact. `id` must report the
+    operating system's reason for it, not the marker -- the same rule the
+    helper test asserts, pinned where a user would see it. (Real OS denials
+    carry EACCES/EPERM and are covered by the chmod tests and the test
+    above; the class-first rule is for hand-built exceptions, and it must
+    not let an explicit ENOSPC hide behind the label.)"""
+    import errno
+
+    from refdes import textio as textio_mod
+
+    real_write = textio_mod.atomic_write_text
+
+    def boom(path, text):
+        if os.path.basename(path) == "ids.yaml":
+            raise PermissionError(errno.ENOSPC, "No space left on device")
+        return real_write(path, text)
+
+    monkeypatch.setattr(textio_mod, "atomic_write_text", boom)
+    config = str(pending_id_project / "refdes-project.yaml")
+    status = cli_mod.main(["-c", config, "id"])
+
+    captured = capsys.readouterr()
+    said = captured.err + captured.out
+    assert status == 1, said
+    assert "cannot write .refdes/ids.yaml (No space left on device)" in said, said
+    assert "cannot write .refdes/ids.yaml (read-only tree?)" not in said, said
+    assert "Make .refdes/ writable" not in said, said
+
+
 def test_destination_refusal_marker_tracks_the_errno():
     """The helper-level contract: `(read-only tree?)` stays exactly as written
     for the errnos a read-only tree produces (EROFS) and the denial it reads
-    as (EACCES, and any `PermissionError`), and is replaced by the
-    operating system's own reason where it cannot be true -- including an
-    OSError with neither strerror nor a known errno, which reports the bare
-    number rather than guessing."""
+    as (EACCES, and any `PermissionError` with no errno behind it), and is
+    replaced by the operating system's own reason where it cannot be true --
+    the errno outranking the exception class where they disagree, and an
+    OSError with neither errno nor strerror reporting its own text (or its
+    class name when built empty) rather than `OS error None`."""
     import errno
 
     from refdes import model as model_mod
@@ -1152,7 +1187,18 @@ def test_destination_refusal_marker_tracks_the_errno():
     assert say("x.yaml", "c", OSError(errno.ENAMETOOLONG, "Filename too long")) == (
         "cannot write x.yaml (Filename too long) -- c"
     )
+    # The errno outranks the class: a full disk wearing a permission label
+    # is still a full disk.
+    assert say("x.yaml", "c", PermissionError(errno.ENOSPC, "No space left on device")) == (
+        "cannot write x.yaml (No space left on device) -- c"
+    )
     assert say("x.yaml", "c", OSError(9999, None)) == "cannot write x.yaml (OS error 9999) -- c"
+    # Built from a message alone -- textio's guard shape -- there is no errno
+    # to name, so the exception's own text is the reason.
+    assert say("x.yaml", "c", OSError("device failed")) == (
+        "cannot write x.yaml (device failed) -- c"
+    )
+    assert say("x.yaml", "c", OSError()) == "cannot write x.yaml (OSError) -- c"
     assert say("x.yaml", "c") == "cannot write x.yaml (read-only tree?) -- c"
 
 

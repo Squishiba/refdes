@@ -60,7 +60,7 @@ what it could not write, or refuses:
 | a baseline's stored-hash format rewrite | `audit`, `former-ids propose` | Names the file and carries on, **exit 0**. A baseline already on disk holds correct content; only its format lags the current hash definition, and the diff is computed in memory either way. |
 | the `.refdes/history/` store | `history capture`, `history redact`, `history migrate-seals` | Refuses: `error: cannot write .refdes/history/… (read-only tree?) -- nothing was captured`, **exit 1**. A snapshot that was not taken is never announced as one that was. |
 | a seal hash or baseline entry carried forward, or an item file rewritten | `rename`, `calc-rewrite`, `standard upgrade` | `refused:` naming the file, **exit 1**, and the whole operation is rolled back. The carried hash is the only record that the rename was not an edit to a sealed entry or a stamped baseline, and a rename that lands in some item files and not others is not a rename. |
-| an id written back into its source file, or `.refdes/ids.yaml` | `id` | `cannot write <file> (read-only tree?) -- …`, **exit 1**. An id that never reached its source file is not allocated and its number stays free; the ledger is what stops a deleted item's number being reused, so a refusal to record it is reported too. |
+| an id written back into its source file, or `.refdes/ids.yaml` | `id` | `cannot write <file> (read-only tree?) -- …`, **exit 1**; when the reported errno shows the cause is not a permission, the parenthetical is the operating system's own reason instead — `cannot write .refdes/ids.yaml (No space left on device) -- …` on a full disk. An id that never reached its source file is not allocated and its number stays free; the ledger is what stops a deleted item's number being reused, so a refusal to record it is reported too. |
 | a `stub-tests.md` | `stub-tests` | `refused:` naming the file, **exit 1**. The files are independent (one per workspace/board, holding only their own scope's stubs) and a written stub is the author's, so what landed stays and what was refused is named; re-running picks up exactly the missed ones. |
 | `refdes-project.yaml` | `standard add-preset`, `standard remove-preset` | `error: cannot write refdes-project.yaml (read-only tree?) -- …`, **exit 2** — the code these two already use for "your config is not what you asked for it to be". |
 | an explicit write through `keys adopt` / `keys restore` | `keys adopt`, `keys restore` | `refused:` naming the operating system's own errno, **exit 1**, no traceback. Deliberately the one family of explicit writes that does *not* carry `(read-only tree?)`, so a filter written on that marker will miss them. |
@@ -72,7 +72,7 @@ unaffected by whether the tree would have taken it.
 
 **Match on `(read-only tree?)`.** It is the string almost every read-only
 refusal above carries, whichever of the two shapes it arrives in, and it is
-the part of the message that never varies (the two exceptions are called out
+the part of the message that never varies (the exceptions are called out
 below):
 
 ```
@@ -101,11 +101,18 @@ both shapes too, and is the more precise choice if you only care about the
 load-time writes (key minting, link expansion, `.refdes/schema.json`). The
 refusals in the table that name a *specific destination* the user asked for
 (`error: cannot write .refdes/baselines/rev-b.yaml (read-only tree?) -- …`)
-put the path first and so do not contain that longer string; they do all
-contain `(read-only tree?)`, which is why that is the substring to write
-against. Two exceptions, both stated in the table above: `build`'s refusal
-for the site directory reports the operating system's own reason, because
-that write can be refused for reasons that have nothing to do with a
+put the path first and so do not contain that longer string; they carry
+`(read-only tree?)` for every failure a read-only tree could produce (a
+permission denial, a read-only filesystem), which is why that is the substring
+to write against. Three exceptions. The destination refusals of `id` report
+the operating system's own reason for failures that cannot be a read-only
+tree — a full disk is refused as `(No space left on device)`, not as a
+permission — so a filter on the marker sees the tree-write refusals of `id`
+when the tree is read-only and not when the disk is full; the rule is the
+same one this section states for the two commands named next: the marker is
+a claim refdes only makes where a read-only tree could be the cause. `build`'s
+refusal for the site directory reports the operating system's own reason,
+because that write can be refused for reasons that have nothing to do with a
 read-only tree (a file sitting at the `site.out` path is refused as
 `File exists`), so the marker would be a claim refdes cannot make there; and
 `keys adopt` / `keys restore` report the `OSError`'s own errno for the same

@@ -13,5 +13,8 @@
   `(No space left on device)` — with a remedy that says fix the reported
   failure. Read-only refusals are byte-identical, so CI filters written
   against the marker still catch every failure a read-only tree could
-  produce. Pinned by injection tests in
+  produce (the errno outranks the exception class, so a
+  `PermissionError(ENOSPC, ...)` is reported as the full disk its number
+  names, and an OSError built from a message alone reports its own text,
+  not `OS error None`). Pinned by injection tests in
   `tests/test_readonly_explicit_writes.py`.

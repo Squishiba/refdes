@@ -821,19 +821,34 @@ def could_be_read_only(exc: OSError) -> bool:
     `(read-only tree?)` for them is the false hint this predicate exists to
     stop (DIAG-WORD-008: the real cause was confirmed by injecting
     `OSError(ENOSPC)` into `textio.atomic_write_text` on a writable tree).
-    `PermissionError` qualifies even with no errno attached, because that is
-    exactly what `textio.atomic_write_text`'s own read-only guards raise.
+
+    The errno, when there is one, is the specific fact and outranks the
+    exception class: `PermissionError(ENOSPC, ...)` is a full disk wearing a
+    permission label, and the class is only the label. The class decides only
+    for an OSError built with no errno at all -- which is exactly the shape of
+    `textio.atomic_write_text`'s read-only guards (`PermissionError("file is
+    read-only: ...")`), so those keep the marker.
     """
-    if isinstance(exc, PermissionError):
-        return True
-    return getattr(exc, "errno", None) in READ_ONLY_ERRNOS
+    errno_value = getattr(exc, "errno", None)
+    if errno_value is not None:
+        return errno_value in READ_ONLY_ERRNOS
+    return isinstance(exc, PermissionError)
 
 
 def write_refusal_reason(exc: OSError) -> str:
     """The operating system's own reason for `exc`, the way `sources`,
-    `citations` and `cli`'s site refusal already report it: `strerror`, with
-    the bare errno behind it when the OSError was built without one."""
-    return getattr(exc, "strerror", None) or f"OS error {getattr(exc, 'errno', None)}"
+    `citations` and `cli`'s site refusal already report it: `strerror` when
+    the OSError carries one, the bare errno when it has an errno but no
+    message, and the exception's own text -- its class name when it was built
+    empty -- when it has neither, because an OSError built from a message
+    alone has no errno to name and `OS error None` blames nothing."""
+    reason = getattr(exc, "strerror", None)
+    if reason:
+        return reason
+    errno_value = getattr(exc, "errno", None)
+    if errno_value is not None:
+        return f"OS error {errno_value}"
+    return str(exc) or type(exc).__name__
 
 
 def read_only_refusal(consequence: str = "") -> str:

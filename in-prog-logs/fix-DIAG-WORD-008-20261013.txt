@@ -83,3 +83,38 @@ adopt/restore already report the OS's own reason.
 Finished: yes. Committed on this branch; no push/PR per instructions.
 Also added `changelog.d/destination-refusal-real-cause.fixed.md`, matching
 the per-fix changelog-fragment convention (HEAD~1 did the same).
+
+## Review follow-up (same branch, on 4bddfa5)
+
+1. docs/cli-reference.md was left false by the fix: the filter section
+   claimed destination refusals "do all contain `(read-only tree?)`" with
+   two exceptions. Rewrote that passage from probe output
+   (`.scratch/dw008/enospc_run.py` re-run after the fix:
+   `cannot write .refdes/ids.yaml (No space left on device) -- ...`):
+   the marker now stands for every failure a read-only tree *could*
+   produce, `id`'s non-permission refusals are the third documented
+   exception, and the "two exceptions" count in the section intro is
+   de-counted. The `id` row of the destination table gained the
+   full-disk wording.
+2. `write_refusal_reason(OSError('device failed'))` printed
+   `OS error None` (verified by probe before touching code): an OSError
+   built from a message alone has errno None *and* strerror None, so the
+   old `strerror or f"OS error {errno}"` fallback named nothing. Fallback
+   chain is now strerror -> `OS error {errno}` -> `str(exc)` -> class
+   name (for `OSError()`, str is empty). Pinned in the helper test.
+3. `could_be_read_only(PermissionError(ENOSPC, ...))` was True — the
+   class outranked the number. Decided: the errno is the specific fact
+   and outranks the class (a hand-built PermissionError wearing ENOSPC is
+   a full-disk claim; textio's real guards set no errno, so the class
+   decides only when there is no errno). Pinned at helper level and at
+   the `id` command level (injected PermissionError(ENOSPC) -> "(No space
+   left on device)", no marker).
+4. Tests: 24 passed in test_readonly_explicit_writes.py; full suite
+   3607 passed, 2 skipped. ruff on the touched files: same 4 pre-existing
+   findings as HEAD, none added.
+5. Noted, not changed (out of the stated scope): docs/design/keys.md:466
+   calls keys adopt/restore "the one family of explicit writes" without
+   the marker — true pre-4bddfa5, now shared with `id`'s non-permission
+   refusals, which cli-reference documents.
+
+Finished: yes. No push/PR/merge/stash.
