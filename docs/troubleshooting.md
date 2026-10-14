@@ -608,10 +608,9 @@ the bytes it counted. A shape that is not a 64-character lowercase hex digest is
 a bad hand-edit or merge: restore the record, or re-run the fetch that writes it.
 A valid digest beside the count is different from a matching digest: `check` only
 trusts `page_count:`/`page_count_error:` as checked when the provenance matches
-`sha256:`, except for old remote hash-only records that a plain fetch cannot
-repair offline. A mismatch is not malformed; it is reported as *pages unchecked*,
-and repaired by a plain fetch when the bytes are on this machine or by
-`--update` when they are not.
+`sha256:`. A missing digest is untrusted too, even for a remote hash-only record.
+Neither is malformed; both are reported as *pages unchecked*, and repaired by a
+plain fetch when the bytes are on this machine or by `--update` when they are not.
 
 **`.refdes/citations.yaml:N — duplicate key '…' in one mapping (lines N and M)`**
 YAML resolves a repeated key to the *last* one and says nothing, so this is the

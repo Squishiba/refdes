@@ -471,7 +471,8 @@ about a document:
   merge may have paired with the wrong document, and the next plain `refdes
   fetch` recounts from those bytes and repairs the record. A remote hash-only pin
   has no bytes here to recount, so only `refdes fetch --update` can establish a
-  count for it; until then `check` reports its page numbers as not checked too.
+  count for it; a count recorded there without provenance is not trusted either,
+  and until `--update` runs `check` reports its page numbers as not checked too.
 - **A lockfile that claims no count is left alone.** A hand-written record, or
   one written before any of this, has no `page_count:` and no
   `page_count_error:` — it says nothing about its pages, so nothing is checked

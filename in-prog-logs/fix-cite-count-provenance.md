@@ -129,10 +129,51 @@ time of writing this log before the final review pass.
 
 Known limits
 ------------
-- Missing `page_count_sha256` is still trusted for old remote hash-only PDF
-  records, because the bytes are not on this machine and a plain fetch cannot
-  repair them without network.
+- Missing `page_count_sha256` is no longer trusted for remote hash-only records
+  that already claim a count/error. A plain fetch cannot repair them without the
+  network, so it warns and leaves them for `fetch --update`.
 - A trusted `page_count_error` is not re-counted by plain fetch merely because
   pypdf may have been installed after the fetch. This preserves existing
   behavior and avoids turning plain fetch into a broad repair command.
 - The final gate did not include pushing, PR creation, or merge.
+
+Follow-up review of a501d8e
+---------------------------
+Two blockers were reported:
+
+1. The skip-path repair could leave `page_count` and `page_count_error` in the
+   same record when replacing one with the other.
+2. `_count_provenance_untrusted` trusted a remote hash-only count whose
+   provenance key was absent, leaving the original merge-corruption hole open.
+
+Added three tests first:
+
+- repairing an untrusted old failed count writes a new count and removes the
+  failed count;
+- recording a new failed count removes the old count;
+- a remote hash-only record with `page_count: 8` and no
+  `page_count_sha256` is untrusted, warned by check/build, left unchanged by a
+  plain fetch that must not use the network, and reported by audit as pages
+  unchecked.
+
+All three failed at the expected assertion on the old code, then passed after:
+
+- popping the opposite count key in each repair branch;
+- making missing provenance untrusted for any record that claims a count/error,
+  including remote hash-only records.
+
+Existing run-5 audit fixtures were updated to the new contract: a remote
+hash-only counted pin is trusted only when its provenance matches its pin, and
+an unprovenanced failed count reports the unverified-provenance reason. Docs
+were changed to remove the old remote hash-only exception.
+
+Gates:
+- new tests: 3 passed;
+- citation pages + run-5 friction: 85 passed;
+- citation pages, lockfile corruption, run-5, citations, serve accept, audit
+  wording: 341 passed, 1 skipped;
+- full suite: 3614 passed, 2 skipped;
+- CLI probe:
+  `.scratch/cite-count-provenance-cli-probe-hash-only-unprovenanced` confirmed
+  check warns, plain fetch skips and warns without changing the lockfile, audit
+  reports pages unchecked, and build --require-citations exits nonzero.

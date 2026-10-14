@@ -801,6 +801,118 @@ def test_a_count_without_matching_provenance_is_not_trusted_and_plain_fetch_repa
     assert repaired["page_count_sha256"] == repaired["sha256"]
 
 
+def test_a_plain_fetch_that_repairs_a_count_clears_the_stale_page_count_error(
+    tmp_path,
+):
+    """A repaired count and an old failed count describe opposite facts."""
+    root = _project(tmp_path, _page_item("5"), pages=2)
+    _fetch(root)
+    record = _record(root)
+    record.pop("page_count")
+    record["page_count_error"] = "the PDF was unreadable last time"
+    record["page_count_sha256"] = "0" * 64
+    (root / ".refdes" / "citations.yaml").write_text(
+        yaml.safe_dump({"citations": {"docs/manual.pdf": record}}),
+        encoding="utf-8",
+    )
+
+    results = _fetch(root)
+    assert results[0].skipped
+    assert results[0].page_warnings == [
+        "docs/manual.pdf: page 5 is not in this document -- it has 2 page(s) "
+        "(cited by CMP-001)"
+    ]
+    repaired = _record(root)
+    assert repaired["page_count"] == 2
+    assert "page_count_error" not in repaired
+    assert repaired["page_count_sha256"] == repaired["sha256"]
+    project = _build(root)
+    assert [str(w) for w in project.warnings] == [
+        (
+            "WARNING items/cmp.yaml:4 [CMP-001] — docs/manual.pdf: page 5 is not "
+            "in this document -- it has 2 page(s)"
+        )
+    ], _messages(project)
+
+
+def test_a_plain_fetch_that_records_a_counting_failure_clears_the_stale_count(
+    tmp_path, monkeypatch
+):
+    """A failed count and an old trusted-looking count describe opposite facts."""
+    root = _project(tmp_path, _page_item("5"), pages=2)
+    _fetch(root)
+    record = _record(root)
+    record["page_count_sha256"] = "0" * 64
+    (root / ".refdes" / "citations.yaml").write_text(
+        yaml.safe_dump({"citations": {"docs/manual.pdf": record}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setitem(sys.modules, "pypdf", None)
+    results = _fetch(root)
+    assert results[0].skipped
+    assert results[0].page_warnings == [f"docs/manual.pdf: {UNCHECKED}"]
+    repaired = _record(root)
+    assert "page_count" not in repaired
+    assert repaired["page_count_error"] == UNCARRIED
+    assert repaired["page_count_sha256"] == repaired["sha256"]
+    project = _build(root)
+    assert [str(w) for w in project.warnings] == [
+        (
+            "WARNING items/cmp.yaml:4 [CMP-001] — the page numbers cited for "
+            "docs/manual.pdf are not checked: the lockfile records no page count "
+            f"for this document because {UNCARRIED} -- run 'refdes fetch --update "
+            "--path docs/manual.pdf' to establish it"
+        )
+    ], _messages(project)
+
+
+def test_a_remote_hash_only_count_without_provenance_is_not_trusted(tmp_path, capsys):
+    """A hash-only count from the pre-provenance era is not proof of its bytes."""
+    url = "https://example.com/manual.pdf"
+    root = _project(tmp_path, _page_item("5", path=url), pages=2)
+    data = pdf_bytes(2)
+    record = {
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "fetched": "2026-01-01T00:00:00Z",
+        "kept_copy": False,
+        "bytes": len(data),
+        "page_count": 8,
+    }
+    (root / ".refdes").mkdir(exist_ok=True)
+    (root / ".refdes" / "citations.yaml").write_text(
+        yaml.safe_dump({"citations": {url: record}}), encoding="utf-8"
+    )
+
+    project = _build(root)
+    assert [str(w) for w in project.warnings] == [
+        (
+            f"WARNING items/cmp.yaml:4 [CMP-001] — the page numbers cited for {url} "
+            f"are not checked: {citations_mod.PAGE_COUNT_UNVERIFIED_WHY} -- run "
+            f"'refdes fetch --update --path {url}' to recount the pinned bytes"
+        )
+    ], _messages(project)
+    assert _build(root, require_citations=True).errors
+
+    def no_network(_url):
+        raise AssertionError("plain fetch must not download a pinned citation")
+
+    results = citations_mod.fetch_all(_load_only(root), fetcher=no_network)
+    assert results[0].skipped
+    assert results[0].page_warnings == [
+        f"{url}: the page numbers cited here are not checked -- "
+        f"{citations_mod.PAGE_COUNT_UNVERIFIED_WHY} -- run 'refdes fetch --update "
+        f"--path {url}' to count them"
+    ]
+    assert _record(root, url) == record
+
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "audit"]) == 0
+    out = capsys.readouterr().out
+    assert "pages unchecked" in out, out
+    assert citations_mod.PAGE_COUNT_UNVERIFIED_WHY in out, out
+    assert "no cited page number was checked" in out, out
+
+
 def test_hash_only_pin_with_stale_count_stays_loud_until_update(tmp_path, capsys):
     """A plain fetch cannot repair a remote hash-only count offline."""
     url = "https://example.com/manual.pdf"

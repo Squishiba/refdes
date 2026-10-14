@@ -705,7 +705,8 @@ _LOCKFILE_REQUIRED = ("sha256", "fetched", "kept_copy")
 # `if`/`elif`, with `page_count_sha256` beside whichever lands. The provenance
 # key matters because the lockfile is hand-mergeable: a merge can keep one
 # document's sha256 while taking another's count, and a count without this
-# provenance is not safe to trust where the bytes can still be recounted offline.
+# provenance is not safe to trust at all. The bytes decide whether a plain fetch
+# can repair it offline; they do not make an unprovenanced count safe.
 # All three are spelled out here because `_record_problem` has to name them --
 # it is what rejects a record carrying both count and error, a count that is not
 # a number, and a provenance that cannot name these bytes.
@@ -758,19 +759,17 @@ def _count_provenance_untrusted(path: str, record: Mapping) -> bool:
     always unsafe: a merge or hand-edit has paired one document's hash with
     another's count. A missing key is unsafe for local and kept-copy records too,
     because the bytes are on this machine and a plain fetch can re-derive the count
-    before anything trusts it. The one missing-key exception is a remote hash-only
-    PDF pin: only a prior fresh fetch could have counted those bytes, a plain
-    fetch will not download them, and refusing to trust old records there would
-    add a warning with no offline repair. Same posture as `sections_sha256`: a
-    derived page fact is only good next to the bytes it was read from.
+    before anything trusts it. Remote hash-only records are not exempt: a merge can
+    pair this pin's hash with an old count, and check/build must not publish an
+    out-of-range page from that state even when plain fetch cannot repair it
+    offline. The missing-key state for a record that has *no* count remains quiet
+    until a plain fetch can fill it, with `--update` the remedy for hash-only
+    bytes. Same posture as `sections_sha256`: a derived page fact is only good
+    next to the bytes it was read from.
     """
     return bool(
         (PAGE_COUNT_KEY in record or PAGE_COUNT_ERROR_KEY in record)
         and not _page_count_matches_pin(record)
-        and not (
-            PAGE_COUNT_SHA256_KEY not in record
-            and _hash_only_without_count(path, record)
-        )
     )
 
 # A sha256 as `hashlib.sha256().hexdigest()` writes it: lowercase hex, always
@@ -2757,12 +2756,14 @@ def fetch_all(
                     if data is not None:
                         counted, why = _page_count_for_pin(canon, data)
                         if counted is not None:
+                            existing.pop(PAGE_COUNT_ERROR_KEY, None)
                             existing[PAGE_COUNT_KEY] = counted
                             existing[PAGE_COUNT_SHA256_KEY] = pinned
                             result.pages = counted
                             changed = True
                             _check_pages(canon, counted, pages, result)
                         elif why:
+                            existing.pop(PAGE_COUNT_KEY, None)
                             existing[PAGE_COUNT_ERROR_KEY] = why
                             existing[PAGE_COUNT_SHA256_KEY] = pinned
                             changed = True

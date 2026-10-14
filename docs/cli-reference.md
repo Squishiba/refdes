@@ -919,10 +919,10 @@ a kept copy. A remote pin kept hash-only has no bytes here to count, so only
 citation's page numbers as not checked. A count or error that is present is also
 sound in shape when `page_count_sha256:` is a valid digest or absent; the digest
 does not have to match `sha256:` for the lockfile to parse, because an old record
-or a remote hash-only record may legitimately lack that provenance. What a
-missing or mismatched `page_count_sha256:` means is that `check` does not trust
-the recorded count as checked against these bytes — and plain `fetch` repairs it
-offline where the bytes are available.
+may predate that provenance. What a missing or mismatched `page_count_sha256:`
+means is that `check` does not trust the recorded count as checked against these
+bytes — plain `fetch` repairs it offline where the bytes are available, while a
+remote hash-only record reports it and waits for `--update`.
 
 Every other command reports the same problem as an ordinary project error.
 `check` and `build` exit `1` for it like any other error (`build --keep-going`

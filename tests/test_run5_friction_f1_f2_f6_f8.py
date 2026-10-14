@@ -178,8 +178,8 @@ def _audit_row(out):
 
 
 def test_audit_does_not_call_an_uncheckable_pin_ok(tmp_path, capsys):
-    """The lockfile says these bytes have no countable pages, so no cited
-    `page:` was ever compared to anything. `audit` used to print `ok`."""
+    """A failed count whose provenance is missing is not checked, and `audit`
+    used to print `ok` for it."""
     config = _citation_project(tmp_path, DEAD)
     _pin(tmp_path, [DEAD], page_count_error=PAGE_COUNT_ERROR)
     code, out, err = _run(capsys, config, "audit")
@@ -187,15 +187,21 @@ def test_audit_does_not_call_an_uncheckable_pin_ok(tmp_path, capsys):
     row = _audit_row(out)
     assert not row.startswith("ok "), row
     assert row.startswith("pages unchecked "), row
-    # and the report says why, in the words the lockfile already holds
-    assert PAGE_COUNT_ERROR in out, out
+    # and the report says why: the lockfile's fact is not tied to the pin
+    assert citations_mod.PAGE_COUNT_UNVERIFIED_WHY in out, out
 
 
 def test_audit_still_calls_a_counted_pin_ok(tmp_path, capsys):
     """The fix is about the ambiguous pin, not about being generically gloomier:
-    a document whose pages WERE counted keeps its `ok`."""
+    a document whose pages WERE counted, against these exact bytes, keeps its
+    `ok`."""
     config = _citation_project(tmp_path, DEAD)
-    _pin(tmp_path, [DEAD], page_count=8)
+    _pin(
+        tmp_path,
+        [DEAD],
+        page_count=8,
+        page_count_sha256=hashlib.sha256(DEAD.encode()).hexdigest(),
+    )
     code, out, err = _run(capsys, config, "audit")
     assert code == 0, err
     assert _audit_row(out).split()[0] == "ok", out
@@ -229,7 +235,10 @@ def test_the_pages_unchecked_row_does_not_shift_the_pin_column(tmp_path, capsys)
         [DEAD, LIVE],
         extra_by_url={
             DEAD: {"page_count_error": PAGE_COUNT_ERROR},
-            LIVE: {"page_count": 8},
+            LIVE: {
+                "page_count": 8,
+                "page_count_sha256": hashlib.sha256(LIVE.encode()).hexdigest(),
+            },
         },
     )
     code, out, err = _run(capsys, config, "audit")
