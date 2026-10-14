@@ -8,7 +8,9 @@
 
 const PREFIX = 'refdes.draft.v1.';
 // An unreadable mirror is copied here and nothing else ever writes this key,
-// so the bytes survive page edits (and a reload) until an explicit discard.
+// so the bytes survive page edits and reloads -- re-armed from this key on
+// every load -- until an explicit discard, which clears both this key and
+// the draft slot (only if it still holds the discarded bytes).
 const CORRUPT_PREFIX = 'refdes.draft.corrupt.v1.';
 const memory = new Map();
 const corruptMirrors = new Map(); // handle -> { raw, reason }: bytes we could not read
@@ -34,13 +36,18 @@ function reportCorruptMirror(handle, raw, reason) {
   // proceeds from a fresh draft -- the refusal is to be silent, not to be
   // useful. If even the copy cannot be stored the bytes live in this page
   // only; persistence is lost, but silence never is.
-  corruptMirrors.set(handle, { raw, reason });
+  const entry = corruptMirrors.get(handle) || { warned: false };
+  entry.raw = raw;
+  entry.reason = reason;
+  corruptMirrors.set(handle, entry);
   let preserved = true;
   try {
     sessionStorage.setItem(corruptKey(handle), raw);
   } catch (_) {
     preserved = false;
   }
+  if (entry.warned) return; // one warning and one banner per page
+  entry.warned = true;
   console.warn(
     `refdes: the saved draft mirror for ${handle} could not be read (${reason}). ` +
       (preserved
@@ -48,7 +55,6 @@ function reportCorruptMirror(handle, raw, reason) {
         : 'The unreadable bytes could not be preserved in storage either; they live in this page only.')
   );
   mirrorNotice(handle, preserved);
-  return emptyDraft();
 }
 
 function mirrorNotice(handle, preserved) {
@@ -77,6 +83,12 @@ function load(handle) {
   let raw;
   try {
     raw = sessionStorage.getItem(key(handle));
+    // a recovery copy from an earlier page load is re-armed on every load,
+    // even once a newer valid draft has replaced the slot it was found in
+    const recovered = sessionStorage.getItem(corruptKey(handle));
+    if (recovered) {
+      reportCorruptMirror(handle, recovered, 'unreadable bytes preserved by an earlier page load');
+    }
   } catch (_) {
     return emptyDraft(); // a private-mode or quota failure costs persistence, not editing
   }
@@ -85,11 +97,13 @@ function load(handle) {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    return reportCorruptMirror(handle, raw, err.message);
+    reportCorruptMirror(handle, raw, err.message);
+    return emptyDraft();
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     // parses but is not a draft: same class of damage -- bytes, not a draft
-    return reportCorruptMirror(handle, raw, 'the stored mirror is not a draft object');
+    reportCorruptMirror(handle, raw, 'the stored mirror is not a draft object');
+    return emptyDraft();
   }
   const links = parsed.links || {};
   return {
@@ -135,9 +149,16 @@ export function corruptDraft(handle) {
 }
 
 export function discardCorruptDraft(handle) {
+  const entry = corruptMirrors.get(handle);
   corruptMirrors.delete(handle);
   try {
     sessionStorage.removeItem(corruptKey(handle));
+    // a discard also clears the unreadable bytes from the draft slot, so a
+    // reload finds nothing to re-report -- only when the slot still holds
+    // exactly those bytes; a newer valid draft in the slot survives
+    if (entry && sessionStorage.getItem(key(handle)) === entry.raw) {
+      sessionStorage.removeItem(key(handle));
+    }
   } catch (_) {
     /* nothing to remove where we cannot write */
   }

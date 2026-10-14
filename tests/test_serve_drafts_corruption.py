@@ -105,6 +105,16 @@ if (scenario === 'discard') {
   if (button) button.click();
   result = { corrupted: result, afterDiscard: snapshot() };
 }
+if (scenario === 'edited') {
+  drafts.setDraftField(handle, 'title', 'Y');
+  result = { corrupted: result, edited: snapshot() };
+}
+if (scenario === 'editedDiscard') {
+  const button = body.children[0] && body.children[0].findButton();
+  drafts.setDraftField(handle, 'title', 'Y');
+  if (button) button.click();
+  result = { corrupted: result, afterDiscard: snapshot() };
+}
 console.warn = realWarn;
 process.stdout.write(JSON.stringify(result));
 """
@@ -217,6 +227,63 @@ def test_mirrors_that_parse_but_are_not_drafts_are_corrupt(tmp_path, raw):
     assert result["storage"][CORRUPT_KEY] == raw
     assert result["hasAnyDraft"] is True and result["prompted"] is True
     assert len(result["banners"]) == 1
+
+
+def test_discard_survives_a_reload(tmp_path):
+    """Discard must be durable: a reload over the post-discard storage finds
+    no corruption to report. The draft slot is only cleared when it still
+    holds the very bytes being discarded."""
+    first = _run(tmp_path, "discard", {DRAFT_KEY: TRUNCATED})
+    assert first["corrupted"]["corrupt"] is not None
+    after = first["afterDiscard"]
+    second = _run(tmp_path, "corrupt", after["storage"])
+    assert second["corrupt"] is None, "reload re-detected a discarded mirror"
+    assert second["banners"] == []
+    assert second["hasAnyDraft"] is False
+    assert second["prompted"] is False
+    assert second["storage"] == {}
+    # and the discarded draft slot is free: a new draft writes normally
+    third = _run(tmp_path, "corrupt", {})
+    assert third["corrupt"] is None and third["draft"]["fields"] == {}
+
+
+def test_editing_after_corruption_keeps_recovery_discoverable(tmp_path):
+    """persist() replaces the draft slot with the user's newer valid draft;
+    that must not bury the recovery copy. A reload shows the mirror again
+    (banner + close prompt) while the newer draft still loads intact."""
+    first = _run(tmp_path, "edited", {DRAFT_KEY: TRUNCATED})
+    edited = first["edited"]
+    assert edited["draft"]["fields"] == {"title": "Y"}
+    assert json.loads(edited["storage"][DRAFT_KEY])["fields"] == {"title": "Y"}
+    assert edited["storage"][CORRUPT_KEY] == TRUNCATED
+    second = _run(tmp_path, "corrupt", edited["storage"])
+    assert second["draft"]["fields"] == {"title": "Y"}, "the newer draft was buried"
+    assert second["corrupt"] is not None, "the recovery copy went undiscoverable"
+    assert second["corrupt"]["raw"] == TRUNCATED
+    assert len(second["banners"]) == 1
+    assert CORRUPT_KEY in second["banners"][0]["text"]
+    assert second["hasAnyDraft"] is True
+    assert second["prompted"] is True
+    # nothing destructive on the way: both slots survive the reload check
+    assert json.loads(second["storage"][DRAFT_KEY])["fields"] == {"title": "Y"}
+    assert second["storage"][CORRUPT_KEY] == TRUNCATED
+
+
+def test_discard_after_editing_keeps_the_newer_draft(tmp_path):
+    """Discarding the unreadable mirror clears the recovery copy, never a
+    newer valid draft that has taken over the draft slot in the meantime."""
+    first = _run(tmp_path, "editedDiscard", {DRAFT_KEY: TRUNCATED})
+    after = first["afterDiscard"]
+    assert after["draft"]["fields"] == {"title": "Y"}
+    assert after["corrupt"] is None
+    assert CORRUPT_KEY not in after["storage"]
+    assert json.loads(after["storage"][DRAFT_KEY])["fields"] == {"title": "Y"}
+    second = _run(tmp_path, "corrupt", after["storage"])
+    assert second["draft"]["fields"] == {"title": "Y"}
+    assert second["corrupt"] is None
+    assert second["banners"] == []
+    assert second["prompted"] is True  # the newer unsaved draft still arms the prompt
+    assert json.loads(second["storage"][DRAFT_KEY])["fields"] == {"title": "Y"}
 
 
 def test_unreachable_storage_still_costs_persistence_not_editing(tmp_path):

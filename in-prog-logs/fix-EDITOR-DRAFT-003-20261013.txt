@@ -48,3 +48,32 @@ handlers, no new dynamic code.
 
 Not touched: editor.js (EDITOR-API-002 lives there per coordination
 note). No push/PR/merge.
+
+FOLLOW-UP (review of 1254e9c): two lifecycle gaps in the recovery flow
+- Reproduced first, through the real module (new harness scenarios):
+  (1) discardCorruptDraft removed the recovery key/map but left the
+      corrupt bytes in refdes.draft.v1.<handle>; a reload over the
+      post-discard storage re-detected and rebuilt banner + recovery key
+      -- Discard did not stick. Test test_discard_survives_a_reload.
+  (2) after an edit, persist replaces the draft slot with a valid
+      draft; load() only inspected the draft slot, so the recovery
+      copy under refdes.draft.corrupt.v1. became invisible on reload:
+      no banner, no hasAnyDraft guard, backup doomed with the tab.
+      Test test_editing_after_corruption_keeps_recovery_discoverable.
+- Fixes in drafts.js:
+  * load() now reads the recovery key first and re-arms the mirror
+    (warn + banner + prompt) from it on every page load, then parses
+    the draft slot as usual -- so a newer valid draft loads AND the
+    backup stays discoverable until discarded.
+  * reportCorruptMirror dedupes per handle per page (entry.warned):
+    the corrupt-slot reload (recovery copy + unreadable slot both
+    present) warns and banners once, not twice.
+  * discardCorruptDraft also clears the draft slot, so a reload finds
+    nothing to re-report -- only when the slot still holds exactly the
+    discarded bytes (string compare), so it never deletes a newer
+    valid draft that took the slot over; test_discard_after_editing_
+    keeps_the_newer_draft pins that.
+- Tests: 13 in tests/test_serve_drafts_corruption.py (3 new, driven
+  through the same node harness; discard-survives uses a 3-process
+  reload chain). Both gap tests fail against 1254e9c, pass now.
+  Full suite 3615 passed, 2 skipped; test_serve_static 49 green.
