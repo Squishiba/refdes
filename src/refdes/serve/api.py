@@ -686,19 +686,24 @@ def _create_item(app, body) -> tuple[int, dict]:
             return 400, {"error": f"links {verb!r} takes its target refs as strings"}
 
     project = app.state.snapshot.project
+    # An empty `id` reads as "not given" -- exactly what `_create_preview`
+    # makes of `?id=`: an empty id box previews the next free id, so the
+    # POST that saves that preview must not die on the empty string it
+    # carried. The collapse is spelled `== ""` and not `or None` on purpose:
+    # the loop above already refuses a non-string `id` as a 400, so a falsy
+    # JSON value (0, false, []) can never reach this line as an "empty"
+    # auto, and a reordering that ever moved the shape gate upstream must
+    # not silently turn a malformed explicit id into one. A malformed id
+    # that is not empty ("  ", "not-an-id") still reaches the id layer and
+    # is refused there, on both routes alike.
+    explicit_id = body.get("id")
     result = edit_mod.create_item(
         project.root,
         edit_mod.CreateRequest(
             who="local",
             type=type_name,
             fields=fields,
-            # An empty `id` reads as "not given" -- exactly what
-            # `_create_preview` makes of `?id=`: an empty id box previews
-            # the next free id, so the POST that saves that preview must
-            # not die on the empty string it carried. A malformed id that
-            # is not empty ("  ", "not-an-id") still reaches the id layer
-            # and is refused there, on both routes alike.
-            id=body.get("id") or None,
+            id=None if explicit_id == "" else explicit_id,
             destination=body.get("destination"),
             amends=body.get("amends"),
             links=links_body,

@@ -1135,6 +1135,45 @@ def test_http_create_reads_an_empty_id_as_auto_like_the_preview(served):
     assert prev_blank["id"] is None and prev_blank["reason"]
 
 
+@pytest.mark.parametrize("bad_id", [0, False, [], {}])
+def test_http_create_refuses_a_falsy_non_string_id_and_allocates_nothing(served, bad_id):
+    """The empty-id auto collapse is exact-string, not falsy-truthy: a
+    JSON 0/false/[]/{} is the same 400 shape refusal as any non-string
+    `id` (the `must be a string when given` gate runs before the collapse
+    can see it) and reserves nothing -- a malformed explicit id must never
+    be silently re-planned as the next free one."""
+    _app, client, root = served
+    before = snapshot_tree(root)
+    status, payload = client.api_post(
+        "/api/items/create",
+        {"type": "requirement", "fields": {"text": "X."}, "id": bad_id},
+    )
+    assert status == 400, payload
+    assert "must be a string" in payload["error"]
+    after = snapshot_tree(root)
+    after.pop(".refdes/schema.json", None)
+    before.pop(".refdes/schema.json", None)
+    assert after == before
+
+
+def test_http_create_reads_a_null_id_as_omitted(served):
+    """JSON null keeps its standing meaning on both routes -- "not given"
+    is auto, the same answer an omitted `id` gets (this was the base's
+    behaviour too; the empty-string collapse must not have eaten it)."""
+    _app, client, _root = served
+    status, made = client.api_post(
+        "/api/items/create",
+        {
+            "type": "requirement",
+            "fields": {"text": "Null id means auto."},
+            "id": None,
+            "destination": "items/reqs.yaml",
+        },
+    )
+    assert status == 200 and made["kind"] == "created", made
+    assert made["id"] == "REQ-012"
+
+
 def test_http_refusals_carry_reasons_and_write_nothing(served):
     _app, client, root = served
     before = snapshot_tree(root)
