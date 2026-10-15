@@ -1,0 +1,43 @@
+DIAG-WORD-006: `refdes id` printed every load error twice
+
+Claimed in .scratch/PROGRESS.md row 62 (Sol / Qwen slot). Branch
+fix/id-load-error-once-20261015, branched off 7e49a20.
+
+Finding, verified before editing (per the row's own instruction): real CLI
+run in .scratch/diag-word-006 (PYTHONPATH pinned to this worktree's src,
+refdes.__file__ asserted against src/refdes/__init__.py): project with 4
+unparseable item files + one itemless item, `refdes id --dry-run` printed
+each load error twice (grep -c per file: 2), exit 1. Allocation-time
+collision (quoted `id: "001"` under a live REQ-001) printed once.
+The scratch repro dir and red/green stderr captures are left in
+.scratch/diag-word-006/.
+
+Cause, read from src/refdes/cli.py cmd_id: `load_errors =
+project.errors` is printed to stderr before allocation, then after
+`ids_mod.allocate` the command printed `project.errors` again -- the
+cumulative list (model.py filters `diagnostics`, append-only), load errors
+still in it -- so every load error printed a second time.
+
+Fix: post-allocation loop prints only the tail `project.errors[len(load_
+errors):]`, i.e. exactly what allocate() added (numeric-hint collision,
+write-back/ledger refusals). Allocation report lines, the cumulative exit
+code (`1 if project.errors`), and the no-pending load-error path are
+untouched.
+
+Red/green: new test in tests/test_cli_load_errors.py,
+test_id_prints_each_load_error_once_when_allocation_runs -- 4 broken files
++ colliding hint + pending item under --dry-run (collision check runs
+before the dry-run return, so the allocation-time error is exercised
+without writing anything). Asserts: each load error exactly once (count 4
+of "invalid YAML"), collision exactly once, allocation report intact, exit
+1. Verified red by temporarily reverting the one-line fix in the worktree
+(no git stash -- shared checkout), restored; git diff confirms only
+cmd_id's loop changed.
+
+Runs: tests/test_ids.py tests/test_cli_load_errors.py tests/test_no_write.py
+tests/test_load_time_writes.py -> 152 passed. ruff (scoped per AGENTS.md):
+F,E9 clean on both touched files; E501/I findings on cli.py are
+pre-existing and not on the touched lines.
+
+Finished: yes. PR open (number recorded in the PROGRESS.md row). Not
+merged -- merge gate is the orchestrators'.
