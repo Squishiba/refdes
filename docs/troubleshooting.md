@@ -592,13 +592,25 @@ that look alike are told apart above. `page_count: 0` is not this error — that
 what a document with no pages in it is recorded as. A record with no
 `page_count:` and no `page_count_error:` is not this error either: it claims
 nothing about its pages (see [citing a datasheet](markdown.md#citing-a-datasheet))
-and the next `refdes fetch` records the count.
+and the next `refdes fetch` records the count — plain, for a local file or a kept
+copy; `--update` for a remote pin kept hash-only, whose cited pages are reported
+as not checked until that run.
 
 **`.refdes/citations.yaml:N — the entry for '…' has both page_count and page_count_error`**
 Those are opposites — a count, and the reason there is none — and `refdes fetch`
 writes one or the other, never both. Keep the one that is true of these bytes;
 the other is a leftover from a merge, and the count wins on every read, so a
 stale reason beside it would never be shown to anyone again.
+
+**`.refdes/citations.yaml:N — the entry for '…' has page_count_sha256 '…'`**
+`refdes fetch` records the page count, or failed count, beside the digest naming
+the bytes it counted. A shape that is not a 64-character lowercase hex digest is
+a bad hand-edit or merge: restore the record, or re-run the fetch that writes it.
+A valid digest beside the count is different from a matching digest: `check` only
+trusts `page_count:`/`page_count_error:` as checked when the provenance matches
+`sha256:`. A missing digest is untrusted too, even for a remote hash-only record.
+Neither is malformed; both are reported as *pages unchecked*, and repaired by a
+plain fetch when the bytes are on this machine or by `--update` when they are not.
 
 **`.refdes/citations.yaml:N — duplicate key '…' in one mapping (lines N and M)`**
 YAML resolves a repeated key to the *last* one and says nothing, so this is the

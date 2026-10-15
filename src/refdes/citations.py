@@ -698,14 +698,79 @@ def resolve_sections(
 # displayed, so a record without it is stale rather than unreadable.
 _LOCKFILE_REQUIRED = ("sha256", "fetched", "kept_copy")
 
-# The page count of the pinned bytes, or why there is none. Written only for a
-# cited path some item gives a `page:` to, and written by `fetch_all` as
+# The page count of the pinned bytes, or why there is none, and the sha256 those
+# bytes had when the count was taken. Written only for a cited path some item
+# gives a `page:` to, and written by `fetch_all` as
 # `record["page_count"] = counted` / `record["page_count_error"] = why` in one
-# `if`/`elif`, so exactly one of the two is ever present. Spelled out here
-# because `_record_problem` has to name both -- it is what rejects a record
-# carrying both, and a count that is not a number reads as no count at all.
+# `if`/`elif`, with `page_count_sha256` beside whichever lands. The provenance
+# key matters because the lockfile is hand-mergeable: a merge can keep one
+# document's sha256 while taking another's count, and a count without this
+# provenance is not safe to trust at all. The bytes decide whether a plain fetch
+# can repair it offline; they do not make an unprovenanced count safe.
+# All three are spelled out here because `_record_problem` has to name them --
+# it is what rejects a record carrying both count and error, a count that is not
+# a number, and a provenance that cannot name these bytes.
 PAGE_COUNT_KEY = "page_count"
 PAGE_COUNT_ERROR_KEY = "page_count_error"
+PAGE_COUNT_SHA256_KEY = "page_count_sha256"
+PAGE_COUNT_UNVERIFIED_WHY = (
+    "the lockfile's page count is not tied to the pinned sha256"
+)
+
+# The reason a remote pin kept hash-only can never have its pages counted
+# offline: the bytes are not on this machine, and a plain `refdes fetch` does
+# not download them. One clause, shared by `_apply_page` and `page_count_gaps`
+# so `check` and `audit` cannot disagree about what this state means (the
+# disagreement was itself run-5 finding F1). It is a clause, not a sentence:
+# both callers wrap it in their own.
+HASH_ONLY_UNCOUNTED_WHY = (
+    "it is pinned hash-only, with no kept copy to count offline"
+)
+
+
+def _hash_only_without_count(path: str, record: Mapping) -> bool:
+    """A remote, hash-only pin of a PDF whose record claims no count at all.
+
+    The one no-count state no command can repair without the network: the
+    fresh-pin path counts every PDF it downloads (kept copy or not), and the
+    skip path counts from the local file or the kept copy -- so a record
+    missing the count is a record whose bytes were never on this machine.
+    Same extension test as `_page_count_for_pin`, so the two cannot call the
+    same document countable and uncountable: a `page:` on a file that is not
+    a PDF is not this feature's business (CITE-LOCK-003)."""
+    if urlparse(path).scheme.lower() not in REMOTE_SCHEMES:
+        return False
+    if record.get("kept_copy"):
+        return False
+    return os.path.splitext(path)[1].lower() in sources_mod.PdfReader.extensions
+
+
+def _page_count_matches_pin(record: Mapping) -> bool:
+    """Whether the count (or failed count) was derived from the pinned bytes."""
+    pinned = record.get("sha256")
+    return bool(pinned) and record.get(PAGE_COUNT_SHA256_KEY) == pinned
+
+
+def _count_provenance_untrusted(path: str, record: Mapping) -> bool:
+    """Whether a recorded count/error cannot safely be read as checked against `path`.
+
+    A provenance key is what turns `page_count` from "some count exists for this
+    record" into "this count belongs to exactly these pinned bytes". A mismatch is
+    always unsafe: a merge or hand-edit has paired one document's hash with
+    another's count. A missing key is unsafe for local and kept-copy records too,
+    because the bytes are on this machine and a plain fetch can re-derive the count
+    before anything trusts it. Remote hash-only records are not exempt: a merge can
+    pair this pin's hash with an old count, and check/build must not publish an
+    out-of-range page from that state even when plain fetch cannot repair it
+    offline. The missing-key state for a record that has *no* count remains quiet
+    until a plain fetch can fill it, with `--update` the remedy for hash-only
+    bytes. Same posture as `sections_sha256`: a derived page fact is only good
+    next to the bytes it was read from.
+    """
+    return bool(
+        (PAGE_COUNT_KEY in record or PAGE_COUNT_ERROR_KEY in record)
+        and not _page_count_matches_pin(record)
+    )
 
 # A sha256 as `hashlib.sha256().hexdigest()` writes it: lowercase hex, always
 # 64 characters. `lockfile_text` quotes an all-digit one so YAML reads it back
@@ -937,7 +1002,7 @@ def _record_problem(cited: object, record: object) -> str | None:
             f"the entry for {_yaml_kind(cited) if not isinstance(cited, str) else repr(cited)} "
             f"is {_yaml_kind(record)}, not a mapping of the fields `refdes fetch` writes "
             f"({', '.join(_LOCKFILE_REQUIRED)}, and optionally bytes, sections, "
-            f"{PAGE_COUNT_KEY}, {PAGE_COUNT_ERROR_KEY}, values)"
+            f"{PAGE_COUNT_KEY}, {PAGE_COUNT_ERROR_KEY}, {PAGE_COUNT_SHA256_KEY}, values)"
         )
     # A pre-rename record carries `vendored:` where `kept_copy:` now is, and
     # is missing the new spelling entirely. Exempt here so `legacy_notices`
@@ -1043,9 +1108,19 @@ def _record_problem(cited: object, record: object) -> str | None:
     if why is not None and (not isinstance(why, str) or not why.strip()):
         return (
             f"the entry for {cited!r} has {PAGE_COUNT_ERROR_KEY} {why!r}, which is not the "
-            f"reason the pages could not be counted. `refdes fetch` records that sentence "
+            f"reason the pages could not be counted. `refdes fetch` writes that sentence "
             f"when it pins a document whose pages it could not count, and `check` reports it "
             f"back as the reason the page numbers are not checked"
+        )
+    page_sha = record.get(PAGE_COUNT_SHA256_KEY)
+    if page_sha is not None and (
+        not isinstance(page_sha, str) or not _SHA256_RE.match(page_sha)
+    ):
+        return (
+            f"the entry for {cited!r} has {PAGE_COUNT_SHA256_KEY} {page_sha!r}, which is not "
+            f"a 64-character lowercase hex digest -- it names the bytes whose pages were "
+            f"counted, and a page count beside the wrong sha256 is not a count of this "
+            f"document"
         )
     return None
 
@@ -1365,19 +1440,27 @@ def locked_source_value(record: dict | None, key: str) -> str | None:
 
 
 def page_count_gaps(records: Mapping[str, Mapping]) -> dict[str, str]:
-    """`path` -> why this document's pages could not be counted, for every
-    pinned record that records the attempt's failure instead of a count.
+    """`path` -> why this document's pages could not be checked, for every pinned
+    record that records the attempt's failure, a count with untrusted provenance,
+    or the one offline repair that a plain fetch cannot make.
 
     The lockfile already holds this fact (`fetch` writes it, `_apply_page` reads
     it so that `check` can warn without the bytes), and `audit` -- the command a
     release reviewer actually runs -- printed nothing about it, so a pin whose
     cited page numbers were never compared to anything read `ok` (run-5 F1).
 
-    Two kinds of record are deliberately absent: one with a count, whose pages
-    were checked, and one with neither, which claims nothing about its pages --
-    a pin written before any count was attempted. That is `_apply_page`'s
-    distinction, kept here so the two commands cannot disagree about what "we
-    could not check this" means.
+    A count is not enough by itself: `page_count_sha256` says which pinned bytes
+    it counted, and `_count_provenance_untrusted` decides when a count or failed
+    count cannot be read as checked. Two kinds of record are deliberately absent:
+    one with a trusted count, whose pages were checked, and one with neither key
+    whose bytes are on this machine -- a pin a plain `refdes fetch` can still
+    count from the local file or the kept copy the moment a citation gives it a
+    `page:`. The exception is the third row below: a remote pin kept hash-only has
+    no bytes to count and a plain fetch will not fetch them, so no future run of
+    anything but `fetch --update` records a count for it, and an `audit` that
+    stayed silent while `check` warns is exactly the run-5 F1 hole. That is
+    `_apply_page`'s distinction, kept here so the two commands cannot disagree
+    about what "we could not check this" means.
 
     What a record cannot know is whether anything still cites a `page:` of this
     path -- `fetch` writes the failure against the path, and deleting the `page:`
@@ -1387,12 +1470,17 @@ def page_count_gaps(records: Mapping[str, Mapping]) -> dict[str, str]:
     """
     gaps: dict[str, str] = {}
     for path, record in records.items():
+        if _count_provenance_untrusted(path, record):
+            gaps[path] = PAGE_COUNT_UNVERIFIED_WHY
+            continue
         counted = record.get(PAGE_COUNT_KEY)
         if isinstance(counted, int) and counted >= 1:
             continue
         why = record.get(PAGE_COUNT_ERROR_KEY)
         if why:
             gaps[path] = str(why)
+        elif PAGE_COUNT_KEY not in record and _hash_only_without_count(path, record):
+            gaps[path] = HASH_ONLY_UNCOUNTED_WHY
     return gaps
 
 
@@ -1696,21 +1784,54 @@ def _apply_page(project, item, spec, record, status, severity) -> None:
 
     A record with neither `page_count` nor `page_count_error` claims nothing
     about its pages -- a hand-written lockfile, or one written before any of
-    this -- and is left alone. That is not leniency: every project has to run
-    `refdes fetch` before `check` can pass it, and that run records the count.
-    Reporting the gap in the meantime would warn about a lockfile rather than
-    about a citation.
+    this -- and is left alone while a plain `refdes fetch` can still fill it:
+    the skip path counts the pinned document from the bytes on disk the moment
+    a citation gives it a `page:`, and warning about the gap before that run
+    would warn about a lockfile rather than about a citation. The one record
+    no plain fetch can fill is a remote pin kept hash-only: its bytes are not
+    here to count and fetch does not go and get them, so this says the pages
+    are not checked -- `check` and `build` must not publish an out-of-range
+    page number as verified (CITE-LOCK-003).
     """
     if not spec.page or status.state != "ok":
         return
     page = page_number(spec.page)
     if page is None:
         return  # a load-time declaration error already reported it, with file:line
+    if _count_provenance_untrusted(spec.path, record or {}):
+        cmd = (
+            f"refdes fetch --update --path {spec.path}"
+            if _hash_only_without_count(spec.path, record or {})
+            else f"refdes fetch --path {spec.path}"
+        )
+        status.detail = (
+            f"the page numbers cited for {spec.path} are not checked: "
+            f"{PAGE_COUNT_UNVERIFIED_WHY} -- run '{cmd}' to recount the pinned "
+            f"bytes"
+        )
+        severity(
+            status.detail,
+            file=item.source_file, line=item.source_line, item_id=item.id,
+        )
+        return
     count = (record or {}).get(PAGE_COUNT_KEY)
     if not isinstance(count, int) or count < 1:
         why = str((record or {}).get(PAGE_COUNT_ERROR_KEY) or "")
         if not why:
-            return  # no count was ever claimed for these bytes
+            if PAGE_COUNT_KEY not in (record or {}) and _hash_only_without_count(
+                spec.path, record or {}
+            ):
+                status.detail = (
+                    f"the page numbers cited for {spec.path} are not checked: "
+                    f"the lockfile records no page count for this document "
+                    f"because {HASH_ONLY_UNCOUNTED_WHY} -- run 'refdes fetch "
+                    f"--update --path {spec.path}' to establish it"
+                )
+                severity(
+                    status.detail,
+                    file=item.source_file, line=item.source_line, item_id=item.id,
+                )
+            return  # the count is missing, but a plain fetch can still record it
         status.detail = (
             f"the page numbers cited for {spec.path} are not checked: the "
             f"lockfile records no page count for this document because {why} -- "
@@ -2358,8 +2479,9 @@ def _page_count_for_pin(canon: str, data: bytes) -> tuple[int | None, str]:
     -- "not applicable" is not "we tried and could not". A PDF whose pages
     cannot be counted -- no extra installed, bytes pypdf cannot open -- answers
     with the reason, which is a clause both call sites read: the fetch that
-    pinned these bytes prints it as the warning it is, and the lockfile keeps it
-    so a later `check` can say the same thing without having the bytes."""
+    holds these bytes (pinning them, or counting an already-pinned path from
+    the bytes it kept) prints it as the warning it is, and the lockfile keeps
+    it so a later `check` can say the same thing without having the bytes."""
     if os.path.splitext(canon)[1].lower() not in sources_mod.PdfReader.extensions:
         return None, ""
     try:
@@ -2592,18 +2714,73 @@ def fetch_all(
             # alone because the recorded count is right there -- a `page:`
             # edited since the last fetch is the commonest way a wrong page gets
             # written, and fetch is the command the author just ran. A record
-            # with neither key claims no count (a hand-written or older
-            # lockfile), and there is nothing here to check it against: the
-            # first `refdes fetch` records one, and `check` says so until then.
-            counted = existing.get(PAGE_COUNT_KEY)
-            stale = [k for k in (PAGE_COUNT_KEY, PAGE_COUNT_ERROR_KEY) if k in existing]
-            if not pages and stale:
-                for key in stale:
+            # with neither key claims no count at all -- a pin made before this
+            # citation had a `page:`, or one written before counts existed --
+            # and the path whose bytes are on disk is counted right here, from
+            # exactly the sha256 the record vouches for and with no network,
+            # the same derivation the sections above were resolved by (this is
+            # what makes the docs' promise that `refdes fetch` records the
+            # count true for an already-pinned path -- CITE-LOCK-003). A record
+            # with a count or failed count whose provenance cannot be trusted is
+            # counted here too: the bytes are vouched for by the record's
+            # sha256, so no network is needed for local files or kept copies, and
+            # repairing the record before `check` is the only way an offline merge
+            # stops publishing a stale count as checked. A path without bytes to
+            # count (a hash-only remote pin, or a local file that has changed or
+            # gone) is not rewritten and downloads nothing. An old missing-count
+            # state stays quiet for `check` to report, because that is the
+            # hash-only state CITE-LOCK-003 deliberately leaves for `--update`; a
+            # distrusted count/error is reported here as not checked, because
+            # fetch just decided it could not repair it offline.
+            count_keys = [
+                key
+                for key in (PAGE_COUNT_KEY, PAGE_COUNT_ERROR_KEY)
+                if key in existing
+            ]
+            provenance_only = PAGE_COUNT_SHA256_KEY in existing and not count_keys
+            page_keys = count_keys + (
+                [PAGE_COUNT_SHA256_KEY] if PAGE_COUNT_SHA256_KEY in existing else []
+            )
+            if not pages and page_keys:
+                for key in page_keys:
                     existing.pop(key)
                 changed = True
-            elif isinstance(counted, int) and pages:
-                result.pages = counted
-                _check_pages(canon, counted, pages, result)
+            elif pages:
+                counted = existing.get(PAGE_COUNT_KEY)
+                if provenance_only:
+                    existing.pop(PAGE_COUNT_SHA256_KEY)
+                    changed = True
+                untrusted = _count_provenance_untrusted(canon, existing)
+                if untrusted or not count_keys:
+                    data, _absent = _section_bytes(project, kind, canon, existing)
+                    if data is not None:
+                        counted, why = _page_count_for_pin(canon, data)
+                        if counted is not None:
+                            existing.pop(PAGE_COUNT_ERROR_KEY, None)
+                            existing[PAGE_COUNT_KEY] = counted
+                            existing[PAGE_COUNT_SHA256_KEY] = pinned
+                            result.pages = counted
+                            changed = True
+                            _check_pages(canon, counted, pages, result)
+                        elif why:
+                            existing.pop(PAGE_COUNT_KEY, None)
+                            existing[PAGE_COUNT_ERROR_KEY] = why
+                            existing[PAGE_COUNT_SHA256_KEY] = pinned
+                            changed = True
+                            result.page_warnings.append(
+                                f"{canon}: the pages could not be counted to check "
+                                f"the page numbers cited here -- {why}"
+                                + _page_count_remedy(canon, why)
+                            )
+                    elif untrusted:
+                        result.page_warnings.append(
+                            f"{canon}: the page numbers cited here are not checked -- "
+                            f"{PAGE_COUNT_UNVERIFIED_WHY} -- run 'refdes fetch "
+                            f"--update --path {canon}' to count them"
+                        )
+                elif isinstance(counted, int):
+                    result.pages = counted
+                    _check_pages(canon, counted, pages, result)
             results.append(result)
             continue
 
@@ -2722,6 +2899,7 @@ def fetch_all(
             counted, why = _page_count_for_pin(canon, data)
             if counted is not None:
                 record[PAGE_COUNT_KEY] = counted
+                record[PAGE_COUNT_SHA256_KEY] = digest
                 result.pages = counted
                 _check_pages(canon, counted, pages, result)
             elif why:
@@ -2738,6 +2916,7 @@ def fetch_all(
                     + _page_count_remedy(canon, why)
                 )
                 record[PAGE_COUNT_ERROR_KEY] = why
+                record[PAGE_COUNT_SHA256_KEY] = digest
         if new_values:
             record["values"] = new_values
             _diff_source_values(

@@ -444,7 +444,8 @@ about a document:
   [troubleshooting](troubleshooting.md#citations).
 - **The range is checked against the pinned document.** `refdes fetch` counts
   the pages of the bytes it is pinning and records that count in the lockfile
-  next to the sha256, and it checks every cited `page:` for that path against it
+  beside the sha256, with `page_count_sha256:` naming exactly the bytes whose
+  pages were counted, and it checks every cited `page:` for that path against it
   while it still has the document open — including the pages belonging to items
   outside the run's `--item`/`--path` scope, for the same reason a re-pin
   re-resolves every section. So `page: "6"` pinned against an eight-page
@@ -462,11 +463,27 @@ about a document:
   reason and the command that establishes them. That is the same shape as a
   `section:` fetched without the extra: a soft row that
   `refdes build --require-citations` escalates, never a hard failure of its own.
+- **A count is only as good as the bytes it counted.** `page_count_sha256:` is
+  the provenance marker that ties `page_count:` or `page_count_error:` to the
+  record's `sha256:`. If the provenance is missing or mismatched where a plain
+  fetch can still read the pinned bytes — a local file or a kept copy — `check`
+  reports the cited page numbers as *not checked* rather than trusting a count a
+  merge may have paired with the wrong document, and the next plain `refdes
+  fetch` recounts from those bytes and repairs the record. A remote hash-only pin
+  has no bytes here to recount, so only `refdes fetch --update` can establish a
+  count for it; a count recorded there without provenance is not trusted either,
+  and until `--update` runs `check` reports its page numbers as not checked too.
 - **A lockfile that claims no count is left alone.** A hand-written record, or
   one written before any of this, has no `page_count:` and no
   `page_count_error:` — it says nothing about its pages, so nothing is checked
   against it. Every project has to run `refdes fetch` before `check` can pass
-  it, and that run records the count.
+  it, and that run records the count: a plain fetch — which re-pins nothing —
+  counts from the bytes the record already vouches for, a local file or a kept
+  copy. The exception is a remote pin kept hash-only, whose bytes are not on
+  this machine: plain fetch does not download them, so only `refdes fetch
+  --update` establishes that count, and until it runs `check` reports the
+  citation's page numbers as *not checked*, in the same shape (and with the
+  same `--require-citations` escalation) as the unreadable-extra case above.
 
 `page:` means the page of the *PDF*, counted from 1 — the same number the
 rendered `#page=` fragment opens. A datasheet's own printed page number is a
@@ -525,6 +542,7 @@ warnings at `check` and never fail it:
 | A `section:` with no resolved page in the lockfile — never fetched, or fetched without `refdes[pdf]` installed | warning naming every citer (error with `refdes build --require-citations`) |
 | A `page:` the pinned document does not have — `page: "99"` on an eight-page datasheet, or a page that stopped existing when a revision got shorter | warning naming the citer (error with `refdes build --require-citations`) |
 | A `page:` that was never checked against the document — pinned without `refdes[pdf]` installed, so no page count was recorded | warning naming the citer (error with `refdes build --require-citations`) |
+| A `page:` whose lockfile count/error is not tied to the pinned `sha256` by `page_count_sha256:` | warning naming the citer (error with `refdes build --require-citations`) |
 | A `page:` that is not a positive integer — `0`, `-1`, `eight`, `xiv`, `1.5`, `2-4` | **error, always** — a declaration error, and no file is needed to see it |
 
 The hash-mismatch case is never soft-failed — a corrupted or tampered local
