@@ -35,10 +35,12 @@ function displayHalf(target) {
 // the server accepts: the declared types when there are any, the whole
 // project when the list is empty.
 //
-// The picker asks the list API for its full page (the server MAX_LIMIT,
-// serve/filters.py) rather than the default 500, and says so when even that
-// page is truncated -- a picker that silently dropped rows would be hiding
-// valid targets exactly like the empty-list bug it replaced.
+// The picker asks the list API for its full page (MAX_LIMIT in
+// serve/filters.py) rather than the default 500. When even a full page is
+// capped the notice says so, and says the filter searches only the fetched
+// rows: the list API has no offset, so nothing the picker does can reach
+// rows past the cap, and a notice promising a filter remedy would hide
+// valid targets with false hope.
 const PICKER_LIMIT = 5000;
 
 async function candidatesFor(types) {
@@ -99,6 +101,16 @@ function verbPicker(item, handle, verb, spec, onChange) {
     return serverTargets.find(
       (t) => displayHalf(t) === id || (row.key && t.slice(t.lastIndexOf('@') + 1) === row.key)
     );
+  }
+
+  // The picker never offers the item being edited: self-links make no
+  // sense to pick from a list, the build cycle checks refuse the directed
+  // self-cycles of the standard at save time, and verbs without a cycle
+  // rule would accept one silently.
+  function isSelf(row) {
+    if (row.handle && row.handle === handle) return true;
+    if (row.key && item.key && row.key === item.key) return true;
+    return Boolean(item.id && row.id === item.id);
   }
 
   function refresh() {
@@ -168,6 +180,7 @@ function verbPicker(item, handle, verb, spec, onChange) {
     const want = filter.value.trim().toLowerCase();
     let shown = 0;
     for (const row of all) {
+      if (isSelf(row)) continue;
       const label = `${row.id || row.handle} — ${row.title || ''}`;
       if (want && !label.toLowerCase().includes(want)) continue;
       shown += 1;
@@ -191,7 +204,7 @@ function verbPicker(item, handle, verb, spec, onChange) {
     }
     if (!shown) pickers.appendChild(el('p', 'muted', 'no candidates match'));
     if (totalFound !== null && all.length < totalFound)
-      pickers.appendChild(el('p', 'muted', `showing ${all.length} of ${totalFound} targets -- filter to narrow`));
+      pickers.appendChild(el('p', 'muted', `showing the first ${all.length} of ${totalFound} targets -- the filter searches only these`));
   }
 
   let all = [];

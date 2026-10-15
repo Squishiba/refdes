@@ -18,9 +18,11 @@ consistent (verified by reading, file:line cited):
 - `build.py:911` `resolve_links` — the type check runs `if allowed and ...`,
   so an empty list skips it.
 - `serve/edit.py:795` `_resolve_link_op` — gates adds through
-  `accepts_type`; its refusal message for the non-empty case is "targets of
-  type X", and model's docstring phrasing for the empty case is "any
-  declared type".
+  `accepts_type`; the refusal message at edit.py:803-804 reads "targets of
+  type X" for the non-empty case and "any declared type" for the empty
+  case (round 2 review: this "any declared type" phrasing is edit.py's,
+  not the model docstring's -- model.py:1145 says "an empty list is
+  unrestricted").
 
 Real-world case in the bundled standard (hardware@3):
 `src/refdes/standards/hardware/v3/base.yaml` — `log.links.blocked_by: []`.
@@ -118,3 +120,32 @@ Traps (repeat of round 1, keep in mind): links.js comments must carry no
 apostrophes (test_serve_static quote-state scanner), and the node harness
 needs STATIC as an ABSOLUTE path (file:// URL import; a relative STATIC
 fails the node spawn, which reads like a harness crash).
+
+## Round 3: PR #267 review round 2 (CHANGES REQUESTED) -- fix round
+
+1. MEDIUM, FIXED: the capped notice promised "filter to narrow", but the
+   filter (renderCandidates) only searches the FETCHED rows -- past the
+   5000 cap no filter reaches the rest. Chose the smaller remedy (the
+   orchestrator's menu: honest text vs server-side filtering): the notice
+   now reads "showing the first N of M targets -- the filter searches only
+   these". Test: the capped scenario asserts the new text.
+2. Orchestrator decision (finding 2 reversed): the picker NEVER offers the
+   item under edit. links.js gains isSelf (handle, key, and id matching)
+   and renderCandidates skips self rows on both the restricted and the
+   unrestricted path. Test: the unrestricted scenario's item is now
+   LOG-001, present in the universe (handle + id + key all match) -- it
+   must be absent from the offered labels; red-before verified against
+   the pre-change links.js (.scratch/red-static-267): the offered list
+   contained it.
+3. LOW (finding 3, 5000 full rows fetched per picker open, no cache):
+   noted, no code change -- a caching layer is a separate seam.
+4. FIXED: the round-1 log section above attributed "any declared type" to
+   the model docstring; it is edit.py:803's message (model.py:1145 says
+   "unrestricted"). Citations corrected in place.
+5. NOT IN THE REVIEW FINDINGS, REAL: the round-2 Windows CI run failed on
+   my new test (tests/test_editor_empty_link_target_types.py) -- the
+   harness labels carry an em dash and node's UTF-8 stdout decoded under
+   Windows cp1252. Fixed with encoding="utf-8" on subprocess.run.
+
+Round-2 note: the .scratch/ probes are gitignored scratch, not PR-
+reproducible; the in-test HTTP pins carry the equivalent evidence.

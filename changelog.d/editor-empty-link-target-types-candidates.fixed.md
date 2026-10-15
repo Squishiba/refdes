@@ -12,5 +12,8 @@
   with declared target types keep their filtered per-type queries. The
   picker now also asks the list API for its full page (the server's
   5000-row maximum, not the default 500) and labels a list that even that
-  page truncates ("showing N of M targets"), so a candidate list never
-  silently hides valid targets.
+  page truncates ("showing the first N of M targets -- the filter searches
+  only these"), so a candidate list never silently hides valid targets nor
+  promises a filter remedy that reaches past the page. The picker also
+  never offers the item being edited: a self-link is not a choice to make
+  from a list.

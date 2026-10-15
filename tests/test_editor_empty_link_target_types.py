@@ -24,13 +24,17 @@ Two halves, one per side of the seam:
   `target_types: []`, and `POST .../edit` applies an add of any type.
 - Node, the REAL served modules (red before the fix): with `target_types: []`
   the picker must fetch the unfiltered list and offer every item as a
-  candidate, and clicking Add must draft the add; a verb with declared types
-  must keep fetching exactly those types and offering exactly their items.
+  candidate -- except the item being edited, which the picker never offers
+  (a self-link is not a choice to make from a list) -- and clicking Add
+  must draft the add; a verb with declared types must keep fetching exactly
+  those types and offering exactly their items.
   The list API caps at a page of rows (`filters.py`: default 500, max 5000),
   so the picker must ask for the full page -- a 600-item project must offer
-  all 600, not a silently truncated 500 -- and must say so when even the
-  full page truncates (a project past the cap shows the fetched rows plus a
-  "showing N of M" line, never a list that hides the gap).
+  all 600, not a silently truncated 500 -- and must say so honestly when
+  even the full page truncates: a project past the cap shows the fetched
+  rows plus a "showing the first N of M" line that names the filter's
+  limit (it searches only the fetched rows), never a list that hides the
+  gap or promises a remedy it cannot deliver.
 """
 
 from __future__ import annotations
@@ -254,7 +258,8 @@ globalThis.document = {
 globalThis.window = { addEventListener: () => {} };
 
 // Three items, one per type: an unrestricted picker must offer ALL of
-// them; a verb declaring `requirement` must offer exactly REQ-001.
+// them except the item under edit; a verb declaring `requirement` must
+// offer exactly REQ-001.
 const ALL = [
   { id: 'REQ-001', handle: 'REQ-001', key: 'k1', title: 'Rail', type: 'requirement' },
   { id: 'DEC-001', handle: 'DEC-001', key: 'k2', title: 'Buck', type: 'decision' },
@@ -292,10 +297,13 @@ const drafts = await import(url('drafts.js'));
 const tick = (ms) => new Promise((r) => setTimeout(r, ms));
 const snapshot = (draft) => JSON.parse(JSON.stringify(draft.links));
 
-function editItem(links) {
+function editItem(links, self) {
+  // self: id/key of the item under edit, so the picker can recognize it
+  // among the candidate rows (the item view the API serves carries both).
   return {
     id: 'X',
     revision: 'rev-0',
+    ...(self || {}),
     edit: {
       editable: true,
       file_revision: 'rev-0',
@@ -321,13 +329,17 @@ function findMuted(editor) {
 const results = {};
 
 // -- unrestricted: a verb declared with `target_types: []` must offer every
-//    item (the server accepts a link to any of them), and Add must draft.
+//    item (the server accepts a link to any of them) EXCEPT the item under
+//    edit, and Add must draft.
 {
   const handle = 'LOG-001';
   UNIVERSE = ALL;
   fetchCalls.length = 0;
   const editor = createEditor(
-    editItem({ blocked_by: { editable: true, target_types: [], targets: [] } }),
+    editItem(
+      { blocked_by: { editable: true, target_types: [], targets: [] } },
+      { id: 'LOG-001', key: 'k3' }
+    ),
     handle, () => {}, () => {},
   );
   await tick(20); // the candidates promise
@@ -411,6 +423,8 @@ def test_the_picker_offers_every_item_for_an_unrestricted_verb():
         [NODE, "--input-type=module", "-e", script],
         capture_output=True,
         text=True,
+        encoding="utf-8",  # the harness labels carry an em dash; node writes
+        # UTF-8 and the Windows default (cp1252) mangles it in CI
         timeout=NODE_TIMEOUT_S,
         check=False,
     )
@@ -424,12 +438,12 @@ def test_the_picker_offers_every_item_for_an_unrestricted_verb():
     )
     assert results["unrestrictedCandidates"] == [
         "DEC-001 — Buck",
-        "LOG-001 — Start",
         "REQ-001 — Rail",
     ], (
-        "the picker offered no candidates for a verb the server accepts to "
-        "every type -- an empty target list is unrestricted, not empty "
-        "(EDITOR-API-006)"
+        "the picker offered no candidates (or offered the item under edit) "
+        "for a verb the server accepts to every type -- an empty target "
+        "list is unrestricted, not empty (EDITOR-API-006), and the picker "
+        "must not offer a self-link"
     )
     assert results["unrestrictedAdd"] == {"blocked_by": ["REQ-001"]}, (
         "clicking Add on an unrestricted verb's candidate must draft the add"
@@ -455,11 +469,16 @@ def test_the_picker_offers_every_item_for_an_unrestricted_verb():
 
     # past even the full page (6000 > MAX_LIMIT 5000): the fetched page is
     # the whole offer and the picker says so, instead of presenting a list
-    # that hides 1000 valid targets.
+    # that hides 1000 valid targets. The wording must be honest about what
+    # the author can still do: the filter searches only the fetched rows
+    # (renderCandidates matches over `all`), so it must not promise that
+    # filtering reaches the rows past the cap (review of PR #267, round 2,
+    # finding 1).
     assert results["cappedCandidateCount"] == 5000
     assert results["cappedNotice"] == [
-        "showing 5000 of 6000 targets -- filter to narrow"
+        "showing the first 5000 of 6000 targets -- the filter searches only these"
     ], (
-        "a truncated candidate list must say so; a silent one hides valid "
-        "targets -- which is the defect this PR exists to remove"
+        "a truncated candidate list must say so, and say it honestly: the "
+        "filter only searches the fetched rows, so a notice that suggests "
+        "filtering reaches the rest is a false remedy"
     )
