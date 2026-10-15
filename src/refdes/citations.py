@@ -1112,17 +1112,39 @@ def _record_problem(cited: object, record: object) -> str | None:
         )
     counted = record.get(PAGE_COUNT_KEY)
     if counted is not None and (isinstance(counted, bool) or not isinstance(counted, int)):
-        # Type only, and no range: `page_count(data)` is `len(reader.pages)`, so
-        # `fetch` really does record `page_count: 0` for a document pypdf opens
-        # and finds no pages in. Demanding a positive count here would report
-        # `fetch`'s own output as malformed -- the one failure this validator
-        # must not be able to cause. (`_apply_page` reads a count below 1 as no
-        # count, which is its own business and is not contradicted here.)
+        # Type: `page_count(data)` is `len(reader.pages)`, so `fetch` really
+        # does record `page_count: 0` for a document pypdf opens and finds no
+        # pages in. Demanding a positive count here would report `fetch`'s own
+        # output as malformed -- the one failure this validator must not be
+        # able to cause. The one range refusal is the clause below, where
+        # `fetch`'s own output provably is not in the running. (`_apply_page`
+        # reads a count of 0 as no count, which is its own business and is not
+        # contradicted here.)
         return (
             f"the entry for {cited!r} has {PAGE_COUNT_KEY} {counted!r}, which is not a whole "
             f"number of pages -- it is the count `refdes fetch` took of the bytes it was "
             f"pinning, and a count that is not a number reads as no count at all, which "
             f"silently drops the page check that count exists for"
+        )
+    if isinstance(counted, int) and counted < 0:
+        # The one range check, and it is safe for exactly the reason the type
+        # check above cannot make one: `page_count(data)` is `len(reader.pages)`,
+        # and no document has a negative number of pages, so -- unlike the `0`
+        # the clause above keeps sound -- a negative count is a line this tool
+        # never wrote. It is also the one bad count the readers used to
+        # disagree about (CITE-LOCK-012): `_apply_page` read any count below 1
+        # as no count and `check`/`build` went quiet, while `fetch`'s own page
+        # warning printed `it has -3 page(s)` from the same record. Refusing at
+        # load is what makes every command that reads this file say the same
+        # thing, in the same words, at the same line.
+        return (
+            f"the entry for {cited!r} has {PAGE_COUNT_KEY} {counted!r}, and no document has "
+            f"a negative number of pages -- `refdes fetch` counts them "
+            f"(`len(reader.pages)`), and a count of 0 is real (a document pypdf opens and "
+            f"finds no pages in) while a negative is a line this tool never wrote. Read as "
+            f"a count it calls every cited page out of range; read as no count it drops "
+            f"the page check -- which is why it is refused here, where every command that "
+            f"reads this file says the same sentence at the same line"
         )
     why = record.get(PAGE_COUNT_ERROR_KEY)
     if why is not None and (not isinstance(why, str) or not why.strip()):

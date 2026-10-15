@@ -609,6 +609,14 @@ and the next `refdes fetch` records the count — plain, for a local file or a k
 copy; `--update` for a remote pin kept hash-only, whose cited pages are reported
 as not checked until that run.
 
+**`.refdes/citations.yaml:N — the entry for '…' has page_count -3`**
+No document has a negative number of pages, and `refdes fetch`'s count is
+`len(reader.pages)`, so a negative count is a line this tool never wrote — a
+hand-edit or a bad merge. It used to split the commands reading the file:
+`fetch` warned of the record's `-3 page(s)` while `check` and `build`, reading
+any count below 1 as no count, stayed quiet. Restore the record, then a plain
+`refdes fetch` records the true count for the bytes it has.
+
 **`.refdes/citations.yaml:N — the entry for '…' has both page_count and page_count_error`**
 Those are opposites — a count, and the reason there is none — and `refdes fetch`
 writes one or the other, never both. Keep the one that is true of these bytes;

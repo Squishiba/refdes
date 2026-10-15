@@ -931,7 +931,8 @@ A fourth refusal is a `.refdes/citations.yaml` that cannot be read as a
 lockfile — unresolved merge markers, invalid YAML, a `citations:` that is not a
 mapping, a key that appears twice, a record that is not a pin record, a `sha256`
 that is not a 64-character hex digest, a `page_count:` that is not a number, a
-`page_count_sha256:` that is not a 64-character hex digest, or a record carrying
+`page_count:` that is negative, a `page_count_sha256:` that is not a
+64-character hex digest, or a record carrying
 both `page_count:` and `page_count_error:` (they are opposites:
 a count, and the reason there is none). The file is committed and
 hand-mergeable, so the realistic way to get one is two branches both running
@@ -948,7 +949,11 @@ and finds no pages in is recorded as, and a record carrying neither
 `page_count:` nor `page_count_error:` is sound — it claims nothing about its
 pages, and `refdes fetch` establishes the count, even in its plain form (which
 re-pins nothing) for a record whose bytes are on this machine: a local file or
-a kept copy. A remote pin kept hash-only has no bytes here to count, so only
+a kept copy. A negative `page_count:` is the one range refusal, because
+`fetch`'s count is `len(reader.pages)` — never negative — so a negative is a
+line the tool never wrote, and reading it as a count warned of `-3 page(s)` on
+one command while the next command read it as no count and said nothing.
+A remote pin kept hash-only has no bytes here to count, so only
 `--update` establishes its count, and until then `check` reports the
 citation's page numbers as not checked. A count or error that is present is also
 sound in shape when `page_count_sha256:` is a valid digest or absent; the digest
