@@ -50,6 +50,51 @@ def _anchorize(html: str, known_slugs: set[str]) -> str:
     return PAGE_HREF_RE.sub(swap, html)
 
 
+_ID_ATTR_RE = re.compile(r'(?<![-\w])id="([^"]*)"')
+_CALC_TABLE_ID_RE = re.compile(r'(<table class="calc" id=")(calc-[^"]*)(")')
+
+
+def _unique_calc_anchors(html: str) -> str:
+    """Rename a calc-table anchor that would repeat a `calc-` id on the page.
+
+    Block names are unique per item (docs/design/named-calc-blocks.md
+    §11.2), but a merged document -- document.html and its board/workspace
+    copies, or a page with two `{{calcblock}}` directives -- renders several
+    items' tables into one DOM, where two items naming their block `losses`
+    would put `id="calc-losses"` on the page twice. The owner's own page
+    always keeps the bare anchor, which is what every `[[ID#calc:name]]` href
+    resolves to (they carry the owner's page name, so they resolve there from
+    anywhere); on a page that renders the same calc anchor again, the *later*
+    occurrence moves to `-2`/`-3`…, never onto an id the page already carries
+    (an item can genuinely name a block `losses-2`).
+
+    The rename targets only the exact opening tag `_calc_table_html` emits.
+    An `id="` can also be the tail of some other attribute name (`data-id=`,
+    `hiddenid=`, the generated `data-where-id=`) or plain escaped text, and
+    a value inside such an attribute is not a DOM id -- matching only the
+    generated tag keeps this pass from reading or moving anything it does
+    not own. The collision inventory (`_ID_ATTR_RE`) is attribute-bounded
+    for the same reason: `data-id="calc-losses-2"` must not push a rename
+    one suffix further.
+    """
+    taken = set(_ID_ATTR_RE.findall(html))
+    emitted: set[str] = set()
+
+    def swap(match: re.Match) -> str:
+        anchor = match.group(2)
+        if anchor not in emitted:
+            emitted.add(anchor)
+            return match.group(0)
+        suffix = 2
+        while f"{anchor}-{suffix}" in taken or f"{anchor}-{suffix}" in emitted:
+            suffix += 1
+        renamed = f"{anchor}-{suffix}"
+        emitted.add(renamed)
+        return f"{match.group(1)}{renamed}{match.group(3)}"
+
+    return _CALC_TABLE_ID_RE.sub(swap, html)
+
+
 def _figured(project: Project, bodies: list[str]):
     """A `figured(html)` closure for one rendered document: numbers every
     `{id="..."}` figure across `bodies` in that document's own reading order,
@@ -933,11 +978,16 @@ def _write_html(out_dir: str, written: set[str], name: str, template, **context)
     need it: `base.html.j2` compares it against a nav node's `href` to mark
     `aria-current="page"`, and to decide which sidebar group should render
     pre-expanded because the reader is already standing inside it.
+
+    The same seam is where a page's calc-table anchors are made unique
+    (`_unique_calc_anchors`): uniqueness is a property of one rendered page,
+    and this is the one place that sees a whole page.
     """
     written.add(name)
     context["current_page"] = name
+    page_html = _unique_calc_anchors(template.render(**context))
     with open(os.path.join(out_dir, name), "w", encoding="utf-8") as fh:
-        fh.write(template.render(**context))
+        fh.write(page_html)
 
 
 def render_site(project: Project, draft: bool = False) -> str:

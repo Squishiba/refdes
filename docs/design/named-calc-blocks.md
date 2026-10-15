@@ -229,6 +229,20 @@ tells an author in one line whether they have any such fence.
   get). An unnamed block's HTML is byte-for-byte what it is today — pinned by a
   test (§10), because most items have one unnamed block and nothing about them
   should move.
+- **Anchor uniqueness is a property of the page (decided in implementation,
+  2026-10-12).** Block names are unique per item, not per project (§11.2), so
+  the merged document pages — `document.html` and its board/workspace copies,
+  which render every in-scope item's body into one DOM — can carry two items
+  both naming their block `losses`, and two `{{calcblock}}` directives naming
+  the same block of two items do the same on an ordinary page. At the one
+  write seam (`render._write_html`), each table anchor repeating one the page
+  already carries moves to a `-2`/`-3`… suffix that avoids every id the page
+  carries (an item may genuinely own a block `losses-2`); only the anchors
+  `_calc_table_html` emits are ever read or moved — attributes merely
+  *named* like ids (`data-id=`, `hiddenid=`) hold values, not ids.
+  The owner's own page always keeps the bare anchor — a single item cannot
+  repeat one within itself (§3.4) — and `#calc:` hrefs always carry the
+  owner's page name, so §5.3 resolution is untouched by the rename.
 - **It does not scope anything.** `env` and `origins` stay item-wide. A value in
   block `supply` is visible to block `losses` exactly as it is now, and a name
   reused across two blocks is still the same hard error. Naming a block must not
@@ -414,7 +428,7 @@ that is a paragraph rather than an error.
 | Parameter | Required | Meaning |
 |---|---|---|
 | `item` | yes | A local item's display id (or `DISPLAY-ID@key` composite). Must resolve, and must not be an imported item — an imported item carries no body or calc rows in this project (`imports._absorb`), so there is nothing to render. |
-| `block` | yes | A **named** calc block on that item. Must exist; the error lists the names it does have. |
+| `block` | yes | A **named** calc block on that item. Must exist; the error lists the names it does have. Empty is not a name: `block=""` cannot address the unnamed fence, and is the same error shape (2026-10-12; before that it silently rendered the owner's unnamed rows). |
 
 Rendering: the same table `_calc_table_html` produces on the owner's page —
 expression, result, bounds, unit assertion, comment — from `item.calcs` rows
@@ -594,6 +608,12 @@ WARNING [[DEC-PWR-001#calc:losses]]: DEC-PWR-001 has calc blocks but none is
 ```
 {{calcblock item="DEC-PWR-001" block="loess"}} — 'DEC-PWR-001' has no calc block
     named 'loess'. It names: losses, supply.
+```
+
+```
+{{calcblock item="DEC-PWR-001" block=""}} — block="" is not a calc block name
+    -- calcblock renders a named ```calc block. DEC-PWR-001 names: losses,
+    supply.
 ```
 
 ```
