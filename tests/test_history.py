@@ -591,6 +591,42 @@ def test_store_directory_is_not_created_without_a_write(root, tmp_path_factory, 
     assert not (root / ".refdes" / "history").exists()
 
 
+def _gate_callee(node: ast.Call) -> "str | None":
+    if isinstance(node.func, ast.Name):
+        return node.func.id
+    if isinstance(node.func, ast.Attribute):
+        return node.func.attr
+    return None
+
+
+def _raw_read_calls(source: str) -> list[ast.Call]:
+    """The closed-class gate's detection, shared with its negative test:
+    yaml_safe_load spelled bare or attribute, and open(..., encoding=...)
+    opened for READING -- no mode argument (the default is 'r'), a mode
+    containing 'r', or an update mode carrying '+'. A write cannot leak a
+    store decode, and a gate that calls the first legitimate text write a
+    "raw read" is
+    a gate someone gets to widen away the day they need it. A mode nobody
+    can read statically counts as a read: the gate errs toward flagging."""
+    calls = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _gate_callee(node)
+        if name == "yaml_safe_load":
+            calls.append(node)
+        elif name == "open" and any(kw.arg == "encoding" for kw in node.keywords):
+            mode = ""
+            if len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
+                mode = str(node.args[1].value)
+            for kw in node.keywords:
+                if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                    mode = str(kw.value.value)
+            if mode == "" or "r" in mode or "+" in mode:
+                calls.append(node)
+    return calls
+
+
 def test_no_yaml_safe_load_call_lives_outside_the_shared_read_helper():
     """The class stays closed. #191 wrapped one read, #207's leftover found
     a second with no wrap, #209's review found the object store's pair still
@@ -602,29 +638,33 @@ def test_no_yaml_safe_load_call_lives_outside_the_shared_read_helper():
     the module's own test file uses), and the raw open(..., encoding=...)
     half of the pair: a call gate alone misses the leak when the decode
     moves to a caller that opens the file itself."""
-    tree = ast.parse(Path(history.__file__).read_text(encoding="utf-8"))
+    source = Path(history.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
     helper = next(
         node
         for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "_read_store_file"
     )
-
-    def callee(node: ast.Call) -> "str | None":
-        if isinstance(node.func, ast.Name):
-            return node.func.id
-        if isinstance(node.func, ast.Attribute):
-            return node.func.attr
-        return None
-
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        name = callee(node)
-        raw_read = name == "yaml_safe_load" or (
-            name == "open" and any(kw.arg == "encoding" for kw in node.keywords)
+    for node in _raw_read_calls(source):
+        assert helper.lineno <= node.lineno <= helper.end_lineno, (
+            f"history.py:{node.lineno} has a raw open()/yaml_safe_load "
+            "read outside _read_store_file"
         )
-        if raw_read:
-            assert helper.lineno <= node.lineno <= helper.end_lineno, (
-                f"history.py:{node.lineno} has a raw open()/yaml_safe_load "
-                "read outside _read_store_file"
-            )
+
+
+def test_the_open_half_of_the_gate_is_scoped_to_read_modes():
+    """#212 follow-up round 3: a write-mode open() cannot leak a store
+    decode. The gate flags the no-mode and 'r+' reads and stays quiet on
+    'w', mode='a', and the encoding-less binary opens -- so the first
+    legitimate text write in history.py does not trip a gate that calls
+    it a read."""
+    source = (
+        "def _read(p):\n"
+        "    with open(p, encoding='utf-8') as fh:\n"
+        "        return fh.read()\n"
+        "open(p, 'w', encoding='utf-8').write('x')\n"
+        "open(p, mode='a', encoding='utf-8').write('x')\n"
+        "open(p, 'r+', encoding='utf-8')\n"
+        "open(p, 'rb')\n"
+    )
+    assert sorted(node.lineno for node in _raw_read_calls(source)) == [2, 6]

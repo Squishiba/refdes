@@ -150,3 +150,35 @@ fragment, no sabotage needed (no behaviour change). Suite: (below)
 
 SUITE (foreground, once): 3826 passed, 2 skipped in 303.73s, exit=0
 (.scratch/suite-round3.txt). Task finished.
+
+============================================================
+FIX ROUND 3 for PR #242 (review in paseo logs d4672a1, last round).
+(1) RENDERING: the posture paragraph was glued to the citations
+    entry (no blank line -> renders inside that entry's <p>). Blank
+    line added after "almost always the whole fix.".
+(2) LEDGER CLAIM: re-verified (.scratch/probe8, fresh project, keys
+    minted via refines link): corrupt .refdes/ids.yaml ->
+      check: exit 0, silent -- also with an item needing minting
+      build: exit 2 "configuration error: ... id ledger file is not
+             valid UTF-8"
+      index: exit 2
+    Sentence now says the manifest/baseline/seal are exit 2 and the
+    ledger is exit 2 "for the commands that read it -- `check` never
+    reads the ledger and rides past (exit 0)".
+(3) DUP EXIT CODE: "exits 1 (**exit 1**)" -> "exits with that error
+    (**exit 1**)".
+(4) OPEN GATE: detection extracted to _raw_read_calls() in
+    tests/test_history.py; open(..., encoding=...) now counts only in
+    READ modes (no mode arg, mode containing 'r', or '+' update modes;
+    w/a/x writes and 'rb' stay quiet). Negative test
+    test_the_open_half_of_the_gate_is_scoped_to_read_modes pins
+    [2, 6] for no-mode/'r+' flagged, 'w'/mode='a'/'rb' not. First
+    draft of the mode test caught a real bug in the new condition
+    ('r+' excluded by a w/a/x/+ test); fixed to test for 'r'/'+'.
+Docs tests: 31 passed. gen_examples --check: up to date. Suite: below
+
+SUITE (foreground, once): 3827 passed, 2 skipped in 310.47s, exit=0
+(.scratch/suite-round4.txt; 3827 = the new negative test). ruff E9,F
+clean. First suite run of this round caught the negative test's BFS
+ordering assumption (ast.walk is breadth-first) -> pinned sorted.
+Task finished.
