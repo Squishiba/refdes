@@ -143,3 +143,59 @@ its search path either.
 Finished: implemented, tested, committed (see git log for the hash;
 Co-authored-by: Qwen3.8-Flash-Next). No push, no PR, no stash, no shared-
 main changes. Probes kept under `.scratch/img006/`.
+
+## PR prep, 2026-10-14
+
+- Verified cwd/HEAD/status before work: clean tree at 1fcb509 on
+  `fix/site-assets-root-confinement-20261013` in this Paseo worktree.
+- `git fetch origin main` once: origin/main = 9f83092 (base was 8b6a52e;
+  main advanced by #214/#217/#218/#219/#212/#220/#221/#222/#223/#213/#197).
+- Overlap inspection before rebasing:
+  - #220 (merged, 5e51157) touched `build.py` only at `run_checks`
+    (~1686-1729) and `_image_inputs_hash_value` (~2211); this branch's
+    build.py hunks are imports, `_search_image_matches` (~2650) and
+    `walk_site_assets`/`collect_static_assets` (~3136+). No intersecting
+    lines.
+  - #216 (OPEN, `fix/list-default-validation-20261013`) edits
+    `schema.load_project`'s FieldSpec/field loop (~803+); this branch's
+    schema.py changes are `_confined_asset_dirs` (module level, ~107) and
+    the `site.assets` call site (~789). No overlap; nothing to do on this
+    PR — if #216 lands first, the regions are disjoint.
+  - main changed none of schema.py / serve/state.py / model.py between
+    8b6a52e..9f83092 (checked with `git diff --stat`).
+- `git rebase origin/main`: clean, no conflicts. range-diff says the patch
+  is identical (1fcb509 = e405e6b), i.e. all behavior preserved verbatim.
+  New head e405e6b; single commit, Co-authored-by trailer intact
+  (git log --format=%(trailers)).
+- Post-rebase probes (this worktree's src pinned; the venv's editable
+  `refdes` console script resolves to /home/jorb/work/refdes, so all
+  probes print `refdes.__file__` and assert it is under this worktree):
+  - `.scratch/img006/probe_img006.py` (config half): `assets: ["../"]`
+    REJECTED AT LOAD with the named message; poller probe exits clean.
+  - CLI (real, per AGENTS.md): escaping project via
+    `PYTHONPATH=src python3 -m refdes.cli -c .../refdes-project.yaml
+    check` -> "configuration error: refdes-project.yaml: site.assets
+    entry '../' escapes the project root; declare a directory under it",
+    exit 2; valid project -> "0 items, 0 errors, 0 warnings", exit 0.
+  - `.scratch/img006/probe_postrebase_runtime.py` (runtime half, exit 0):
+    A) normal in-root asset registers + is watched; B) declared dir
+    retargeted to an outside symlink AFTER load -> poller watches nothing,
+    hashes no outside bytes, publisher registers nothing and warns naming
+    the escaped dir; C) in-dir file symlink escaping the root -> not
+    watched/hashed/published (silent for the watcher), per-file build
+    warning, and `_search_image_matches` cannot bare-resolve it.
+- Tests (all with `PYTHONPATH=src` so this worktree's code runs, not
+  main's editable install):
+  - Targeted+related: test_site_assets_confinement + image_hash/search,
+    render_assets, serve_images/state/upload/preview_decorations, theme,
+    config_split -> 300 passed, 1 skipped (pre-existing nt guard).
+  - Full suite: `PYTHONPATH=src python3 -m pytest -q -p no:cacheprovider`
+    at the rebased tree: 3711 passed, 2 skipped, exit 0, 302.54s (the 2
+    skips are the pre-existing platform guards).
+- ruff (scoped to touched files, per AGENTS.md's no-clean-baseline note):
+  7 findings on build.py/model.py/schema.py; all 7 reproduce byte-
+  identically (rule+message) on the pristine `git show origin/main:`
+  copies (`.scratch/ruff-baseline/`) — pre-existing, line-shifted. New
+  test file: clean. No new findings.
+- Status: rebased, verified, pushed, PR opened to main (URL in the PR).
+  Not merged.
