@@ -196,3 +196,35 @@ Gates on the rebased tree:
 No code change in this pass -- the log update and this section are the only new
 content, committed on top with the trailer, so every commit on the branch
 carries `Co-authored-by: Qwen3.8-Flash-Next <noreply@refdes.local>`.
+
+### Second refresh, because main moved again during prep
+
+The second `git fetch origin main` (done right before pushing) took main from
+594b401 to 5e51157: #219 (scaffold atomic preset writes) and **#220** -- the
+open build.py PR this section analysed -- had been merged. So the branch was
+rebased once more, onto 5e51157, which is where it stands now (code commit
+acb58f9, this log commit on top).
+
+That rebase is the one worth reading carefully, because #220 is the change this
+section predicted would not collide, and it did land in the same file:
+`src/refdes/build.py` grew 11 lines at ~2193-2222 (`_image_inputs_hash_value`
+now sorts on `(path, digest is not None, digest or "")` so the `None` sentinel
+never compares with a str digest), and my hunk is at ~1689-1740 in `run_checks`
+-- 450 lines apart, different function, no shared context line, so the rebase
+applied both hunks with no conflict and no manual merge. Verified in the
+rebased tree rather than assumed: `grep -n` finds `bare_key =
+_is_bare_key_token(target_id)` at build.py:794 (`resolve_links`) *and* at
+build.py:1702 (this fix, in `run_checks`), #220's sort key at build.py:2222,
+and `git diff origin/main..HEAD -- src/refdes/build.py` is still exactly the
+36 +/- lines of this fix.
+
+Gates re-run on the final tree (main advanced, so #219/#220's tests came with
+it): targeted incl. `tests/test_image_hash.py` -> 311 passed; full suite ->
+**3681 passed, 2 skipped** in 284s; `ruff check --select E9,F` on the two
+changed files -> clean; real CLI on `.scratch/probe-003/proj` with
+`PYTHONPATH` pinned to this worktree's src (import path printed first to prove
+it, since the shared venv's editable install points at `/home/jorb/work/refdes/
+src`) -> both diagnostics present with `which no item declares` (grep count 2)
+and the dangling wording absent (count 0).
+
+Landed PR: see the PR URL in the final report.
