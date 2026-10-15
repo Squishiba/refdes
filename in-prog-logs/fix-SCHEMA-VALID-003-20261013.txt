@@ -258,7 +258,8 @@ Gates on the pushed tree (base f7df34d):
   'k7f3m2q9x4a'` and one `check against key 'k7f3m2q9x4a'`, no dangling-id
   wording -- the pair this PR is about.
 
-Branch as pushed: 3 commits (fix + two log appends), each carrying the
+Branch as pushed: the fix commit plus four log appends (this file's history is
+their count), every one of them carrying the
 `Co-authored-by: Qwen3.8-Flash-Next <noreply@refdes.local>` trailer
 (`git log origin/main..HEAD --format=...trailers...`). Not merged; PR opened
 against main. No shared-main edit, no stash, no subagent, and Claude's #211/
