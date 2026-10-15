@@ -1965,6 +1965,18 @@ def _resolve(project, item, spec, record, severity, unpinned_severity, changed_l
     return status
 
 
+def _directory_citation_detail(canon: str) -> str:
+    """The one sentence for a citation that names a directory (DIAG-WORD-002).
+
+    Truthful in both halves: the path *is* there (so "does not exist" is a
+    lie the author has to debug), and what is there is not a file. Shared by
+    `check` (`_resolve_local`) and `fetch` (`_local_read_failure`) so the two
+    commands cannot word one condition apart -- the sentence `_local_read_failure`
+    already appends `(cited by ...)` to; this returns the shared core only.
+    """
+    return f"cited local file {canon!r} is a directory, not a file"
+
+
 def _resolve_local(project, item, spec, canon, record, status, unpinned_severity, changed_local):
     """Resolve a repo-local citation (finding 25 Part 2): the file itself is
     the artifact -- no fetch, no copies dir, no publish_datasheets gate (the
@@ -1976,7 +1988,15 @@ def _resolve_local(project, item, spec, canon, record, status, unpinned_severity
     target = os.path.join(project.root, canon)
     if not os.path.isfile(target):
         status.state = "missing"
-        status.detail = f"cited local file {canon!r} does not exist"
+        status.detail = (
+            _directory_citation_detail(canon)
+            if os.path.isdir(target)
+            # A directory is not an absent file: `check` and `fetch` say the
+            # one true sentence for each condition (DIAG-WORD-002 -- they
+            # used to name a directory "missing" here and "cannot be read"
+            # there, two wordings for one condition).
+            else f"cited local file {canon!r} does not exist"
+        )
         project.error(
             status.detail, file=item.source_file, line=item.source_line, item_id=item.id
         )
@@ -2449,22 +2469,29 @@ def _local_read_failure(
     """A cited local file `fetch` could not open, in `check`'s words and naming
     every item that wanted it.
 
-    The two halves are not decoration. `check` already reports this exact
-    condition as `cited local file <canon> does not exist`
-    (`_resolve_local`), so a project that gets one message from `fetch` and the
-    other from `check` reads as two different problems; and a fetch failure
-    with no item id on it is a failure an author has to locate by hand. The
-    `source()` users of the file are named too: they are why the file is cited
-    even when no `citations:` entry spells a key out of it.
+    The two halves are not decoration. `check` reports an absent cited file as
+    `cited local file <canon> does not exist` and one that is a directory as
+    `_directory_citation_detail`'s sentence (`_resolve_local`), so a project
+    that gets one message from `fetch` and a different one from `check` reads
+    as two different problems; and a fetch failure with no item id on it is a
+    failure an author has to locate by hand. The `source()` users of the file
+    are named too: they are why the file is cited even when no `citations:`
+    entry spells a key out of it.
 
     `reason` is `exc.strerror`, never `str(exc)`: `sources._cannot_read`'s
     docstring says why in one line ("`str(OSError)` interpolates the filename
     it was raised on"), and `errno` covers the rare OSErrors that carry none.
+    A directory gets its own sentence, not a `reason`: on Linux `open()`
+    raises `IsADirectoryError` for the condition `_resolve_local` detects with
+    `os.path.isdir` before it ever opens, and the OS's bare "Is a directory"
+    is the platform's phrasing of it, not `check`'s.
     """
     who = sorted(set(citers) | {i for group in source_citers.values() for i in group})
     cited_by = f" (cited by {', '.join(who)})" if who else ""
     if isinstance(exc, FileNotFoundError):
         return f"cited local file {canon!r} does not exist{cited_by}"
+    if isinstance(exc, IsADirectoryError):
+        return f"{_directory_citation_detail(canon)}{cited_by}"
     reason = getattr(exc, "strerror", None) or f"OS error {getattr(exc, 'errno', None)}"
     return f"cited local file {canon!r} cannot be read: {reason}{cited_by}"
 
@@ -2839,7 +2866,17 @@ def fetch_all(
 
         try:
             if kind == "local":
-                with open(os.path.join(project.root, canon), "rb") as fh:
+                target = os.path.join(project.root, canon)
+                if os.path.isdir(target):
+                    # Gate on the filesystem, not on the OS error: a POSIX
+                    # open() raises IsADirectoryError on a directory, a
+                    # Windows one raises PermissionError -- which is the
+                    # same OSError an unreadable file raises, so letting it
+                    # through would word one condition as the other on half
+                    # the platforms. The raise exists only to reach the
+                    # shared sentence below (DIAG-WORD-002).
+                    raise IsADirectoryError(canon)
+                with open(target, "rb") as fh:
                     data = fh.read()
             else:
                 data = fetcher(canon)
