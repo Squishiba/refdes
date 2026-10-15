@@ -85,3 +85,31 @@ on sys.path — verified refdes.__file__ resolves to the worktree):
 Difficulties: none material. One note — my first draft comment claimed the interpreter's
 smallest non-zero int-conversion limit was 64; running it proved 640, and the comment
 now says what was measured.
+
+PR prep (2026-10-14) — rebase onto current main, open PR
+---------------------------------------------------------
+- main advanced 8b6a52e -> f7df34d (9 commits, incl. #212 = 1a1c960, which also touches
+  citations.py). Fetched origin/main once; the only main-side change in the touched files
+  is citations.load_lockfile (~line 1070), which now raises LockfileError on a non-UTF-8
+  lockfile. My change sits at MAX_PAGE_DIGITS/page_number (~lines 294-330) -- disjoint.
+- `git rebase origin/main`: clean, zero conflicts (1/1 commit applied). New head f297f4d.
+  Both fixes verified co-present at the head: MAX_PAGE_DIGITS at citations.py:308, the
+  LockfileError UTF-8 guard at citations.py:1097 (git show HEAD:src/refdes/citations.py).
+- Verification with PYTHONPATH forced to this worktree's src (venv
+  /home/jorb/work/venv-refdes/bin/python3; every run prints/echoes refdes.__file__ =
+  .../worktrees/16msma8v/fix-pdf-query-integer-20261012/src/refdes/__init__.py):
+  * real EditorApp probe over live HTTP, .scratch/fix-pdf-query-integer-20261012/
+    probe_diag001.py -> diag001-postrebase.out: oversized page/row/token on the proposal
+    route 422 x3 ("must be an integer >= N"), oversized page on the page route 400,
+    controls 422/400/200 unchanged, 19-digit page still the reader's out-of-range 422,
+    /api/revision 200 after all probes; zero ValueError/tracebacks.
+  * real CLI on a project whose citation has a 5000-digit page:: check exits 1 with the
+    load error "page: ... is not a page number -- page: must be a positive integer,
+    counted from 1" (measured exit code 1, no traceback).
+  * pytest tests/test_serve_pdf_sources.py tests/test_citation_pages.py
+    tests/test_serve_sources.py tests/test_serve_sources_accept.py tests/test_render_assets.py
+    tests/test_run5_friction_f1_f2_f6_f8.py -> 239 passed (same set as pre-rebase).
+  * adjacent #212-area tests, post-rebase: tests/test_history.py tests/test_keys_adopt.py
+    tests/test_reseal_audit.py tests/test_seal.py tests/test_yaml_loaders.py -> 85 passed.
+  * scoped ruff on the three touched files: the same 10 pre-existing findings, none on
+    added lines (repo-wide ruff baseline is not clean; see AGENTS.md).
