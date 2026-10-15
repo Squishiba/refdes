@@ -520,6 +520,204 @@ def test_two_concurrent_creates_never_claim_the_same_id(project_root):
     assert "REQ-012" in ledger and "REQ-013" in ledger
 
 
+def external_writer(monkeypatch, path, blocks):
+    """Land an outside append on `path` in the middle of a create.
+
+    The seam is `textio.append_ending`: the create calls it between reading
+    the destination (the bytes its append is planned against) and replacing
+    the file with the planned bytes -- the EDITOR-API-007 window, made
+    deterministic instead of timed. Each call hands the real function its
+    text, returns exactly what it returns, and writes one queued block to
+    `path` on the way out; with the queue exhausted the create runs through
+    an honest pass. This stands in for a writer that never takes the
+    project's write lock -- the class of writer the lock was never promised
+    to stop, and the one whose bytes used to be eaten and reported as
+    success."""
+    real = edit_mod.textio.append_ending
+    pending = list(blocks)
+
+    def racing(text: str) -> str:
+        ending = real(text)
+        if pending:
+            with open(path, "a", encoding="utf-8", newline="") as fh:
+                fh.write(pending.pop(0))
+        return ending
+
+    monkeypatch.setattr(edit_mod.textio, "append_ending", racing)
+
+
+def test_a_destination_written_between_read_and_replace_is_not_eaten(project_root, monkeypatch):
+    """EDITOR-API-007, the retry half: an external append landing in the
+    window re-plans the creation onto the bytes that are actually on disk
+    instead of replacing them -- the outside item survives, this item lands
+    after it, and both are reserved/ledgered exactly once."""
+    path = project_root / "items" / "reqs.yaml"
+    before = read(path)
+    external = "  - id: REQ-005\n    text: Written by a process outside this lock.\n"
+    external_writer(monkeypatch, path, [external])
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Raced."},
+            destination="items/reqs.yaml",
+        ),
+    )
+
+    assert isinstance(result, Created), result.message
+    after = read(path)
+    assert after.startswith(before), "the create was not a pure append onto current bytes"
+    assert "id: REQ-005" in after, "the external write was silently replaced"
+    assert result.item_id in after
+    assert after.index("id: REQ-005") < after.index(result.item_id)
+    ledger = (project_root / ".refdes" / "ids.yaml").read_text(encoding="utf-8")
+    assert result.item_id in ledger and "REQ-005" not in ledger
+
+
+def test_a_moved_markdown_destination_replans_onto_the_current_bytes(project_root, monkeypatch):
+    """The same window on the multi-item Markdown shape -- the one the
+    baseline repro lost REQ-777 in. A front-matter block written outside
+    the lock must survive under an appended item, not be rolled back by
+    the create's whole-file replace."""
+    path = project_root / "items" / "notes.md"
+    before = read(path)
+    external = (
+        "---\nid: REQ-005\ntype: requirement\nboard: board-a\n"
+        "text: Written by a process outside this lock.\n---\n\nOutside prose.\n"
+    )
+    external_writer(monkeypatch, path, [external])
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Raced."},
+            destination="items/notes.md",
+        ),
+    )
+
+    assert isinstance(result, Created), result.message
+    after = read(path)
+    assert after.startswith(before)
+    assert "id: REQ-005" in after, "the external block was silently replaced"
+    assert result.item_id in after
+    assert after.index("id: REQ-005") < after.index(result.item_id)
+
+
+def test_a_destination_that_keeps_moving_is_refused_with_nothing_burned(
+    project_root, monkeypatch
+):
+    """EDITOR-API-007, the refusal half: a destination that moves again on
+    every attempt is never replaced -- the create stops, refuses, and
+    leaves the disk to whoever is writing it. Nothing is reserved: the id
+    this create planned is still free, and the outside bytes stand alone."""
+    path = project_root / "items" / "reqs.yaml"
+    before = tree(project_root, "items", ".refdes")
+    first = "  - id: REQ-005\n    text: First outside write.\n"
+    second = "  - id: REQ-006\n    text: Second outside write.\n"
+    # exactly two landings: one per attempt of this create, so the create
+    # below sees a moved destination twice and gives up, while the retry
+    # create after it runs against a quiet file.
+    external_writer(monkeypatch, path, [first, second])
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Raced."},
+            destination="items/reqs.yaml",
+        ),
+    )
+
+    assert isinstance(result, Refused) and not result.ok, result.message
+    assert "kept changing" in result.message and "retry" in result.message
+    after = read(path)
+    # the destination is exactly the fixture plus the two outside blocks:
+    # the refused create added no bytes of its own, wrote no second file,
+    # and left everything else in the tree byte-identical
+    assert after == REQS + first + second
+    after_tree = tree(project_root, "items", ".refdes")
+    assert {k: v for k, v in after_tree.items() if k != "items/reqs.yaml"} == {
+        k: v for k, v in before.items() if k != "items/reqs.yaml"
+    }, "the refused create touched a file outside the destination"
+    assert "Raced." not in after, "the refused create still wrote its item"
+    # The id this create planned is not burned by the refusal: the id the
+    # Refused result names is free, and the next honest create gets it.
+    ledger = project_root / ".refdes" / "ids.yaml"
+    planned = result.ref
+    assert not ledger.exists() or planned not in ledger.read_text(encoding="utf-8")
+    retry = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "After the storm."},
+            destination="items/reqs.yaml",
+        ),
+    )
+    assert isinstance(retry, Created), retry.message
+    assert retry.item_id == planned
+    assert "Raced." not in read(path)
+
+
+def replace_gap_writer(monkeypatch, path, blocks):
+    """Land an outside append *strictly between* the destination read inside
+    `_atomic_replace` and the `os.replace` that follows it.
+
+    This is the one window the create's last check cannot close -- the gap
+    between reading the file and swapping it is two syscalls, and a writer
+    that does not take the project lock can land in it. The seam is
+    `os.replace` itself: on the create's own replace of `path` (not the
+    temp-file creation), the queued block is appended to the destination
+    first, so it is the bytes on disk at the instant the create's replace
+    fires. `external_writer`'s seam (`textio.append_ending`) lands earlier --
+    inside the plan window -- and is what the retry check catches; this seam
+    lands one notch later and is what it cannot."""
+    real = os.replace
+    pending = list(blocks)
+
+    def racing(src, dst, *args, **kwargs):
+        if pending and os.path.abspath(dst) == os.path.abspath(str(path)):
+            with open(dst, "a", encoding="utf-8", newline="") as fh:
+                fh.write(pending.pop(0))
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(edit_mod.os, "replace", racing)
+
+
+def test_the_gap_between_the_last_check_and_the_replace_is_the_residual_loss(
+    project_root, monkeypatch
+):
+    """EDITOR-API-007's documented limit, pinned as a test. A writer that
+    lands strictly between the create's final destination read and its
+    `os.replace` is still lost, and the create reports `Created` -- on a
+    plain file no check-and-replace closes that gap, and this branch does
+    not claim it does. The test pins that at least this window is exposed:
+    the same bytes, written one notch earlier (the `external_writer` seam,
+    inside the plan window), are caught and retried by
+    `test_a_destination_written_between_read_and_replace_is_not_eaten`.
+    If the check is ever weakened so a plan-window write is *also* lost,
+    that test fails; if the gap is ever closed for real (a real CAS), this
+    test fails and says so."""
+    path = project_root / "items" / "reqs.yaml"
+    external = "  - id: REQ-005\n    text: Written after the last check.\n"
+    replace_gap_writer(monkeypatch, path, [external])
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Raced at the last moment."},
+            destination="items/reqs.yaml",
+        ),
+    )
+
+    assert isinstance(result, Created), result.message
+    after = read(path)
+    assert result.item_id in after
+    assert "id: REQ-005" not in after, (
+        "the final-gap window closed -- update the docs: this create now "
+        "closes EDITOR-API-007 fully, not just to the last-check gap"
+    )
+    # the create's own bytes are intact: only the outside block is lost
+    assert "Raced at the last moment." in after
+
+
 def test_explicit_id_override_is_honoured_or_refused_not_renumbered(project_root):
     clash = create_item(
         str(project_root),
@@ -1193,6 +1391,63 @@ def test_http_refusals_carry_reasons_and_write_nothing(served):
     after.pop(".refdes/schema.json", None)
     before.pop(".refdes/schema.json", None)
     assert after == before
+
+
+def test_http_a_raced_create_retries_and_the_outside_bytes_survive(served, monkeypatch):
+    """EDITOR-API-007 over the wire the editor actually uses: an outside
+    append landing inside the create's window re-plans the creation, the
+    POST reports success once, and the outside bytes stand in the file."""
+    _app, client, root = served
+    path = root / "items" / "reqs.yaml"
+    before = read(path)
+    external_writer(monkeypatch, path, ["  - id: REQ-005\n    text: Outside the lock.\n"])
+
+    status, made = client.api_post(
+        "/api/items/create",
+        {
+            "type": "requirement",
+            "fields": {"text": "Via HTTP, raced."},
+            "destination": "items/reqs.yaml",
+        },
+    )
+
+    assert status == 200 and made["kind"] == "created", made
+    after = read(path)
+    assert after.startswith(before)
+    assert "id: REQ-005" in after and made["id"] in after
+    assert after.index("id: REQ-005") < after.index(made["id"])
+
+
+def test_http_a_persistent_race_refuses_with_a_retry_reason(served, monkeypatch):
+    """The same route, the other outcome: a destination that moves again on
+    every attempt ends as a 422 refusal whose reason tells the author to
+    retry -- not a 200 over the top of what another process wrote."""
+    _app, client, root = served
+    path = root / "items" / "reqs.yaml"
+    external_writer(
+        monkeypatch,
+        path,
+        [
+            "  - id: REQ-005\n    text: First outside write.\n",
+            "  - id: REQ-006\n    text: Second outside write.\n",
+        ],
+    )
+
+    status, refused = client.api_post(
+        "/api/items/create",
+        {
+            "type": "requirement",
+            "fields": {"text": "Via HTTP, raced."},
+            "destination": "items/reqs.yaml",
+        },
+    )
+
+    assert status == 422 and refused["kind"] == "refused", refused
+    assert "kept changing" in refused["reason"] and "retry" in refused["reason"]
+    after = read(path)
+    assert "id: REQ-005" in after and "Via HTTP, raced." not in after
+    ledger = root / ".refdes" / "ids.yaml"
+    assert not ledger.exists() or "REQ-012" not in ledger.read_text(encoding="utf-8")
 
 
 def test_http_create_with_links_writes_resolved_composites(served):

@@ -58,7 +58,14 @@ request, not the number of writers.
 Slice 3's entry point, which does mint a key, reserve an id, and write a new
 item -- inside the same lock, with the same refuse-as-a-value posture, and
 with the ledger reservation and the file write committed or rolled back
-together.
+together. An append through `create_item` is planned against the destination
+bytes read under that lock and re-read once, immediately before the replace,
+so a destination a writer outside the lock touched in the meantime is
+re-planned from a fresh load rather than silently replaced -- and a create
+whose last check passes can still lose to a writer that lands between that
+check and the `os.replace` itself, which no check-and-replace on a plain
+file can prevent; see `create_item`'s docstring for what is and is not
+promised.
 """
 
 from __future__ import annotations
@@ -933,11 +940,31 @@ def _synthetic_error(item: Item, message: str) -> Diagnostic:
 # ---------------------------------------------------------------- atomic write
 
 
-def _atomic_replace(path: str, payload: bytes) -> str | None:
+class _Moved(Exception):
+    """Private signal from `_atomic_replace`: the file on disk at the moment
+    the replace read it is not the bytes the caller planned against, so
+    nothing was written. Raised, not returned: the return of
+    `_atomic_replace` stays the reason string its callers already treat, and
+    only a caller that passes `expected` can ever see this."""
+
+
+def _atomic_replace(
+    path: str, payload: bytes, expected: str | None = None
+) -> str | None:
     """Write `payload` to `path` atomically; return None on success, a reason
     on failure. A failed replacement leaves the original bytes in place: the
     temp file is discarded, and if the destination was somehow replaced and
-    the re-read disagrees, the original bytes are put back."""
+    the re-read disagrees, the original bytes are put back.
+
+    With `expected` (the sha256 of the bytes the caller planned against --
+    what a create read before it planned its append), the destination is
+    checked against it on the read below, before a byte is written: a
+    destination that moved since the caller's plan raises `_Moved` and
+    writes nothing. The check consumes the exact
+    bytes this function will replace and protect, which is the narrowest
+    window a plain file allows -- the gap between this read and
+    `os.replace` (the temp write and fsync in between) is the irreducible
+    part, and no check-and-replace on a plain file closes it."""
     directory = os.path.dirname(path)
     tmp = None
     try:
@@ -945,6 +972,8 @@ def _atomic_replace(path: str, payload: bytes) -> str | None:
             original = fh.read()
     except OSError as exc:
         return f"could not read {path} before writing: {exc}"
+    if expected is not None and hashlib.sha256(original).hexdigest() != expected:
+        raise _Moved()
 
     try:
         fd, tmp = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.refdes-tmp-", dir=directory)
@@ -996,7 +1025,13 @@ def _restore(path: str, original: bytes) -> None:
 # minted by `keys.mint`, and every link is spelled by `links.composite_for`.
 # The ledger reservation runs only after the file write succeeded, and any
 # failure after the write rolls the file back -- a failed creation burns
-# nothing. Destinations are suggested but always overridable (Decisions,
+# nothing. An append checks its destination against the bytes it planned
+# onto on the very read its replace performs: bytes a writer outside the
+# lock landed in the meantime re-plan the creation onto the current file or
+# end it as a refusal, never a silent replacement reported as success --
+# and a writer landing in the replace's own read-to-swap gap remains the
+# limit no plain file can promise against (see `create_item`). Destinations
+# are suggested but always overridable (Decisions,
 # "Creation destination: suggest plus override"); the three supported shapes
 # are append to an existing YAML list file, append to an existing
 # multi-item Markdown file, and create a new single-item Markdown file.
@@ -1055,11 +1090,54 @@ class Created:
         return f"created: {self.item_id} ({self.type}) in {self.path}"
 
 
+# How many times one `create_item` call plans and attempts its append. A
+# destination that another process wrote between this create's read of it and
+# its replace is re-planned from a fresh load while attempts remain, then
+# refused -- never silently replaced. Two attempts: enough for the ordinary
+# one-shot concurrent append, bounded so a destination under steady outside
+# writing ends in a refusal instead of an unbounded spin under the lock.
+CREATE_DESTINATION_ATTEMPTS = 2
+
+
+@dataclass(frozen=True)
+class _DestinationMoved:
+    """Private signal, never returned by `create_item`: the destination file
+    holds different bytes now than the ones this creation read and planned
+    its append onto. Carried instead of raised because a result value is how
+    this module says "no"; `create_item` retries the whole plan while
+    attempts remain and then spells the refusal. It is not one of the four
+    public outcomes and must not leave this module."""
+
+    who: str
+    new_id: str
+    rel: str
+    path: str
+
+
 def create_item(project_root: str, request: CreateRequest):
     """Create one item in the project at `project_root`, under the same
     per-project write lock every edit takes: two creates in flight cannot
     claim the same id, because the second plans against the state the first
-    committed. Returns `Created` | `Refused` | `Invalid`."""
+    committed. Returns `Created` | `Refused` | `Invalid`.
+
+    An append to an existing destination checks that file on the very read
+    its replace performs (see `_create_locked` and `_atomic_replace`'s
+    `expected` argument); a destination that moved between this create's
+    plan and that read is re-planned from a fresh load up to
+    `CREATE_DESTINATION_ATTEMPTS` times, and a destination still moving
+    after that is refused with nothing written and no id reserved. What a
+    standard `os.replace` cannot offer -- and this does not claim -- is a
+    check and its replacement as one atomic step: between the replace's own
+    read of the destination and its `os.replace` (the temp write's syscalls
+    in between) a writer that does not take the project's write lock can
+    still land, and its bytes are lost. The check shrinks a create's
+    exposure from the whole candidate gate (two project loads, easily
+    seconds) to that irreducible gap; it is a narrower posture than
+    `apply_edit`'s last-moment revision check (whose read and swap are
+    separate calls), and it is not a conflict guarantee against
+    uncooperating writers. A destination planned as a new file needs none
+    of this: `_atomic_create` links rather than replaces, so a file that
+    appeared underneath is already a refusal."""
     root = os.path.abspath(project_root)
     config = os.path.join(root, CONFIG_NAME)
     with write_lock_for(root):
@@ -1071,7 +1149,20 @@ def create_item(project_root: str, request: CreateRequest):
         # returns only values.
         try:
             with _disk_write_lock(root):
-                return _create_locked(config, request)
+                attempts = max(1, CREATE_DESTINATION_ATTEMPTS)
+                for attempt in range(attempts):
+                    result = _create_locked(config, request)
+                    if not isinstance(result, _DestinationMoved):
+                        return result
+                    if attempt + 1 == attempts:
+                        return Refused(
+                            result.who,
+                            result.new_id,
+                            f"{result.rel} kept changing while this creation was "
+                            f"being planned ({attempts} attempts); nothing was "
+                            "written and no id was reserved -- retry the creation",
+                            path=result.path,
+                        )
         except OSError as exc:
             return Refused(
                 request.who, "", f"could not lock {root} for writing: {exc}"
@@ -1162,15 +1253,28 @@ def _create_locked(config: str, request: CreateRequest):
     else:
         try:
             with open(path, "rb") as fh:
-                original = fh.read().decode("utf-8")
+                raw = fh.read()
+            text = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             return Refused(who, new_id, f"could not read {rel}: {exc}")
+        # The bytes bug on this line (the rollback payload must stay raw --
+        # `_restore` opens `"wb"` and truncates before it writes) is fixed
+        # in #244, the rollback-only split of this PR; the rollback tests
+        # live there. This PR stays scoped to the check window.
+        original = text
+        # The revision of exactly the bytes this append was planned against,
+        # computed from the read itself rather than a second read of the
+        # path: what this check can promise is that the bytes being replaced
+        # are the bytes that were appended to, and it can only promise that
+        # about the bytes it actually has. The check that consumes it is the
+        # replace's own read, inside `_atomic_replace`, below.
+        planned_revision = hashlib.sha256(raw).hexdigest()
         # The ending of the line the new block is being appended *after*, not
         # "CRLF if the file mentions CRLF anywhere": appending to a file whose
         # tail is LF used to hand the new item CRLF endings, because an
         # unrelated line higher up was CRLF. The block joins the end, so it
         # takes the end's style.
-        eol = textio.append_ending(original)
+        eol = textio.append_ending(text)
         if dest["kind"] == "append-md":
             block = ["---", f"id: {new_id}", f"key: {key}", f"type: {request.type}", *body, "---", ""]
         else:
@@ -1179,10 +1283,10 @@ def _create_locked(config: str, request: CreateRequest):
             if dest["type"] != request.type:
                 block.append(f"{ind}  type: {request.type}")
             block.extend(f"{ind}  {ln}" for ln in body)
-        head = "" if original.endswith("\n") else eol
+        head = "" if text.endswith("\n") else eol
         # Pure append: every existing byte of the file stays exactly where
         # it was -- the fidelity contract, trivially satisfied.
-        new_text = original + head + eol.join(block) + eol
+        new_text = text + head + eol.join(block) + eol
 
     # Validate the candidate before a byte changes, the same overlay gate
     # apply_edit runs: exactly one more item, no newly introduced error, and
@@ -1201,7 +1305,16 @@ def _create_locked(config: str, request: CreateRequest):
     if dest["kind"] == "new-md":
         failure = _atomic_create(path, new_text.encode("utf-8"))
     else:
-        failure = _atomic_replace(path, new_text.encode("utf-8"))
+        # The gate above cannot see writes to the destination's own bytes;
+        # the check consumes the replace's own read (see `_atomic_replace`),
+        # so a destination that moved since this append was planned writes
+        # nothing, reserves nothing, and re-plans from a fresh load. The
+        # read-to-swap gap that remains is irreducible on a plain file --
+        # see `create_item`'s docstring.
+        try:
+            failure = _atomic_replace(path, new_text.encode("utf-8"), planned_revision)
+        except _Moved:
+            return _DestinationMoved(who, new_id, rel, path)
     if failure is not None:
         return Refused(who, new_id, failure, path=path)
 
