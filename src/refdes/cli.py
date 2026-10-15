@@ -1671,12 +1671,22 @@ def cmd_audit(args) -> int:
             continue
         any_item = True
         reason = item.on_change_override.get("reason", "NO REASON GIVEN")
-        if item.on_change_override.get("mode"):
-            print(
-                f"  {item.id:<14} whole item -> {item.on_change_override['mode']}  — {reason}"
-            )
+        # The spelling the file carries (#196 review): on a pre-v3 pin the
+        # schema section above prints `log`, so an override printed as the
+        # canonical `timeline` read as a *different* mode in one report. The
+        # authored spelling wins; the canonical mode is the fallback for
+        # overrides that were never canonicalised, and the pre-v3 canonical
+        # mode is `timeline` when the mapping form recorded no canonical key
+        # (a v3-style item under a v3 pin keeps its canonical `mode`).
+        authored = item.on_change_override.get("authored_modes") or {}
+        if item.on_change_override.get("mode") or authored.get("mode"):
+            mode = authored.get("mode") or item.on_change_override["mode"]
+            print(f"  {item.id:<14} whole item -> {mode}  — {reason}")
+        authored_fields = authored.get("fields") or {}
         for fname, mode in (item.on_change_override.get("fields") or {}).items():
-            print(f"  {item.id:<14} {fname} -> {mode}  — {reason}")
+            print(
+                f"  {item.id:<14} {fname} -> {authored_fields.get(fname) or mode}  — {reason}"
+            )
     if not any_item:
         print("  (none)")
 

@@ -405,7 +405,10 @@ def test_item_log_override_errors_but_is_still_applied(tmp_path):
         for d in project.errors
         if d.message.startswith("on_change: mode 'log' was renamed")
     ]
-    assert project.item_by_id("NOTE-001").on_change_override == {"mode": "timeline"}
+    assert project.item_by_id("NOTE-001").on_change_override == {
+        "mode": "timeline",
+        "authored_modes": {"mode": "log"},
+    }
     assert project.item_by_id("NOTE-001").on_change_for(
         "status", project.types["note"], "ignore"
     ) == "timeline"
@@ -483,4 +486,37 @@ def test_pre_v3_pin_still_reads_the_old_log_mode(tmp_path):
     assert project.default_on_change == "log"
     assert project.types["note"].fields["status"].on_change == "log"
     assert project.types["requirement"].fields["source"].on_change == "log"
-    assert project.item_by_id("NOTE-001").on_change_override == {"mode": "timeline"}
+    # The canonical value for behaviour, the authored spelling recorded for
+    # the surfaces that show the file's own text (#196 review c1).
+    assert project.item_by_id("NOTE-001").on_change_override == {
+        "mode": "timeline",
+        "authored_modes": {"mode": "log"},
+    }
+
+
+def test_audit_prints_the_authored_log_spelling_for_pre_v3_overrides(tmp_path, capsys):
+    """#196 review c1: on a pre-v3 pin the audit's schema section prints the
+    standard's own `log`, so an item override canonicalised to `timeline`
+    read as a *different* mode inside one report. The override section
+    prints the spelling the file carries; the canonical value stays on the
+    override for behaviour (`on_change_for` above is unchanged)."""
+    from refdes import cli
+
+    _write_project(
+        tmp_path,
+        LEGACY_PIN,
+        "defaults: {type: note}\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    on_change:\n"
+        "      mode: log\n"
+        "      fields:\n"
+        "        status: log\n"
+        "      reason: Pre-v3 pin.\n",
+    )
+    assert cli.main(["-c", str(tmp_path / "refdes-project.yaml"), "audit"]) == 0
+    out = capsys.readouterr().out
+    overrides = out.split("Item-level overrides:")[1].split("\n\n")[0]
+    assert "whole item -> log" in overrides
+    assert "status -> log" in overrides
+    assert "timeline" not in overrides

@@ -106,8 +106,15 @@ shortlist's shared `status: candidate` is written once and the winner
 overrides it in place:
 
 ```yaml
+# items/power/candidates.yaml
+defaults:
+  type: component
+  status: candidate
+
+items:
   - id: CMP-PWR-014
     title: MP1584EN buck module
+    part_number: MP1584EN-LF-Z
     status: selected    # LOG-PWR-007 selects this one
 ```
 

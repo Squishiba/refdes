@@ -1020,6 +1020,7 @@ def _apply_change_override(
                     item_id=item.id,
                 )
             value = TIMELINE
+            item.on_change_override = {"authored_modes": {"mode": ON_CHANGE_LOG_OLD}}
         if value not in ON_CHANGE_MODES:
             project.error(
                 f"on_change: {value!r} must be one of {', '.join(ON_CHANGE_MODES)}",
@@ -1028,10 +1029,11 @@ def _apply_change_override(
                 item_id=item.id,
             )
             return
-        item.on_change_override = {"mode": value}
+        item.on_change_override["mode"] = value
     elif isinstance(value, dict):
         item.on_change_override = _strip_lines(value)
         override = item.on_change_override
+        authored: dict[str, Any] = {}
         legacy_ok = _legacy_log_allowed(project)
         if override.get("mode") == ON_CHANGE_LOG_OLD:
             if not legacy_ok:
@@ -1042,6 +1044,7 @@ def _apply_change_override(
                     item_id=item.id,
                 )
             override["mode"] = TIMELINE
+            authored["mode"] = ON_CHANGE_LOG_OLD
         elif "mode" in override and override["mode"] not in ON_CHANGE_MODES:
             project.error(
                 f"on_change mode: {override['mode']!r} must be one of {', '.join(ON_CHANGE_MODES)}",
@@ -1062,6 +1065,7 @@ def _apply_change_override(
                             item_id=item.id,
                         )
                     fields[fname] = TIMELINE
+                    authored.setdefault("fields", {})[fname] = ON_CHANGE_LOG_OLD
                 elif fmode not in ON_CHANGE_MODES:
                     project.error(
                         f"on_change fields.{fname}: {fmode!r} must be one of {', '.join(ON_CHANGE_MODES)}",
@@ -1079,6 +1083,12 @@ def _apply_change_override(
                     item_id=item.id,
                 )
                 del override[key]
+        if authored:
+            # #196 review: the canonicalisation above is for behaviour; the
+            # audit report prints the spelling the file carries, which on a
+            # pre-v3 pin is `log` -- the same reading schema.py's
+            # "keep the standard's own spelling" comment gives its fields.
+            override["authored_modes"] = authored
         if override.get("fields") and not override.get("reason"):
             project.warn(
                 "item-level on_change override has no 'reason'; suppression should be "
@@ -1225,8 +1235,11 @@ def _build_item(
             if fspec.type == "tasks" and isinstance(value, list):
                 # Living notes H8: keep what the line-tagging loader already
                 # computed for each task row, before _strip_lines discards it
-                # (it must -- a __line__ key left inside a field value would
-                # poison the content hash and the history digest). None where
+                # (it must -- a __line__ key left inside a field value poisons
+                # the history digest, which hashes `fields` verbatim, and the
+                # content hash too for a field in `invalidate` mode; the
+                # `tasks` field is `timeline` mode, so only the digest half
+                # bites for it). None where
                 # no line exists: a row inherited through `defaults:` (whose
                 # mapping is stripped before the merge) or a malformed
                 # non-mapping row.
