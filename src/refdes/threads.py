@@ -42,7 +42,9 @@ The shape carries §5's decisions, not a rendering of them:
   ``state: "resolved"``;
 * a fork is never collapsed: there is no thread-level status anywhere, and
   each open tip gets its own branch (its own ``fold_tasks`` list, its own
-  branch-local verdict via ``chains.fold_at_tip``);
+  branch-local verdict via ``chains.fold_field_at_tip`` — the reported fold
+  ``_verdict`` needs for the ``conflicting`` posture, not ``chains.fold_at_tip``'s
+  bare ``(value, source)`` pair);
 * the store's capture fact travels with the thread it captures: ``captured``
   names each member with a live capture event in the history store, with the
   event's kind and its ``occurred_at`` when the store holds one (a
@@ -330,6 +332,7 @@ def threads_projection(
     *,
     graph: chains_mod.ChainGraph | None = None,
     captures: dict | None = None,
+    problems: dict | None = None,
 ) -> list[dict]:
     """Every thread in the project, ordered by each thread's root ref, as
     JSON-serialisable dicts — §6's query service, whole-project form.
@@ -355,12 +358,15 @@ def threads_projection(
     read, passed down by a caller that needs the same index for its own
     keys (`render.items_json`) so a whole `index` run parses the event
     store once, not twice; by default the projection reads it itself.
+    `problems` is `_derived_problems`'s same one-read posture:
+    `work_projection` computes it once for both halves (review #194 r2 c4);
+    by default the projection computes it itself.
     """
     graph = graph if graph is not None else chains_mod.build_graph(project)
     nodes = set(graph.predecessors) | set(graph.successors)
     if not nodes:
         return []
-    problems = _derived_problems(project)
+    problems = _derived_problems(project) if problems is None else problems
     captures = capture_facts(project)[0] if captures is None else captures
     views: list[dict] = []
     seen: set[int] = set()
@@ -681,6 +687,7 @@ def project_derived(
     *,
     graph: chains_mod.ChainGraph | None = None,
     threads: list[dict] | None = None,
+    problems: dict | None = None,
 ) -> list[dict]:
     """Every derived gap in the project at once — §5's "Generated worklist"
     rows for `refdes work`, computed once over the whole project (not scoped
@@ -697,10 +704,13 @@ def project_derived(
     for each forked thread naming its own tips. Two threads merged into one
     tip fold the same verdict at it, so verdict rows are listed once per tip.
     `threads` lets a caller that already ran the projection reuse it (and no
-    graph is built for it then). Remote citation drift is deliberately absent:
+    graph is built for it then). `problems` is `threads_projection`'s same
+    one-read posture: `work_projection` computes `_derived_problems` once and
+    passes it to both halves (review #194 r2 c4). Remote citation drift is
+    deliberately absent:
     it is produced only by `citations.refresh`, which is networked and runs
     under `check --refresh` alone — `refdes work` never touches the network."""
-    problems = _derived_problems(project)
+    problems = _derived_problems(project) if problems is None else problems
     rows: list[dict] = []
     for subject in project.local_items:
         rows.extend(_rows_for_subject(project, subject, problems))
@@ -708,7 +718,9 @@ def project_derived(
         # The graph exists only for the projection (review #194 W10): a
         # caller that passes `threads` in hand owes no chain-graph parse.
         threads = threads_projection(
-            project, graph=graph if graph is not None else chains_mod.build_graph(project)
+            project,
+            graph=graph if graph is not None else chains_mod.build_graph(project),
+            problems=problems,
         )
     listed_verdicts: set[str] = set()
     for view in threads:
@@ -755,15 +767,20 @@ def work_projection(
 
     `captures` is read once per command run by the caller and passed through to
     `threads_projection` like `cmd_thread` does (B4's one-read posture), so a
-    run never parses the event store twice.
+    run never parses the event store twice. `_derived_problems` is computed
+    once here and passed to both halves (review #194 r2 c4) — one whole-project
+    read of the lifecycle gate's selection sets, not two.
 
     The two halves are kept in separate keys exactly as §5 rule 1 wants them
     separate in the output: `threads[].branches[].tasks` are the authors' lists
     (per tip), `derived` is the self-closing block, and no row in one is ever
     written into the other."""
     graph = graph if graph is not None else chains_mod.build_graph(project)
-    threads = threads_projection(project, graph=graph, captures=captures)
+    problems = _derived_problems(project)
+    threads = threads_projection(project, graph=graph, captures=captures, problems=problems)
     return {
         "threads": threads,
-        "derived": project_derived(project, graph=graph, threads=threads),
+        # No `graph=` here: with `threads` in hand the callee builds no graph
+        # (project_derived's own W10 rule), so passing one was a dead argument.
+        "derived": project_derived(project, threads=threads, problems=problems),
     }

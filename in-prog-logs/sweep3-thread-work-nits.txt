@@ -1,0 +1,239 @@
+SWEEP 3, task G2 — thread/work docstring, doc-table and test-hygiene nits
+Branch: sweep3-thread-work-nits (cut from main 21fb2c4). Worktree:
+/home/jorb/.paseo/worktrees/16msma8v/sweep3-thread-work-nits
+Log kept as I go. Every "verified" line names the command/grep I ran.
+
+STARTING STATE
+- git status clean at 21fb2c4; Python 3.13.5; venv refdes install points at
+  /home/jorb/work/refdes (main checkout), so every probe runs with
+  PYTHONPATH=$PWD/src + .scratch/g2run.py (imports refdes.cli:main) to hit
+  THIS worktree's code.
+
+VERIFICATION PASS (before any edit)
+
+G2.1 (#191 r2 c3) — 4 sub-claims.
+ a) threads.py module docstring cites `chains.fold_at_tip` at line 45.
+    VERIFIED APPLIES: `grep -n "fold_at_tip\|fold_field_at_tip" src/refdes/threads.py
+    src/refdes/chains.py` shows both names exist in chains.py (fold_at_tip at
+    chains.py:708, fold_field_at_tip at 657), so the cite is not a dead link —
+    but it is the wrong one for the claim it makes: the branch-local verdict is
+    computed by `_verdict`, whose only fold call is
+    `chains_mod.fold_field_at_tip(...)` (threads.py:509); `fold_at_tip` is
+    never called in threads.py at all (grep above). `fold_at_tip` also cannot
+    answer the three-posture question the bullet describes (its own docstring
+    at chains.py:625/668 says the (value, source) pair it returns "cannot
+    answer" the ambiguity question, and it is a thin wrapper over
+    fold_field_at_tip). FIX: cite fold_field_at_tip at line 45.
+ b) tests/test_threads_projection.py docstring "purely H7a".
+    VERIFIED APPLIES (stale): the file now has section banners
+    "the review-fix matrix (H7b)" (line 499) and "the project-wide worklist
+    (H7c)" (line 699), i.e. H7b projection-side review fixes and H7c's
+    `work_projection` are tested here; the module docstring (lines 1-17) says
+    only "phase H7a: the thread-view projection and the index key" and frames
+    H7b/H7c as "the two CLI commands". FIX: widen the docstring.
+ c) "unterminated backtick around ~548".
+    ALREADY FIXED — no odd backtick anywhere in the file. Evidence: an AST
+    scan of every docstring plus a tokenize scan of every comment for a line
+    whose backtick count is odd:
+      python - <<EOF (ast.get_docstring on every node; tokenize COMMENT tok)
+      -> zero output (no docstring and no comment has an odd ` count).
+    Line 543-548 (the `tasks:`/`cleared`/`malformed` docstring the review
+    meant) has 10 backticks, all paired.
+ d) threads.py "rows are copies" claim.
+    NOT IN threads.py — `grep -rn "are copies" src/ docs/ tests/` has exactly
+    one hit: tests/test_threads_projection.py:604 (`rows` are copies --
+    `open_since` is *added* to the copy). The copy is `entry = dict(row)`
+    (threads.py:475), which is shallow, so the claim overstates. FIX: say
+    "top-level copies" where the claim lives (the test docstring), and name
+    the shared nested values.
+
+G2.2 (#194 r2 c4) — VERIFIED APPLIES, both halves.
+    `grep -n "_derived_problems" src/refdes/threads.py` -> calls at 363
+    (threads_projection) and 703 (project_derived); work_projection (765-768)
+    calls both, so one `work_projection` run computes the same dict twice.
+    Safe to share: `problems` is read-only in its consumers (reads at 599,
+    608, 631 and _derived; the only `.add` near them is a local
+    `listed_verdicts` set at 731).
+    Ignored `graph=`: project_derived only uses `graph` inside
+    `if threads is None:` (707-712); work_projection passes BOTH `graph=` and
+    `threads=` (768), so that graph= is dead. FIX: pass `problems` through
+    from work_projection, drop the dead `graph=`.
+
+G2.3 (#191 r2 c1) — VERIFIED APPLIES for thread, partly for work.
+    Real codes, run on a scratch project (.scratch/g2proj, .scratch/g2proj2)
+    with PYTHONPATH=$PWD/src .scratch/g2run.py:
+      `thread LOG-001 --as-of not-a-date` -> stderr
+        "error: --as-of 'not-a-date': date does not match YYYY-MM-DD", EXIT=2
+      `work --as-of not-a-date`            -> same message, EXIT=2
+      `thread LOG-001` with items/broken.yaml (invalid YAML) -> ERROR line on
+        stderr, the full thread answer on stdout, EXIT=1
+      `work` same project -> ERROR on stderr, listing intact on stdout, EXIT=1
+      `thread LOG-001 --json` same project -> JSON on stdout, EXIT=0 (the
+        --json branch does not carry load_errors; not touched, out of scope)
+    Docs (docs/cli-reference.md):
+      thread --as-of row (563) lists only the --json clash exit 2; the bad
+        date's exit 2 is NOT listed -> FIX
+      thread section exit text (591-602) lists exit 2 for a naming error and
+        the stderr-write note; the parse-failure exit 1 with the answer on
+        stdout is NOT stated -> FIX
+      work --as-of row (700) same gap as thread -> FIX
+      work parse-failure exit 1 with the listing intact IS documented
+        (718-721 "exits **1** (like `ls`/`thread`)") -> ALREADY FIXED, skip.
+
+G2.4 (#191 r2 c4) — mixed.
+ a) `--json` verdict.state "conflicting" at CLI level: NOT pinned —
+    `grep -n conflicting tests/test_thread_cli.py` has 2 hits (394, 406),
+    both the text-render test; the only JSON verdict assertion is
+    `verdict["state"] == "resolved"` (299). FIX: add the JSON pin.
+ b) module docstring: VERIFIED ACCURATE, not stale — its three exit-code
+    claims match the runs above (naming error exit 2, parse failure exit 1
+    with the answer intact), the mocked clock it claims exists (mock.patch at
+    280), and it claims only thread (no "work" run in the file:
+    `grep -n '"work"' tests/test_thread_cli.py` -> no hits). SKIP, no change.
+ c) "cleared-by-nobody-who-declared" (now at line 369, in
+    test_task_block_states_print_as_themselves's docstring): VERIFIED APPLIES
+    — the coined phrase is muddled (nobody "declares" a clearing here; the
+    line names the entry that declared the explicit empty list,
+    "none (cleared by LOG-008)"). FIX: plain wording.
+ d) mid-function `from refdes import loader` at 461 and 481: VERIFIED APPLIES
+    — hoist to the module top (test_work.py already imports it at top, line
+    35, so it's the established pattern).
+
+G2.5 (#194 r3 c3) — VERIFIED APPLIES, both halves.
+ a) malformed note: cli.py's thread printer composes it
+    (`threads_mod.task_malformed_note`, cli.py:1092-1094, text
+    "(N malformed row(s) not shown)" from threads.py:160-165), while
+    `_work_authored_blocks` appends the bare `heading` (cli.py:1146) with no
+    note. So `refdes work` drops it. FIX: print the same note from the same
+    composer. Reproduction run recorded below the change.
+ b) cold-run writes: a fresh project (.scratch/g2cold2, never opened), one
+    `refdes work` run, before/after `find . -type f` diff:
+      + .refdes/history/events/430bbfa0-....yaml
+      + .refdes/history/objects/3c4a935c....yaml
+      + .refdes/schema.json
+      + .refdes-write.lock
+    and stderr said "captured LOG-001: LOG-002 now follows it" +
+    "(minted 2 key(s) and rewrote 1 reference(s) while loading)" — i.e. the
+    cold load also records the `follows:` capture event (the ownership table
+    at docs/cli-reference.md:2157 confirms `.refdes/history/` is "written by
+    the `follows:` capture"). `refdes work --help` says "it writes nothing
+    beyond the load's own key minting/expansions" and cmd_work's docstring
+    says the same -> under-report. FIX: name the capture (+ schema.json
+    regeneration) in the help description, cmd_work's docstring, and the
+    docs' work-section sentence that repeats the claim.
+
+G2.6 (#194 r3 c5) — VERIFIED APPLIES.
+    The " -- declared after --as-of" text is composed once in
+    `threads.age_suffix` (threads.py:278, `days < 0` branch) and reaches both
+    surfaces through `cli._thread_age_suffix` -> `_task_row_lines`
+    (cli.py:864-898). `grep -rn "declared after" tests/` -> no hits, so it is
+    untested on both. FIX: one test for `refdes thread`, one for `refdes
+    work`.
+
+G2.7 (#200 r2 c1) — mixed.
+ a) `p_revise = sub.add_parser("revise", help=argparse.SUPPRESS)` (cli.py:
+    3085) plus `_hide_command(sub, "revise")` (3235). Ran
+    `refdes --help` on this Python 3.13.5 through this worktree's code:
+    output has NO "==SUPPRESS==" anywhere and no `revise` row (grep of the
+    help text) — the alias is hidden today. `_hide_command`'s own docstring
+    (2481-2491) documents that on 3.13.5 the SUPPRESS idiom is the thing that
+    does NOT work (it makes `_format_action` print the sentinel as the row's
+    help) and `_hide_command` is the real fix. Decided by experiment (below):
+    with the SUPPRESS dropped and only `_hide_command` applied, does --help
+    stay clean? Record the result and keep whichever is true.
+ b) cmd_index docstring "Emit items.json to stdout without rendering the
+    site." vs `refdes index --help` (run): "Print the resolved project as one
+    JSON document on stdout, rendering no HTML: ...". "items.json" is stale
+    terminology. FIX: match the help's current first sentence.
+
+== CHANGES APPLIED (post-verification) ==
+
+G2.1 (done):
+- src/refdes/threads.py:45 module docstring: `chains.fold_at_tip` ->
+  `chains.fold_field_at_tip`, with the branch-local/verdict wording made
+  accurate (the cited fold is the field fold, verdict folded on the tip's
+  own entry, per `threads.py:_verdict`).
+- tests/test_threads_projection.py module docstring: now names all three
+  sections (H7a projection + H7b review-fix matrix + H7c worklist/
+  project_derived), matching the test file's actual content.
+- tests/test_threads_projection.py copy-claim test: docstring + name text
+  say *top-level* copies (dict(row): the dict is new, nested values shared),
+  matching `threads.py`'s shallow-copy.
+- Unterminated-backtick claim: VERIFIED ALREADY FIXED on this base (see
+  VERIFICATION PASS) — no change.
+
+G2.2 (done):
+- threads_projection/project_derived take `problems=None`; work_projection
+  computes _derived_problems once and passes it to both halves.
+- Dropped the dead `graph=` on work_projection's project_derived call (the
+  parameter was never read when `threads` was passed).
+- Pinned by tests/test_threads_projection.py::
+  test_work_projection_computes_the_derived_state_exactly_once (a counting
+  mock around _derived_problems).
+- Output byte-identical verified: .scratch/g2byte.py over .scratch/g2byteproj,
+  HEAD src (.scratch/g2head/src) vs working tree -> `diff` printed
+  BYTE-IDENTICAL. tests/test_threads_projection.py: 28 passed.
+
+G2.3 (done): docs/cli-reference.md
+- `thread --as-of` and `work --as-of` rows: added the `declared after
+  --as-of` clause and the unparseable-DATE exit-2 sentence (codes from the
+  probes above).
+- thread write/exit paragraph: added the items-file-parse-failure posture
+  (stderr + answer on stdout + exit 1, like ls). work's row already had it.
+
+G2.4 (done): tests/test_thread_cli.py
+- JSON pin for the refused fold at the CLI: new
+  test_json_prints_the_refused_verdict_as_the_conflicting_state_it_is
+  (`verdict == {state: conflicting, status/declared_by/declared_on: None,
+  concluding: False}`), complementing the existing printed-line pin.
+- `cleared-by-nobody-who-declared` docstring phrase rewritten plainly
+  ("cleared -- with the entry whose explicit `tasks: []` did the clearing
+  named in the line itself").
+- Mid-function `from refdes import loader` (two sites) hoisted to the
+  module top next to the other refdes imports.
+- Module docstring: verified accurate as written (exit postures match
+  behaviour) — no change, per VERIFICATION PASS.
+
+G2.5 (done):
+- src/refdes/cli.py `_work_authored_blocks`: prints
+  `threads.task_malformed_note(malformed)` on the heading, the same note
+  `cmd_thread` prints (reproduced first: thread showed the note, work
+  dropped it — see VERIFICATION PASS).
+- New pin: tests/test_work.py::
+  test_work_prints_the_malformed_row_note_thread_prints (work and thread
+  both print `(1 malformed row(s) not shown)` on the same fixture).
+- Sabotage: reverted the cli.py note line (`print(heading)`) -> new test
+  FAILED at the work-surface assert (tests/test_work.py:396); restored from
+  .scratch/cli.py.bak -> passes again.
+- Honest `refdes work --help` + `cmd_work` docstring: name the cold-run
+  writes measured in .scratch/g2cold2 (key minting/reference expansion in
+  items/, first capture of each new follows edge under .refdes/history/,
+  regenerated .refdes/schema.json) instead of a bare "writes nothing".
+- docs/cli-reference.md work section: the "writes nothing beyond that load"
+  sentence now names the same three cold-run writes.
+- changelog.d/work-malformed-row-note.fixed.md for the user-visible note.
+
+G2.6 (done):
+- tests/test_thread_cli.py::test_as_of_earlier_than_the_declaring_date_says_so
+- tests/test_work.py::test_as_of_earlier_than_the_declaring_date_says_so
+  Both pin the composed ` -- declared after --as-of` line (the
+  threads.age_suffix days<0 posture) and the absence of a negative span.
+
+G2.7 (done):
+- src/refdes/cli.py: dropped `help=argparse.SUPPRESS` from `p_revise`,
+  with a comment saying `_hide_command` alone hides the alias (verified by
+  experiment on this base, Python 3.13.5 — see VERIFICATION PASS).
+- src/refdes/cli.py `cmd_index` docstring: no longer claims index emits
+  items.json; says stdout JSON document, renders no HTML (matches
+  `refdes index --help`).
+
+Targeted gates: tests/test_threads_projection.py tests/test_thread_cli.py
+tests/test_work.py -> 90 passed. ruff check --select E9,F src tests -> clean.
+docs-site/gen_examples.py --check -> up to date.
+
+== FINAL GATES ==
+- Full suite (foreground, .scratch/suite.txt): 3660 passed, 2 skipped,
+  exit 0, 292s. The known serve-cli load flake did not fire.
+- ruff check --select E9,F src tests: All checks passed.
+- docs-site/gen_examples.py --check: up to date.
+- Status: COMPLETE.

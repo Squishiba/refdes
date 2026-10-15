@@ -560,7 +560,7 @@ that refused prints `task reconciliation required`.
 | Flag | Meaning |
 | --- | --- |
 | `--json` | Print the thread's projection entry as JSON — exactly the object `index` carries in its `threads` array (plus a `diagnostics` entry, shaped like the index payload's, when the history store refused to be read and the capture lines are therefore not shown) |
-| `--as-of DATE` | Print open-task ages as a relative span measured against DATE. Without it the output prints the absolute declaring date and no span, so the bytes never depend on the wall clock. Not combinable with `--json` (exit 2): the projection is clock-free by design |
+| `--as-of DATE` | Print open-task ages as a relative span measured against DATE. Without it the output prints the absolute declaring date and no span, so the bytes never depend on the wall clock. A task declared *after* DATE prints `declared after --as-of` in place of a span. Not combinable with `--json` (exit 2): the projection is clock-free by design. A DATE that does not parse is an argument error, **exit 2** |
 
 ```console
 $ refdes thread LOG-002 --as-of 2026-09-12
@@ -596,7 +596,9 @@ $ refdes thread LOG-999
 error: no item 'LOG-999' in this project (looked up by display id, then surrogate key)
 ```
 
-Like `ls`, the command itself writes nothing beyond the load's own key
+An items file that fails to parse is reported on stderr, the thread's own
+answer still prints on stdout, and the command **exits 1** (like `ls`). Like
+`ls`, the command itself writes nothing beyond the load's own key
 minting/expansions — which, like `index` (and unlike `ls`), it announces on
 **stderr**, so the thread's answer is the only thing on stdout even on a
 never-opened project. Its build never writes a seal.
@@ -697,7 +699,7 @@ prints every tip's block.
 | Flag | Meaning |
 | --- | --- |
 | `--json` | Print the worklist projection as JSON — `{"threads": [...], "derived": [...]}`, the `threads` array being exactly what `index` carries under `threads` (the object gains a `diagnostics` entry, shaped like the index payload's, only when the history store refused to be read and the threads' capture data is therefore missing) |
-| `--as-of DATE` | Print open-task ages as a relative span measured against DATE. Without it the output prints the absolute declaring date and no span, so the bytes never depend on the wall clock. Not combinable with `--json` (exit 2): the projection is clock-free by design |
+| `--as-of DATE` | Print open-task ages as a relative span measured against DATE. Without it the output prints the absolute declaring date and no span, so the bytes never depend on the wall clock. A task declared *after* DATE prints `declared after --as-of` in place of a span. Not combinable with `--json` (exit 2): the projection is clock-free by design. A DATE that does not parse is an argument error, **exit 2** |
 
 ```console
 $ refdes work --as-of 2026-09-12
@@ -722,7 +724,10 @@ listing intact and exits **1** (like `ls`/`thread`). Like `thread` (and unlike
 `ls`), the load's own key-minting/expansion notice is announced on **stderr**
 even in text mode, so the worklist is the only thing on stdout and `--json`
 parses even on a never-opened project. The command itself writes nothing
-beyond that load, and its build never writes a seal.
+beyond that load — on a project opened for the first time, the load mints keys
+and expands references in `items/`, captures each thread's first `follows:`
+edge under `.refdes/history/`, and regenerates `.refdes/schema.json` — and its
+build never writes a seal.
 
 ---
 
