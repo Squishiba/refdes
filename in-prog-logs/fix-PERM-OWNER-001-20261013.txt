@@ -1,0 +1,217 @@
+Task: fix PERM-OWNER-001 (from in-prog-logs/current-main-resweep-write-permissions.tsv,
+which lives in the shared main checkout /home/jorb/work/refdes/in-prog-logs/, not in
+this worktree -- read it there). Branch fix/seal-new-file-mode-20261013 on main 8b6a52e.
+
+Finding confirmed: seal.py save_seals wrote through tempfile.NamedTemporaryFile
+(creates 0600) and copied the old file's mode only under `if os.path.exists(path)`,
+so the FIRST seal file in a tree kept 0600 while siblings written by ordinary
+open() calls (.refdes/schema.json via textio.write_text, .refdes-write.lock)
+landed at the umask default.
+
+Repro (this worktree's src via PYTHONPATH, venv console script; the venv's
+__editable__ .pth is a plain path line so PYTHONPATH shadows it -- verified
+refdes.__file__ resolves to the worktree):
+  .scratch/fix-perm-owner-001-20261013/proj1, hardware@3 + refdes-schema.yaml
+  overlay `types: log: sealing: build` (the stock hardware@3 log is
+  sealing: history and never seals at build -- first thing learned),
+  items/log.yaml with LOG-001, `umask 002 && refdes -c ... build` -> exit 0,
+  .refdes/log-seal.yaml at 600 beside schema.json/.refdes-write.lock at 664.
+
+Fix (src/refdes/seal.py only; textio.atomic_write_text has the identical gap as
+PERM-OWNER-002 and serve/edit.py:952 as a third instance -- deliberately NOT
+touched per the "avoid changing unrelated atomic writers" instruction):
+  - new _umask_respecting_mode() helper: 0o666 & ~umask, umask read via the
+    set-and-restore os.umask round-trip leaving 022 in place during the window
+    (pip idiom) instead of a wide-open 000. save_seals is only reached from
+    single-threaded CLI flows (all serve in-process builds pass
+    seal_write=False -- checked serve/edit.py:358 and server.py), but the
+    restrictive window costs nothing.
+  - else-branch: chmod the temp to that mode before os.replace; existing-file
+    branch unchanged (still copies the target's mode verbatim).
+
+Post-fix CLI verification (proj2/proj3 in .scratch): fresh build under umask
+002 -> seal file 664 = siblings; chmod 600 then rebuild -> stays 600; fresh
+build under umask 022 -> 644 = siblings.
+
+Tests (tests/test_seal.py, "file modes" section): parametrized new-file
+002->664 / 022->644, and a rewrite-preservation case pinning 0640 (neither
+umask default) across a save_seals rewrite. Negative check done by temporarily
+stubbing the else-branch (`elif False`) in place: the two new-file cases fail,
+preservation case keeps passing (it guards the untouched branch), fix restored,
+23/23 green.
+
+Scoped runs: tests/test_seal.py + test_history_seal.py + test_revise.py +
+test_checks_keys.py + test_calc_rewrite.py + test_sealing_optin_note.py
+(save_seals' callers: build/verify, revise carry-forward, calc-rewrite)
+-> 162 passed. Full suite not run: the change is one else-branch inside
+save_seals and every caller file is covered above.
+ruff: tests/test_seal.py --select I clean; the two findings ruff reports in
+seal.py (TRY004 at :157, UP017 at :320) are pre-existing at HEAD on untouched
+lines, left alone per AGENTS.md.
+
+Finished: yes. Not pushed; commit is local on the branch.
+
+-------------------------------------------------------------- follow-up (review)
+Review on cc2e5be: _umask_respecting_mode() mutated the process-wide umask
+(set-and-restore); any concurrent thread creating files in the window gets a
+wrong mode, and the "serve never seals" claim shouldn't be load-bearing.
+Re-audited callers to test that claim: seal_write=True reaches seal.verify
+only through cli.py:403 (the build command); every other build() call site
+(serve/edit.py:358, loader.py:193, revise.py:1384, cli check/index/ls/...)
+is seal_write=False; revise.py:2038 calls save_seals directly. All CLI. But
+the design should not depend on that, so it was replaced.
+
+Options considered:
+- Keep NamedTemporaryFile + a separate same-directory O_CREAT|O_EXCL mode-0666
+  probe file: works but adds a second file, its own collision handling and a
+  crash-debris class, for information the temp creation itself can produce.
+- mkstemp/NamedTemporaryFile then chmod from a computed mode: back to reading
+  the umask somehow. Rejected.
+- Chosen: create the seal temp itself with os.open(O_WRONLY|O_CREAT|O_EXCL,
+  0o666) -- the kernel filters the creation mode through the umask, so a NEW
+  seal file lands 0666 & ~umask with no chmod, no probe, no process-umask
+  mutation; the existing-file branch still copies the old mode verbatim.
+  Same-directory creation is already required for the os.replace to be
+  atomic, and it is the repo's own idiom (serve/edit.py _atomic_create opens
+  its temp at 0o666); the random name uses secrets.token_hex like keys.py /
+  serve/security.py. Uniqueness via O_EXCL + retry loop (mkstemp does the
+  same). tempfile import dropped.
+
+Trade-off accepted: the temp is group-readable while being written under a
+group umask (the old temp was 0600 until the chmod). The payload is content
+hashes, not secrets, its siblings in .refdes/ are group-readable from
+creation anyway, and _atomic_create already has exactly this property. The
+name is unpredictable (16 hex chars).
+
+Cleanup/portability: the existing finally still unlinks the temp on every
+failure path; fdopen failure closes the raw fd (no leak); missing/read-only
+directory raises OSError into the unchanged _record_seal_write refusal path.
+Windows: os.open/O_EXCL work; the mode argument is advisory there, same as
+the os.chmod line already in this function -- parity, not a new assumption.
+
+CLI re-verification after the swap (proj4, this worktree src): fresh build
+umask 002 -> 664; chmod 600 + rebuild -> 600; new entry against a 555
+.refdes -> exit 1, the usual "NOT sealed ... read-only tree?" ERROR, old
+file intact, no .log-seal-*.tmp debris; settled rebuild exit 0 (steady state
+writes nothing, so a read-only .refdes is not refused then -- unchanged).
+
+Tests: kept the two behaviour tests; added
+- test_a_colliding_temp_name_is_retried_not_fatal (seal._create_temp gets a
+  fresh name when one roll collides with a foreign file),
+- test_saving_seals_never_reads_or_writes_the_process_umask (os.umask spy:
+  zero calls during save_seals).
+Negative checks: creating the temp at 0600 fails both parametrized new-file
+cases; an inserted os.umask readback fails the spy test; both reverted.
+25/25 test_seal.py; caller set (seal, history-seal, revise, checks-keys,
+calc-rewrite, sealing-optin) 164 passed. ruff --select I,F,E9 clean on both
+files. Changelog fragment unchanged: user-visible behaviour is identical.
+Behaviour-level limitation kept honest: no deterministic test can catch a
+future re-introduction of the umask *window* mid-call beyond the spy test,
+which catches any call itself -- the spy is that tripwire.
+
+Follow-up finished: yes, committed locally on the same branch. Not pushed.
+
+----------------------------------------------------------------- PR prep 20261014
+Prepared branch for PR to main. Pre-checks: pwd = this Paseo worktree, HEAD
+was 4407da5, tree clean. Fetched origin/main once: 8b6a52e..f7df34d, nine
+commits. Intervening seal.py change = PR #212 (1a1c960): _load_seal_data
+wraps decode/YAML errors in SchemaError (+ the mapping/reseal-history
+ValueErrors -> SchemaError) and appends a corrupt-seal CLI test to
+tests/test_seal.py -- the reader half; my two commits are the writer half,
+regions disjoint in seal.py, both import blocks and the file-end of
+test_seal.py collide.
+
+Rebase onto f7df34d: seal.py auto-merged clean (SchemaError import/raises +
+secrets/_create_temp all present in the result). tests/test_seal.py
+conflicted twice, both resolved by keeping both sides: the import block now
+carries contextmanager+Path+pytest+cli_mod together, and the corrupt-seal
+CLI test from #212 sits before my file-modes section. cc2e5be re-applied as
+c760bd7 (git rebase --continue needed GIT_EDITOR=true in this dumb
+terminal); 4407da5 re-applied cleanly as 385c1a7. Both commits keep the
+Co-authored-by trailer (verified with git log --format trailers).
+
+Verification after rebase (PYTHONPATH pinned to this worktree src;
+refdes.seal.__file__ printed from it):
+- test_seal + history-seal + revise + checks-keys + calc-rewrite +
+  sealing-optin: 165 passed (164 + #212's new test).
+- #212 adjacency suite (reseal-audit, yaml-loaders, history, keys-adopt):
+  64 passed.
+- CLI probe, fresh project, umask 002: new log-seal.yaml 664; chmod 600 +
+  rebuild stays 600; then \xff into the seal file -> `check` prints
+  "configuration error: ... seal file is not valid UTF-8 ..." exit 2, no
+  traceback. Both behaviors coexist end to end.
+- ruff --select I,F,E9 on both touched files: clean. The repo-wide ruff
+  baseline (AGENTS.md) is not a gate; the single remaining finding in
+  seal.py is the pre-existing UP017 at :335 on an untouched line.
+
+Pushed branch, PR opened against main (no merge). Not done here: merge,
+shared-main edits.
+
+Main advanced during prep (f7df34d -> 9f83092: #223 checks diagnostic, #222
+docs; neither touches seal.py/test_seal.py -- diff --stat empty). Rebased
+once more onto 9f83092, no conflicts; final heads 94bab70/57d9c86/c61eed6.
+Re-ran test_seal + reseal-audit + yaml-loaders on the new base (52 passed)
+and the fresh-build CLI probe (new seal file 664 under umask 002, matching
+schema.json).
+
+----------------------------------------------------------------- review round 1
+Reviewer agent 7b5408de-cf26-4bbb-9f57-fb58539bc2f3 on PR #229: production
+fix sound, Windows CI RED -- the two mode-asserting tests (new-file
+002/022 -> 664/644, rewrite 0640-preservation) read st_mode bits that
+Windows chmod/umask make advisory (Windows reports 0666). Applied the
+reviewer's decorator, verbatim in repo style, to exactly those two tests:
+  @pytest.mark.skipif(os.name == "nt", reason="chmod-based: advisory mode
+  bits on Windows")
+(same family as test_serve_security.py's "POSIX permission bits" skips).
+The os.umask-spy and collision tests stay active on Windows: os.umask,
+O_CREAT|O_EXCL, os.replace all exist there; neither asserts numeric mode
+bits -- verified by inspection (spy asserts zero os.umask calls; collision
+asserts name/retry only).
+Reviewer's prose correction accepted and checked: serve/edit.py:952 is
+inside _atomic_replace, which *reads the existing target first* (returns a
+reason when it is absent) -- replacement-only, no new-file path; new files
+there go through _atomic_create (os.open 0666, umask-respecting). The
+real new-file gap in that file family is textio.atomic_write_text
+(PERM-OWNER-002). PR body corrected.
+Rebased onto c608363 (main advanced: #230 DIAG-WORD-008 refusal-cause,
+#232, #228, #224; none touch seal.py/tests/test_seal.py since my base --
+diff empty), clean, no conflicts; #212 reader and my writer coexist
+unchanged.
+Local checks on the new head: targeted set (seal + callers + #212
+adjacency: reseal-audit, yaml-loaders, history, keys-adopt) 233 passed;
+CI's exact lint command `ruff check --select E9,F src tests` clean; CLI
+probe re-run (fresh 664 under umask 002, 600 preserved).
+
+CI at new head a2c40be: all three jobs green -- ubuntu-latest (pass),
+ubuntu-latest/py3.13 (pass), windows-latest pass with "3686 passed, 58
+skipped" (the two seal mode tests among the skips). Local on this head:
+seal+callers+#212-adjacency 233 passed; CI's lint step
+`ruff check --select E9,F src tests` clean; CLI probe re-run (fresh 664 /
+preserved 600). PR body corrected and re-pushed via REST (gh pr edit hits
+the projects-classic GraphQL bug). Fresh review requested from reviewer
+agent 7b5408de at head a2c40be.
+Status: DONE pending the fresh review verdict.
+
+Fresh-review round: reviewer agent 7b5408de re-ran its full checklist on
+my request; its fresh-review run died on provider quota
+("Free usage exceeded" on longcat-2.5-preview-free) after three retry
+prompts, so no fresh verdict exists at a2c40be/46d28dc. Its completed
+review (against 83123c6, pre-skipif) is the verdict I was sent: CHANGES
+REQUESTED with exactly two findings -- (1) High: Windows CI red on the
+three mode-bit assertions, fix = the repo's own
+`skipif(os.name == "nt", reason="chmod-based: advisory mode bits on
+Windows")` idiom (cited test_citations_lockfile_locking.py:291; my
+a2c40be applies exactly that to the two mode tests, spy/collision stay
+active); (2) Low: the serve/edit.py:952 prose imprecision -- both fixed
+at a2c40be (code/tests) and in the PR body. The review's verbatim closing
+assessment of everything else: "the fix is minimal and correct, the
+umask-spy tripwire test is sound, the collision-retry test is sound, the
+fdopen failure path closes the fd, the post-replace finally doesn't
+unlink a renamed temp, ruff passes, the changelog fragment matches
+convention, and the full POSIX suite is green" -- plus its own Windows
+analysis that the production fix itself is correct there (file lands
+0666, the intended end state). All 3 CI jobs pass at 46d28dc (windows
+3686 passed, 58 skipped). Remaining work: a human/orchestrator re-runs
+the reviewer agent once its model quota recovers, for a fresh verdict on
+the current head.
+Status: DONE, pending a fresh reviewer verdict that cannot run (quota).
