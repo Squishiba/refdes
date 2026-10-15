@@ -11,7 +11,7 @@
 // written on the item, and the service matches it by display or key half.
 
 import { api } from './api.js';
-import { getDraft, draftLinkAdd, draftLinkRemove } from './drafts.js';
+import { getDraft, draftLinkAdd, draftLinkRemove, draftLinkCancel } from './drafts.js';
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -68,6 +68,16 @@ function verbPicker(item, handle, verb, spec, onChange) {
     );
   }
 
+  // The server text of the link for a candidate row, when the item links it
+  // on the server: adding such a row back can only cancel a pending remove,
+  // never mint an add of a link that already exists.
+  function serverTargetFor(row) {
+    const id = row.id || row.handle;
+    return serverTargets.find(
+      (t) => displayHalf(t) === id || (row.key && t.slice(t.lastIndexOf('@') + 1) === row.key)
+    );
+  }
+
   function refresh() {
     current.textContent = '';
     const { kept, added, removed } = effective();
@@ -92,7 +102,7 @@ function verbPicker(item, handle, verb, spec, onChange) {
       line.appendChild(el('span', 'badge', 'will add'));
       const undo = el('button', 'btn link-undo', 'undo');
       undo.addEventListener('click', () => {
-        draftLinkRemove(handle, verb, target); // cancels the pending add
+        draftLinkCancel(handle, verb, target); // cancels the pending add
         refresh();
         onChange();
       });
@@ -105,7 +115,7 @@ function verbPicker(item, handle, verb, spec, onChange) {
       line.appendChild(el('span', 'badge bad', 'will remove'));
       const undo = el('button', 'btn link-undo', 'undo');
       undo.addEventListener('click', () => {
-        draftLinkAdd(handle, verb, target); // cancels the pending remove
+        draftLinkCancel(handle, verb, target); // cancels the pending remove
         refresh();
         onChange();
       });
@@ -143,7 +153,12 @@ function verbPicker(item, handle, verb, spec, onChange) {
       add.dataset.row = String(shown);
       rows.set(String(shown), row);
       add.addEventListener('click', () => {
-        draftLinkAdd(handle, verb, row.handle || row.id);
+        // The add button is enabled for a server link precisely when it is
+        // pending-removed, so for a server row "add" cancels that removal
+        // (under the stored target text); only a non-server row is a new add.
+        const server = serverTargetFor(row);
+        if (server) draftLinkCancel(handle, verb, server);
+        else draftLinkAdd(handle, verb, row.handle || row.id);
         refresh();
         onChange();
       });
