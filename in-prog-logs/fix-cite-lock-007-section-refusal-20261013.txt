@@ -1,0 +1,180 @@
+CITE-LOCK-007 -- int(resolved) on a lockfile `sections:` value crashes serve
+=============================================================================
+
+Finding (in-prog-logs/current-main-resweep-citation-restore.tsv, read from
+the shared main checkout /home/jorb/work/refdes -- not present at the pinned
+worktree base): src/refdes/serve/sources.py:371 `return int(resolved),
+"section", detail`. A sound-shaped record whose `sections` value is not a
+page number (`{Intro: nope}`) loads -- `citations._record_problem` types the
+`sections:` mapping (:987-992) and `sections_sha256` (:993-1001) but never
+the values -- and the serve routes catch only SourceRefusal.
+
+Base: worktree fix/citation-section-refusal-20261013 at 8b6a52e (local main),
+tree clean at start. No stash, no rebase over other worktrees.
+
+Reproduction (red)
+------------------
+Not the sweep's direct call: a real `EditorApp` + `Client` (tests/
+serve_support.py) over HTTP, in tests/test_serve_pdf_sources.py's fixture
+style -- a `keep_copy: true` remote citation with
+`sections: {Load Regulation: nope}, sections_sha256 == record sha256` (the
+matching digest is what routes the value past the bytes-drift branch into
+`int()`). GET `/api/item/DEC-020/sources/page?path=...` died with the
+uncaught `ValueError: invalid literal for int() with base 10: 'nope'`
+through server.py's unguarded api.handle (traceback captured in the red
+pytest run, sources.py:371).
+
+Additional reach found while fixing: the same crash hits the FILE route
+(`/api/item/<ref>/sources`) via `files_payload -> _file_entry -> _browse ->
+_cited_page` -- a garbage section value on a PDF citation crashed the picker
+listing too, not just the page route. The sweep line only named the page
+route. Both were red in the new test before the fix (the page route raised
+first; the files route shares the one call site).
+
+Decision: panel state, not a 422 (task/sweep wording deviation)
+---------------------------------------------------------------
+The sweep line phrased the wanted outcome as "SourceRefusal -> 422". The
+module's own doctrine, verified in the tree at 8b6a52e, says this exact
+shape is a panel state:
+
+- sources.py `_cited_page` docstring: "a value that names no openable page
+  is reported in the citation's own terms and the picker opens page 1 --
+  never page 0, and never a guess at what 'xiv' meant."
+- `page_payload` docstring: "A citation whose page this document does not
+  have opens page 1 and says so in `cited.detail`, because refusing the
+  whole document over a stale page number would hide the very thing the
+  author needs to look at." 422 there is defined as failures of "the read
+  itself" -- the PDF reads fine here; it is the pointer that is broken.
+- docs/design/editor-pdf-picker.md:193: "Visible failure is a panel state,
+  not an error page."
+- The sibling test `test_a_section_whose_page_is_unusable_says_why_and_
+  opens_page_one`: no resolved page, resolved-against-other-bytes (same
+  elif chain, same remedy `refdes fetch --update`), `page: xiv`, page 99
+  past the count -- all 200 + page 1 + detail naming the fix. A 422 here
+  would make a garbage resolution stricter than a stale one with the same
+  remedy.
+- Mechanically, a SourceRefusal raised inside `_cited_page` would also
+  crash `/sources` at this base (no catch until unmerged 403ab84 on the
+  CITE-LOCK-005 branch) -- so "422" is not even the smaller change here.
+
+Confirmed with the task owner before shipping (chose panel-state).
+
+Fix
+---
+src/refdes/serve/sources.py `_cited_page`: replaced the second page grammar
+`int(resolved)` with the shared `_page_number(str(resolved))` (the same
+grammar `page:` above it and the loader use -- `citations.page_number`'s
+docstring names exactly this two-grammars hazard, incl. page 0). A value
+that is not one now falls through to the existing no-page return with a
+detail naming the section, the path, the offending value, and
+`refdes fetch --update --path <path>` to re-resolve. One fix site covers
+both routes. Docstring extended to state the lockfile-value contract.
+
+Valid-numeric controls: YAML int 3 -- the shape `fetch` writes -- already
+opens page 3 via the existing `test_the_page_view_..._resolved_section_page`
+test; the new test adds the string "3" control (accepted by `int()` before,
+must stay accepted: `str()`-then-`page_number` keeps it) on both the page
+route (open_at page 3 from section, no detail) and the file list
+(open_page 3). Behavior tightening, both directions of the shared grammar:
+`0`, `+3`, `3.5`, bools no longer open a page -- they name themselves in
+detail. That is the documented "positive integer and nothing else".
+
+Tests (all through the live EditorApp over HTTP)
+------------------------------------------------
+- NEW tests/test_serve_pdf_sources.py
+  ::test_a_section_the_lockfile_resolved_to_not_a_page_says_so -- red at
+  8b6a52e (uncaught ValueError), green after; cases `nope` and int 0 on the
+  page route AND the file route, plus the string-"3" control on both.
+- pytest tests/test_serve_pdf_sources.py tests/test_serve_sources.py
+  tests/test_serve_sources_accept.py tests/test_lockfile_corruption.py:
+  248 passed.
+- pytest tests/test_serve_api.py: 60 passed.
+- ruff check on the two touched files: findings byte-identical to the same
+  files at HEAD (3 pre-existing RUF059/RUF015 in serve/sources.py, zero
+  new; per AGENTS.md, `ruff check .` baseline is not green repo-wide).
+- CLI claim checked by running: `refdes fetch --help` (the `--update` in the
+  new message is real, and `--path` scopes it).
+
+Overlap with the CITE-LOCK-004/005 worker (branch
+fix/citation-lockfile-refusal-20261013, 403ab84+cf0fd00, unmerged)
+-------------------------------------------------------------------
+- citations.py: untouched by me, as instructed. That branch currently edits
+  citations.read_lockfile / build memoise / serve/sources._lockfile /
+  serve/api._item_sources -- all different hunks than mine (mine is
+  _cited_page ~:342-390; theirs is _lockfile ~:86-101). No textual conflict
+  foreseen in serve/sources.py; tests: mine is test_serve_pdf_sources.py,
+  theirs test_serve_sources.py.
+- Merge interaction (benign, worth one line in review): once their branch
+  lands, an UNREADABLE lockfile refuses all four source routes with 422;
+  my change governs a readable-but-garbage section value (panel state). No
+  route gets both.
+- Left open deliberately, root-cause side: `citations._record_problem` still
+  does not type the VALUES of `sections:` -- a lockfile holding
+  `{Intro: nope}` loads and `check`/`build` pass it. Adding that check is
+  the citations.py-side sibling fix (same posture as the `bytes:`/
+  `page_count:` type checks) and lands squarely in the CITE-LOCK-004
+  worker's file -- left to that worker to avoid a collision. Note the
+  render side is already non-crashing for such a value:
+  `citations._apply_section` str()s the page into the status/href without
+  parsing it (citations.py:1660), so the build renders a meaningless
+  `#page=` rather than crashing -- a real (if quieter) sibling worth that
+  worker's eyes.
+
+Finish state: DONE. Committed on fix/citation-section-refusal-20261013 at
+the 8b6a52e base; not pushed, no PR. Scratch under .scratch/cite-lock-007-*/
+(HEAD copies of the touched files for the ruff comparison), retained.
+
+=============================================================================
+PR prep (2026-10-15): rebased onto origin/main fd47a56
+=============================================================================
+Status at start: tree clean at ef268df. `git fetch origin` (once): origin/main
+tip fd47a56 -- contains the dependency PDF integer guard #225 (780ca94,
+citations.MAX_PAGE_DIGITS) AND CITE-LOCK-005 #234 (abd2f8b), so the §"left
+open" note above about 403ab84 being unmerged is now superseded: the
+unreadable-lockfile 422 posture (incl. the _item_sources catch) IS on main.
+
+Rebase: clean, no conflicts (my hunks are _cited_page + its docstring, and
+test_serve_pdf_sources.py; #225 touched citations.page_number + serve
+_pdf_proposal/api page pre-check, #234 touched _lockfile/api._item_sources/
+citations/build/test_serve_sources -- all disjoint). New head: 437cacf.
+Behavior preserved: panel-state 200 + page-1 detail (as approved).
+
+#225 interaction on my call site (the point of the rebase): my fix reads the
+lockfile value with the shared `_page_number` grammar, which #225 bounded at
+MAX_PAGE_DIGITS=64 BEFORE int() is asked. So a section value with a long
+digit run is refused as panel state on my path too -- pre-#225 the alias
+target itself would have raised "Exceeds the limit (4300 digits)" out of my
+detail path.
+
+Verification on the rebased head:
+- pytest test_serve_pdf_sources / test_serve_sources / test_serve_sources_
+  accept / test_lockfile_corruption / test_serve_api / test_citation_pages
+  (the #225 grammar suite included): 381 passed.
+- Real CLI/HTTP probe from the worktree src (.scratch/cite-lock-007-pr/
+  probe.py, refdes.__file__ asserted worktree-first; venv python):
+  `refdes check` exits 0 with the `{Intro: nope}` record (loads sound -- the
+  panel is the first reader that notices); live EditorApp: page route 200 /
+  page 1 / detail names 'nope' + `refdes fetch --update --path ...`; file
+  route 200 open_page None; valid-numeric controls int 3 -> page 3 from
+  "section", string "5" -> page 5; int 0 -> page 1 detail "resolved to 0".
+- Oversized-value probe finding: a 5000-digit value as a QUOTED string (and
+  an int over 64 digits, e.g. 70 digits) reaches the panel and is panel
+  state, as designed. A 5000-digit BARE INT in the lockfile cannot reach any
+  reader: the YAML load of citations.yaml itself raises the 4300-digit
+  ValueError (verified: yaml.safe_load of 'a: <5000 sevens>') -- loader
+  side, citations.py, the same exposure family #225 fixed on the request
+  side. Out of scope for this branch (citations.py is the CITE-LOCK-004
+  worker's file); flagged for them here, NOT fixed.
+- Cosmetic limit noted: my detail echoes the bad value ({resolved!r}), so a
+  hand-edited 5000-char string value yields a 5 KB detail string (no crash,
+  panel renders it). This matches the module's existing "reported in the
+  citation's own terms" echo (the page: 'xiv' detail interpolates the
+  author's page: the same way); left as-is rather than inventing a second
+  truncation grammar in the panel's words.
+
+Changelog fragment added: changelog.d/serve-lockfile-section-page.fixed.md
+(one fragment per change, per changelog.d/README.md -- CHANGELOG.md's
+[Unreleased] is not hand-edited).
+
+Finish state (this pass): rebased, fragment + log committed, PR opened
+against main, NOT merged. Head 437cacf at PR time.

@@ -486,6 +486,82 @@ def test_a_section_whose_page_is_unusable_says_why_and_opens_page_one(tmp_path):
         app.stop()
 
 
+def _section_item(root, item_id):
+    """Rewrite the fixture's items to one `section:` citation of the remote PDF."""
+    (root / "items" / "decisions.yaml").write_text(
+        f"defaults: {{ type: decision }}\n"
+        f"items:\n"
+        f"  - id: {item_id}\n"
+        f"    citations:\n"
+        f"      - path: {REMOTE}\n"
+        f"        keep_copy: true\n"
+        f"        section: Load Regulation\n",
+        encoding="utf-8",
+    )
+
+
+def test_a_section_the_lockfile_resolved_to_not_a_page_says_so(tmp_path):
+    # CITE-LOCK-007: the page route read the lockfile's value for a `section:`
+    # with a bare `int()`, a second page grammar and one that *crashed*: the
+    # picker's validator types the `sections:` mapping but not its values, so
+    # `{Load Regulation: nope}` loads as sound, and the route died on an
+    # uncaught `invalid literal for int()`. The fix is the rule this file's
+    # other tests already hold: a value that names no openable page -- from
+    # the item or from the lockfile -- opens page 1 and says so in the
+    # citation's own terms, never page 0 and never a guess. The valid
+    # numbers beside them are the control: `fetch` writes YAML integers, and
+    # a hand-edited string number is as openable as ever.
+    pdf_sha = hashlib.sha256(PDF).hexdigest()
+    cases = {
+        "not-a-page": ({"sections": {"Load Regulation": "nope"}}, "'nope'"),
+        "page-zero": ({"sections": {"Load Regulation": 0}}, "resolved to 0"),
+    }
+    for label, (extra, names) in cases.items():
+        root = make_root(tmp_path / label)
+        fetch(root)
+        keep_copy(
+            root, REMOTE, PDF, sections_sha256=pdf_sha, **extra
+        )
+        _section_item(root, "DEC-020")
+        app = start(root)
+        try:
+            client = Client(app)
+            status, payload = client.api_get(page_url("DEC-020", REMOTE))
+            assert status == 200, (label, payload)
+            assert payload["page"] == 1
+            assert payload["open_at"] == {"page": 1, "from": "default"}
+            assert names in payload["cited"]["detail"], (label, payload)
+            assert "is not a page number this can open at" in payload["cited"]["detail"]
+            assert "refdes fetch --update" in payload["cited"]["detail"]
+            # The file list asks the same question for `open_page`, and a
+            # crash there is the same bug on the route that lists the file.
+            status, listing = client.api_get(sources_url("DEC-020"))
+            assert status == 200, (label, listing)
+            assert listing["files"][0]["open_page"] is None
+        finally:
+            app.stop()
+
+    root = make_root(tmp_path / "control")
+    fetch(root)
+    keep_copy(
+        root, REMOTE, PDF,
+        sections={"Load Regulation": "3"}, sections_sha256=pdf_sha,
+    )
+    _section_item(root, "DEC-021")
+    app = start(root)
+    try:
+        client = Client(app)
+        status, payload = client.api_get(page_url("DEC-021", REMOTE))
+        assert status == 200, payload
+        assert payload["open_at"] == {"page": 3, "from": "section"}
+        assert payload["cited"]["detail"] == ""
+        status, listing = client.api_get(sources_url("DEC-021"))
+        assert status == 200, listing
+        assert listing["files"][0]["open_page"] == 3
+    finally:
+        app.stop()
+
+
 def test_a_cited_page_the_document_does_not_have_opens_page_one_and_says_why(tmp_path):
     # A page number from another revision is a wrong link, not a near miss
     # (docs/markdown.md), and this is the same rule at the read boundary: the

@@ -359,7 +359,10 @@ def _cited_page(spec, record: dict) -> tuple[int | None, str, str]:
     `page:` values that are not page numbers are refused at load
     (`build.validate_items`), so this is the second line of defence: it holds
     for a project serve has not validated, and for one an author edited by
-    hand.
+    hand. The lockfile's resolved page for a section is read by the same
+    grammar: the loader types the `sections:` mapping but not its values, so
+    this is the reader that has to notice a value `fetch` could not have
+    written, and it says so rather than opening page 0 or crashing on `int`.
     """
     detail = ""
     page = _page_number(spec.page)
@@ -382,7 +385,22 @@ def _cited_page(spec, record: dict) -> tuple[int | None, str, str]:
                     f"'refdes fetch --update --path {spec.path}' to re-resolve it"
                 )
         elif resolved is not None:
-            return int(resolved), "section", detail
+            # The same grammar as the `page:` above -- `fetch` records a
+            # section's page as a positive integer, and a value that is not
+            # one (`{Intro: nope}`, a hand-edited `0`) is reported like every
+            # other pointer that names no openable page, not raised: `int()`
+            # here was an uncaught ValueError out of both routes that ask
+            # this question.
+            page = _page_number(str(resolved))
+            if page is not None:
+                return page, "section", detail
+            if not detail:
+                detail = (
+                    f"section {spec.section!r} of {spec.path} resolved to "
+                    f"{resolved!r} in the lockfile, which is not a page number "
+                    "this can open at; run "
+                    f"'refdes fetch --update --path {spec.path}' to re-resolve it"
+                )
         elif not detail:
             detail = (
                 f"section {spec.section!r} of {spec.path} has no resolved page "
