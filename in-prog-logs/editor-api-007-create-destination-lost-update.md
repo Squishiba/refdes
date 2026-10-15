@@ -132,3 +132,52 @@ again; restore confirmed green.
 
 Commit: see the `fix(serve)` commit on this branch (subject
 `fix(serve): refuse/retry a create whose destination moved under it (EDITOR-API-007)`).
+
+## Follow-up 2026-10-15 — independent review findings addressed
+
+The independent review (in-prog-logs/fix-branch-review-20261014.txt) held
+this branch for two things; both are addressed here.
+
+1. **The final check-to-replace gap (review: mitigation, not closure).**
+   Confirmed: at `5bd62cf` the check (`file_revision(path)`) and the
+   replace's own read of the destination were *two full-file reads* — the
+   window from the check to the swap included the second read plus the temp
+   write. The check is now folded into `_atomic_replace` as an `expected`
+   argument: the function checks the bytes on the read it performs to
+   protect the replace, so no plan-window read of the destination remains
+   between check and swap. The gap that is left — that read to
+   `os.replace`, spanning the temp write's syscalls — is the irreducible
+   one on a plain file, and the module/create docstrings say exactly that.
+   This branch closes EDITOR-API-007's reported signature (the seconds-wide
+   plan window, reported as `200 created`), not the irreducible
+   uncooperating-writer race; the in-prog log's limit section above and the
+   docstrings carry that scope. The new test
+   `test_the_gap_between_the_last_check_and_the_replace_is_the_residual_loss`
+   pins the exposure to exactly that gap (seam: `os.replace` itself, one
+   notch later than the retry tests' `append_ending` seam): a write landing
+   there is *still lost* with `Created` — documented, asserted behavior, so
+   a future real CAS fails the test and updates the docs.
+2. **HIGH rollback failure, reproduced (also on main at `8b6a52e`).** In
+   the append shapes `original` was `raw.decode("utf-8")`, a str; a failed
+   `ids.reserve_id` fed it to `_restore`'s `open(path, "wb").write(...)` —
+   the open truncates the file to zero bytes, the write raises
+   `TypeError` (not caught by `_restore`'s `except OSError`), and
+   `create_item` raised where it is documented to return a result. Fix:
+   `original` stays the raw bytes (the decoded text is a local `text`);
+   the rollback restores bytes. Tests
+   `test_a_failed_id_reservation_restores_the_destination_bytes` /
+   `..._a_markdown_destination` (seam: `ids.reserve_id` raising `OSError`)
+   are red at `5bd62cf` with exactly the reproduced signature
+   (`TypeError: a bytes-like object is required, not 'str'` at the
+   `_restore` write) and green with the fix, asserting the full original
+   bytes are back and nothing is reserved.
+   Sabotage: dropping the folded `expected` argument fails the two
+   retry tests; restoring is green.
+
+Focused: 69 passed on the rebased tree (66 pre-existing + 3 new). Sabotage
+of the bytes fix (`original = raw.decode("utf-8")`) fails both rollback
+tests; restoring is green. Full suite on the rebased tree (base
+`509a487`): **3833 passed, 2 skipped**. CI-scope ruff
+(`--select E9,F src tests`) clean.
+
+

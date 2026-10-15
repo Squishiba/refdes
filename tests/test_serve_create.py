@@ -648,6 +648,121 @@ def test_a_destination_that_keeps_moving_is_refused_with_nothing_burned(
     assert "Raced." not in read(path)
 
 
+def replace_gap_writer(monkeypatch, path, blocks):
+    """Land an outside append *strictly between* the destination read inside
+    `_atomic_replace` and the `os.replace` that follows it.
+
+    This is the one window the create's last check cannot close -- the gap
+    between reading the file and swapping it is two syscalls, and a writer
+    that does not take the project lock can land in it. The seam is
+    `os.replace` itself: on the create's own replace of `path` (not the
+    temp-file creation), the queued block is appended to the destination
+    first, so it is the bytes on disk at the instant the create's replace
+    fires. `external_writer`'s seam (`textio.append_ending`) lands earlier --
+    inside the plan window -- and is what the retry check catches; this seam
+    lands one notch later and is what it cannot."""
+    real = os.replace
+    pending = list(blocks)
+
+    def racing(src, dst, *args, **kwargs):
+        if pending and os.path.abspath(dst) == os.path.abspath(str(path)):
+            with open(dst, "a", encoding="utf-8", newline="") as fh:
+                fh.write(pending.pop(0))
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(edit_mod.os, "replace", racing)
+
+
+def test_the_gap_between_the_last_check_and_the_replace_is_the_residual_loss(
+    project_root, monkeypatch
+):
+    """EDITOR-API-007's documented limit, pinned as a test. A writer that
+    lands strictly between the create's final destination read and its
+    `os.replace` is still lost, and the create reports `Created` -- on a
+    plain file no check-and-replace closes that gap, and this branch does
+    not claim it does. The test pins the exposure to exactly this window:
+    the same bytes, written one notch earlier (the `external_writer` seam,
+    inside the plan window), are caught and retried by
+    `test_a_destination_written_between_read_and_replace_is_not_eaten`.
+    If the check is ever weakened so a plan-window write is *also* lost,
+    that test fails; if the gap is ever closed for real (a real CAS), this
+    test fails and says so."""
+    path = project_root / "items" / "reqs.yaml"
+    external = "  - id: REQ-005\n    text: Written after the last check.\n"
+    replace_gap_writer(monkeypatch, path, [external])
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Raced at the last moment."},
+            destination="items/reqs.yaml",
+        ),
+    )
+
+    assert isinstance(result, Created), result.message
+    after = read(path)
+    assert result.item_id in after
+    assert "id: REQ-005" not in after, (
+        "the final-gap window closed -- update the docs: this create now "
+        "closes EDITOR-API-007 fully, not just to the last-check gap"
+    )
+    # the create's own bytes are intact: only the outside block is lost
+    assert "Raced at the last moment." in after
+
+
+def test_a_failed_id_reservation_restores_the_destination_bytes(project_root, monkeypatch):
+    """The rollback after a failed reservation writes *bytes*, not the
+    decoded text: `_restore` opens the file `"wb"`, which truncates it
+    first, then `write(str)` raises `TypeError` -- a zero-byte destination
+    and an exception out of `create_item` where the contract says it
+    returns a result. A failed creation burns nothing; it also destroys
+    nothing."""
+    path = project_root / "items" / "reqs.yaml"
+    before = read(path)
+
+    def boom(*_args, **_kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(edit_mod.ids, "reserve_id", boom)
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Unreservable."},
+            destination="items/reqs.yaml",
+        ),
+    )
+
+    assert isinstance(result, Refused), result
+    assert "rolled back" in result.reason
+    after = read(path)
+    assert after == before, "the rollback did not restore the original bytes"
+    assert after != ""
+    ledger = project_root / ".refdes" / "ids.yaml"
+    assert not ledger.exists() or "REQ-012" not in ledger.read_text(encoding="utf-8")
+
+
+def test_a_failed_id_reservation_restores_a_markdown_destination(project_root, monkeypatch):
+    """The same rollback on the multi-item Markdown shape -- the append
+    shapes share the decoded-text bug."""
+    path = project_root / "items" / "notes.md"
+    before = read(path)
+
+    def boom(*_args, **_kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(edit_mod.ids, "reserve_id", boom)
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Unreservable."},
+            destination="items/notes.md",
+        ),
+    )
+
+    assert isinstance(result, Refused), result
+    assert read(path) == before, "the rollback did not restore the original bytes"
+
+
 def test_explicit_id_override_is_honoured_or_refused_not_renumbered(project_root):
     clash = create_item(
         str(project_root),
