@@ -1,0 +1,121 @@
+# docs-links-verify — verify docs/links.md against the tool
+
+Branch: docs-links-verify (main 9fbd89b). Docs-only task: verify every claim
+in docs/links.md by running refdes, fix the page where it is wrong/missing.
+
+## Setup
+
+- Probe projects under `.scratch/probe-links/` (gitignored):
+  - p1: hardware@3, rich item set (all verbs exercised, prose probes,
+    cascade chain, previews, custom overlay `types: bound: preview:`).
+  - p3: copy of p1 used for the blocked_by cycle (add a closing edge).
+  - p4: hardware@1 project (equivalence probes, then upgraded to v3).
+  - p5: hardware@2 project (undeclared `follows:`, `records:` → v3 upgrade).
+  - p6: `standard: none` custom schema (custom type + links, verb-guard probe).
+  - p7: p5 copy (standard add-preset/remove-preset writable-load probe).
+- All refdes runs with `PYTHONPATH=$PWD/src` +
+  `/home/jorb/work/venv-refdes/bin/refdes` (verified it resolves to this
+  worktree's `src/refdes/`).
+
+## Claim table
+
+Legend: V = VERIFIED, W = WRONG (fixed), M = MISSING FROM DOCS (added),
+C = CAN'T VERIFY. "checked by" = probe project / command.
+
+| # | Claim (links.md) | Result | Evidence |
+|---|---|---|---|
+| 1 | Links declared in refdes-schema.yaml `types: <t>: links:`; used on a custom type | V | p6 `standard: none`, note `relates: [THING-001]` → 0 errors |
+| 2 | Standard library declares the vocabulary for the six standard types | V | v3 base.yaml: requirement, bound, test, component, group, log |
+| 3 | Dangling link → build error | V | p1: `satisfies points at 'REQ-MISSING-001', which does not exist ...` |
+| 4 | Disallowed target type → build error | V | p1: `drop_in may point at component, but REQ-PWR-001 is a requirement`; `verifies may point at requirement, bound, but CMP-001 is a component` |
+| 5 | Bare ref rewritten to `DISPLAY-ID@key` on next writable load | V | p1: files show `REQ-PWR-001@gccjeh448b8` etc. after first check |
+| 6 | Writable commands: check, build, revision, release, index, ls, id, fetch, audit, stub-tests, former-ids propose | V | p1 loop: each expands a fresh bare ref (revision/release need a name arg) |
+| 7 | Not writable: init, new, schema, standard add-preset, standard remove-preset | V | p1 loop (new/schema bare), p7 (add-preset/remove-preset bare) |
+| 8 | rename / standard upgrade / keys adopt mint+expand in own transaction; `--dry-run` reports expansion without writing | V | p1 `keys adopt --dry-run` → "would expand 1 link reference(s)", file unchanged; upgrade --to 3 rewrote p4/p5; --help confirms --dry-run for rename/upgrade |
+| 9 | Composite example `REQ-PWR-002@k7f3m2q9x4a` (11-char key) | V | p1 keys all 11 chars [a-z0-9] |
+| 10 | Key half is identity: composite resolves by key, not label | V | p4: `equivalent: [CMP-002@<REQ key>]` resolves to REQ-PWR-001 (upgrade refuses on key's type) |
+| 11 | Display half refreshed on rename: stale `OLD-ID@key` → `NEW-ID@key` on next writable load | V | p1 REQ-PWR-002→007 rename: all refs updated by next `check` |
+| 12 | Refresh refuses when stale label names a *different live* item (warns, leaves ref) | M (added) | p1: `WARNING ... addresses references 'REQ-PWR-007@gjs1vc97em5', but that key is REQ-PWR-002 and REQ-PWR-007 is a different live item. Refusing to refresh the label until you confirm which was meant.` — not in page |
+| 13 | Keys printed by `ls --keys` (own column), `thread --keys` (header, whole thread composite), `thread --json` per entry, = index `items[].key` | V | p1: all four show the same key (e.g. LOG-001 = 5f9sabkn7ag) |
+| 14 | `--no-write` (global, before subcommand) suppresses expansion/refresh, writes nothing | V | p1: bare ref and stale display half both survive `refdes --no-write ls` |
+| 15 | `follows:` while bare anchors to thread tip on first writable load; `DISPLAY-ID@key`, bare key for id-less tip | V | p1: `follows: [LOG-001]` → `LOG-001@5f9sabkn7ag`; id-less-tip probe kept bare-key form |
+| 16 | hardware@3 declares `follows`, v1/v2 don't; writing undeclared `follows:` → `unknown field 'follows' on <type>`, build succeeds | V | p5 (v2): `WARNING ... unknown field 'follows' on log entry.` 0 errors; v1/v2 base.yaml lack follows |
+| 17 | Threads link target docs/design/threads.md exists | V | ls docs/design/threads.md |
+| 18 | Back-links computed; test `verifies:` → requirement `verified_by` without requirement mentioning it | V | p1 req-pwr-002 page Incoming: verified_by/addressed_by/refined_by/governs |
+| 19 | "Declaring both ends is allowed but redundant" | W (fixed) | stock: `verified_by:` on requirement → `unknown field 'verified_by' on requirement -- did you mean the link 'governed_by'?` (ERROR); p6: custom schema declaring the inverse verb → both ends fine, page shows edge once |
+| 20 | Starter table rows (15 verbs: inverse names + authored-on → targets) | V | v3 base.yaml types/sets: claims(satisfies/constrained_by→req,bound/bound), grouped(part_of→group, not log), requirement refines/governed_by, bound refines/derives_from (governed_by un-declared), test verifies, log follows/addresses/amends/supersedes/selects/blocked_by([]), component drop_in/alternate; inverses all match link_types |
+| 21 | `part_of`+`group` new in v3, v1/v2 declare neither | V | grep v1/v2 base.yaml: no part_of/group |
+| 22 | `follows` is v3's spelling of v2's `records`; `standard upgrade --to 3` renames verb; migrated edge anchors + captures snapshot | V | p5: records: [DEC-001] → `follows: [DEC-001@...]` after upgrade; p1 capture line "captured LOG-001: LOG-003 now follows it" |
+| 23 | Vocabulary page graph at top + `refdes schema --graph > graph.svg` writes identical SVG to stdout | V | vocabulary.py render_spine_svg/render_term_svg; p1 graph.svg 43561 B to stdout, rc=0 |
+| 24 | Compliance-verb table: satisfies feeds coverage (satisfied; claimed while status outside satisfying_statuses); refines/derives_from/governed_by/constrained_by don't | V | p1 index coverage: REQ-PWR-001 satisfied (LOG-001 accepted+CMP-001 selected) → claimed_by LOG-001 when status in_progress; BND-THM-001 open despite constrained_by/derives_from; governed_by doc string "never feeds coverage" |
+| 25 | verifies gated by verifying_statuses; addresses no status gate | V | p1: TST-PWR-001 planned → REQ-PWR-002 stage addressed (verified_by empty); LOG-004 in_progress → addressed_by on REQ-PWR-004 |
+| 26 | met_by/meets design-debate preset only; v1 targets [requirement, constraint]; option declares no status lists; never fed coverage | V | v1 preset `met_by: [requirement, constraint]`, v2 `[requirement, bound]`; option fields/status lists absent; build.py coverage never reads met_by |
+| 27 | hardware@3 ships no presets; add-preset design-debate → `configuration error: preset 'design-debate' does not exist for hardware@3 (available: []).` | V | p4: exact message, incl. v3 dir = base.yaml + migration.yaml |
+| 28 | resolved_by: [decision] had nothing to target post-v3; standard-library change 7 records it | V | v2 preset line 25; standard-library.md change 7 exists |
+| 29 | drop_in/alternate component-only; rationale required_when links: alternate; `drop_in: [REQ-...]` on component = build error | V | p1 CMP-022 error text; base.yaml required_when |
+| 30 | verb was `equivalent` pre-v3; upgrade --to 3 rewrites `equivalent:` → `drop_in:`; v3 project writing `equivalent:` → build error naming drop_in; v1/v2 keep old spelling | V | p4 upgrade diff `drop_in: [CMP-002]`; v3 probe error: `the link verb 'component.equivalent' is now 'component.drop_in' -- rename this key...`; v1/v2 base.yaml spell equivalent |
+| 31 | v1 wrote target lists as `[]` = unrestricted → same line builds clean on v1 | V | p4 v1: `equivalent: [REQ-PWR-001]` → 0 errors |
+| 32 | upgrade --to 2 refuses and rolls back on a violating existing link, naming it | V | p4: `refused: rewritten project has build errors -- rolled back: ERROR ... equivalent may point at component, but REQ-PWR-001 is a requirement`; version stayed 1 |
+| 33 | Self-inverse: page merges declarations with computed backlink into one list (no Outgoing+Incoming duplication); both-ends declared de-dups, nothing to warn | V | p1 cmp-014: single merged "Drop-in CMP-019" list, Outgoing "None."; with CMP-019 declaring back: one entry, 0 warnings |
+| 34 | supersedes↔superseded / selects↔selected warning texts (both directions), exact wording | V | p1: both quoted texts match real output word for word |
+| 35 | "a project that never declares supersedes/selects at all hears nothing, whatever its statuses say" | W (fixed) | p4 (standard@3, zero supersedes links): `WARNING ... status is 'superseded' but nothing supersedes it` — warns. Silence requires resolved link_types to lack the verb (p6 standard: none: silent) — status_links.py guards on project.link_types |
+| 36 | Cascade: direct edge, transitive report, full path not collapsed, "root" structural | V | p1 audit: `LOG-006 <- LOG-005 <- LOG-003 <- CMP-001 (selected, root)`; LOG-003 accepted (settled) is NOT root, CMP-001 (no blocked_by) is |
+| 37 | blocked_by target: any type, no status restriction | V | p1: `blocked_by: [CMP-001]` accepted, resolves |
+| 38 | Cycle = hard build error at the closing edge, format | W (fixed) | p3: `ERROR   items/log/LOG-006.md:2 [LOG-006] — blocked_by cycle: LOG-002 -> LOG-006 -> LOG-002` — real output is ONE line; page showed a two-line wrap (fixed with a note) |
+| 39 | Stale-blocker INFO text, default-hidden, -v shows, audit always shows | V | p1: exact text (page used em dash mid-message; real `--` — fixed); hidden in `check`, shown in `check -v`; audit line "… -- stale: edge still declared, blocker settled"; settled = satisfying/verifying_statuses (blocked.py _is_settled) |
+| 40 | audit "Blocked chains:" section, one line per chain, staleness inline; item page panel; coverage.md#when-the-claimer-is-blocked | V | p1 audit section verbatim; log-006.html `<section class="blocked-chains">`; coverage.html blocked-note chain "← LOG-005 ← LOG-003 ← CMP-001 (selected)"; coverage.md:198 |
+| 41 | Bare autolink; MIL-STD-810 / DO-254 / LTC3388-1 plain text; backticks suppress | V | p1 req-pwr-002.html: BND-THM-001 anchor; the three tokens plain; `REQ-PWR-002` in `<code>` |
+| 42 | Explicit [[...]] validated; unresolved = warning + red; custom text form | V | p1: `reference to 'REQ-NOPE-001', which does not exist`; `span class="ref ref-missing"`; --bad #b3261e; [[REQ-PWR-001\|the input supply]] renders label |
+| 43 | #field fragment → field row; undeclared field warns naming item+field+type; own-section fields → section; empty declared field → collapsed row | V | hrefs `cmp-001.html#field-part_number`, `#field-checks`, `#field-rationale`; `reference to 'CMP-001' names field 'body', which type 'component' does not declare` |
+| 44 | #calc: fragment → block table; bare fragment read as field name (warns); miss names the blocks/fences present | V | href `log-001.html#calc-losses`; `names field 'losses', which type 'log' does not declare`; `[[LOG-001#calc:other]]: LOG-001 has no calc block named 'other' (it names: losses).` |
+| 45 | fig:/cite: references; explicit citation id required; #field and #calc: on them = warning | V | cite:ds1 resolves (id: given); `reference to 'fig:x' has a #status fragment, which figure references do not have`; `reference to 'cite:ds1' has a #calc:losses fragment, which citation references do not have`; missing fig warns |
+| 46 | Hover card: type badge, ID, title, fields, current check state; per-type `preview:` overlay field works; former_ids row; build-time inlined, no network; focus/Escape; tap | V | preview JSON {type,title,fields,check:"fail"} for LOG-001 (violating check); p1 refdes-schema.yaml bound preview [status,limit,rationale] → payload matches; former_ids in payload + "formerly known as" in app.js; fetch( count 0 in app.js; focusin/Escape/touch handlers in app.js |
+| 47 | former_ids: `refdes ls` finds item by retired id | V | `refdes ls REQ-PWR-000` → `REQ-PWR-001 requirement Input supply (formerly REQ-PWR-000)` |
+| 48 | Item pages list Outgoing/Incoming grouped by relationship | V | trace-cols Outgoing/Incoming with rel spans (addressed_by/refined_by/governs) |
+| 49 | coverage.html "because of" headline sentence | C | page shows the blocked-claimer chain note ("← LOG-005 ← …") and the "claimed, unsettled" card; the quoted English sentence is prose framing in coverage.md, not a literal page string — left alone |
+
+## Fixes applied to docs/links.md
+
+1. (claim 12) Composite section: added the refresh-refusal sentence (stale
+   label naming a different live item → warns, leaves the reference).
+2. (claim 19) "Declaring both ends is allowed but redundant" → qualified:
+   standard inverses are computed, not authorable (writing them is an
+   unknown-field error); only a project that declares the inverse verb
+   authorable can double-author, and the page shows the edge once.
+3. (claim 35) "a project that never declares supersedes/selects at all hears
+   nothing" → corrected to the code's actual guard (resolved link_types +
+   status choices; standard-pinned projects carry both verbs and DO warn).
+4. (claim 38) cycle sample → matches real single-line output (wrapped with a
+   note to fit the page).
+5. (claim 39) INFO sample: mid-message `—` → `--` (real separator).
+
+## Sabotage (docs analogue)
+
+No behaviour fix → no test (task is docs-only). Sabotage of fix 3: reverted
+the paragraph, re-ran the p4 probe (hardware@3, zero supersedes links,
+`status: superseded`): `WARNING ... status is 'superseded' but nothing
+supersedes it` — directly contradicts the reverted sentence. Restored the
+fix; git diff confirms the corrected text is back. The probe IS the test for
+a docs fix.
+
+## changelog
+
+No fragment: docs-only prose correction; no user-visible behaviour changed
+(changelog.d/README: fragments are for what a release contains — behavior
+changes/features).
+
+## Cross-page note (not fixed here)
+
+docs/concepts.md:57 repeats the pre-fix claim verbatim: "Declaring both ends
+is allowed but redundant." Task scope is links.md only; noted in PR body.
+
+## Checks
+
+- tests/test_docs_anchors.py, test_docs_examples.py, test_schema_doc_key.py,
+  test_standard_docs_complete.py, test_candidate_parts_doc.py: pass (post-fix
+  anchors/examples run: 8 passed; docs_complete 2 passed).
+- docs-site/gen_examples.py --check: rc=0 ("up to date" x2).
+- ruff check --select E9,F src tests: rc=0.
+- Full suite: see .scratch/suite.txt (counts in PR body).
+
+Status: DONE.
