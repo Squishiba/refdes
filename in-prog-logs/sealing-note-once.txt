@@ -185,3 +185,25 @@ besides the lock).
 No code changes (docstring prose only).
 Docs tests: test_docs_anchors/examples/standard_docs_complete/scaffold
 90 passed. gen_examples --check clean.
+
+--- FIX ROUND 5 (PR #238 reviews f1f1057 + eb9c2dc, minimal diff) ---
+
+(a) eb9c2dc #1: chmod test skip guard now also skips root, matching
+test_scaffold.py's shape (os.name == "nt" or geteuid() == 0) -- under
+root the 0o444/0o555 bits do nothing and the test silently stops
+pinning the round-3 regression.
+(b) eb9c2dc #2: refusal-test docstring rewritten to describe the setup
+(it produces the refusal on the FILE's bit inside a read-only dir --
+the file-bit path, refused by the old atomic writer too; the
+directory-bit difference is the success side, exercised by the
+writable tests). eb9c2dc #3: settled-counts docstring now says the
+overlay side is fresh-per-command (that is where freshness matters)
+and the plain control shares one tree, its build being a second run.
+(c) f1f1057 #1: fresh-clone sentence added to the cli-reference record
+row and design-log: record is gitignored, so a fresh clone (CI
+included) starts unannounced and prints on its first writable run.
+(d) f1f1057 #4: em-dash line starts fixed in the two named paragraphs
+of cli-reference.md (init-gitignore wrap reflowed so the dash ends a
+line; the serve-lock sentence's dash-chain closed with a period).
+Left: f1f1057 #2 (flagged for Jared), #3 (docs say add by hand), #5
+(historical log).

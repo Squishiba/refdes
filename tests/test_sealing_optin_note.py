@@ -163,14 +163,16 @@ def test_the_summary_and_exit_codes_are_identical_with_and_without(tmp_path, cap
     """The whole point of the note is that nothing else moves: same summary
     line, same exit code, from both commands, overlay or not.
 
-    Each side is measured on a *fresh* tree, on the first run of each
-    command: run-6a F10 made the note once-per-tree, so the run that carries
-    it is the run that first sees the overlay, and the settled-state measure
+    The overlay side is measured on a *fresh* tree per command — run-6a
+    F10 made the note once-per-tree, so the run that carries it has to be
+    the run that first sees the overlay, and the settled-state measure
     this test used to take (one run to absorb the one-time
     `.refdes/schema.json was older than refdes-schema.yaml` refresh, then
     measure) now measures the run *after* the note and sees only silence.
-    A fresh tree absorbs the schema.json refresh the same way -- the file
-    is created, not found stale -- so the summaries stay comparable.
+    The plain control shares one tree for both commands, so its `build`
+    is a second run — the side that can grow a note is the one that needs
+    the freshness, and a first run on any tree *creates* `.refdes/schema.json`
+    rather than finding it stale, so the summaries stay comparable.
     """
     cfg = _setup_in(tmp_path / "plain", BASE)
     before = {cmd: _run(capsys, cfg, cmd) for cmd in ("check", "build")}
@@ -269,17 +271,22 @@ def test_a_dry_run_build_does_not_consume_the_note(tmp_path, capsys):
     assert _notes(_run(capsys, cfg, "check")[1]) == []
 
 
-@pytest.mark.skipif(os.name == "nt", reason="chmod write-protection is POSIX")
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permission bits: chmod 0o444/0o555 stops Windows not at "
+    "all, and root ignores them, so the refused write cannot be produced",
+)
 def test_a_refused_record_write_costs_no_diagnostic(tmp_path, capsys):
     """The record is best-effort: a refused write of it changes no exit code
     and no `N errors, M warnings` count — exactly the note's own contract,
     and the regression round 3 caught: the atomic-rename version of this
-    write fired a counted WARNING on every run of a project whose `.refdes/`
-    directory is read-only, in precisely the state where the mirrored
-    `schema.json` refresh *succeeds* (an existing file only needs the file's
-    own write bit; a rename into the directory needs the directory's).
-    Silent skip, note prints, counts identical to the control project
-    without the overlay."""
+    write fired a counted WARNING on every run in this state. The refusal
+    here is produced on the record file's own write bit (0o444, inside a
+    read-only `.refdes/` directory) — the file-bit path, which the old
+    atomic writer refused too; the directory-bit difference that made
+    `textio.write_text` the chosen writer is the success side, exercised
+    by every writable test in this file. Silent skip, note prints, counts
+    identical to the control project without the overlay."""
     cfg = _setup(tmp_path, BASE + OPT_IN)
     _run(capsys, cfg, "check")  # writable run: the record lands, keys mint
     state = _state_file(tmp_path)

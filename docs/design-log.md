@@ -275,7 +275,10 @@ every invocation — and it consumes nothing, so the next writable run still
 prints it once; a read-only workflow that wants the confirmation passes
 `-v` (`--no-write check -v`), which always prints, on the run you asked for
 it. A project that never had an overlay prints nothing and grows no record,
-which is the state the rest of this section describes.
+which is the state the rest of this section describes. The record is
+per-checkout and gitignored, so a fresh clone — CI included — starts
+unannounced and prints the note on its first writable run: the quiet is per
+checkout, not per repository.
 
 The entries stay append-only in the authoring sense — a correction is still a
 new entry that `amends` the old one — but nothing is sealed any more:
