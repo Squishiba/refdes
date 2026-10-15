@@ -283,6 +283,98 @@ def test_an_unreadable_site_assets_file_is_refused_naming_the_asset(tmp_path):
     )
 
 
+@needs_chmod
+def test_a_referenced_unreadable_site_assets_file_is_gated_at_the_reference(tmp_path,
+                                                                              monkeypatch,
+                                                                              capsys):
+    """Review of #268: `collect_static_assets` registers a `site.assets:` file
+    before the render pass sees it, so the digest-path readability gate was
+    short-circuited for a *referenced* static file -- `refdes check` said
+    `0 errors`, the preview record marked the reference resolved, and the page
+    pointed at an asset publish would later refuse. The probe in
+    `_process_images` gates it at the reference like any other unreadable src
+    (which is also what makes `check` -- a command that renders, never
+    publishes -- see it). Sabotage: probe only when `dest is None`, and this
+    is the clean check again."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "![the board](/shots/board.png)\n")
+    shot = tmp_path / "shots" / "board.png"
+    (tmp_path / "shots").mkdir()
+    shot.write_bytes(PNG)
+    shot.chmod(0o000)
+    monkeypatch.chdir(tmp_path)
+    try:
+        status = cli_mod.main(["check"])
+    finally:
+        shot.chmod(0o644)
+
+    captured = capsys.readouterr()
+    report = captured.out + captured.err
+    assert status == 1, report
+    assert "cannot be read" in report
+    assert "shots/board.png" in report
+
+
+def test_a_file_that_vanishes_between_gate_and_open_is_a_missing_image(tmp_path,
+                                                                        monkeypatch):
+    """The resolution gate (`os.path.isfile`) and the digest open are separate
+    syscalls; a concurrent editor write, the serve poller, or a stale network
+    mount can delete the file in between, and claiming it "exists ... but
+    cannot be read. Make the file readable" is self-contradictory advice for
+    a file that is gone. `FileNotFoundError` from the open re-unifies with
+    the gate's own "does not exist" sentence; EACCES/EISDIR keep the
+    unreadable one. Sabotage: one bare `except OSError` for both, and the
+    race tells the user to chmod a file that no longer exists."""
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    _item(tmp_path, "![the board](items/ghost.png)\n")
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(
+        os.path, "isfile",
+        lambda p: True if str(p).endswith("ghost.png") else real_isfile(p),
+    )
+    build_mod.build(project)
+
+    failing = next(d for d in project.errors if "ghost.png" in d.message)
+    assert "does not exist" in failing.message, failing.message
+    assert "cannot be read" not in failing.message
+    (entry,) = project.image_results["DEC-A-001"]
+    assert entry["ok"] is False
+
+
+@needs_chmod
+def test_an_unwritable_site_out_is_still_builds_site_write_refusal(tmp_path,
+                                                                    monkeypatch,
+                                                                    capsys):
+    """Review of #268: the copy loop reads the project's own file *and* writes
+    the site, so its `except OSError` must not blame the asset for a
+    destination failure. A read-only `site.out` with all-readable sources is
+    `refdes build`'s own refusal -- names the site directory, exit 2, no
+    partial "site written to" -- exactly as docs/cli-reference.md promises.
+    Sabotage: report every copy OSError as the asset's fault, and the user
+    gets a site missing an asset plus advice to chmod the wrong file."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "No image referenced here.\n")
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "shots" / "board.png").write_bytes(PNG)
+    (tmp_path / "_site").mkdir()
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "_site").chmod(0o500)
+    try:
+        status = cli_mod.main(["build"])
+    finally:
+        (tmp_path / "_site").chmod(0o700)
+
+    captured = capsys.readouterr()
+    report = captured.out + captured.err
+    assert status == 2, report
+    assert "cannot write the site to" in report
+    assert "cannot be read" not in report
+    assert "site written to" not in report
+    assert "Traceback" not in report
+
+
 def test_a_multi_segment_path_is_never_searched(tmp_path):
     """`shots/board.png` was written as a specific location; a failing one stays
     a plain does-not-exist error rather than resolving by leaf name."""

@@ -2878,6 +2878,31 @@ def _process_images(
                 {"src": src, "ok": ok, "rel": rel, "dest": dest}
             )
 
+    def refused(exc: OSError, src: str, rel: str, match: re.Match) -> str:
+        # The resolution gate is `os.path.isfile`, and the open happens
+        # after it. A file that changes in between -- a concurrent editor
+        # write, the serve poller (see in-prog-logs/concurrent-editing-
+        # serve.txt), a network mount going stale -- makes the open raise
+        # FileNotFoundError, and claiming it "exists ... but cannot be
+        # read" is self-contradictory with the wrong remediation. That race
+        # re-unifies with the gate's own "does not exist" sentence;
+        # everything the open can still refuse for (EACCES, EISDIR, EIO)
+        # gets the unreadable refusal (IMAGE-ASSET-007).
+        if isinstance(exc, FileNotFoundError):
+            project.error(
+                f"image src {src!r} does not exist",
+                file=where_file, line=where_line, item_id=where_id,
+            )
+        else:
+            project.error(
+                f"image src {src!r} exists at {rel!r} but cannot be "
+                f"read: {exc.strerror or exc}. Make the file readable, "
+                f"or point the reference at a readable file",
+                file=where_file, line=where_line, item_id=where_id,
+            )
+        record(False, src)
+        return match.group(0)
+
     def swap(match: re.Match) -> str:
         prefix, attr, suffix = match.group(1), match.group(2), match.group(3)
         # Canonicalise first: the attribute carries markdown-it's escaped
@@ -2918,16 +2943,24 @@ def _process_images(
                 with open(full_path, "rb") as fh:
                     digest = hashlib.sha256(fh.read()).hexdigest()[:16]
             except OSError as exc:
-                project.error(
-                    f"image src {src!r} exists at {rel!r} but cannot be "
-                    f"read: {exc.strerror or exc}. Make the file readable, "
-                    f"or point the reference at a readable file",
-                    file=where_file, line=where_line, item_id=where_id,
-                )
-                record(False, src)
-                return match.group(0)
+                return refused(exc, src, rel, match)
             dest = _hashed_leaf(rel, digest)
             project.assets[rel] = dest
+        elif rel not in project.readable_probe:
+            # A file registered by `collect_static_assets` (a `site.assets:`
+            # directory) short-circuits the digest block above, so the
+            # readability gate there never sees it: a referenced mode-000
+            # asset recorded ok: True, `check` said 0 errors, and the
+            # published page pointed at a copy publish then refused
+            # (IMAGE-ASSET-007 review). Probe it here -- open and close,
+            # no content read -- so the reference carries the same named
+            # error as any other unreadable src; `readable_probe` keeps a
+            # heavily-referenced asset directory at one open per file.
+            try:
+                os.close(os.open(full_path, os.O_RDONLY))
+            except OSError as exc:
+                return refused(exc, src, rel, match)
+            project.readable_probe.add(rel)
         record(True, src, rel, dest)
         # Re-escape on the way out: the published page must carry the src in
         # the same spelling markdown-it's renderer emits, so a browser

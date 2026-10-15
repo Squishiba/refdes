@@ -82,3 +82,39 @@ PR https://github.com/Squishiba/refdes/pull/268 opened against main
 (base 3793ac9, #261 untouched). Full suite 3891 passed / 2 skipped.
 PROGRESS.md row for IMAGE-ASSET-007 updated. Not merged (no self-review by
 lane rules). Task complete.
+
+REVIEW ROUND (orchestrator covering Sol): review of #268 returned
+CHANGES REQUESTED. Rebased on origin/main (35c2304) -- clean.
+Findings and responses:
+1 (blocking, real): render.py's blanket `except OSError` swallowed
+   destination failures (unwritable site.out, ENOSPC) and blamed the asset
+   -- regression vs base for exactly the case the comment claimed to
+   preserve (docs/cli-reference.md:58). Fixed: `if exc.filename != src:
+   raise` -- source reads get the named per-asset error, every
+   destination-side OSError (makedirs outside the try, dest open, ENOSPC
+   in the copy loop which carries no filename, refused chmod naming dest)
+   reaches cli.py's exit-2 site-write refusal.
+2 (low-medium, real): a *referenced* site.assets file is registered by
+   collect_static_assets, so the digest-path gate was short-circuited:
+   check said 0 errors, record ok:True, page pointed at a refused copy.
+   Fixed: readability probe (open/close, no content read) on the
+   pre-registered reference path, cached in Project.readable_probe (new
+   field, model.py) so a heavily-referenced directory costs one open per
+   file.
+3 (low, real): the blanket OSError asserted "exists ... but cannot be
+   read" for a FileNotFoundError race between the isfile gate and the
+   open. Fixed: shared `refused()` helper -- FileNotFoundError re-unifies
+   with the gate's own "does not exist" sentence; EACCES/EISDIR/EIO keep
+   the unreadable one.
+4 (info): check's clean bill over an unreadable site.assets file -- the
+   referenced case is now caught by fix 2 (check renders); an
+   UNreferenced one stays build-time-only (check publishes nothing, so it
+   cannot see the copy) -- docs/markdown.md reworded to match.
+5 (info): changelog "preview record marks the reference failed" was true
+   only for the digest path -- fix 2 makes it true for every referenced
+   file; changelog and docs wording extended.
+New tests (red at 9d47275 per the review's reproductions, green here):
+referenced-static gated at check exit 1; vanished-between-gate-and-open
+gets "does not exist"; read-only site.out keeps build's exit-2 refusal
+naming the site dir.
+Targeted: 188 passed. Scoped ruff: identical to pre-fix head.

@@ -1045,6 +1045,12 @@ class Project:
     # so the preview decorator (docs/design/thread-workbench.md W2) reads
     # this instead of re-running the asset search.
     image_results: dict[str, list[dict]] = field(default_factory=dict)
+    # Paths whose readability this build's `_process_images` pass has
+    # already probed at a `site.assets:`-registered reference
+    # (IMAGE-ASSET-007): the digest pass caches by `assets` registration,
+    # static files need their own probe cache so a heavily-referenced
+    # asset directory costs one open per file, not one per reference.
+    readable_probe: set[str] = field(default_factory=set)
     # `site.theme:` -- the built-in theme this project selects -- and
     # `site.tokens:`, its own token overrides merged over that theme. Both are
     # validated at load by theme.py; `render_site` turns the merged overrides

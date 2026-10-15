@@ -12,4 +12,6 @@
   `refdes build`'s "cannot write the site to _site" refusal, which names the
   output directory and sends the user to make it writable; the copy now
   names the asset and its reason, publishes the rest of the site, and leaves
-  that file out.
+  that file out. A `site.assets:` file that *is* referenced gets the same
+  gate at the reference, where the record is marked failed and `check` (which
+  renders, never publishes) sees it too.
