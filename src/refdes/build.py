@@ -3380,6 +3380,13 @@ def collect_static_assets(project: Project) -> None:
     (IMAGE-ASSET-006) is refused rather than copied -- publishing it would
     ship bytes the repository does not contain -- with a warning naming the
     escaped entry, since silence would read as a working asset directory.
+
+    A file that cannot be read (IMAGE-ASSET-007) is likewise refused at
+    registration, not discovered at publish: `refdes check` renders and
+    publishes nothing, so a copy-time-only refusal would leave the whole
+    `site.assets:` layout passing check clean. An unregistered file has no
+    publish attempt to fail; one that an `<img>` references falls to the
+    reference gate in `_process_images`, which gates it at the reference.
     """
     root_real = os.path.realpath(project.root)
     for rel_dir in project.asset_dirs:
@@ -3397,6 +3404,23 @@ def collect_static_assets(project: Project) -> None:
             project.warn(
                 f"site.assets file {rel!r} resolves outside the project root "
                 "(via a symlink?) and is not published",
+                file="refdes-project.yaml",
+            )
+            continue
+        # Open-and-close, no content read: the same probe posture
+        # `_process_images` uses at a reference. A file that vanished between
+        # the walk and here (the usual concurrent-editing race) is silently
+        # dropped -- there is nothing to publish, and a reference to it hits
+        # the reference gate's own "does not exist" sentence.
+        try:
+            os.close(os.open(os.path.join(project.root, *rel.split("/")), os.O_RDONLY))
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            project.error(
+                f"site.assets file {rel!r} cannot be read: {exc.strerror or exc}. "
+                "Make it readable, or remove it from the site.assets: "
+                "directory -- it is not published",
                 file="refdes-project.yaml",
             )
             continue

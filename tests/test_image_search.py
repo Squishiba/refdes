@@ -8,8 +8,10 @@ is an error at the reference site, never a silent first-match pick.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
+import shutil
 
 import pytest
 from conftest import write_project_config
@@ -251,14 +253,15 @@ def test_check_reports_the_unreadable_image_and_exits_1(tmp_path, monkeypatch, c
 @needs_chmod
 def test_an_unreadable_site_assets_file_is_refused_naming_the_asset(tmp_path):
     """The bulk-copy half (the resweep probe's own layout): a mode-000 file in a
-    declared `site.assets:` directory is registered by `collect_static_assets`
-    without any reference gating it, and `shutil.copy2`'s `PermissionError`
-    escaped `render_site` into `refdes build`'s "cannot write the site to
-    _site" refusal -- which names the *output* directory and tells the user
-    to make it writable, sending them to chmod the wrong thing. The copy now
-    names the asset and the OS's reason, publishes the rest of the site, and
-    leaves that file out of it. Sabotage: swallow the OSError silently -- the
-    asset vanishes from the published site with a clean build."""
+    declared `site.assets:` directory used to escape `render_site` into
+    `refdes build`'s "cannot write the site to _site" refusal -- which names
+    the *output* directory and tells the user to make it writable, sending
+    them to chmod the wrong thing. The refusal happens at registration
+    (IMAGE-ASSET-007 review, F2): the file is named during `build`, before
+    any render, so even the render-only commands see it; publish simply has
+    nothing to copy. The site publishes around it. Sabotage: swallow the
+    OSError silently -- the asset vanishes from the published site with a
+    clean build."""
     write_project_config(tmp_path, _config("shots"))
     _item(tmp_path, "No image referenced here.\n")
     (tmp_path / "shots").mkdir()
@@ -267,20 +270,48 @@ def test_an_unreadable_site_assets_file_is_refused_naming_the_asset(tmp_path):
     shot.chmod(0o000)
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
-    build_mod.build(project)
-    assert not project.errors, project.errors  # collect registers; copy reads
     try:
-        out = render_mod.render_site(project)
+        build_mod.build(project)
     finally:
         shot.chmod(0o644)
 
     failing = next(d for d in project.errors if "board.png" in d.message)
     assert "cannot be read" in failing.message, failing.message
     assert "Permission denied" in failing.message
+    out = render_mod.render_site(project)
     assert not os.path.isfile(os.path.join(out, "assets", "shots", "board.png"))
     assert os.path.isfile(os.path.join(out, "assets", "style.css")), (
         "the rest of the site publishes"
     )
+
+
+@needs_chmod
+def test_check_reports_an_unreferenced_unreadable_site_assets_file(tmp_path,
+                                                                    monkeypatch,
+                                                                    capsys):
+    """F2: `refdes check` renders, publishes nothing -- a copy-time-only
+    refusal left the resweep probe's own layout (`site.assets:` file, mode
+    000, no `<img>` gating it) passing `check` clean, exit 0. The
+    readability probe lives in `collect_static_assets` now: `check` names
+    the file and exits 1. Sabotage: move the probe into
+    `_copy_project_assets` and this is the clean `check` again."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "No image referenced here.\n")
+    (tmp_path / "shots").mkdir()
+    shot = tmp_path / "shots" / "board.png"
+    shot.write_bytes(PNG)
+    shot.chmod(0o000)
+    monkeypatch.chdir(tmp_path)
+    try:
+        status = cli_mod.main(["check"])
+    finally:
+        shot.chmod(0o644)
+
+    captured = capsys.readouterr()
+    report = captured.out + captured.err
+    assert status == 1, report
+    assert "board.png" in report
+    assert "cannot be read" in report
 
 
 @needs_chmod
@@ -313,6 +344,36 @@ def test_a_referenced_unreadable_site_assets_file_is_gated_at_the_reference(tmp_
     assert status == 1, report
     assert "cannot be read" in report
     assert "shots/board.png" in report
+
+
+@needs_chmod
+def test_an_unreadable_referenced_site_assets_file_records_the_reference_failed(tmp_path):
+    """F3: the preview decorator reads `image_results`, and the
+    `collect_static_assets` registration short-circuits the digest-path
+    gate -- a referenced mode-000 static file used to record `ok: True`,
+    so the preview showed a resolved image pointing at an asset publish
+    would refuse. With the unreadable file refused at registration it is
+    never registered, the reference takes the digest path, its open fails,
+    and the record says `ok: False` with the reference-level sentence --
+    exactly like the src-next-to-the-item case."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "![the board](/shots/board.png)\n")
+    (tmp_path / "shots").mkdir()
+    shot = tmp_path / "shots" / "board.png"
+    shot.write_bytes(PNG)
+    shot.chmod(0o000)
+    try:
+        project = _load(tmp_path)
+    finally:
+        shot.chmod(0o644)
+
+    (entry,) = project.image_results["DEC-A-001"]
+    assert entry["ok"] is False and entry["src"] == "/shots/board.png"
+    failing = next(d for d in project.errors if "/shots/board.png" in d.message)
+    assert "cannot be read" in failing.message, failing.message
+    assert failing.item_id == "DEC-A-001"
+    html = project.item_by_id("DEC-A-001").body_html
+    assert 'src="/shots/board.png"' in html  # unrewritten, as for any failed src
 
 
 def test_a_file_that_vanishes_between_gate_and_open_is_a_missing_image(tmp_path,
@@ -373,6 +434,119 @@ def test_an_unwritable_site_out_is_still_builds_site_write_refusal(tmp_path,
     assert "cannot be read" not in report
     assert "site written to" not in report
     assert "Traceback" not in report
+
+
+def _copy2_raiser_for(target: str, exc: OSError):
+    """`shutil.copy2` that raises only for the named source; the template's
+    own copytree is unaffected (it bound the real `copy2` as its default
+    argument). The raised OSError carries no `filename`, like every OSError
+    from the copy loop's raw read/write -- which is exactly the case the
+    errno split in `render._copy_source_refused` exists for (F1)."""
+    real = shutil.copy2
+
+    def raiser(src, dst, *args, **kwargs):
+        if str(src).endswith(target):
+            raise exc
+        return real(src, dst, *args, **kwargs)
+
+    return raiser
+
+
+def test_a_full_destination_in_the_copy_loop_refuses_as_a_site_write(tmp_path,
+                                                                      monkeypatch,
+                                                                      capsys):
+    """F1, destination half: ENOSPC lands mid-copy, on `fdst.write()`, with
+    no filename on the OSError. At the PR's first shape a blanket
+    `except OSError` blamed the asset; the naive `filename != src` split
+    sends the source-side read failures to the site-write message -- the
+    same wrong-file bug, mirrored. A write-only errno is the destination:
+    `refdes build` keeps its exit-2 "cannot write the site to <dir>"
+    refusal naming the site directory, exactly as docs/cli-reference.md
+    promises."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "No image referenced here.\n")
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "shots" / "board.png").write_bytes(PNG)
+    monkeypatch.setattr(
+        shutil, "copy2",
+        _copy2_raiser_for("board.png", OSError(errno.ENOSPC, "No space left on device")),
+    )
+    monkeypatch.chdir(tmp_path)
+    status = cli_mod.main(["build"])
+
+    captured = capsys.readouterr()
+    report = captured.out + captured.err
+    assert status == 2, report
+    assert "cannot write the site to" in report
+    assert "No space left" in report
+    assert "cannot be read" not in report
+    assert "Traceback" not in report
+
+
+def test_a_source_read_failure_in_the_copy_loop_blames_the_asset(tmp_path,
+                                                                  monkeypatch,
+                                                                  capsys):
+    """F1, source half: a failing `fsrc.read()` mid-copy (EIO on the device,
+    say) is a *source* problem with no filename on the OSError, and the
+    naive `filename != src` split hands it to cli.py's "cannot write the
+    site" refusal -- sending the user to chmod their output directory for
+    an unreadable project file. The errno split names the asset, the rest
+    of the site publishes, and the run exits 1 on its diagnostics, not as a
+    site-write refusal."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "No image referenced here.\n")
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "shots" / "board.png").write_bytes(PNG)
+    monkeypatch.setattr(
+        shutil, "copy2",
+        _copy2_raiser_for("board.png", OSError(errno.EIO, "I/O error")),
+    )
+    monkeypatch.chdir(tmp_path)
+    status = cli_mod.main(["build"])
+
+    captured = capsys.readouterr()
+    report = captured.out + captured.err
+    assert status == 1, report
+    assert "board.png" in report
+    assert "cannot be read" in report
+    assert "I/O error" in report
+    assert "cannot write the site" not in report
+
+
+def test_an_unreadable_datasheet_copy_names_the_datasheet_not_the_site_out(tmp_path,
+                                                                             monkeypatch):
+    """F4: `_copy_datasheet_assets` copies from `.refdes/copies/<sha>` with
+    the same read-the-source/write-the-destination shape as
+    `_copy_project_assets` and its `copy2` was unwrapped -- an unreadable
+    cached PDF escaped to the same misleading site-write refusal. Same
+    split, same helper: the datasheet is named and the build proceeds; a
+    destination-side OSError still propagates to `cli.py`.
+    (render.py's own site-write refusal, exit 2, names the site directory.)"""
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    _item(tmp_path, "No image referenced here.\n")
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    cache = tmp_path / ".refdes" / "copies"
+    cache.mkdir(parents=True)
+    (cache / "deadbeef.pdf").write_bytes(b"%PDF-1.4\n")
+    project.datasheet_assets = {"datasheets/deadbeef.pdf": str(cache / "deadbeef.pdf")}
+
+    monkeypatch.setattr(
+        shutil, "copy2",
+        _copy2_raiser_for("deadbeef.pdf", OSError(errno.EIO, "I/O error")),
+    )
+    render_mod._copy_datasheet_assets(project, str(tmp_path / "site1"), set())
+    failing = next(d for d in project.errors if "deadbeef.pdf" in d.message)
+    assert "published datasheet" in failing.message, failing.message
+    assert "cannot be read" in failing.message
+
+    monkeypatch.setattr(
+        shutil, "copy2",
+        _copy2_raiser_for("deadbeef.pdf", OSError(errno.ENOSPC, "No space left on device")),
+    )
+    with pytest.raises(OSError) as excinfo:
+        render_mod._copy_datasheet_assets(project, str(tmp_path / "site2"), set())
+    assert excinfo.value.errno == errno.ENOSPC
 
 
 def test_a_multi_segment_path_is_never_searched(tmp_path):

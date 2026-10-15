@@ -140,11 +140,10 @@ with its own sentence naming the file and the OS's reason:
 ERROR items/log/dec-001.md:2 [LOG-001] — image src 'figures/locked.png' exists at 'items/log/figures/locked.png' but cannot be read: Permission denied. Make the file readable, or point the reference at a readable file
 ```
 
-A mode-000 file inside a `site.assets:` directory is gated where the build
-first touches it: a **referenced** one gets the same treatment as above (so
-`refdes check` catches it), and a file with no reference to gate it gets the
-same refusal at publish time — the build names the asset, publishes the
-rest of the site, and leaves that file out.
+A mode-000 file inside a `site.assets:` directory is refused **at
+registration**: `refdes check` names the file and the build publishes the
+rest of the site, leaving that file out. A referenced one additionally gets
+the reference-level error above, at the `<img>` that points at it.
 
 ### A bare filename, found on the search path
 

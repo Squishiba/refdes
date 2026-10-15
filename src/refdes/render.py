@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -836,6 +837,26 @@ def _asset_file_list(asset_dir: str) -> list[str]:
     return out
 
 
+def _copy_source_refused(exc: OSError, src: str, dest: str) -> bool:
+    """Whether a `shutil.copy2` OSError means the *source* refused (True --
+    name the asset) or the *destination* did (False -- cli.py's exit-2
+    "cannot write the site" refusal owns it; sending the user to chmod the
+    project file for a full disk is the same wrong-file bug this whole pass
+    exists to kill, in the other direction).
+
+    `shutil` names the file it was working on: opening/stat'ing the source
+    carries `src`, opening the destination and `copystat`'s chmod carry
+    `dest`. The copy loop's read and write do not (the OSError comes from
+    the raw fd operation), so a filename-less OSError is split by errno:
+    ENOSPC/EDQUOT/EFBIG/EROFS can only come from a write, everything that
+    can come from a read -- EIO, EBADF, EFAULT -- is treated as the source.
+    (IMAGE-ASSET-007 review, F1.)
+    """
+    if exc.filename is not None:
+        return exc.filename == src
+    return exc.errno not in {errno.ENOSPC, errno.EDQUOT, errno.EFBIG, errno.EROFS}
+
+
 def _copy_project_assets(
     project: Project, out_dir: str, written: set[str], taskpane_enabled: bool = False
 ) -> None:
@@ -885,7 +906,7 @@ def _copy_project_assets(
         try:
             shutil.copy2(src, dest)
         except OSError as exc:
-            if exc.filename != src:
+            if not _copy_source_refused(exc, src, dest):
                 raise  # destination-side: cli.py's "cannot write the site" owns it
             project.error(
                 f"asset {rel!r} cannot be read: {exc.strerror or exc}. Make "
@@ -918,7 +939,21 @@ def _copy_datasheet_assets(project: Project, out_dir: str, written: set[str]) ->
             continue  # already reported as cache_missing when the citation was resolved
         dest = os.path.join(asset_out, *rel.split("/"))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        shutil.copy2(src, dest)
+        # Same split as `_copy_project_assets` (IMAGE-ASSET-007 review, F4):
+        # the source is `.refdes/copies/<sha>`, and an unreadable cached PDF
+        # escaping to `cli.py`'s site-write refusal would send the user to
+        # chmod their output directory for a cache-file problem.
+        try:
+            shutil.copy2(src, dest)
+        except OSError as exc:
+            if not _copy_source_refused(exc, src, dest):
+                raise  # destination-side: cli.py's "cannot write the site" owns it
+            project.error(
+                f"published datasheet {rel!r} cannot be read: "
+                f"{exc.strerror or exc}. Refetch the citation, or make the "
+                f"cache entry readable -- this build does not publish it"
+            )
+            continue
         written.add(target)
 
 

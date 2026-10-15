@@ -118,3 +118,38 @@ referenced-static gated at check exit 1; vanished-between-gate-and-open
 gets "does not exist"; read-only site.out keeps build's exit-2 refusal
 naming the site dir.
 Targeted: 188 passed. Scoped ruff: identical to pre-fix head.
+
+REVIEW ROUND 2 (orchestrator covering Sol): second review (257e04ab) =
+CHANGES REQUESTED on head 33207ce. origin/main unchanged (35c2304); branch
+already on top, rebase no-op.
+F1 (real): the copy loop's raw read/write OSErrors carry no filename, so
+   the round-1 `exc.filename != src` split sent source-side read failures
+   (EIO mid-read) to cli.py's site-write refusal -- the same wrong-file
+   bug mirrored. Fixed: render._copy_source_refused(exc, src, dest) --
+   filename==src is source; filename==dest is destination; filename None
+   splits by errno (ENOSPC/EDQUOT/EFBIG/EROFS = write-only = destination,
+   read-capable = source). Tests for each half (monkeypatched copy2 raising
+   the real copy-loop shapes: ENOSPC -> exit 2 site-write refusal naming the
+   dir; EIO -> exit 1 naming the asset, site publishes around it).
+F2 (real): check still passed clean over an UNreferenced unreadable
+   site.assets: file (it renders, publishes nothing -- copy-time refusal
+   invisible). Fixed: readability probe moved to collect_static_assets
+   registration: open/close per file, FileNotFoundError (walk->probe race)
+   silently dropped, other OSError = named build error naming the file
+   (file=refdes-project.yaml, same convention as the confinement warns),
+   file NOT registered -> publish has nothing to copy. check exit 1 now.
+   Existing bulk-copy test updated (build reports, not render).
+F3 (real at review-time head): record ok:True for a referenced unreadable
+   site.assets file -- with the registration refusal the file is
+   unregistered, the reference falls to the digest path, its open fails,
+   record(ok:False) + reference sentence. Build-level test asserts the
+   record, item id, unrewritten reference.
+F4 (adjacent class, small wrap done): _copy_datasheet_assets' unwrapped
+   copy2 -- same escape to the site-write refusal from .refdes/copies/.
+   Same helper, names the datasheet, destination-side raises to cli.py.
+   Unit test both directions via the raiser.
+F5: informational (full-suite PYTHONPATH, CI windows pending), no action.
+Docs/changelog reworded: registration refusal semantics.
+Targeted 193 passed; full suite 3928 passed / 2 skipped; scoped ruff
+identical to baseline (5 pre-existing findings, render.py:115 = line shift
+from the errno import).
