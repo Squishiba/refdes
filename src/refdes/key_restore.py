@@ -8,7 +8,10 @@ Where a stamped baseline remembers the key, it also says what the key
 belonged to, and that record outranks the label: restoring a key onto an item
 the record does not describe is refused (`_baseline_content_conflict`) rather
 than accepted, because the move silently re-points every reference that names
-the key while leaving a clean build. `--force` is the override.
+the key while leaving a clean build. `--force` is the override. The
+comparison runs on the proposed post-restore project, so a batch restoring a
+linked pair judges the owner's hash with the target's key already restored --
+not with the pre-restore `!nokey:` sentinel standing in for it.
 """
 
 from __future__ import annotations
@@ -143,11 +146,6 @@ def apply(
     config_path = os.path.join(project_root, schema.PROJECT_SETTINGS_NAME)
     try:
         project = loader.load_readonly(config_path)
-        # `keys.hash_in_format` compares a stored baseline hash against
-        # `item.content_hash` for the current format, and `load_readonly` does
-        # not compute hashes. `keys adopt` does the same before it compares
-        # stored hashes.
-        build_mod.compute_hashes(project)
         selected = []
         seen_ids: set[str] = set()
         seen_keys: set[str] = set()
@@ -179,10 +177,6 @@ def apply(
                         f"{display}'s current key {item.key!r} is recorded in {record}; "
                         "restoring another key would orphan that history"
                     )
-                if not force:
-                    conflict = _baseline_content_conflict(project, item, key)
-                    if conflict:
-                        raise ValueError(conflict)
             selected.append((item, key))
 
         originals: dict[str, str] = {}
@@ -212,6 +206,26 @@ def apply(
                 ]
                 + [str(d) for d in blocking],
             )
+        # The baseline comparison runs on the candidate -- the project as it
+        # would be *after* the restore -- not on the live pre-restore project.
+        # An item's content hash includes its links' resolved target keys, so
+        # in a batch restoring a linked pair, hashing the owner pre-restore
+        # sees the target keyless (the `!nokey:`/`!unresolved:` sentinel) and
+        # a genuine same-item restore looks like moved content. The candidate
+        # is the state the user is being asked to approve; judging its hashes
+        # against the record is the honest comparison. `keys.hash_in_format`
+        # compares a stored baseline hash against `item.content_hash` for the
+        # current format, and `load_readonly` does not compute hashes;
+        # `keys adopt` does the same before it compares stored hashes.
+        if not force:
+            build_mod.compute_hashes(candidate)
+            for item, key in selected:
+                if item.key == key:
+                    continue
+                restored = candidate.item_by_id(item.id)
+                conflict = _baseline_content_conflict(candidate, restored, key)
+                if conflict:
+                    raise ValueError(conflict)
         rewrites = [
             revise.FileRewrite(
                 path=path,
