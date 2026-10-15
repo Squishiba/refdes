@@ -162,3 +162,26 @@ Finding 5: main's lock gate now uses _writes_allowed(args) (was verbatim
 duplicate).
 Finding 6: design-log "A project with no overlay" -> "A project that
 never had an overlay" (a removal leaves {"opted_in": []} behind).
+
+--- FIX ROUND 4 (PR #238 review, agent cac6226, docs only) ---
+
+Finding 1 (MEDIUM): cli-reference.md record row said the refused write is
+"silent (best-effort, like schema.json's)" -- FALSE comparison:
+schema_json.write_schema's refusal IS a counted warning
+(schema_json.py:454-459). Now says plainly: unlike schema.json's, this
+record's refusal adds no warning (the note's no-count contract). Checked
+the cli.py docstring: it compared only the WRITER and where it succeeds
+(both true, no silence claim), but added the explicit
+writer-shared/refusal-posture-not sentence so it can't be misread.
+Finding 2 (LOW): standard-library.md init-gitignore list omitted
+.refdes-write.lock -- now "the four gitignored paths" matching
+getting-started.md ("five paths") and cli-reference.md ("four gitignored
+paths ... with .vscode/settings.json"). Grepped docs/ for other copies:
+cli-reference.md:1133 (complete), getting-started.md:75-83 (complete),
+markdown.md/standard-library.md single-path mentions (fine), and found
+one stale count: cli-reference.md:2136 "the other two generated files"
+-> "the other generated files" (three gitignored generated files now
+besides the lock).
+No code changes (docstring prose only).
+Docs tests: test_docs_anchors/examples/standard_docs_complete/scaffold
+90 passed. gen_examples --check clean.

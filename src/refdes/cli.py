@@ -258,12 +258,14 @@ def _record_sealing_optins(project: Project, names: list[str]) -> None:
     """Write the announcement state. Best-effort, and silent about a
     refusal: the note's own contract is that this condition changes no exit
     code and no `N errors, M warnings` count, so a refused record adds no
-    diagnostic — the only cost is the note printing again next run. Written
-    with `textio.write_text`, the same writer `schema_json.write_schema`
-    uses for `.refdes/schema.json`, so it succeeds wherever the
+    diagnostic — the only cost is the note printing again next run.
+    `schema_json.write_schema` refuses *loudly* (a counted warning: its
+    staleness trip-wire has to know whether the refresh landed), so what is
+    shared with it is the writer, not the refusal posture — the writer is
+    `textio.write_text`, chosen for where it succeeds: wherever the
     schema.json refresh does — a read-only `.refdes/` directory with
     writable files included, where an atomic rename into the directory
-    would not (PR #238 review round 3)."""
+    would not (PR #238 review rounds 3-4)."""
     path = _sealing_optin_state_path(project)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)

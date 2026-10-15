@@ -319,8 +319,9 @@ Writes a minimal `refdes-project.yaml` in the current directory — `site:`,
 standard doesn't get one — plus `.vscode/settings.json` wiring up schema
 completion for `items/**/*.yaml` (see [editor
 support](#editor-support-json-schema-emission) below), and a `.gitignore`
-covering that settings file plus `.refdes/copies/`, `.refdes/schema.json` and
-`.refdes/sealing-optin.json`.
+covering that settings file plus the four gitignored paths —
+`.refdes/copies/`, `.refdes/schema.json`, `.refdes/sealing-optin.json` and
+`.refdes-write.lock`.
 
 ```bash
 refdes init                            # hardware@<latest>, no presets
