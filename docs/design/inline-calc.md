@@ -85,27 +85,39 @@ says so explicitly; otherwise it builds on them.
 
 ### 3.1 The ambiguity we have to solve
 
-Prose already contains `=` (`x = 5 in the datasheet`). The design must say how
-an evaluable expression is told apart from ordinary text, and it must leave
-ordinary code spans such as `Rtop/Rbot` or `foo()` completely untouched.
+Prose already contains `=` (`x = 5 in the datasheet`). Existing documentation
+also contains many single-backtick code spans of the form `NAME = value`, e.g.
+`docs/math.md` uses `` `V_in = LOG-PWR-001.V_in | mV` ``, `docs/design/backlog.md`
+uses `` `V_cl = 0.8 V` `` and `` `CLR = 3.3 kohm` ``, and `docs/design/editor-image-upload.md`
+uses `` `MAX_BODY_BYTES = 1 MiB` ``. A trigger rule that fires on any `NAME = value`
+code span would misclassify all of these as inline math.
+
+I checked every single-backtick span in `docs/` and `tests/` that matches
+`NAME = value`. The count is **57 spans in `docs/` and 0 in `tests/`**. None of
+them contain `:=`, and none of them should be evaluated. Requiring `:=` is
+therefore the safest trigger.
 
 **Trigger rule (recommended).** A single backtick code span is interpreted as
-inline math only when its content matches the grammar in §3.2. In particular the
-content must contain either `:=` (a definition or solve) or a trailing
-`= <quantity>` (a stored result). A code span like `Rtop/Rbot` or `foo()` does
-not match, so it is rendered as plain code and never evaluated.
+inline math only when its content contains `:=` and matches the grammar in §3.2.
+Ordinary spans like `Rtop/Rbot`, `foo()`, `V_cl = 0.8 V`, and
+`MAX_BODY_BYTES = 1 MiB` are untouched.
 
-**Alternative trigger rule.** Require an explicit marker at the start of the
-span, such as `` `= 0.8 V * (1 + Rtop/Rbot) = 4.436 V` `` or
-`` `:= Vout = 0.8 V * (1 + Rtop/Rbot) = 4.436 V` ``. This makes the trigger even
-more visible, at the cost of extra noise in every span. See Q1.
+**Alternative trigger rules.**
+- (b) Explicit opt-in per item, e.g. a field `inline_calc: true` in item front
+  matter. This is safe but adds friction; it is a fallback if the recommended
+  rule ever proves too aggressive.
+- (c) Mandatory leading marker at the start of the span, such as
+  `` `= 0.8 V * (1 + Rtop/Rbot) = 4.436 V` `` or
+  `` `:= Vout = 0.8 V * (1 + Rtop/Rbot) = 4.436 V` ``. This is unambiguous but
+  noisier than `:=` and does not remove the ambiguity for `NAME = value` spans
+  unless the marker is required.
 
 ### 3.2 Grammar
 
 A single backtick span is one of:
 
 ```text
-basic       = [ name " := " ] expression [ " = " result ]
+basic       = name " := " expression [ " = " result ]
 solve       = name " := " solve-result " where " expression " = " target
               [ " from " quantity " to " quantity ]
 multi-out   = name-list " := " call " = " result-list
@@ -114,24 +126,24 @@ name          = calc assignment name  ([A-Za-z_][A-Za-z0-9_]*)
 name-list     = name *(", " name)
 expression    = any existing calc expression
 call          = equation-name "(" [ expression *(", " expression) ] ")"
-result        = quantity with unit, e.g. 4.436 V
+result        = calc quantity literal (may be dimensionless)
 result-list   = result *(", " result)
 solve-result  = "?" | quantity
-target        = quantity with unit
+target        = calc quantity literal with unit
 quantity      = calc quantity literal
 ```
 
 Rules:
 
-- `:=` **defines** one or more names in the item's calc scope. Without it, the
-  span is an anonymous evaluation.
+- `:=` **defines** one or more names in the item's calc scope. Every evaluable
+  inline span must contain `:=`; without it, the span is ordinary code.
 - In **basic** and **multi-out** spans, the **stored result** is the value after
   the **last** ` = `.
 - In a **solve** span, the stored result is the `solve-result` before `where`.
   It is `?` before solving and a quantity after the fill command writes the root.
-- A span without a stored result is either a plain code span or a definition/
-  solve with no stored value yet; the build warns and the fill command can add
-  the result.
+- A span that matches the grammar but has no stored result (basic without
+  `= result`) is verified as a definition; the build warns that the result is
+  missing and the fill command can add one.
 - Any code span whose content does **not** match this grammar is treated as an
   ordinary inline code span.
 
@@ -139,13 +151,13 @@ Examples (every one parses under the grammar above):
 
 ```markdown
 `Vout := 0.8 V * (1 + Rtop/Rbot) = 4.436 V`       # basic, defines Vout
-`0.8 V * (1 + Rtop/Rbot) = 4.436 V`                # basic, anonymous
 `I_load := 1.2 A`                                  # basic, no stored result
 `Rbot := ? where Vout = 3.3 V from 1 kohm to 1 Mohm`   # solve, unsolved
 `Rbot := 3.2 kohm where Vout = 3.3 V from 1 kohm to 1 Mohm`  # solve, solved
 `Vout, ratio := divider(0.8 V, 10 kohm, 2.2 kohm) = 4.436 V, 4.545`  # multi-out
 `Rtop/Rbot`                                        # ordinary code span
 `foo()`                                            # ordinary code span
+`V_cl = 0.8 V`                                     # ordinary code span (no :=)
 ```
 
 Why a code span works:
@@ -168,6 +180,7 @@ Why a code span works:
 
 The recommended code-span shape is kept because it stores the result in the
 file text, is visually distinct from prose, and needs no new Markdown construct.
+The `:=` trigger makes it unambiguous with existing `NAME = value` code spans.
 
 ## 4. Stored-result format and verification
 
@@ -373,16 +386,29 @@ Rbot = Rtop / (Vout/Vref - 1)
      = 3.200 kohm
 ```
 
-Nearest standard values and the resulting Vout:
+The exact answer, 3.200 kohm, is exactly halfway between two E96 values: 3.16
+kohm and 3.24 kohm (both are 0.04 kohm away). The two candidates give:
 
 ```
-Rbot = 3.30 kohm  ->  Vout = 0.8 V * (1 + 10 kohm / 3.30 kohm) = 3.224 V  (nearest E24)
-Rbot = 3.16 kohm  ->  Vout = 0.8 V * (1 + 10 kohm / 3.16 kohm) = 3.332 V  (nearest E96)
+Rbot = 3.16 kohm  ->  Vout = 0.8 V * (1 + 10 kohm / 3.16 kohm) = 3.332 V
+Rbot = 3.24 kohm  ->  Vout = 0.8 V * (1 + 10 kohm / 3.24 kohm) = 3.269 V
 ```
 
-These are suggestions; accepting one replaces the solved value in the source
-with the chosen E-series value and recomputes the resulting Vout. Symbolic solve
-stays out of scope, matching the existing limitation in `docs/math.md:498`.
+For a 3.3 V supply rail, undershoot is usually the unsafe direction, so the
+tie-break rule is: **prefer the standard value whose resulting Vout is not below
+the target**. In this case that is 3.16 kohm. The tool still shows both
+candidates; the author can pick the other one if the application cares more
+about overshoot.
+
+For comparison, the nearest E24 value is 3.3 kohm:
+
+```
+Rbot = 3.30 kohm  ->  Vout = 0.8 V * (1 + 10 kohm / 3.30 kohm) = 3.224 V
+```
+
+Accepting a suggested value replaces the solved value in the source with the
+chosen standard value and recomputes the resulting Vout. Symbolic solve stays
+out of scope, matching the existing limitation in `docs/math.md:498`.
 
 ## 8. Reusable calculators
 
@@ -459,10 +485,26 @@ The same citation ownership and lockfile rules apply
 A calculator call in an inline span can define one or more names. Calls are
 positional, in the order declared by the calculator's `inputs:`. Inputs with a
 `default:` may be omitted only from the end; you cannot skip a positional
-argument in the middle:
+argument in the middle.
 
 ```markdown
 `Vout, ratio := divider(0.8 V, 10 kohm, 2.2 kohm) = 4.436 V, 4.545`
+```
+
+In this example `Vref` has a default, but because it is the first input, the
+full call must provide it. To use the default, reorder the calculator's inputs
+so that `Vref` is last:
+
+```yaml
+equations:
+  divider:
+    inputs:
+      Rtop: {}
+      Rbot: {}
+      Vref: { default: 0.8 V }
+```
+
+```markdown
 `Vout, ratio := divider(10 kohm, 2.2 kohm) = 4.436 V, 4.545`   # Vref uses default
 ```
 
@@ -517,7 +559,7 @@ line before saving.
 | Existing piece | Interaction |
 |---|---|
 | ```` ```calc ```` fences | Stay unchanged. Inline spans and blocks share the same per-item env and are evaluated in source order (`docs/math.md:30-32`). |
-| `{{name}}` prose references | Can reference names defined inline, because they read the same `item.calc_values` / `_env` (`src/refdes/build.py:3095-3121`). |
+| `{{name}}` prose references | Can reference names defined inline, because they read the same `item.calc_values` / `_env` (`src/refdes/build.py:3091-3121`). |
 | Per-item variable scope | An inline `:=` and a block assignment of the same name is the ordinary `assigned twice` error (`src/refdes/calc.py:1301-1319`; `origins`). |
 | Named calc blocks | Inline spans are not blocks and have no block name. They can appear before or after named blocks. |
 | `source()` / calc-sources | Valid inside inline expressions; same-item citation rule and lockfile pinning unchanged (`docs/design/calc-sources.md:1-34, §5`). |
@@ -539,11 +581,23 @@ dependencies are answered.
 
 **Q1 -- Trigger rule for inline math.** What tells the build to treat a code
 span as inline math rather than an ordinary code span?
-- (a) Content matches the `:=` / trailing `= <quantity>` grammar (recommended).
-- (b) Mandatory prefix token at the start of the span, e.g. `` `= ...` `` or
-  `` `:= ...` ``.
-- *Recommended default: (a).* It keeps ordinary spans like `Rtop/Rbot` and
-  `foo()` untouched while avoiding extra ceremony on every inline calculation.
+- (a) **Require `:=` in the span** (recommended). A single-backtick span that
+  contains `:=` and matches the §3.2 grammar is inline math; all other spans are
+  ordinary code. This is safe because a grep of every single-backtick span in
+  `docs/` found **57 existing `NAME = value` spans** (e.g.
+  `docs/math.md`: `` `V_in = LOG-PWR-001.V_in | mV` ``,
+  `docs/design/backlog.md`: `` `V_cl = 0.8 V` ``,
+  `docs/design/editor-image-upload.md`: `` `MAX_BODY_BYTES = 1 MiB` ``) and
+  **0 spans containing `:=`** outside this design doc. Requiring `:=` therefore
+  avoids misclassifying existing documentation.
+- (b) **Explicit opt-in per item**, e.g. `inline_calc: true` in item front
+  matter. Safe, but adds friction for every item that uses inline math.
+- (c) **Mandatory leading marker** at the start of the span, such as
+  `` `= ...` `` or `` `:= ...` ``. Unambiguous, but noisier than the `:=` rule
+  and still has to avoid clashing with existing spans that happen to start with
+  `=`.
+- *Recommended default: (a).* It is the lightest rule that survives the existing
+  corpus.
 
 **Q2 -- Verification tolerance.** How tightly must the stored result match the
 computed value?
