@@ -63,7 +63,7 @@ from . import calc as calc_mod
 from . import sources as sources_mod
 from . import textio
 from .model import CitationSpec, CitationStatus, Item, PartUsage, Project
-from .parse import _yaml_error_report, yaml_safe_load
+from .parse import _yaml_error_report, read_store_text, yaml_safe_load
 
 LOCKFILE = ".refdes/citations.yaml"
 COPIES_DIR = ".refdes/copies"
@@ -1188,8 +1188,7 @@ def load_lockfile(project: Project) -> dict[str, dict]:
     if not os.path.exists(path):
         return {}
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
+        text = read_store_text(path)
     except IsADirectoryError as exc:
         raise LockfileError("is a directory, not a file") from exc
     except UnicodeDecodeError as exc:

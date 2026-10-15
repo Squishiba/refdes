@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import yaml
 from conftest import write_project_config
 
@@ -475,3 +476,50 @@ def test_adopt_refuses_a_directory_where_the_adoption_marker_is(tmp_path, capsys
     assert "is a directory" in output
     assert marker.is_dir()
     assert _snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "adopted: maybe\n",
+        "",
+        "- adopted: true\n",
+        "format: 1\n",
+    ],
+    ids=["malformed-value", "empty", "list", "no-adopted-key"],
+)
+def test_adopt_refuses_a_marker_it_cannot_read_as_a_marker(tmp_path, capsys, text):
+    """The doc claim F12 restores (docs/troubleshooting.md: a corrupt
+    `.refdes/keys-adopted.yaml` is a `refdes keys adopt` refusal, exit 1)
+    speaks of a corrupt marker, not only of one that fails to parse. A
+    marker the reader cannot read as a marker -- empty, a list, a scalar,
+    a mapping that never spells `adopted:` true or false, a non-boolean
+    `adopted:` value -- is corrupt for the purpose of not overwriting it:
+    each is a file someone touched, and each used to be silently replaced
+    with the fresh marker at exit 0."""
+    _write_shape_project(tmp_path)
+    marker = tmp_path / keys_mod.ADOPTION_MARKER
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(text, encoding="utf-8")
+    config = str(tmp_path / "refdes-project.yaml")
+    before = _snapshot(tmp_path)
+    assert cli_mod.main(["-c", config, "keys", "adopt"]) == 1
+    output = capsys.readouterr().err
+    assert ".refdes/keys-adopted.yaml" in output
+    assert "does not declare `adopted: true` or `adopted: false`" in output
+    assert (tmp_path / keys_mod.ADOPTION_MARKER).read_text(encoding="utf-8") == text
+    assert _snapshot(tmp_path) == before
+
+
+def test_adopt_over_a_marker_that_says_not_adopted_still_adopts(tmp_path, capsys):
+    """The guard is for unreadable markers, not for a marker declaring the
+    state `keys adopt` exists to change: `adopted: false` is well-formed
+    and says "not adopted", so the command adopts over it as before."""
+    _write_shape_project(tmp_path)
+    marker = tmp_path / keys_mod.ADOPTION_MARKER
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("adopted: false\n", encoding="utf-8")
+    config = str(tmp_path / "refdes-project.yaml")
+    assert cli_mod.main(["-c", config, "keys", "adopt"]) == 0
+    capsys.readouterr()
+    assert "adopted: true" in marker.read_text(encoding="utf-8")

@@ -78,3 +78,47 @@ failed with the raw IsADirectoryError (the original symptom), restored ->
 changelog.d: store-read-directory.fixed.md + keys-adopt-corrupt-marker.fixed.md
 (rule applied: changelog.d/README.md -- each user-visible change gets one
 fragment; both are behavior fixes -> `fixed` category, one file per change).
+
+---- FIX ROUND (PR #271 review) ----
+
+1. BLOCKER (Windows): the six `except IsADirectoryError` catches were
+   POSIX-only -- on Windows open() on a directory raises PermissionError
+   (CreateFile refuses directories), and windows-latest CI turned red on
+   the three new tests. Fixed by the reviewer's preferred shape: ONE
+   shared helper, parse.read_store_text(path), which checks
+   os.path.isdir(path) BEFORE opening (portable) and converts the
+   racy PermissionError (directory appearing between check and open --
+   the Windows surfacing) into IsADirectoryError. All six readers
+   (lifecycle/seal/ids/boards/citations/history._read_store_file) now
+   read through it and keep their single `except IsADirectoryError`
+   clause as the backstop. adopt.py keeps its pre-open os.path.isdir
+   refusal (already portable). Tests assert the modules' clean error
+   messages/exit codes, not raw OSError types; no chmod anywhere.
+   New test: test_read_store_text_names_a_directory_the_same_way_on_every_
+   platform -- directory pre-check + simulated Windows race (patched
+   isdir sequence + open() raising PermissionError(13)).
+2. LOW (F12 predicate vs doc claim): chose to MATCH THE DOC, not narrow
+   it -- docs/troubleshooting.md states flatly that a corrupt
+   keys-adopted.yaml is a keys adopt refusal (exit 1), and that is the
+   user-facing contract. The refusal predicate widened from YAMLError-
+   only to "a marker that cannot be read as a marker": empty, scalar/
+   list, mapping with no `adopted:` key, non-boolean `adopted:` value
+   (e.g. `adopted: maybe`) all refuse naming the file, file untouched.
+   A well-formed `adopted: false` is NOT corrupt (it declares the state
+   the command exists to change) -- adoption over it proceeds; pinned
+   by test_adopt_over_a_marker_that_says_not_adopted_still_adopts.
+   is_adopted keeps its swallow (documented posture for the OTHER
+   readers). F12 changelog fragment reworded to the widened predicate.
+   Probes: `adopted: maybe` and empty marker now exit 1 with the file
+   named and untouched (previously exit 0 + clobber).
+3. NIT: ruff I001 on tests/test_yaml_loaders.py:12 fixed (cli split onto
+   its own `from refdes import cli as cli_mod`). Checked history.py:50
+   and test_history.py:9 I001s against main via `git show main:$f | ruff
+   check --select I --stdin-filename $f -`: pre-existing on main, left
+   untouched per AGENTS.md (no silencing pre-existing findings in
+   passing). New I001s from this round's imports (pytest in
+   test_keys_adopt.py, read_store_text in six import lines) sorted.
+   ruff --select I clean on all changed files.
+
+Fix-round suite: 3927 passed, 2 skipped (exit 0; 6 new tests over the
+first round's 3921). E9,F clean; gen_examples --check up to date.

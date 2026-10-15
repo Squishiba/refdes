@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import builtins
+import os
 from pathlib import Path
 
 import pytest
@@ -9,7 +11,8 @@ import yaml
 from conftest import write_project_config
 from helpers import COVERAGE_SCHEMA
 
-from refdes import boards, citations, cli as cli_mod, ids, keys, lifecycle, parse, seal, standards
+from refdes import boards, citations, ids, keys, lifecycle, parse, seal, standards
+from refdes import cli as cli_mod
 from refdes.parse import _PurePythonLineLoader, _yaml_error_report
 from refdes.schema import SCHEMA_NAME, SchemaError, load_project
 
@@ -217,7 +220,10 @@ def test_check_reports_a_directory_baseline_by_path_and_exits_2(tmp_path, capsys
     """The end-to-end half of B9: the raw traceback left the user with no
     actionable line. `refdes check` now prints the configuration error
     naming the offending path and exits 2, like every other corrupt store
-    file."""
+    file. The assertion is on the printed line, not on an exception type:
+    the loader raises its own SchemaError on every platform (the
+    directory is detected before `open()`, which raises a different
+    OSError on Windows)."""
     write_project_config(tmp_path, COVERAGE_SCHEMA)
     baselines = tmp_path / ".refdes" / "baselines"
     baselines.mkdir(parents=True)
@@ -228,3 +234,34 @@ def test_check_reports_a_directory_baseline_by_path_and_exits_2(tmp_path, capsys
     assert "configuration error" in err
     assert "r9.yaml" in err
     assert "is a directory, not a file" in err
+
+
+def test_read_store_text_names_a_directory_the_same_way_on_every_platform(tmp_path, monkeypatch):
+    """The review's Windows blocker: open() on a directory raises
+    IsADirectoryError on POSIX and PermissionError on Windows, so the
+    six store readers cannot rely on catching afterwards -- a catch-only
+    fix is POSIX-only and the raw traceback survives there under a
+    different errno. The shared helper checks with the portable
+    os.path.isdir() BEFORE opening, and converts the racy
+    PermissionError into the same IsADirectoryError, so each reader's
+    one clean clause fires everywhere."""
+    directory = tmp_path / "r9.yaml"
+    directory.mkdir()
+    with pytest.raises(IsADirectoryError):
+        parse.read_store_text(str(directory))
+
+    file_target = tmp_path / "ok.yaml"
+    file_target.write_text("a: 1\n", encoding="utf-8")
+    assert parse.read_store_text(str(file_target)) == "a: 1\n"
+
+    # Simulate the Windows race: the pre-open check passes, open()
+    # refuses the way Windows refuses directories, the re-check sees it.
+    checks = iter([False, True])
+    monkeypatch.setattr(os.path, "isdir", lambda path: next(checks, True))
+
+    def _open_like_windows(*args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(file_target))
+
+    monkeypatch.setattr(builtins, "open", _open_like_windows)
+    with pytest.raises(IsADirectoryError):
+        parse.read_store_text(str(file_target))

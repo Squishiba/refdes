@@ -28,7 +28,7 @@ from . import keys as keys_mod
 from . import model, textio
 from .ids import split_id
 from .model import Item, Project, SchemaError
-from .parse import yaml_safe_load
+from .parse import read_store_text, yaml_safe_load
 
 MANIFEST_FILE = ".refdes/boards.yaml"
 
@@ -235,8 +235,7 @@ def load_manifest(project: Project) -> Manifest:
     if not os.path.exists(path):
         return {"boards": {}, "workspaces": {}}
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = yaml_safe_load(fh) or {}
+        data = yaml_safe_load(read_store_text(path)) or {}
     except IsADirectoryError as exc:
         raise SchemaError(
             f"{path}: membership manifest file is a directory, not a file"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 import yaml
@@ -324,13 +325,34 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
                 dry_run=dry_run,
             )
         try:
-            yaml_safe_load(marker_before)
+            marker_data = yaml_safe_load(marker_before)
         except yaml.YAMLError as exc:
             return AdoptionResult(
                 ok=False,
                 errors=[
                     f"{keys_mod.ADOPTION_MARKER}: adoption marker file does not "
                     f"parse ({exc}); repair it by hand or delete it and run again"
+                ],
+                dry_run=dry_run,
+            )
+        # docs/troubleshooting.md promises: a corrupt marker is a refusal.
+        # A marker the reader cannot read as a marker is corrupt for this
+        # purpose: empty, a scalar/list, or a mapping that never spells
+        # `adopted:` true or false. A marker that plainly says
+        # `adopted: false` is not corrupt -- declaring "not adopted" is
+        # exactly what the command is about to change, so it is adopted
+        # over. `is_adopted` keeps its permissive posture for the *other*
+        # readers, where "unreadable = not adopted" is the documented rule.
+        if not (
+            isinstance(marker_data, Mapping)
+            and isinstance(marker_data.get("adopted"), bool)
+        ):
+            return AdoptionResult(
+                ok=False,
+                errors=[
+                    f"{keys_mod.ADOPTION_MARKER}: adoption marker file does not "
+                    "declare `adopted: true` or `adopted: false`; repair it by "
+                    "hand or delete it and run again"
                 ],
                 dry_run=dry_run,
             )

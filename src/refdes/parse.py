@@ -430,6 +430,34 @@ def yaml_safe_load(stream_or_text) -> Any:
         return yaml.load(text, Loader=_PurePythonKeySafeLoader)
 
 
+def read_store_text(path: str) -> str:
+    """One `.refdes/` store file, read as text; a directory is
+    `IsADirectoryError` on every platform.
+
+    `open()` on a directory raises `IsADirectoryError` on POSIX and
+    `PermissionError` on Windows (its `CreateFile` refuses directories
+    without backup semantics), so a store reader cannot rely on catching
+    the exception afterwards -- a catch-only fix is POSIX-only, and the
+    raw traceback the wrap was supposed to prevent survives on Windows
+    under a different errno. So the helper checks first, and converts the
+    race (a directory that appears between check and open, which on
+    Windows surfaces as `PermissionError`) into the same
+    `IsADirectoryError`: every caller keeps exactly one `except
+    IsADirectoryError` clause naming the path. A missing file is
+    `FileNotFoundError`, like `open()`; callers keep their own absent-file
+    posture. `UnicodeDecodeError` propagates from the read, as before.
+    """
+    if os.path.isdir(path):
+        raise IsADirectoryError(path)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return fh.read()
+    except PermissionError:
+        if os.path.isdir(path):
+            raise IsADirectoryError(path) from None
+        raise
+
+
 def yaml_safe_load_checked(stream_or_text) -> tuple[Any, list[DuplicateKey]]:
     """`yaml_safe_load`, plus every mapping key this document spelled twice.
 
