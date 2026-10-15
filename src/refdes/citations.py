@@ -1175,6 +1175,12 @@ def load_lockfile(project: Project) -> dict[str, dict]:
     `LockfileError`, carrying one sentence that names the file, the line where
     the shape gives one, what is wrong, and what to do about it.
 
+    A project loaded with `project.lockfile_overlay` (the editor's candidate
+    accept, docs/design/editor-source-picker.md §4) is read from that text
+    instead of the file -- every shape check below runs on the overlay text
+    exactly as it runs on the file's, so a candidate is judged against the
+    lockfile the accept is about to write, not the one on disk.
+
     Refusing is the point. This file is committed and hand-mergeable
     (`docs/cli-reference.md`: "Files the tool writes" says commit it), so the
     realistic way to get a broken one is two branches both running `refdes
@@ -1184,15 +1190,19 @@ def load_lockfile(project: Project) -> dict[str, dict]:
     `dict()`; each one is now a diagnostic a person can act on, and none of
     them is allowed to become `{}`.
     """
-    path = lockfile_path(project)
-    if not os.path.exists(path):
-        return {}
-    try:
-        text = read_store_text(path)
-    except IsADirectoryError as exc:
-        raise LockfileError("is a directory, not a file") from exc
-    except UnicodeDecodeError as exc:
-        raise LockfileError(f"is not valid UTF-8: {exc}") from exc
+    overlay = project.lockfile_overlay
+    if overlay is not None:
+        text = overlay
+    else:
+        path = lockfile_path(project)
+        if not os.path.exists(path):
+            return {}
+        try:
+            text = read_store_text(path)
+        except IsADirectoryError as exc:
+            raise LockfileError("is a directory, not a file") from exc
+        except UnicodeDecodeError as exc:
+            raise LockfileError(f"is not valid UTF-8: {exc}") from exc
 
     conflict = _conflict_marker(text)
     if conflict is not None:

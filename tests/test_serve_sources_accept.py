@@ -40,6 +40,7 @@ from refdes import build as build_mod
 from refdes import citations as citations_mod
 from refdes import cli as cli_mod
 from refdes.serve import edit as edit_mod
+from refdes.write_lock import project_write_lock
 
 EDIT = "/api/item/DEC-001/edit"
 CSV_PATH = "analysis/budget.csv"
@@ -364,10 +365,10 @@ def test_a_failure_after_the_lockfile_landed_leaves_the_body_untouched(
 
     real = edit_mod.loader.load_readonly
 
-    def load(config, overlay=None):
-        if overlay:  # the candidate load, which is after the lockfile write
+    def load(config, overlay=None, lockfile_overlay=None):
+        if overlay:  # the candidate load, whose gate is read-only now
             raise RuntimeError("simulated failure after the lockfile landed")
-        return real(config, overlay=overlay)
+        return real(config, overlay=overlay, lockfile_overlay=lockfile_overlay)
 
     monkeypatch.setattr(edit_mod.loader, "load_readonly", load)
     status, payload = accept(
@@ -448,10 +449,10 @@ def test_a_rolled_back_accept_of_a_never_fetched_project_leaves_no_lockfile(
     try:
         real = edit_mod.loader.load_readonly
 
-        def load(config, overlay=None):
+        def load(config, overlay=None, lockfile_overlay=None):
             if overlay:
                 raise RuntimeError("simulated failure after the lockfile landed")
-            return real(config, overlay=overlay)
+            return real(config, overlay=overlay, lockfile_overlay=lockfile_overlay)
 
         monkeypatch.setattr(edit_mod.loader, "load_readonly", load)
         status, payload = accept(
@@ -685,3 +686,149 @@ def test_a_refused_accept_says_nothing_about_the_server_filesystem(served):
     text = json.dumps(payload)
     assert str(root) not in text
     assert "analysis/budget.csv" in text
+
+
+# ----------------------------------------------------------------- #182 family
+#
+# The accept's window runs both ways. The lockfile lands before the gate, so
+# (a) a cooperating accept of the SAME key is a no-op write whose adoption is
+# invisible to a byte compare -- the loser's rollback restores the bytes it
+# read and erases the winner's adopted pin under a body that names it; and
+# (b) a cooperating accept that gates over *this* accept's pin can fail and
+# roll back inside this accept's gate, deleting the pin from under the body
+# this accept then lands. Both leave a tree naming an unpinned pair, which is
+# not §4's inert residue: `refdes check` fails the project.
+
+EXTRA = 'x = 2 | 1'
+
+
+def items_yaml(*lines) -> str:
+    """The fixture's items file with DEC-001's body set to exactly these
+    lines -- what a cooperating accept's applied save leaves on disk."""
+    body = "".join("      " + line + "\n" for line in lines)
+    return (
+        "defaults: { type: decision }\n"
+        "items:\n"
+        "  - id: DEC-001\n"
+        "    citations:\n"
+        "      - path: analysis/budget.csv\n"
+        "    body: |\n"
+        "      ```calc\n"
+        + body
+        + "      ```\n"
+        "  - id: DEC-002\n"
+        "    body: |\n"
+        "      ```calc\n"
+        "      Q = 1 | 1\n"
+        "      ```\n"
+    )
+
+
+def pin_eff_records(root):
+    """The fetched project's records with `eff` pinned -- the bytes a
+    same-key accept stages, spelled from the records on disk."""
+    records = citations_mod.load_lockfile(_build_at(root))
+    records[CSV_PATH].setdefault("values", {})["eff"] = {"reader": "csv", "value": "0.93"}
+    return records
+
+
+def test_a_rolled_back_accept_does_not_erase_a_pin_a_same_key_accept_adopted(
+    served, monkeypatch
+):
+    # The loser writes its pin, then conflicts; the winner's accept of the
+    # same key landed mid-gate -- its lockfile byte-identical to the loser's
+    # staged bytes (its own write a no-op), its body naming the pin on disk.
+    # The loser's rollback compares equal to its staged bytes and restores
+    # the pre-accept file, erasing the adoption under the winner's body.
+    _app, client, root = served
+    item_file = root / "items" / "decisions.yaml"
+    lock_file = root / ".refdes" / "citations.yaml"
+    original_gate = edit_mod._blocking_diagnostics
+
+    def same_key_accept_lands_midflight(before, after, item, op):
+        # The winner's whole applied state, as it exists at this instant:
+        # its lockfile (identical bytes to the loser's staged write, so the
+        # write is a no-op) and its body, which differs from the loser's.
+        with project_write_lock(str(root)):
+            lock_file.write_bytes(
+                citations_mod.lockfile_text(pin_eff_records(root)).encode("utf-8")
+            )
+        item_file.write_text(items_yaml(RAIL, EFF, EXTRA), "utf-8")
+        return original_gate(before, after, item, op)
+
+    monkeypatch.setattr(
+        edit_mod, "_blocking_diagnostics", same_key_accept_lands_midflight
+    )
+    status, payload = accept(
+        client, root, text=calc_body(RAIL, EFF), pins=pin("eff", name="eff")
+    )
+    assert status == 409, payload
+    assert payload["kind"] == "conflict"
+    # the winner's adopted pin stands under the body naming it
+    assert "eff" in lock(root)["citations"][CSV_PATH]["values"]
+    assert EFF in item_file.read_text("utf-8")
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
+
+
+def test_a_rollback_does_not_delete_a_pin_from_under_a_landed_body(
+    served, monkeypatch
+):
+    # The window runs the other way: a cooperating accept of the same key
+    # lands (its lockfile is byte-identical to this accept's staged bytes),
+    # and this accept refuses inside its own gate. Its rollback restores the
+    # bytes it read -- a file that does not pin the key the landed body,
+    # written over its own staged bytes, names.
+    _app, client, root = served
+    item_file = root / "items" / "decisions.yaml"
+    lock_file = root / ".refdes" / "citations.yaml"
+    real = edit_mod.loader.load_readonly
+
+    def load(config, overlay=None, lockfile_overlay=None):
+        if overlay:  # the candidate load, after this accept's decision
+            with project_write_lock(str(root)):
+                lock_file.write_bytes(
+                    citations_mod.lockfile_text(pin_eff_records(root)).encode("utf-8")
+                )
+            item_file.write_text(items_yaml(RAIL, EFF), "utf-8")
+            raise RuntimeError("simulated failure inside the gate")
+        return real(config, overlay=overlay, lockfile_overlay=lockfile_overlay)
+
+    monkeypatch.setattr(edit_mod.loader, "load_readonly", load)
+    status, payload = accept(
+        client, root, text=calc_body(RAIL, EFF), pins=pin("eff", name="eff")
+    )
+    assert status == 422, payload
+    assert payload["kind"] == "refused"
+    # the landed body names `eff`, so `eff` stays pinned
+    assert "eff" in lock(root)["citations"][CSV_PATH]["values"]
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
+
+
+def test_an_accept_survives_a_writer_that_moved_the_lockfile_midgate(
+    served, monkeypatch
+):
+    # A cooperating writer rewrote the lockfile during the gate. The pair
+    # this accept brings is not collateral for a compare to skip: the accept
+    # re-stages over the writer's records under fetch's own policy and lands
+    # both files. The writer's pin survives in the bytes that land.
+    _app, client, root = served
+    lock_file = root / ".refdes" / "citations.yaml"
+    original_gate = edit_mod._blocking_diagnostics
+
+    def a_pin_lands_during_the_gate(before, after, item, op):
+        records = citations_mod.load_lockfile(_build_at(root))
+        records[CSV_PATH].setdefault("values", {})["other"] = {"reader": "csv", "value": "7"}
+        with project_write_lock(str(root)):
+            lock_file.write_bytes(citations_mod.lockfile_text(records).encode("utf-8"))
+        return original_gate(before, after, item, op)
+
+    monkeypatch.setattr(edit_mod, "_blocking_diagnostics", a_pin_lands_during_the_gate)
+    status, payload = accept(
+        client, root, text=calc_body(RAIL, EFF), pins=pin("eff", name="eff")
+    )
+    assert status == 200, payload
+    assert payload["kind"] == "applied"
+    assert EFF in (root / "items" / "decisions.yaml").read_text("utf-8")
+    values = lock(root)["citations"][CSV_PATH]["values"]
+    assert {"eff", "other", "rail_load"} <= set(values)
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0

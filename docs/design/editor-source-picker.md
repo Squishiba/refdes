@@ -2,7 +2,9 @@ Status: **proposed**; **Slices A, B, and C landed** (§11). `sources.list_entrie
 `SourceEntry` and the three read endpoints ship, with their authorization and
 caps and the reader/endpoint tests, and §4's accept ships: one widened
 `set_body` request writes the item and `.refdes/citations.yaml` as one
-operation inside the write lock, with the rollback, proven against the CLI's
+operation: the lockfile is staged in memory, judged through the loader's
+lockfile overlay, and both files land together behind the revision check,
+proven against the CLI's
 own fetch semantics. So does the panel: `sourcepicker.js` runs the file → key →
 confirm flow beside the body and saves through `setDraftBody`, taking all four
 of §10's UI, static rows with it. What is still design only is the one §10
@@ -196,43 +198,59 @@ The sequence, inside the existing per-project write lock
 3. For each `{path, key}` the request names: re-authorize with
    `citations.authorize_source_path()` against the **server's** copy of the
    item, then extract that key from the live file with the reader. The request
-   carries paths and keys only — never a value (§5, §6).
-4. Write the lockfile atomically: the path's record gains `values: {key:
-   {reader, value}}` in the shape `calc-sources.md` §5 already fixes, staged in
-   memory and replaced whole, so a partial value set never lands.
-5. Load the candidate with `overlay={item_path: new_text}` — now reading the
-   lockfile that was just written, so the new `source()` line resolves and the
-   delta gate judges the real candidate.
-6. Run the delta gate. Pass → write the body atomically → `Applied`, and
-   `state.refresh()` as today. Fail → **restore the previous lockfile bytes**
-   and return the gate's `Invalid` diagnostics unchanged.
+   carries paths and keys only — never a value (§5, §6). Steps 3–4 read the
+   lockfile fresh and stage its new whole-file bytes **in memory**, under one
+   section of `write_lock.project_write_lock`.
+4. Load the candidate with `overlay={item_path: new_text}` and
+   `lockfile_overlay=` the staged bytes — the loader reads the lockfile the
+   save is about to write, so the new `source()` line resolves and the delta
+   gate judges the real candidate.
+5. Run the delta gate. Fail → return the gate's `Invalid` diagnostics
+   unchanged; **nothing has been written anywhere**. Pass → the landing
+   section: take `project_write_lock`, re-check `expected_revision`, land the
+   lockfile bytes, replace the body — one section, nothing between the two
+   files.
 
-Step 6's rollback is the first two-file transaction the editor performs, and
-`browser-editor.md` puts the general transaction journal in "a later slice".
-This does not wait for it, and does not pretend to be crash-atomic: the window
-is one `os.replace` wide, the recovery is `_restore` of bytes held in memory,
-and the failure mode if the process dies inside the window is a lockfile that
-pins a key no item names — which is inert, visible in `git status`, and
-cleaned by the next `refdes fetch`. That is stated rather than papered over:
-when the journal lands, this operation becomes its first client.
+Nothing lands ahead of the pair, and that is structural, not stylistic. The
+shape this section first shipped — write the lockfile, gate, restore the
+previous bytes on refusal — cannot be repaired by any predicate on the
+restore side. If a cooperating accept of the *same key* lands inside the
+gate's window, the file at refusal time is byte-identical to this
+operation's staged bytes; and the refusal that must restore (the named pair
+was pinned by nothing, the pin is ours to remove) reads exactly the same
+disk. No observation of shared state separates the worlds — the
+identical-bytes case *requires* the restore and *destroys* the cooperator's
+adoption by performing it. So the window is removed rather than watched:
+the gate is read-only over staged bytes, and both files land together
+behind the revision check, in one section of the cross-process lock that
+`refdes fetch` runs inside.
+
+The landing section is not a compare-and-skip either — a file a cooperator
+replaced during the gate is input, not an obstacle. It re-reads the records
+under the lock: if the file already holds this accept's staged bytes, the
+write is skipped; if it holds the bytes the accept staged from, the staged
+bytes land; anything else, the accept's keys are re-staged over the records
+as they now stand, under fetch's own policy, and the merged bytes land —
+so a cooperator's pins survive in the file, and this accept's pair lands
+with its body. A record the keys no longer describe is a refusal, not a
+clobber.
 
 Two locks, in that order, and never the other way round. `write_lock_for` is
-the in-process one and it stops this server interleaving its own saves; steps
-4 and 6 additionally take `write_lock.project_write_lock` — the same
-cross-process lock `refdes fetch` runs inside — so the lockfile's
-read-modify-write and the rollback's read-compare-restore are each one
-unbreakable section for any writer that takes the lock too. The delta gate
-between them holds the in-process lock like the rest of the sequence, but
-deliberately not the project one: it can take seconds, and holding the project
-lock across it would keep every other lock-taking writer out of the project
-for that long. That is also why the rollback still compares before it
-restores.
-The compare is not there for the (now closed) gap between its own read and its
-restore; it is there for the gate — a save that landed while the gate was
-running has already replaced the file, and restoring the bytes this operation
-read would delete a pin that a body on disk still names. What the lock cannot
-promise is the crash inside the one `os.replace` above, or a writer that
-ignores the lock. Proven both ways, with the interleaving built on events
+the in-process one and it stops this server interleaving its own saves; the
+staging section (3–4) and the landing section (5) each take
+`write_lock.project_write_lock`, and the delta gate between them holds the
+in-process lock like the rest of the sequence, but deliberately not the
+project one: it can take seconds, and holding the project lock across it
+would keep every other lock-taking writer out of the project for that long.
+What is left is stated rather than papered over: if the body's replace fails,
+the landing section restores the lockfile bytes *its own write* replaced,
+under the same lock, seconds after the write and inside the same section —
+not seconds later in a window. A process killed between the lockfile landing
+and the body's replace leaves a lockfile pinning a key no item names, which
+is inert, visible in `git status`, and cleaned by the next `refdes fetch`;
+a writer that ignores the lock entirely is outside what any code here can
+serialise. That is the whole residue, and it is crash-shaped, not
+interleaving-shaped. Proven both ways, with the interleavings built on events
 rather than on timing, in `tests/test_citations_lockfile_locking.py`.
 
 **The browser never re-pins a changed file.** Acceptance extracts under
@@ -566,8 +584,9 @@ a CLI `refdes sources list --item X` or a future xlsx picker both sit on, and it
 is where the path-confinement rules get proven.
 
 **Slice B — accept. LANDED 2026-09-27.** The widened `set_body` request, the
-lockfile write and its rollback inside the existing write lock, and the accept
-tests (`tests/test_serve_sources_accept.py`). Land B before any UI: it is the
+lockfile write and its rollback inside the existing write lock (the pair
+landing in one section behind the revision check is a later fix, §4), and the
+accept tests (`tests/test_serve_sources_accept.py`). Land B before any UI: it is the
 only part that writes tracked state, and it should be proven against the CLI's
 own fetch semantics while the only caller is a test.
 
