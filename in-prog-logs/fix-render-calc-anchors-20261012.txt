@@ -149,5 +149,22 @@ REVIEW FOLLOW-UP (same day)
 - .scratch/ruff-head/ is gone (not my deletion — other sessions share this
   checkout); re-materialized HEAD copies in .scratch/ruff-head2/.
 
-Status: finished. Committed on fix/render-calc-anchors-20261012; no PR,
-main untouched.
+PR PREP (2026-10-14, after review follow-up)
+- Verified cwd/branch/HEAD (fix/render-calc-anchors-20261012 @ 3f915a1),
+  clean tree. Fetched origin/main once: still 374a4aa as assigned; branch
+  rebased 8b6a52e..374a4aa cleanly — zero conflicts (main's sweep3 touched
+  CHANGELOG in other sections; W5a task pane never touched render.py).
+  New head 4f5b5f0+f8c3fd4 (same two commits, rebased).
+- Post-rebase targeted run: 9 anchor/render/calc files + 4 serve-preview
+  files (W5a/reload/values/decorations — preview rebuilds through
+  render_site -> _write_html, my seam, so that's the concrete integration
+  risk worth covering) = 251 passed.
+- Scoped ruff on the three touched py files: only the 3 pre-existing
+  findings (blocks.py:38, blocks.py:296, render.py SIM103 — all present at
+  branch start); new test file clean.
+- CLI probe re-run with post-rebase src (refdes.__file__ verified as this
+  worktree): document.html [calc-losses, calc-losses-2], dec-001 bare
+  anchor, empty.md block-error, exit 1 by design.
+- Pushed branch, opened PR against main. No merge.
+
+Status: finished and PR'd.
