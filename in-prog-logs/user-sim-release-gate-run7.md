@@ -40,9 +40,9 @@ with an `AttributeError`; **B9** — a directory named `*.yaml` under
 `.refdes/baselines/` kills every command with an `IsADirectoryError`
 (adjacent to open PR #242). One friction (**F12**): a YAML-corrupt
 `keys-adopted.yaml` is silently overwritten by `keys adopt`, contrary to its
-fragment's "refuses with the file named" claim. Two nits (F14, F15) and one
-residual context (F13, 6a F1 family). Nothing in this run blocks a release on
-behavioural grounds; B8/B9 are the ones to take.
+fragment's "refuses with the file named" claim. Three nits (F14, F15, F16)
+and one residual context (F13, 6a F1 family). Nothing in this run blocks a
+release on behavioural grounds; B8/B9 are the ones to take.
 
 ---
 
@@ -446,6 +446,53 @@ audit row, check exit 0. (No `ls --status` flag exists; that was my error,
 (`standard upgrade` is); release-gate behaviour unchanged (blocks on
 `uncovered_requirements`, as run 6a).
 
+### 2.17 F13 — a `page:` citation of a hash-only doc goes unchecked, silently, in both commands
+
+Reproducible setup (`cf-f13`, a `_pristine` copy): `docs/notes.txt` is a
+3-line plain-text file; the component's citation cites it **with a page**:
+
+```yaml
+# items/components/pwr.md, front matter
+citations:
+  - path: docs/notes.txt
+    page: "3"
+```
+
+```console
+$ rr cf-f13 fetch
+fetched  docs/notes.txt  sha256=1b58373a7815...  hash-only
+1 citation(s) processed, 0 failed
+$ rr cf-f13 check        # exit 0
+WARNING items/components/pwr.md:2 [CMP-PWR-001] — status is 'selected' but nothing selects it -- …
+WARNING <project> — 1 item(s) with no coverage — see coverage.html
+WARNING <project> — 2 requirement(s) satisfied but not verified — see coverage.html
+6 items, 0 errors, 3 warnings        # the standing three; nothing about the cited page 3
+$ rr cf-f13 audit
+Citations:
+  docs/notes.txt
+    ok              hash-only  cited by CMP-PWR-001
+```
+
+The lockfile record for `docs/notes.txt` carries `bytes`/`fetched`/
+`kept_copy`/`sha256` — no `page_count`, no `page_count_error`. So the
+cited `page: "3"` is compared against nothing: `check` prints no page
+diagnostic at all (exit 0), and `audit`'s citation row reads
+`ok hash-only` — byte-identical to a row whose pages were counted and
+the citation in range.
+
+This is the family `changelog.d/audit-pages-unchecked.fixed.md` (the run-5
+F1 fix) addressed: it made rows whose lockfile carries a `page_count_error:`
+read `pages unchecked` + reason, and it promises "a pin whose count *is* on
+record keeps its `ok` even when a cited page is out of range: that page is a
+separate warning `check` already gives" (verified: `page: "99"` against the
+counted 8-page PDF → `WARNING … page 99 is not in this document -- it has
+8 page(s)`). The uncovered corner is a record with no count and no recorded
+count-failure — the ordinary state for a non-PDF document: neither promise
+covers it, and the out-of-range `page:` of a 3-line text file passes both
+commands silently. Run 6a recorded the same residual (`ok hash-only`
+indistinguishable from pages-verified); the `page:` citation on a `hash-only`
+record is the author-visible form of it.
+
 ---
 
 ## 3. Findings summary
@@ -455,7 +502,7 @@ audit row, check exit 0. (No `ls --status` flag exists; that was my error,
 | B8 | moderate | Item `on_change:` mapping with `fields:` written as a **list** → raw `AttributeError: 'list' object has no attribute 'get'` traceback (`model.py:674` via `build.py:1890`); `check`/`ls` exit 1 project-wide. §2.3 |
 | B9 | moderate | A **directory** named `*.yaml` under `.refdes/baselines/` → every command crashes with a raw `IsADirectoryError` traceback (`lifecycle.py:189`). Adjacent to open PR #242. §2.14 |
 | F12 | low-mid | YAML-corrupt `.refdes/keys-adopted.yaml` (valid UTF-8): `keys adopt` silently overwrites it, exit 0 — the #212 fragment claims a refusal with the file named. `adopt.py:301` guards UTF-8 only; `is_adopted` (`keys.py:647`) swallows `YAMLError`. §2.14 |
-| F13 | low | Audit citation block prints `ok hash-only` for a hash-only doc cited by `page:` — pages unchecked, silently (run 6a F1's residual, new `page:` context). §2.14 context: audit rows checked this run |
+| F13 | low | Audit citation block prints `ok hash-only` for a hash-only doc cited by `page:` — pages unchecked, silently (run 6a F1's residual, new `page:` context). §2.17 |
 | F14 | nit | `refdes revision`'s write-refusal line (cli.py:587) hardcodes `(read-only tree?)`; #230 made that marker conditional everywhere it saw the `OSError`. §2.9 |
 | F15 | nit | `on_change fields:` entries naming a field the type doesn't declare load clean and do nothing. §1.8 |
 | F16 | nit | 6a B6 residual, confirmed persisting: `ls --tag` substring-matches the stringified dict of a mapping-shaped tag, and the (exit-1) build writes the dict repr into `_site` tags rows. §1.1 |
