@@ -20,7 +20,6 @@ root. The tmpfs reproduction of the same two shapes lives in
 from __future__ import annotations
 
 import os
-import tempfile
 
 import pytest
 
@@ -74,10 +73,12 @@ def _symlink_preset_project(tmp_path, presets: list[str]) -> tuple[str, str]:
 class _FailingDisk:
     """ENOSPC injection aimed at `textio.atomic_write_text`'s temp file.
 
-    Only fds minted by `mkstemp` whose temp name matches `targets(tmp)` fail;
-    everything else on the machine (pytest's own writes, the project write
-    lock, other temp files) is untouched, which is what makes this safe to
-    install over the real `os`/`tempfile` for the length of one command.
+    Only fds minted by `os.open` (how `textio._create_temp` makes its temp)
+    whose temp name matches `targets(tmp)` fail; everything else on the
+    machine (pytest's own writes, the project write lock, other temp files)
+    is untouched -- the recording wrapper forwards every call unchanged and
+    only the matching fds are made to fail -- which is what makes this safe
+    to install over the real `os` for the length of one command.
     """
 
     def __init__(self, monkeypatch, targets):
@@ -86,18 +87,14 @@ class _FailingDisk:
         self.victims: set[int] = set()
 
     def install(self, *, at_write: bool) -> None:
-        real_mkstemp, real_fsync, real_fdopen = (
-            tempfile.mkstemp,
-            os.fsync,
-            os.fdopen,
-        )
+        real_open, real_fsync, real_fdopen = os.open, os.fsync, os.fdopen
         victims, targets = self.victims, self.targets
 
-        def recording_mkstemp(*args, **kwargs):
-            fd, tmp = real_mkstemp(*args, **kwargs)
-            if targets(os.path.basename(tmp)):
+        def recording_open(path, flags, *args, **kwargs):
+            fd = real_open(path, flags, *args, **kwargs)
+            if targets(os.path.basename(str(path))):
                 victims.add(fd)
-            return fd, tmp
+            return fd
 
         if at_write:
 
@@ -137,7 +134,7 @@ class _FailingDisk:
 
             self.monkeypatch.setattr(os, "fsync", fsync)
 
-        self.monkeypatch.setattr(tempfile, "mkstemp", recording_mkstemp)
+        self.monkeypatch.setattr(os, "open", recording_open)
 
     def temp_survivors(self, directory) -> list[str]:
         return [
