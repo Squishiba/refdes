@@ -9,7 +9,7 @@ usage: refdes [-h] [-V] [-c CONFIG] [--no-write]
 |---|---|
 | `-V`, `--version` | Print one line, `refdes <version>`, naming the `refdes` you are actually holding, and exit `0`. Needs no project, no config, and no subcommand. The number is read from the installed package's own metadata, so it cannot disagree with what `pip show refdes` reports; run from a raw checkout with nothing installed, it prints `refdes (version unknown -- not installed as a package)` rather than raising. |
 | `-c`, `--config PATH` | Use this `refdes-project.yaml`. Default: search upward from the current directory. |
-| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `rename`, `calc-rewrite`, `stub-tests`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` and `keys restore` report the full plan and write nothing; commands that fundamentally write (`fetch`, `init`, `standard upgrade`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`) **refuse to run** under `--no-write` and exit 2. `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
+| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `rename`, `calc-rewrite`, `stub-tests`, `standard upgrade`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` and `keys restore` report the full plan and write nothing; commands that fundamentally write (`fetch`, `init`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`) **refuse to run** under `--no-write` and exit 2. `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
 
 Exit codes: `0` success, `1` errors found, `2` configuration error (including `--no-write` refusal).
 
@@ -1271,6 +1271,7 @@ file to match.
 
 ```bash
 refdes standard upgrade --to 3
+refdes standard upgrade --to 3 --dry-run
 ```
 
 Each bundled standard version ships its own `migration.yaml` — the delta
@@ -1303,6 +1304,20 @@ already at or past `--to N`, and a non-integer `--to`, both exit 2 without
 writing. A `--to` past the newest bundled version is not caught that way —
 the chain attempts the step and the rewritten project fails to load, which is
 also an exit 1 with the config left at the version it had.
+
+| Flag | Meaning |
+| --- | --- |
+| `--to N` | (required) target `standard.version:` to upgrade to |
+| `--dry-run` | Print the whole plan — per version step: the item files that would be rewritten, the `standard.version:` bump, and the baselines and seals whose hashes would be carried forward — and write nothing: no item file, no `refdes-project.yaml`, nothing under `.refdes/`, not one minted key. A refusal the real run would raise (already at the target, a project that doesn't validate, a step whose rewrite fails to load) refuses the same way here. Exits 0 when the plan is clean, 1 on a step the real run would refuse. |
+
+```bash
+refdes standard upgrade --to 3 --dry-run
+```
+
+`--dry-run` previews the chain on a throwaway copy of the project: the plan
+is the real engine's own output for the real run, so it cannot drift from
+what the real run would do. Global `--no-write` selects it too, as it does
+for every command that has a `--dry-run`.
 
 > **The project must validate first — but a failing check is not that.**
 > Both this and `refdes rename` refuse if the project doesn't validate: an

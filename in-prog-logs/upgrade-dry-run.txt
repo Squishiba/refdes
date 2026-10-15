@@ -1,0 +1,109 @@
+# upgrade-dry-run -- F11: `refdes standard upgrade` gets `--dry-run`
+
+Task: .scratch/task/TASK.txt (F11 from in-prog-logs/user-sim-release-gate-run6a.md
+section "### F11"). Branch: upgrade-dry-run, base fd47a56 (tree clean at start).
+
+## Verification of the claim (before touching anything)
+
+- Built a hardware@2 project in .scratch/upgrade-dry-run-probe/ and ran
+  `refdes standard upgrade --to 3 --dry-run`: argparse "unrecognized
+  arguments: --dry-run", exit 2. Claim VERIFIED, still applies on this branch.
+- Sibling dry-runs exist: keys adopt (cli.py cmd_keys_adopt: `if args.no_write:
+  args.dry_run = True`, "would mint ...", "baselines would be rebased:"),
+  keys restore (`dry_run = args.dry_run or args.no_write`, "would restore",
+  "files would change:"), rename/calc-rewrite (`args.dry_run = True` under
+  --no-write).
+- `standard upgrade` itself: cli.py cmd_standard_upgrade refuses --no-write
+  via _refuse_no_write with the explicit reason "it has no dry-run" (cli.py
+  :2066-2071). revise.apply_standard_upgrade chains apply() per version step;
+  apply() already has a full dry_run path, and the repo's convention for
+  plan-fidelity is "run it for real on a throwaway copy" (calc_rewrite._dry_run,
+  revise._simulate_key_ensure).
+
+## Design
+
+- apply_standard_upgrade(project_root, to_version, dry_run=False): identical
+  pre-flight refusals first (not-pinned / already-at-target raise SchemaError
+  the same under dry-run, exit 2), then --dry-run runs the real chain on a
+  copytree of the tree under tempfile.mkdtemp (ignoring _site/.git like the
+  two existing simulation helpers) and discards it. The plan is the real
+  run's own RevisionResults -- files, id changes, baselines/seals carried
+  forward, stale prose, refusals -- so it cannot drift from the real engine.
+  The real tree is never touched, keys are never minted to it, the pin never
+  moves.
+- CLI: --dry-run flag; --no-write now maps to dry-run (the refusal's own text
+  justified itself by "it has no dry-run"; every sibling with --dry-run is
+  forced onto it by --no-write -- keys adopt/restore, rename, calc-rewrite --
+  and docs/cli-reference.md's --no-write table states exactly that convention:
+  "commands with --dry-run report what would change"). Global --no-write help
+  text and the cli-reference --no-write row move "standard upgrade" from the
+  refuse list to the report list.
+- Dry-run output: existing per-step "would change N file(s):" from
+  _print_revision_result (same verb the rename/calc-rewrite dry runs use),
+  a "standard.version: 2 -> 3 (would be bumped)" line per step, and
+  baselines/seals lines ("baselines would be carried forward: ...") which
+  _print_revision_result now prints under dry_run too (plain `revise
+  --dry-run` is unaffected: its result carries none of those fields).
+
+## Implementation + verification (as it happened)
+
+- revise.py: apply_standard_upgrade(project_root, to_version, dry_run=False);
+  pre-flight refusals unchanged (raise identically under dry_run, verified by
+  probe: exit 2 "configuration error: project is already at hardware@2...");
+  chain body extracted to _run_upgrade_chain(); dry_run runs the real chain on
+  a tempfile.mkdtemp copytree (ignoring _site/.git, same as calc_rewrite._dry_run
+  and _simulate_key_ensure) and discards it.
+- cli.py: --dry-run added to the parser (help "show the complete plan without
+  writing", same string as keys adopt); cmd_standard_upgrade: dry_run =
+  args.dry_run or args.no_write; per-step "standard.version: X -> Y (would be
+  bumped)" line; "dry run -- nothing written; the real run would upgrade to
+  vN." trailer; _print_revision_result now prints the baselines/seals
+  ("... would be carried forward:") and stale-prose lines under dry_run too
+  (plain revise --dry-run is unaffected: apply()'s in-memory dry-run result
+  carries none of those fields); global --no-write help text moved
+  "standard upgrade" into the reporting list; parser description mentions
+  --dry-run.
+- Probe (.scratch/f11-probe/): dry-run exits 0 with the plan (3 files,
+  baseline rev-a, seal (base)), tree byte-identical after; --no-write the
+  same; real run afterwards upgrades to v3 and carries baseline+seal; dry-run
+  on the now-current tree refuses (exit 2) like the real run.
+- tests/test_revise_migrations.py: _stamped_v2_project fixture (hardware@2,
+  build(seal_write=True) + revision stamp), _tree_hashes (whole tree incl.
+  .refdes/); 3 new tests: plan + byte-identical, dry-run-then-real, refusal
+  parity (snapshots taken around the dry run only: the real run takes the
+  write lock, the dry run must not -- and does not).
+- tests/test_no_write.py: --no-write standard upgrade now reports the
+  pre-flight refusal (fixture pins no standard) with exit 2, writes nothing;
+  the reporting-list pinning test extended with "standard upgrade" (it reads
+  the help text and pins the set, so the docs/cli-reference --no-write table
+  row and the help text had to move together -- they did).
+- Docs: cli-reference.md --no-write row moved standard upgrade to the
+  --dry-run family; the upgrade section gains the --dry-run flag row, an
+  example line, and the throwaway-copy sentence. standard-library.md NOT
+  changed: its migration text (470-540) never tells people to copy the tree
+  by hand (grep "copy" -- only "pointer, not a copy" and a stale-copy
+  sentence); the task's "if" condition is false.
+- changelog.d/standard-upgrade-dry-run.added.md -- rule applied: `added`
+  (new capability: a new flag; the --no-write flip is called out in the same
+  bullet, non-breaking).
+- Verified by running: refdes standard upgrade --help (shows --dry-run).
+
+## Sabotage
+
+Reverted the fix at its core point: _run_upgrade_chain(copy, ...) ->
+_run_upgrade_chain(project_root, ...) in the dry_run branch, i.e. the dry run
+runs the real chain on the real tree.
+`-k dry_run` -> 2 failed (test_standard_upgrade_dry_run_prints_the_plan_and_writes_nothing:
+tree-hash assert fails -- the sabotaged dry run rewrote the item files, bumped
+the pin, carried the baseline/seal for real; and test_standard_upgrade_dry_run_then_the_real_run_still_works:
+the real run afterwards refuses, already at v3 -- the preview ate the upgrade),
+1 passed (the refusal-parity test, which is immune: the pre-flight SchemaError
+raises before the copy is built). Restored the copy line; 3 passed.
+
+## Gates
+
+- ruff check --select E9,F src tests: All checks passed.
+- python docs-site/gen_examples.py --check: schema-reference.md /
+  vocabulary.md up to date.
+- Full suite (foreground, once): 3822 passed, 2 skipped in 299.30s, exit 0.
+  (.scratch/suite.txt)
