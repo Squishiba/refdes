@@ -1,0 +1,132 @@
+sweep3-serve-test-helper-lows — low findings from the #210 and #206 reviews
+============================================================================
+
+Branch: sweep3-serve-test-helper-lows (cut from main at 8b6a52e).
+Task file: .scratch/TASK-ITEMS.txt (items M1-M4), rules in .scratch/COMMON.txt.
+
+Started: verified the tree is clean and on the right branch (`git status`,
+`git log --oneline -3` -> 8b6a52e at HEAD).
+
+## M1 — tests/serve_support.py free_port(): empty pinning band
+
+Verified the finding still applies: `free_port()` (tests/serve_support.py:465)
+built `band = range(2048, ephemeral_start())` and sampled from it; with
+`len(band) == 0` the `for` loop body never runs and it raises
+`RuntimeError("no free loopback port to pin...")`, so every pinned-port test
+dies on a box whose `ip_local_port_range` starts at or below 2048. This box is
+32768-60999, so the band is fine here and the failure mode is only reachable by
+monkeypatching -- which is how the test drives it.
+
+Fix: if the below-range band holds fewer than 512 ports, fall back to the
+pre-#210 `bind(0)` behaviour, with a comment naming the reopened race window.
+Chose the fallback over e.g. pinning above the range: above the range is where
+the kernel's own auto-assignment lives, which is precisely what #210 moved away
+from (the docstring at tests/serve_support.py:444-463 records the measurement).
+512 as the floor, per the task's suggestion: `random.sample(band, k=min(16,
+len(band)))` still probes 16 candidates when the band is 512 wide, so the band
+is only abandoned when it has effectively collapsed.
+
+Test: tests/test_serve_cli.py::test_free_port_falls_back_when_there_is_no_room_to_pin
+monkeypatches serve_support.ephemeral_start to 2048 (band empty) and 1500 (band
+negative), and asserts free_port() still returns a port that binds -- i.e. it
+returns *something usable* rather than raising. Checked that the fixture
+patches the name free_port() actually looks up (the module global in
+serve_support), not the copy test_serve_cli.py imported.
+
+Sabotage: removed the `if len(band) < 512:` fallback block from free_port()
+and re-ran `pytest tests/test_serve_cli.py -k free_port` ->
+`test_free_port_falls_back_when_there_is_no_room_to_pin` FAILED with
+`RuntimeError: no free loopback port to pin: nothing bound, nothing was free`
+(serve_support.py:478), exactly the failure the item describes. Restored the
+block; both free_port tests pass again (2 passed). The test needs `socket`, so
+`import socket` was added to tests/test_serve_cli.py.
+
+## M2 — tests/test_serve_cli.py _wait_for_file docstring
+
+Verified: the docstring says "The exit code and the first lines of stderr ride
+along in the assertion", while dead_child() (tests/test_serve_cli.py:149) joins
+`(err or out or "").strip().splitlines()[:3]` -- stderr when it is non-empty,
+otherwise stdout, first three lines. Docstring-only fix, as the task says.
+
+## M3 — changelog.d/verb-named-reserved-key.breaking.md silent-vs-error wording
+
+Verified the finding still applies: the fragment groups "`on_change: [MEMO-002]`
+and a `body:` collision silently dropped the link with a clean exit" and then
+says `key:`, `former_ids:`, `id:` and `type:` "collided as the item's own ...
+identity", without saying which collisions errored.
+
+Ground truth, established by running the PRE-FIX code rather than by reading
+alone: extracted the parent of 052d0c3 (the commit that added
+schema._reject_reserved_link_verb) into .scratch/m3old/src and ran
+.scratch/m3probe/probe.py (load + load_items) and probe2.py (load + a full
+`build.build()`, so "clean exit" means clean end to end and not merely clean
+at load) against it. Each case is a project whose `note` type declares the
+verb in `links:`, with items/NOTE-001.md writing that verb at the live item
+NOTE-002, scalar and list spellings:
+
+  - ERRORED (loud, but about the wrong thing):
+      * scalar `on_change:` -> "on_change: 'NOTE-002' must be one of
+        invalidate, log, ignore" (the bogus change-policy error, as claimed)
+      * `type:` in BOTH spellings -> "unknown type 'NOTE-002'." /
+        "unknown type ['NOTE-002']."
+      * scalar `id:` naming a live item -> "duplicate id 'NOTE-002'"
+        (naming nothing live it is silent: the item just took the id --
+        probed separately with `id: MEMO-999`, clean and ids = MEMO-999)
+      * `key:` both spellings -> build: "key 'NOTE-002' is malformed:
+        expected exactly 11 characters"
+      * `former_ids:` both spellings -> build: "former_ids: 'NOTE-002' is
+        still a live item id"
+  - SILENT (clean exit, links == {}):
+      * list `on_change:` (_apply_change_override only handles str/dict)
+      * `body:` -- absorbed into the item's body text instead ("NOTE-002" /
+        "['NOTE-002']")
+      * `prefix:`/`board:`/`workspace:` -- absorbed as the item's own hint
+      * list `id:` -- the item vanished under NOTE-001 and re-appeared with
+        id "['NOTE-002']", no diagnostic
+
+So the fragment's split was wrong in three places: `type:`, `key:` and
+`former_ids:` never dropped silently (they errored, just about the wrong
+thing), and a list `id:` DID drop silently while the fragment implied `id:`
+belonged with the errored-identity group. Reworded the sentence to say
+exactly which spellings dropped silently and which errored; wording only,
+the check itself is untouched.
+
+## M4 — in-prog-logs/sweep3-schema-vocab-nits.txt duplicated heading
+
+Verified: `grep -n "^## "` shows two `## D6` lines (115 and 116). Line 115 is
+the raw task title left over ("vocabulary.py differs_from on a malformed sets:
+entry -> bare ValueError"); line 116 is the real, D5/D7-style status heading
+and the body under it is the SKIPPED write-up. Removed line 115.
+
+## Changelog
+
+No new fragment. changelog.d/README.md's rule is that "each change that
+deserves a changelog entry gets one fragment file here", written "for a reader
+of the project, saying what changed and what they must do about it". None of
+these four items is such a change: M1 is a test helper, M2 is a test
+docstring, M4 is an in-prog log, and M3 edits the wording of the fragment
+that already carries #196's user-visible entry (the entry itself and the
+behaviour it describes are unchanged). So the directory keeps exactly the
+fragments it had.
+
+## Verification
+
+- `PYTHONPATH=$PWD/src <venv> -m pytest -q -p no:cacheprovider` (foreground,
+  once, at the end) -> `3603 passed, 2 skipped in 267.25s`, exit 0. No flake
+  this time, so the known stale-token-file test did not need a solo re-run.
+- `ruff check --select E9,F src tests` -> "All checks passed!", exit 0
+  (scoped as AGENTS.md requires; `ruff check .` is not a clean baseline here).
+- `PYTHONPATH=$PWD/src <venv> python docs-site/gen_examples.py --check` ->
+  both generated docs "up to date", exit 0.
+- Targeted runs during the work: `pytest tests/test_serve_cli.py -k free_port`
+  -> 2 passed (before the sabotage and again after restoring the fix).
+- No test or doc references changelog.d/verb-named-reserved-key.breaking.md
+  (`grep -rln "verb-named-reserved-key" tests docs src` -> nothing), so M3's
+  rewording has no fixture to update.
+
+## Status
+
+Finished: M1 (fallback + test, sabotage recorded), M2 (docstring), M3
+(wording, verified against the pre-fix code end to end), M4 (stray heading
+removed). Scratch artefacts left in .scratch/ (m3old/, m3probe/ including
+probe.py and probe2.py and the generated probe projects, suite.txt).

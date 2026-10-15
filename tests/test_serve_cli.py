@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -141,8 +142,9 @@ def _wait_for_file(path, timeout: float = 180.0, differs_from: str | None = None
     With `proc`, the wait ends the moment the launch it waits on is dead: a
     child that exited cannot write the file, and burning the whole deadline
     on one was turning a one-second diagnosis into a three-minute stall that
-    every worker then had to work around. The exit code and the first lines
-    of stderr ride along in the assertion, so the failure says why.
+    every worker then had to work around. The exit code and the first three
+    lines of the child's output ride along in the assertion -- stderr when it
+    has any, stdout otherwise -- so the failure says why.
     """
     def dead_child() -> AssertionError:
         out, err = proc.communicate(timeout=10)
@@ -186,6 +188,20 @@ def test_free_port_hands_out_nothing_the_os_will_later_reassign():
     for _ in range(16):
         port = free_port()
         assert 1024 < port < start, f"{port} is inside the ephemeral range"
+
+
+def test_free_port_falls_back_when_there_is_no_room_to_pin(monkeypatch):
+    """The band `free_port()` pins in is `range(2048, ephemeral_start())`, which
+    a sysctl can empty: `ip_local_port_range` may legitimately start at or below
+    2048, and then every pinned-port test would raise instead of running. A
+    suite that cannot get a port at all is worse off than one that races, so a
+    collapsed band degrades to the old `bind(0)` pick -- on loan to the kernel
+    again, race window and all -- rather than failing the whole file."""
+    for start in (2048, 1500):  # band empty, then band inverted
+        monkeypatch.setattr("serve_support.ephemeral_start", lambda start=start: start)
+        port = free_port()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", port))  # the port is real and free to claim
 
 
 def test_port_flag_binds_exactly_the_port_asked_for(tmp_path):
