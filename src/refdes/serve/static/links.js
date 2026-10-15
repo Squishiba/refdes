@@ -34,17 +34,28 @@ function displayHalf(target) {
 // `log.blocked_by: []` is the live case). The picker offers exactly what
 // the server accepts: the declared types when there are any, the whole
 // project when the list is empty.
+//
+// The picker asks the list API for its full page (the server MAX_LIMIT,
+// serve/filters.py) rather than the default 500, and says so when even that
+// page is truncated -- a picker that silently dropped rows would be hiding
+// valid targets exactly like the empty-list bug it replaced.
+const PICKER_LIMIT = 5000;
+
 async function candidatesFor(types) {
-  const out = [];
+  const base = `/api/items?limit=${PICKER_LIMIT}`;
   const queries = types && types.length
-    ? types.map((type) => `/api/items?type=${encodeURIComponent(type)}`)
-    : ['/api/items'];
+    ? types.map((type) => `${base}&type=${encodeURIComponent(type)}`)
+    : [base];
+  const out = [];
+  let total = 0;
   for (const query of queries) {
     const payload = await api(query);
-    out.push(...(payload.items || []));
+    const found = payload.items || [];
+    total += payload.total ?? found.length;
+    out.push(...found);
   }
   out.sort((a, b) => String(a.id || a.handle).localeCompare(String(b.id || b.handle)));
-  return out;
+  return { items: out, total };
 }
 
 function verbPicker(item, handle, verb, spec, onChange) {
@@ -150,6 +161,7 @@ function verbPicker(item, handle, verb, spec, onChange) {
   wrap.appendChild(pickers);
 
   const rows = new Map(); // row id -> candidate row, for isLinked lookups
+  let totalFound = null; // full count of the list, when it exceeds the page
 
   function renderCandidates(all) {
     pickers.textContent = '';
@@ -178,13 +190,16 @@ function verbPicker(item, handle, verb, spec, onChange) {
       pickers.appendChild(line);
     }
     if (!shown) pickers.appendChild(el('p', 'muted', 'no candidates match'));
+    if (totalFound !== null && all.length < totalFound)
+      pickers.appendChild(el('p', 'muted', `showing ${all.length} of ${totalFound} targets -- filter to narrow`));
   }
 
   let all = [];
   filter.addEventListener('input', () => renderCandidates(all));
   candidatesFor(spec.target_types)
     .then((found) => {
-      all = found;
+      all = found.items;
+      totalFound = found.total;
       renderCandidates(all);
       refresh();
     })

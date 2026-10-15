@@ -81,3 +81,40 @@ Green-after: new file 3/3;
 
 Status: finished. Changelog fragment
 `changelog.d/editor-empty-link-target-types-candidates.fixed.md`.
+
+## Round 2: PR #267 review (CHANGES REQUESTED) -- fix round
+
+Reviewer findings, by disposition:
+
+1. MEDIUM, REAL, FIXED: the unfiltered picker silently truncated at the
+   list API's default page of 500 (filters.py DEFAULT_LIMIT=500,
+   MAX_LIMIT=5000; api.py applies it; reviewer reproduced with a real
+   600-item EditorApp: total 600, items 500). Fix: links.js candidatesFor
+   now requests `limit=5000` (the server's MAX_LIMIT, PICKER_LIMIT const
+   naming filters.py), on both the per-type and the unfiltered query; and
+   renderCandidates appends "showing N of M targets -- filter to narrow"
+   when the fetched page is smaller than the list total (candidatesFor
+   returns {items, total}, summing `total` across the per-type queries).
+   New tests in the same node harness, red-before verified against the
+   round-1 links.js in .scratch/red-static-267 (fetches `/api/items` with
+   no limit -> offered 500 of 600): a 600-item project must offer all 600
+   and fetch limit=5000; a 6000-item project shows the capped 5000 rows
+   plus the notice. Plus an HTTP pin on the real EditorApp: GET /api/items
+   caps at 500 with total 601, ?limit=5000 returns all 601.
+2. LOW, NO CODE CHANGE: CI checks pending at review time; this push
+   re-runs them.
+3. LOW, DISAGREED (explained in the PR comment, not changed): the picker
+   lists the item being edited among candidates. Live probe
+   (.scratch/editor-empty-target-types/probe-self-link.py): the server
+   gate itself accepts the self-link, and the save is refused by build
+   validation with a named reason -- 422 "blocked_by cycle: LOG-001 ->
+   LOG-001", tree unchanged, editor surfaces it in the refusal banner.
+   The restricted picker has always offered self when self's type is a
+   declared target type (pre-existing, predates this PR), and self-links
+   are schema-legal for verbs without a cycle rule; excluding self is a
+   product decision outside this ticket's seam.
+
+Traps (repeat of round 1, keep in mind): links.js comments must carry no
+apostrophes (test_serve_static quote-state scanner), and the node harness
+needs STATIC as an ABSOLUTE path (file:// URL import; a relative STATIC
+fails the node spawn, which reads like a harness crash).

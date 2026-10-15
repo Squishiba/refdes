@@ -26,6 +26,11 @@ Two halves, one per side of the seam:
   the picker must fetch the unfiltered list and offer every item as a
   candidate, and clicking Add must draft the add; a verb with declared types
   must keep fetching exactly those types and offering exactly their items.
+  The list API caps at a page of rows (`filters.py`: default 500, max 5000),
+  so the picker must ask for the full page -- a 600-item project must offer
+  all 600, not a silently truncated 500 -- and must say so when even the
+  full page truncates (a project past the cap shows the fetched rows plus a
+  "showing N of M" line, never a list that hides the gap).
 """
 
 from __future__ import annotations
@@ -74,13 +79,18 @@ types:
 
 K_REQ1 = keys_mod.mint()
 
-REQS = f"""\
-defaults: {{ type: requirement, board: board-a }}
-items:
-  - id: REQ-001
-    key: {K_REQ1}
-    text: The rail shall supply 3.3 V.
-"""
+# 600 requirements: past the list API's default page of 500, so the pins
+# below prove the cap is real server behavior (the picker must page for it).
+REQS = (
+    "defaults: { type: requirement, board: board-a }\n"
+    "items:\n"
+    + "".join(
+        f"  - id: REQ-{n:03d}\n"
+        + (f"    key: {K_REQ1}\n" if n == 1 else "")
+        + f"    text: Requirement number {n}.\n"
+        for n in range(1, 601)
+    )
+)
 
 LOG = """\
 defaults: { type: log, board: board-a }
@@ -139,6 +149,20 @@ def test_the_server_applies_an_add_of_any_type_under_an_empty_list(served):
     assert payload["kind"] == "applied" and payload["ok"] is True
     with open(log_file(root), encoding="utf-8") as fh:
         assert f"blocked_by: REQ-001@{K_REQ1}" in fh.read()
+
+
+def test_the_items_list_pages_at_500_and_honors_the_max_page(served):
+    # The cap the picker must plan around (600 requirements in this fixture):
+    # an unpaginated GET /api/items hands back 500 with total 600; the page
+    # of MAX_LIMIT=5000 the picker asks for covers the whole project.
+    client, _root = served
+    status, payload = client.api_get("/api/items")
+    assert status == 200
+    assert payload["total"] == 601 and payload["limit"] == 500  # 600 REQ + 1 LOG
+    assert len(payload["items"]) == 500
+    status, payload = client.api_get("/api/items?limit=5000")
+    assert status == 200
+    assert payload["limit"] == 5000 and len(payload["items"]) == 601
 
 
 # --------------------------------------------------------------------------
@@ -237,14 +261,27 @@ const ALL = [
   { id: 'LOG-001', handle: 'LOG-001', key: 'k3', title: 'Start', type: 'log' },
 ];
 
+// The list API caps its payload at one page (serve/filters.py: DEFAULT_LIMIT
+// 500, MAX_LIMIT 5000; api.py applies parse_limit). The stub mirrors that:
+// no limit param means the default 500, limit slices the match, and `total`
+// is always the FULL match count -- the picker must ask for the full page
+// and must not hide a truncation.
+let UNIVERSE = ALL;
+
 const fetchCalls = [];
 
 globalThis.fetch = async (path) => {
   if (path === '/api/items' || path.startsWith('/api/items?')) {
     fetchCalls.push(path);
-    const m = /(^|\?)type=([^&]+)/.exec(path);
-    const items = m ? ALL.filter((r) => r.type === decodeURIComponent(m[2])) : ALL;
-    return { ok: true, status: 200, statusText: 'OK', json: async () => ({ items }) };
+    const params = new URLSearchParams(path.includes('?') ? path.split('?')[1] : '');
+    const type = params.get('type');
+    const cap = params.has('limit') ? Number(params.get('limit')) : 500;
+    const matched = type ? UNIVERSE.filter((r) => r.type === type) : UNIVERSE;
+    const items = matched.slice(0, cap);
+    return {
+      ok: true, status: 200, statusText: 'OK',
+      json: async () => ({ items, total: matched.length, limit: cap }),
+    };
   }
   return { ok: true, status: 200, statusText: 'OK', json: async () => ({}) };
 };
@@ -277,12 +314,17 @@ function candidateLabels(editor) {
   );
 }
 
+function findMuted(editor) {
+  return findAll(editor.node, 'muted').map((n) => n.textContent).filter((t) => t.startsWith('showing'));
+}
+
 const results = {};
 
 // -- unrestricted: a verb declared with `target_types: []` must offer every
 //    item (the server accepts a link to any of them), and Add must draft.
 {
   const handle = 'LOG-001';
+  UNIVERSE = ALL;
   fetchCalls.length = 0;
   const editor = createEditor(
     editItem({ blocked_by: { editable: true, target_types: [], targets: [] } }),
@@ -306,6 +348,7 @@ const results = {};
 //    per-type fetch and offers exactly those items, and nothing else.
 {
   const handle = 'DEC-001';
+  UNIVERSE = ALL;
   fetchCalls.length = 0;
   const editor = createEditor(
     editItem({ satisfies: { editable: true, target_types: ['requirement'], targets: [] } }),
@@ -314,6 +357,47 @@ const results = {};
   await tick(20);
   results.restrictedCalls = fetchCalls.filter((p) => p.startsWith('/api/items'));
   results.restrictedCandidates = candidateLabels(editor);
+  results.restrictedNotice = findMuted(editor);
+}
+
+// -- big project (600 items > the default page of 500): the picker must ask
+//    for the full page and offer ALL 600, not a silently truncated 500.
+{
+  const handle = 'DEC-002';
+  UNIVERSE = Array.from({ length: 600 }, (_, i) => ({
+    id: `REQ-${String(i + 1).padStart(4, '0')}`,
+    handle: `REQ-${String(i + 1).padStart(4, '0')}`,
+    key: `q${i}`, title: `R${i}`, type: 'requirement',
+  }));
+  fetchCalls.length = 0;
+  const editor = createEditor(
+    editItem({ refines: { editable: true, target_types: ['requirement'], targets: [] } }),
+    handle, () => {}, () => {},
+  );
+  await tick(50);
+  results.bigCalls = fetchCalls.filter((p) => p.startsWith('/api/items'));
+  results.bigCandidateCount = findAll(editor.node, 'link-add').length;
+  results.bigNotice = findMuted(editor);
+}
+
+// -- past the cap (6000 items > MAX_LIMIT page of 5000): the fetched page is
+//    the whole offer, and the picker says so -- "showing N of M" -- instead
+//    of presenting a list that silently hides 1000 valid targets.
+{
+  const handle = 'DEC-003';
+  UNIVERSE = Array.from({ length: 6000 }, (_, i) => ({
+    id: `REQ-${String(i + 1).padStart(5, '0')}`,
+    handle: `REQ-${String(i + 1).padStart(5, '0')}`,
+    key: `q${i}`, title: `R${i}`, type: 'requirement',
+  }));
+  fetchCalls.length = 0;
+  const editor = createEditor(
+    editItem({ refines: { editable: true, target_types: ['requirement'], targets: [] } }),
+    handle, () => {}, () => {},
+  );
+  await tick(100);
+  results.cappedCandidateCount = findAll(editor.node, 'link-add').length;
+  results.cappedNotice = findMuted(editor);
 }
 
 console.log(JSON.stringify(results));
@@ -333,9 +417,9 @@ def test_the_picker_offers_every_item_for_an_unrestricted_verb():
     assert proc.returncode == 0, f"node harness failed:\n{proc.stderr}"
     results = json.loads(proc.stdout.strip().splitlines()[-1])
 
-    assert results["unrestrictedCalls"] == ["/api/items"], (
+    assert results["unrestrictedCalls"] == ["/api/items?limit=5000"], (
         "an unrestricted verb (target_types: []) must fetch the unfiltered "
-        f"/api/items; the picker fetched {results['unrestrictedCalls']!r} "
+        f"/api/items at the full page; the picker fetched {results['unrestrictedCalls']!r} "
         "(it loops the declared types and issues nothing for an empty list)"
     )
     assert results["unrestrictedCandidates"] == [
@@ -351,8 +435,31 @@ def test_the_picker_offers_every_item_for_an_unrestricted_verb():
         "clicking Add on an unrestricted verb's candidate must draft the add"
     )
 
-    assert results["restrictedCalls"] == ["/api/items?type=requirement"]
+    assert results["restrictedCalls"] == ["/api/items?limit=5000&type=requirement"]
     assert results["restrictedCandidates"] == ["REQ-001 — Rail"], (
         "a verb declaring target types must keep offering exactly the items "
         "of the declared types -- the fix must not widen the filtered path"
+    )
+    assert results["restrictedNotice"] == []
+
+    # 600 matching items > the default page of 500: the picker must ask for
+    # the full page and offer all of them -- silently offering 500 of 600
+    # valid targets is the same hiding-the-gap defect, in pages (review of
+    # PR #267, finding 1).
+    assert results["bigCalls"] == ["/api/items?limit=5000&type=requirement"]
+    assert results["bigCandidateCount"] == 600, (
+        "the picker silently truncated its candidate list at the default "
+        f"page of 500: it offered {results['bigCandidateCount']} of 600 items"
+    )
+    assert results["bigNotice"] == []
+
+    # past even the full page (6000 > MAX_LIMIT 5000): the fetched page is
+    # the whole offer and the picker says so, instead of presenting a list
+    # that hides 1000 valid targets.
+    assert results["cappedCandidateCount"] == 5000
+    assert results["cappedNotice"] == [
+        "showing 5000 of 6000 targets -- filter to narrow"
+    ], (
+        "a truncated candidate list must say so; a silent one hides valid "
+        "targets -- which is the defect this PR exists to remove"
     )

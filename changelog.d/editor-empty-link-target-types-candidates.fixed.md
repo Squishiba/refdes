@@ -9,4 +9,8 @@
   "no candidates match" -- a picker offering nothing for a link the server
   accepts to every item. An empty list now fetches the unfiltered
   `/api/items`, so the picker offers exactly what the server accepts; verbs
-  with declared target types keep their filtered per-type queries.
+  with declared target types keep their filtered per-type queries. The
+  picker now also asks the list API for its full page (the server's
+  5000-row maximum, not the default 500) and labels a list that even that
+  page truncates ("showing N of M targets"), so a candidate list never
+  silently hides valid targets.
