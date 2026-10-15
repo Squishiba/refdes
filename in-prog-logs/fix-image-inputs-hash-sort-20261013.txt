@@ -69,3 +69,32 @@ Verification (all from the worktree, PYTHONPATH=worktree/src):
 
 Changelog fragment: changelog.d/image-hash-mixed-none-crash.fixed.md.
 Scope kept to IMAGE-ASSET-001 only; IMAGE-ASSET-002/006/007 untouched.
+
+--- 2026-10-14: PR prep pass (opencode) ---
+
+Task: rebase the unpushed branch onto newest main, verify, push, open PR.
+
+  - Rebased c303bdb onto origin/main 21fb2c4 (main had moved past the
+    assigned 374a4aa: #213, #197, #214 merged). Clean rebase, no
+    conflicts — none of the new main commits touch build.py
+    (git diff 8b6a52e origin/main -- src/refdes/build.py is empty).
+    New head 3d51855.
+  - Targeted tests after rebase (PYTHONPATH=worktree/src,
+    refdes.__file__ confirmed inside the worktree):
+    tests/test_image_hash.py 11 passed; tests/test_build.py 35 passed;
+    tests/test_extends.py 57 passed (oracle_dump pins content hashes —
+    the no-hash-moves guarantee under the new sort key). Full suite not
+    re-run: the new main commits are serve/workbench/changelog-only,
+    no concrete integration risk with build.py.
+  - ruff scoped: test_image_hash.py clean; build.py shows one I001,
+    verified identical on origin/main's build.py — pre-existing,
+    untouched by this diff (which adds no imports).
+  - CLI repro on a fresh probe project (.scratch/hash-sort-pr/repro,
+    split refdes-project.yaml + refdes-schema.yaml per current main):
+    origin/main code -> TypeError traceback at build.py:2196, exit 1;
+    this branch -> "ERROR items/a.md:2 [DEC-001] — image src
+    'assets/sub/img.png' does not exist", site written, exit 1.
+    Ran with PYTHONPATH=worktree/src (shared venv refdes is an
+    editable install at /home/jorb/work/refdes, not this worktree).
+
+Status: rebased, verified, pushed; PR opened against main, not merged.
