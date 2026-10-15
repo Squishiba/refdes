@@ -144,6 +144,11 @@ def _run(tmp_path, scenario: str, storage: dict, handle: str = HANDLE) -> dict:
     return json.loads(proc.stdout)
 
 
+def preserved_bytes(storage: dict) -> str:
+    """The recovery key holds an envelope {raw, reason}; return the raw bytes."""
+    return json.loads(storage[CORRUPT_KEY])["raw"]
+
+
 def test_truncated_mirror_is_preserved_and_never_reads_clean(tmp_path):
     result = _run(tmp_path, "corrupt", {DRAFT_KEY: TRUNCATED})
     # editing still works: the page opens on a fresh, clean draft...
@@ -156,7 +161,7 @@ def test_truncated_mirror_is_preserved_and_never_reads_clean(tmp_path):
     assert result["corrupt"]["raw"] == TRUNCATED
     assert result["corrupt"]["reason"]
     # the bytes are recoverable for the whole tab session, not just this page
-    assert result["storage"][CORRUPT_KEY] == TRUNCATED
+    assert preserved_bytes(result["storage"]) == TRUNCATED
     # a tab close asks, because preserved evidence of unsaved work IS unsaved work
     assert result["hasAnyDraft"] is True
     assert result["prompted"] is True
@@ -176,7 +181,7 @@ def test_corrupt_mirror_is_still_corrupt_after_a_reload(tmp_path):
     assert second["corrupt"]["raw"] == TRUNCATED
     assert second["hasAnyDraft"] is True and second["prompted"] is True
     assert len(second["banners"]) == 1
-    assert second["storage"][CORRUPT_KEY] == TRUNCATED
+    assert preserved_bytes(second["storage"]) == TRUNCATED
 
 
 def test_discarding_the_mirror_is_an_explicit_user_release(tmp_path):
@@ -230,7 +235,7 @@ def test_mirrors_that_parse_but_are_not_drafts_are_corrupt(tmp_path, raw):
     result = _run(tmp_path, "corrupt", {DRAFT_KEY: raw})
     assert result["corrupt"] is not None, f"{raw!r} read as a clean draft"
     assert result["corrupt"]["raw"] == raw
-    assert result["storage"][CORRUPT_KEY] == raw
+    assert preserved_bytes(result["storage"]) == raw
     assert result["hasAnyDraft"] is True and result["prompted"] is True
     assert len(result["banners"]) == 1
 
@@ -261,7 +266,7 @@ def test_editing_after_corruption_keeps_recovery_discoverable(tmp_path):
     edited = first["edited"]
     assert edited["draft"]["fields"] == {"title": "Y"}
     assert json.loads(edited["storage"][DRAFT_KEY])["fields"] == {"title": "Y"}
-    assert edited["storage"][CORRUPT_KEY] == TRUNCATED
+    assert preserved_bytes(edited["storage"]) == TRUNCATED
     second = _run(tmp_path, "corrupt", edited["storage"])
     assert second["draft"]["fields"] == {"title": "Y"}, "the newer draft was buried"
     assert second["corrupt"] is not None, "the recovery copy went undiscoverable"
@@ -272,7 +277,81 @@ def test_editing_after_corruption_keeps_recovery_discoverable(tmp_path):
     assert second["prompted"] is True
     # nothing destructive on the way: both slots survive the reload check
     assert json.loads(second["storage"][DRAFT_KEY])["fields"] == {"title": "Y"}
-    assert second["storage"][CORRUPT_KEY] == TRUNCATED
+    assert preserved_bytes(second["storage"]) == TRUNCATED
+
+
+@pytest.mark.parametrize(
+    "raw,fragment",
+    [
+        ('{"title":"x"}', "none of the draft keys"),
+        ('{"fields":"nope"}', "fields is not an object"),
+        ('{"body":5}', "body is not a string"),
+        ('{"pins":"x"}', "pins is not a list"),
+        ('{"revision":5}', "revision is not a string"),
+        ('{"links":[]}', "links is not an object"),
+        ('{"links":{"add":{"v":"s"}}}', "verbs are not lists"),
+        ('{"revision":7,"fields":{"a":"b"}}', "revision is not a string"),
+    ],
+)
+def test_malformed_object_mirrors_are_preserved_not_clean(tmp_path, raw, fragment):
+    """Objects that parse but are not drafts -- e.g. {"title":"x"}, a mirror
+    from a foreign schema -- used to read as an empty clean draft."""
+    result = _run(tmp_path, "corrupt", {DRAFT_KEY: raw})
+    assert result["corrupt"] is not None, f"{raw} read as a clean draft"
+    assert fragment in result["corrupt"]["reason"]
+    assert result["corrupt"]["raw"] == raw
+    assert preserved_bytes(result["storage"]) == raw
+    assert result["draft"] == {
+        "revision": None, "fields": {}, "body": None, "pins": [],
+        "links": {"add": {}, "remove": {}},
+    }
+    assert result["hasAnyDraft"] is True and result["prompted"] is True
+    assert len(result["banners"]) == 1
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [
+        # a pre-pins, pre-links draft: keys added later may be absent
+        '{"revision":"r1","fields":{"title":"X"},"body":"text"}',
+        '{"revision":"r2","fields":{"title":"X"}}',
+        '{"fields":{},"body":"only body"}',
+    ],
+)
+def test_legacy_drafts_stay_readable(tmp_path, legacy):
+    """Shape validation is permissive where age explains the difference:
+    missing later keys default, valid mirrors never become damage."""
+    result = _run(tmp_path, "corrupt", {DRAFT_KEY: legacy})
+    assert result["corrupt"] is None, f"legacy mirror {legacy} named corrupt"
+    assert result["banners"] == []
+    assert result["warnings"] == []
+    parsed = json.loads(legacy)
+    assert result["draft"]["revision"] == parsed.get("revision")
+    assert result["draft"]["fields"] == parsed.get("fields", {})
+    assert result["draft"]["body"] == parsed.get("body")
+    assert result["draft"]["pins"] == []
+    assert result["draft"]["links"] == {"add": {}, "remove": {}}
+
+
+def test_concrete_parse_reason_survives_the_reload(tmp_path):
+    """The recovery envelope carries the first page's reason, so the reload
+    names the same damage instead of a generic line."""
+    first = _run(tmp_path, "corrupt", {DRAFT_KEY: TRUNCATED})
+    second = _run(tmp_path, "corrupt", first["storage"])
+    assert second["corrupt"]["reason"] == first["corrupt"]["reason"]
+    assert "earlier page load" not in second["corrupt"]["reason"]
+    assert second["corrupt"]["raw"] == TRUNCATED
+
+
+def test_pre_envelope_recovery_value_still_recovers(tmp_path):
+    """A recovery copy written before the envelope existed (bare bytes)
+    decodes with a generic reason: the copy is never lost, only less named."""
+    result = _run(tmp_path, "corrupt", {CORRUPT_KEY: TRUNCATED})
+    assert result["corrupt"] is not None
+    assert result["corrupt"]["raw"] == TRUNCATED
+    assert "earlier page load" in result["corrupt"]["reason"]
+    assert result["hasAnyDraft"] is True and result["prompted"] is True
+    assert len(result["banners"]) == 1
 
 
 def test_discard_after_editing_keeps_the_newer_draft(tmp_path):
@@ -306,7 +385,7 @@ def test_applied_op_drop_and_corrupt_recovery_coexist(tmp_path):
     mirror = json.loads(applied["storage"][DRAFT_KEY])
     assert mirror["fields"] == {} and mirror["revision"] == "r8"
     assert applied["corrupt"] is not None and applied["corrupt"]["raw"] == TRUNCATED
-    assert applied["storage"][CORRUPT_KEY] == TRUNCATED
+    assert preserved_bytes(applied["storage"]) == TRUNCATED
     assert applied["prompted"] is True
     second = _run(tmp_path, "corrupt", applied["storage"])
     assert second["draft"]["body"] == "new body"

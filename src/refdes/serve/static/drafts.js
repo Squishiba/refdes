@@ -29,6 +29,73 @@ function corruptKey(handle) {
   return CORRUPT_PREFIX + encodeURIComponent(handle);
 }
 
+function decodeMirror(stored) {
+  // The recovery copy is an envelope carrying the concrete parse reason, so
+  // a reload names the same damage the first page saw, not a generic line.
+  // A value predating the envelope decodes as bare bytes with a generic
+  // reason; an envelope is only accepted as a whole {raw, reason} pair of
+  // strings, so recovery bytes that are not one are never misread as one.
+  try {
+    const envelope = JSON.parse(stored);
+    if (
+      envelope !== null &&
+      typeof envelope === 'object' &&
+      !Array.isArray(envelope) &&
+      typeof envelope.raw === 'string' &&
+      typeof envelope.reason === 'string'
+    ) {
+      return envelope;
+    }
+  } catch (_) {
+    /* fall through: the bare-bytes form */
+  }
+  return { raw: stored, reason: 'unreadable bytes preserved by an earlier page load' };
+}
+
+function isPlainObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const DRAFT_KEYS = new Set(['revision', 'fields', 'body', 'pins', 'links']);
+
+function draftShapeProblem(parsed) {
+  // Shape-first, permissive where age explains the difference: keys added
+  // after a mirror was written (pins, links) may be absent -- load()
+  // defaults them -- and unknown extra keys are left alone. Every
+  // recognized key that IS present must hold the type the draft accessors
+  // rely on, so a mirror the code would run on blindly is named instead.
+  // (Pins entries are not checked: a damaged entry degrades a pin label,
+  // not the draft.)
+  if (parsed === null) return 'the stored mirror is not a draft object';
+  if (![...DRAFT_KEYS].some((k) => k in parsed)) {
+    return 'the stored mirror has none of the draft keys';
+  }
+  if (parsed.revision !== undefined && parsed.revision !== null && typeof parsed.revision !== 'string') {
+    return 'the mirror revision is not a string';
+  }
+  if (parsed.fields !== undefined && !isPlainObject(parsed.fields)) {
+    return 'the mirror fields is not an object';
+  }
+  if (parsed.body !== undefined && parsed.body !== null && typeof parsed.body !== 'string') {
+    return 'the mirror body is not a string';
+  }
+  if (parsed.pins !== undefined && !Array.isArray(parsed.pins)) {
+    return 'the mirror pins is not a list';
+  }
+  if (parsed.links !== undefined) {
+    if (!isPlainObject(parsed.links)) return 'the mirror links is not an object';
+    for (const side of ['add', 'remove']) {
+      const ops = parsed.links[side];
+      if (ops === undefined) continue;
+      if (!isPlainObject(ops)) return `the mirror links.${side} is not an object`;
+      if (!Object.values(ops).every(Array.isArray)) {
+        return `the mirror links.${side} verbs are not lists of targets`;
+      }
+    }
+  }
+  return null;
+}
+
 function reportCorruptMirror(handle, raw, reason) {
   // Bytes that existed but could not be read are evidence of unsaved work,
   // never a clean slate: keep them in a recovery key, say so in the console
@@ -42,7 +109,7 @@ function reportCorruptMirror(handle, raw, reason) {
   corruptMirrors.set(handle, entry);
   let preserved = true;
   try {
-    sessionStorage.setItem(corruptKey(handle), raw);
+    sessionStorage.setItem(corruptKey(handle), JSON.stringify({ raw, reason }));
   } catch (_) {
     preserved = false;
   }
@@ -51,7 +118,7 @@ function reportCorruptMirror(handle, raw, reason) {
   console.warn(
     `refdes: the saved draft mirror for ${handle} could not be read (${reason}). ` +
       (preserved
-        ? `The unreadable bytes are preserved under the sessionStorage key ${corruptKey(handle)}.`
+        ? `A copy of the unreadable bytes is preserved under the sessionStorage key ${corruptKey(handle)}.`
         : 'The unreadable bytes could not be preserved in storage either; they live in this page only.')
   );
   mirrorNotice(handle, preserved);
@@ -65,7 +132,7 @@ function mirrorNotice(handle, preserved) {
   text.textContent =
     `The saved mirror of unsaved work for ${handle} was unreadable, so this form starts clean. ` +
     (preserved
-      ? `The unreadable bytes are preserved in sessionStorage under ${corruptKey(handle)}; recover them from that key before closing the tab.`
+      ? `A copy of the unreadable bytes is preserved in sessionStorage under ${corruptKey(handle)}; recover them from that key before closing the tab.`
       : 'The unreadable bytes could not be preserved in storage; they exist in this page only.');
   bar.appendChild(text);
   const button = document.createElement('button');
@@ -87,7 +154,8 @@ function load(handle) {
     // even once a newer valid draft has replaced the slot it was found in
     const recovered = sessionStorage.getItem(corruptKey(handle));
     if (recovered) {
-      reportCorruptMirror(handle, recovered, 'unreadable bytes preserved by an earlier page load');
+      const mirror = decodeMirror(recovered);
+      reportCorruptMirror(handle, mirror.raw, mirror.reason);
     }
   } catch (_) {
     return emptyDraft(); // a private-mode or quota failure costs persistence, not editing
@@ -100,9 +168,10 @@ function load(handle) {
     reportCorruptMirror(handle, raw, err.message);
     return emptyDraft();
   }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    // parses but is not a draft: same class of damage -- bytes, not a draft
-    reportCorruptMirror(handle, raw, 'the stored mirror is not a draft object');
+  const problem = draftShapeProblem(isPlainObject(parsed) ? parsed : null);
+  if (problem) {
+    // parses but is not a usable draft: same class of damage -- bytes, not a draft
+    reportCorruptMirror(handle, raw, problem);
     return emptyDraft();
   }
   const links = parsed.links || {};

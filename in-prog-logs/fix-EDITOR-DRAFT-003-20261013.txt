@@ -96,3 +96,47 @@ sibling editable install (python -c "import refdes" points at
 are file/node-driven). Tests: 14+2+49 = 64 green on the JS/serve-static
 set; full suite 3700 passed, 2 skipped. Branch commits 4110fa2/05128d3
 (+ this prep commit) carry the Qwen Co-authored-by trailer.
+
+REVIEW ROUND 2 (PR #227, reviewer agent 505cd734, CHANGES REQUESTED):
+- Rebased onto origin/main cc868e0 (main had advanced past 1d8efad
+  named in the task; #221 f7df34d is in main's history; clean rebase,
+  no conflicts).
+- Added changelog.d/editor-draft-corrupt-recovery.fixed.md (the
+  reviewer's required fragment; the branch shipped code behavior with
+  no changelog entry -- repo convention is one fragment per user-visible
+  change, slug.fixed.md, style followed from
+  editor-draft-mirror-applied-op.fixed.md).
+- Reviewer reproduced a same-class gap: the object mirror
+  {"title":"x"} parses, passes the old not-null/not-array check, and
+  load() defaults every missing key -> empty draft, isDirty false, no
+  warning: corruption read as clean. Fixed with draftShapeProblem():
+  an object with none of the draft keys (revision/fields/body/pins/
+  links) is damage; every recognized key present must hold the type
+  the draft accessors rely on (fields/links plain objects, pins a
+  list, links.add/remove verb values lists of targets, revision a
+  string, body a string). Permissive by design: keys added after a
+  mirror was written (links, pins) may be absent and load() defaults
+  them, and unknown extra keys are left alone -- so current and legacy
+  drafts (pre-links, pre-pins) stay readable (test_legacy_drafts_
+  stay_readable). Pins entry shape is not checked (a damaged entry
+  degrades a pin label, not the draft; noted in the code).
+- Concrete reason across reload: the recovery key now stores an
+  envelope JSON {raw, reason} (decodeMirror falls back to the bare-
+  bytes form for copies written earlier in the same tab, generic
+  reason then; an envelope is accepted only as a whole pair of
+  strings). Chosen because nothing else ever reads this key, it is
+  tab-scoped (sessionStorage), and the feature is unreleased -- a
+  schema-compatible low-risk change. test_concrete_parse_reason_
+  survives_the_reload pins it.
+- PR body: reworded to cite in-branch evidence (the repro tests that
+  run red against the pre-fix sources, recorded above) instead of the
+  untracked resweep TSV; the sweep files stay untracked, not committed.
+- Roundtable plugin is unavailable from this session (plugin.rpc
+  handler_error), so the reviewer room CLI cannot be driven; the
+  reviewer is a Paseo agent (505cd734, title "Review PR #227") --
+  asked for a fresh review of the new head via its agent session
+  after the push.
+- Verification: 27 corruption tests + 1 draft-mirror + 49 static = 77
+  green; e2e/edit suites 117 green; served static path confirmed to
+  resolve into THIS worktree's src (conftest.py:13 sys.path insert;
+  refdes.__file__ + served drafts.js carry the corrupt prefix).
