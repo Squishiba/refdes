@@ -858,6 +858,13 @@ def _copy_source_refused(exc: OSError, src: str, dest: str) -> bool:
     source-side EIO would send the user to the output directory for an
     unreadable project file, the bug this split exists to kill.
     (IMAGE-ASSET-007 review, F1; round-5 review, P2.)
+
+    An OSError naming *neither* path (reachable only through exotic
+    `copystat`/symlink intermediates) is taken as destination-side --
+    `return exc.filename == src` sends it to the loud exit-2 refusal that
+    publishes nothing, which is the safe direction: an asset-side call
+    here would publish a site silently missing a file the asset may not
+    have been (round-6 review, F4).
     """
     if exc.filename is not None:
         return exc.filename == src

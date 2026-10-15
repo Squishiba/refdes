@@ -207,3 +207,39 @@ the asset-side tie-break names a real file, unlinks the partial, and
 continues publishing, while a site refusal for a source-side EIO would
 reproduce exactly that bug. The docstring now says EIO is write-capable
 and names this as the documented tie-break, not a guarantee.
+
+## Review round 6 (chunk 1 CHANGES REQUESTED, review 3d2ce622; rebased onto 8ed01c5)
+
+F1+F2 (blocking, accepted): the reference probe opened with a bare
+blocking os.O_RDONLY -- on a FIFO it waits for a writer forever; base
+attempted no open on that branch, so the hang is this PR's. Fixed: open
+with getattr(os, "O_NONBLOCK", 0) AND fstat the fd -- S_ISREG or the
+reference gets "cannot be read: not a regular file" (a successful FIFO
+open must not record resolved: publish's isfile skip would dangle
+silently, F2). Test: SIGALRM-bounded (15s), isfile-swap simulates the
+gate->probe shape swap. Sabotage shown: bare os.O_RDONLY -> alarm fires,
+test fails at 15.16s; restored -> 36 passed in 1.49s. Scope note: the
+full-CLI FIFO project hangs EARLIER, in the load-time image freeze
+(open() of referenced files, present on base -- pre-existing, separate
+resweep lane), so the test drives collect_static_assets+render_bodies
+directly, as the reviewer's repro did; the CLI-level freeze hang on FIFOs
+is NOT in this ticket and was not touched.
+F3 (accepted, doc-only): "one error per file" reads per-file; the
+per-reference count is the deliberate posture (each broken reference is
+its own error, matching the missing-image behavior -- no cache added).
+docs/markdown.md and the changelog now say "one per reference, like a
+missing image".
+F4 (accepted, docstring-only): the filename-eq-src test classifies a
+neither-path OSError as destination; documented as the safe tie-break
+(loud exit-2 publishing nothing beats publishing a site missing a file).
+F5 (rejected): the parallel copy-side/reference-side sentences are
+intentionally parallel; both remedies are literally true for the copy-
+side case (the file's bytes are what failed to read, at publish time).
+No change; reason in the PR comment.
+F6 (accepted, lane clarification): both artifacts exist OUTSIDE the git
+tree -- the TSV at /home/jorb/work/refdes/in-prog-logs/
+current-main-resweep-image-digests.tsv (untracked lane data), PROGRESS.md
+at /home/jorb/work/refdes/.scratch/PROGRESS.md -- which is why repo-tree
+searches find neither. Claims are true; records live in the main
+checkout, not in commits.
+Gates: targeted 36 passed; full suite below; scoped ruff = baseline.

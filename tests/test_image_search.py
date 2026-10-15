@@ -748,6 +748,56 @@ def test_a_refused_datasheet_copy_leaves_no_partial_destination(tmp_path, monkey
 
 
 @pytest.mark.skipif(os.name == "nt", reason="mkfifo and SIGALRM are POSIX")
+def test_a_referenced_fifo_at_the_probe_is_named_not_a_hang(tmp_path, monkeypatch):
+    """Round-6 review F1+F2. The probe branch blocks on a bare
+    `os.O_RDONLY` open of a FIFO -- the reviewer reproduced `refdes check`
+    hanging there (base attempted no open on this branch at all, so the
+    hang is this PR's). The probe is reached when the file swaps shape
+    between the gate's `isfile` and the probe -- the race the probe
+    exists to close -- simulated here by the isfile swap; a full CLI run
+    of a FIFO project blocks earlier, in the load-time image freeze,
+    which opens referenced files on base too (a separate, pre-existing
+    lane). The guarded probe (open `O_NONBLOCK` + `fstat` for `S_ISREG`)
+    names it at the reference: a successful open of a FIFO is not an
+    image and must not record resolved. The alarm bounds the hang.
+    Sabotage: bare `os.O_RDONLY`, and the alarm fires; drop the
+    `S_ISREG` check, and the reference records resolved pointing at a
+    file publish will skip."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "![the pipe](/shots/pipe)\n")
+    (tmp_path / "shots").mkdir()
+    os.mkfifo(tmp_path / "shots" / "pipe")
+    real_isfile = os.path.isfile
+
+    def isfile_at_the_gate(path):
+        if str(path).endswith(os.path.join("shots", "pipe")):
+            return True  # the gate saw a regular file; it is not now
+        return real_isfile(path)
+
+    monkeypatch.setattr(os.path, "isfile", isfile_at_the_gate)
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.collect_static_assets(project)
+
+    def on_alarm(signum, frame):
+        raise AssertionError("the readability probe blocked on a FIFO")
+
+    previous = signal.signal(signal.SIGALRM, on_alarm)
+    signal.alarm(15)
+    try:
+        build_mod.render_bodies(project)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+    failing = next(d for d in project.errors if "pipe" in d.message)
+    assert "not a regular file" in failing.message, failing.message
+    assert failing.item_id == "DEC-A-001"
+    (entry,) = project.image_results["DEC-A-001"]
+    assert entry["ok"] is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="mkfifo and SIGALRM are POSIX")
 def test_a_fifo_in_a_site_assets_directory_does_not_hang_the_check(tmp_path,
                                                                     monkeypatch,
                                                                     capsys):

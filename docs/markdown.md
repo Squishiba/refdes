@@ -142,9 +142,11 @@ ERROR items/log/dec-001.md:2 [LOG-001] — image src 'figures/locked.png' exists
 
 A mode-000 file inside a `site.assets:` directory is refused by every
 build: `refdes check` names the file and the build publishes the rest of
-the site, leaving that file out. A file an item **references** gets its one
-error at the reference above — not the removal advice, which an item whose
-body links the file must not follow.
+the site, leaving that file out. A file an item **references** gets its
+error at the reference above -- one per reference, like a missing image --
+not the removal advice, which an item whose body links the file must not
+follow.
+
 
 ### A bare filename, found on the search path
 

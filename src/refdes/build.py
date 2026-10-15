@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import difflib
+import errno
 import hashlib
 import html as html_entities
 import json
 import os
 import re
+import stat
 import threading
 from collections.abc import Iterator
 
@@ -2961,8 +2963,26 @@ def _process_images(
             # no content read -- so the reference carries the same named
             # error as any other unreadable src; `readable_probe` keeps a
             # heavily-referenced asset directory at one open per file.
+            # A successful open is the answer only for a *regular* file:
+            # the registration walk takes FIFOs too, a bare-name
+            # reference resolves to one, and the copy loop's `isfile`
+            # then silently skips it -- so a probe that stops at "opened"
+            # records a reference publish will dangle (IMAGE-ASSET-007
+            # review round 6, F2). `fstat` on the opened fd decides.
+            # O_NONBLOCK: the blocking O_RDONLY open of a FIFO waits for
+            # a writer, which hung the whole command on the very branch
+            # added to gate references -- base attempted no open here at
+            # all, so the guard is not optional (round 6, F1; the flag is
+            # Unix-only, hence the `getattr`).
             try:
-                os.close(os.open(full_path, os.O_RDONLY))
+                fd = os.open(full_path,
+                             os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+                try:
+                    if not stat.S_ISREG(os.fstat(fd).st_mode):
+                        raise OSError(errno.ENOTSUP, "not a regular file",
+                                      full_path)
+                finally:
+                    os.close(fd)
             except OSError as exc:
                 return refused(exc, src, rel, match)
             project.readable_probe.add(rel)
