@@ -1,6 +1,6 @@
 // The New Item form: docs/design/browser-editor.md, Slice 3 -- creation.
 // The id shown here is what the server's pure planner says WOULD be minted,
-// refreshed as the type, board, or explicit override change -- nothing is
+// refreshed as the type, board/workspace, or explicit override change -- nothing is
 // reserved until Create is pressed, and the service re-plans under the save
 // lock, so a preview can never burn a number. The destination arrives as a
 // suggestion and stays a plain editable path (suggest plus override). Field
@@ -62,12 +62,33 @@ export function createForm(initial = {}) {
     }
     if (initial.type && byName[initial.type]) typeSelect.value = initial.type;
 
+    // The placeholder means "ask the file", so its value is '' -- an option
+    // with no value attribute reports its text, and the `if (select.value)`
+    // guards below read "(file default)" as a chosen board and stamp it on
+    // the item, which the registry gate then refuses. The registry options
+    // carry their keys explicitly for the same reason.
+    const scopeOption = (label, value) => {
+      const option = el('option', null, label);
+      option.value = value;
+      return option;
+    };
+
     let boardSelect = null;
     if ((schema.boards || []).length) {
       boardSelect = el('select', 'create-board');
-      boardSelect.appendChild(el('option', null, '(file default)'));
-      for (const board of schema.boards) boardSelect.appendChild(el('option', null, board));
+      boardSelect.appendChild(scopeOption('(file default)', ''));
+      for (const board of schema.boards) boardSelect.appendChild(scopeOption(board, board));
       if (initial.board) boardSelect.value = initial.board;
+    }
+
+    let workspaceSelect = null;
+    if ((schema.workspaces || []).length) {
+      workspaceSelect = el('select', 'create-workspace');
+      workspaceSelect.appendChild(scopeOption('(file default)', ''));
+      for (const workspace of schema.workspaces) {
+        workspaceSelect.appendChild(scopeOption(workspace, workspace));
+      }
+      if (initial.workspace) workspaceSelect.value = initial.workspace;
     }
 
     const idInput = el('input', 'create-id');
@@ -86,6 +107,7 @@ export function createForm(initial = {}) {
     const create = el('button', 'btn create-save', 'Create');
 
     if (boardSelect) block.appendChild(row('Board', boardSelect));
+    if (workspaceSelect) block.appendChild(row('Workspace', workspaceSelect));
     block.appendChild(row('Type', typeSelect));
     const idRow = row('ID', idInput);
     idRow.appendChild(idPreview);
@@ -117,6 +139,7 @@ export function createForm(initial = {}) {
     async function refreshPreview() {
       const params = new URLSearchParams({ type: typeSelect.value });
       if (boardSelect && boardSelect.value) params.set('board', boardSelect.value);
+      if (workspaceSelect && workspaceSelect.value) params.set('workspace', workspaceSelect.value);
       if (idInput.value.trim()) params.set('id', idInput.value.trim());
       try {
         const prev = await api(`/api/create/preview?${params.toString()}`);
@@ -142,6 +165,7 @@ export function createForm(initial = {}) {
       refreshPreview();
     });
     if (boardSelect) boardSelect.addEventListener('change', refreshPreview);
+    if (workspaceSelect) workspaceSelect.addEventListener('change', refreshPreview);
     idInput.addEventListener('input', refreshPreview);
 
     create.addEventListener('click', async () => {
@@ -151,6 +175,7 @@ export function createForm(initial = {}) {
         fields[control.dataset.field] = control.value;
       }
       if (boardSelect && boardSelect.value) fields.board = boardSelect.value;
+      if (workspaceSelect && workspaceSelect.value) fields.workspace = workspaceSelect.value;
       const body = { type: typeSelect.value, fields };
       if (idInput.value.trim()) body.id = idInput.value.trim();
       if (destInput.value.trim()) body.destination = destInput.value.trim();

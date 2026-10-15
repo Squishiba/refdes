@@ -1263,24 +1263,33 @@ def _creation_fields(spec, fields):
     return out, None
 
 
-def suggest_destination(project: Project, type_name: str, board: str | None = None) -> str:
+def suggest_destination(
+    project: Project,
+    type_name: str,
+    board: str | None = None,
+    workspace: str | None = None,
+) -> str:
     """Suggest, never decide: the file where items of this type already live
-    (preferring the same board when one is given), falling back to a new
-    single-item Markdown file named for the type. The explicit override
+    (preferring the same board and, where the project registers workspaces,
+    the same workspace when one is given), falling back to a new single-item
+    Markdown file named for the type. The explicit override
     always wins (Decisions, "Creation destination: suggest plus override")."""
     files = [
         item.source_file.replace("\\", "/")
         for item in project.local_items
         if item.type == type_name and item.source_file
     ]
-    if board:
-        same_board = [
+    if board or workspace:
+        same_scope = [
             item.source_file.replace("\\", "/")
             for item in project.local_items
-            if item.type == type_name and item.source_file and item.board == board
+            if item.type == type_name
+            and item.source_file
+            and (not board or item.board == board)
+            and (not workspace or item.workspace == workspace)
         ]
-        if same_board:
-            files = same_board
+        if same_scope:
+            files = same_scope
     if files:
         return Counter(files).most_common(1)[0][0]
     return f"items/{type_name}s.md"
@@ -1304,8 +1313,12 @@ def _resolve_destination(project: Project, request: CreateRequest):
     """
     dest = (request.destination or "").strip().replace("\\", "/")
     if not dest:
+        fields = request.fields or {}
         dest = suggest_destination(
-            project, request.type, board=(request.fields or {}).get("board")
+            project,
+            request.type,
+            board=fields.get("board"),
+            workspace=fields.get("workspace"),
         )
     parts = security.safe_relative_parts("/" + dest)
     if not parts:
@@ -1633,6 +1646,7 @@ def preview_creation(
     *,
     explicit_id: str | None = None,
     board: str | None = None,
+    workspace: str | None = None,
     destination: str | None = None,
 ) -> dict:
     """The id an item WOULD get and the destination it WOULD land in --
@@ -1651,7 +1665,7 @@ def preview_creation(
             "destination_exists": False,
         }
     dest = (destination or "").strip().replace("\\", "/") or suggest_destination(
-        project, type_name, board=board
+        project, type_name, board=board, workspace=workspace
     )
     # Resolved exactly as `create_item` will resolve it, so a destination
     # file's own `defaults.prefix` reaches the previewed id too -- this form
@@ -1659,12 +1673,17 @@ def preview_creation(
     # prefix the preview cannot see is one more way that promise breaks.
     # A destination the create would refuse still previews its bare type
     # prefix; the refusal is the save's to report, not the preview's to hide.
+    preview_fields = {}
+    if board is not None:
+        preview_fields["board"] = board
+    if workspace is not None:
+        preview_fields["workspace"] = workspace
     _rel, resolved, _why = _resolve_destination(
         project,
         CreateRequest(
             who="preview",
             type=type_name,
-            fields={} if board is None else {"board": board},
+            fields=preview_fields,
             destination=dest,
         ),
     )

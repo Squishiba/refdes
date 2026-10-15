@@ -59,6 +59,7 @@ async function renderRoute() {
       type: route.params.get('type'),
       amends: route.params.get('amends'),
       board: route.params.get('board'),
+      workspace: route.params.get('workspace'),
     }));
   } else if (route.handle) {
     renderItem(detailPane, route.handle);

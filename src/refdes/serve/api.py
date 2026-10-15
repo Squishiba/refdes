@@ -643,6 +643,7 @@ def _create_preview(app, query: dict[str, list[str]]) -> tuple[int, dict]:
     if not type_name:
         return 400, {"error": "type is required: ?type=<declared type>"}
     board = (query.get("board") or [""])[0] or None
+    workspace = (query.get("workspace") or [""])[0] or None
     explicit = (query.get("id") or [""])[0] or None
     destination = (query.get("destination") or [""])[0] or None
     return 200, edit_mod.preview_creation(
@@ -650,6 +651,7 @@ def _create_preview(app, query: dict[str, list[str]]) -> tuple[int, dict]:
         type_name,
         explicit_id=explicit,
         board=board,
+        workspace=workspace,
         destination=destination,
     )
 

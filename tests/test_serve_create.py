@@ -1034,6 +1034,120 @@ def test_a_board_field_suggests_a_file_already_on_that_board(tmp_path):
     assert read(items / "many-b.yaml") == many
 
 
+def test_a_workspace_field_suggests_a_file_already_in_that_workspace(tmp_path):
+    """The workspace sibling of the board test (docs/design/browser-editor.md,
+    "Creating items": type, then board/workspace where configured, and a
+    destination suggested from the project's registered board/workspace
+    paths). A `workspace:` among the fields steers the suggested destination
+    to a file already tagged with that workspace -- even when the *other*
+    workspace's file holds more items of the type -- the preview promises the
+    same file, and the create lands there with the workspace line written.
+
+    The suggestion reads `item.workspace`, which the workspaces registry
+    resolves during a build, exactly like `item.board` above: same eager
+    snapshot, same reason."""
+    root = tmp_path
+    two_workspaces = SCHEMA.replace(
+        'boards:\n  board-a:\n    label: "Board A"\n',
+        'boards:\n  board-a:\n    label: "Board A"\n'
+        'workspaces:\n'
+        '  platform: { label: "Platform", shared: true }\n'
+        '  product-a: { label: "Product A" }\n',
+    )
+    write_project_config(root, two_workspaces)
+    items = root / "items"
+    items.mkdir()
+    (items / "many-platform.yaml").write_text(
+        "defaults: { type: requirement, board: board-a, workspace: platform }\n"
+        "items:\n"
+        "  - id: REQ-101\n    text: In platform.\n"
+        "  - id: REQ-102\n    text: In platform.\n"
+        "  - id: REQ-103\n    text: In platform.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (items / "few-product.yaml").write_text(
+        "defaults: { type: requirement, board: board-a, workspace: product-a }\n"
+        "items:\n  - id: REQ-001\n    text: In product.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    built = loader.load_readonly(str(root / "refdes-project.yaml"))
+    assert {i.workspace for i in built.local_items} == {"platform", "product-a"}
+    # no scope given: the overall most-common file, unchanged
+    assert edit_mod.suggest_destination(built, "requirement") == "items/many-platform.yaml"
+    # a board the whole project sits on must not outvote the workspace
+    assert (
+        edit_mod.suggest_destination(built, "requirement", workspace="product-a")
+        == "items/few-product.yaml"
+    )
+    # the form's promise and the save have to agree, or the preview lies
+    assert (
+        edit_mod.preview_creation(built, "requirement", workspace="product-a")["destination"]
+        == "items/few-product.yaml"
+    )
+    # board and workspace compose: everything here sits on board-a, so the
+    # intersection is exactly the workspace's own file -- and a scope nothing
+    # sits in (board-b has no items in this schema) narrows to an empty set,
+    # which falls back to the most-common file, the same posture a board-only
+    # miss has
+    assert (
+        edit_mod.suggest_destination(built, "requirement", board="board-a", workspace="product-a")
+        == "items/few-product.yaml"
+    )
+    assert (
+        edit_mod.suggest_destination(built, "requirement", board="board-b", workspace="product-a")
+        == "items/many-platform.yaml"
+    )
+
+    result = create_item(
+        str(root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "New in product.", "workspace": "product-a"}
+        ),
+    )
+    assert isinstance(result, Created), result.message
+    assert result.path.replace("\\", "/") == (items / "few-product.yaml").as_posix()
+    landed = read(items / "few-product.yaml")
+    assert "New in product." in landed
+    assert "workspace: product-a" in landed  # the line the service emits, not just inherits
+    assert read(items / "many-platform.yaml").count("id: REQ-1") == 3  # untouched
+
+
+def test_creating_into_an_undeclared_workspace_is_the_delta_gate_s_refusal(tmp_path):
+    """`workspace` joins `board` as an accepted create field, so a value the
+    project never declared must be refused the same way a value the schema
+    rejects is: not written, reported by the overlay gate as the one new
+    error it introduces."""
+    root = tmp_path
+    two_workspaces = SCHEMA.replace(
+        'boards:\n  board-a:\n    label: "Board A"\n',
+        'boards:\n  board-a:\n    label: "Board A"\n'
+        'workspaces:\n  platform: { label: "Platform", shared: true }\n',
+    )
+    write_project_config(root, two_workspaces)
+    items = root / "items"
+    items.mkdir()
+    (items / "reqs.yaml").write_text(
+        "defaults: { type: requirement, board: board-a, workspace: platform }\n"
+        "items:\n  - id: REQ-001\n    text: In platform.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    before = tree(root, "items")
+
+    result = create_item(
+        str(root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Ghost.", "workspace": "ghost"}
+        ),
+    )
+    assert isinstance(result, Invalid), result
+    assert any("ghost" in d.message for d in result.diagnostics), result.diagnostics
+    assert tree(root, "items") == before
+
+
 # ---------------------------------------------------------------- HTTP face
 
 from serve_support import Client, snapshot_tree  # noqa: E402
@@ -1047,6 +1161,44 @@ def served(project_root):
     app.start()
     try:
         yield app, Client(app), project_root
+    finally:
+        app.stop()
+
+
+@pytest.fixture
+def served_workspaces(tmp_path):
+    """The same project shape as `test_a_workspace_field_suggests_a_file...`
+    over a live app, so the preview and create routes are exercised, not just
+    the functions behind them."""
+    config = SCHEMA.replace(
+        'boards:\n  board-a:\n    label: "Board A"\n',
+        'boards:\n  board-a:\n    label: "Board A"\n'
+        'workspaces:\n'
+        '  platform: { label: "Platform", shared: true }\n'
+        '  product-a: { label: "Product A" }\n',
+    )
+    write_project_config(tmp_path, config)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "many-platform.yaml").write_text(
+        "defaults: { type: requirement, board: board-a, workspace: platform }\n"
+        "items:\n"
+        "  - id: REQ-101\n    text: In platform.\n"
+        "  - id: REQ-102\n    text: In platform.\n"
+        "  - id: REQ-103\n    text: In platform.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (items / "few-product.yaml").write_text(
+        "defaults: { type: requirement, board: board-a, workspace: product-a }\n"
+        "items:\n  - id: REQ-001\n    text: In product.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    app = EditorApp(str(tmp_path / "refdes-project.yaml"), poll_interval=60)
+    app.start()
+    try:
+        yield app, Client(app), tmp_path
     finally:
         app.stop()
 
@@ -1074,6 +1226,46 @@ def test_http_schema_preview_and_create_round_trip(served):
     assert status == 200 and made["kind"] == "created"
     assert made["id"] == "REQ-012" and len(made["key"]) == 11
     assert "REQ-012" in ledger.read_text(encoding="utf-8")
+
+
+def test_http_preview_narrows_by_workspace_and_the_create_keeps_its_promise(served_workspaces):
+    """The whole UI path over HTTP: `/api/create/schema` publishes the
+    workspaces list (it always did), the preview now honours a `workspace`
+    query the form sends, and the POST whose fields carry that workspace lands
+    in the file the preview named -- the destination the create suggests from
+    the workspace alone must match, or the form would show one file and write
+    to another."""
+    _app, client, root = served_workspaces
+    status, schema = client.api_get("/api/create/schema")
+    assert status == 200
+    assert schema["workspaces"] == ["platform", "product-a"]
+
+    status, prev = client.api_get("/api/create/preview?type=requirement&workspace=product-a")
+    assert status == 200
+    assert prev["destination"] == "items/few-product.yaml"
+    assert prev["id"] == "REQ-104"
+
+    # the untouched neighbours: no scope and board-only preview as before
+    status, plain = client.api_get("/api/create/preview?type=requirement")
+    assert plain["destination"] == "items/many-platform.yaml"
+    status, _prev_b = client.api_get("/api/create/preview?type=requirement&board=board-a")
+
+    status, made = client.api_post(
+        "/api/items/create",
+        {"type": "requirement", "fields": {"text": "Via HTTP, in product.", "workspace": "product-a"}},
+    )
+    assert status == 200 and made["kind"] == "created", made
+    assert made["id"] == "REQ-104"
+    assert made["path"] == "items/few-product.yaml"  # exactly what the preview promised
+    landed = (root / "items" / "few-product.yaml").read_text(encoding="utf-8")
+    assert "workspace: product-a" in landed
+
+    status, ghost = client.api_post(
+        "/api/items/create",
+        {"type": "requirement", "fields": {"text": "Ghost.", "workspace": "ghost"}},
+    )
+    assert status == 422 and ghost["kind"] == "invalid"
+    assert any("ghost" in d["message"] for d in ghost["diagnostics"])
 
 
 def test_http_create_reads_an_empty_id_as_auto_like_the_preview(served):
