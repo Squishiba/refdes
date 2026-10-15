@@ -1,0 +1,100 @@
+fix EDITOR-API-010 — POST /api/items/create treats id:"" differently from preview's ?id=
+date: 2026-10-13
+worktree: /home/jorb/.paseo/worktrees/16msma8v/fix-editor-create-empty-id-20261013
+branch: fix/editor-create-empty-id-20261013, based on local main 8b6a52e
+
+## Task
+
+Resweep finding EDITOR-API-010 (from
+in-prog-logs/current-main-resweep-editor-api-low.tsv, which lives only in the
+shared main checkout — read, not edited): GET /api/create/preview?type=requirement&id=
+treats the empty id as auto and previews the next free id, while
+POST /api/items/create with {"id": ""} passes the explicit empty string to
+CreateRequest and gets 422. Fix only this finding. Choose consistent
+semantics (preferred: POST honours preview's auto mode), add a regression
+with controls (omitted id, valid explicit id), docs only if needed.
+
+## Start state
+
+`git status` clean on the fresh worktree at 8b6a52e; no stash, tree untouched.
+
+## Reproduced (before any change)
+
+Probe: .scratch/probe-editor-api-010/probe.py — a real EditorApp on a real
+two-file-config project (refdes-project.yaml + refdes-schema.yaml; the first
+probe run died with `types does not belong here`, which is the two-file
+config split biting, and was fixed by moving types: to the overlay), driven
+over real HTTP with the X-Refdes-Token header. Pre-fix output:
+
+  preview, id omitted   -> 200 {"id": "REQ-001", ...}
+  preview, id empty     -> 200 {"id": "REQ-001", ...}
+  create, id omitted    -> 200 created REQ-001
+  create, id EMPTY      -> 422 refused "'' is not shaped like a display id (a PREFIX-NNN form such as REQ-042)"
+  create, id explicit REQ-099 -> 200 created REQ-099
+
+Matches the resweep evidence (same refusal text; REQ-011 there vs REQ-001
+here is only the fixture's high-water).
+
+## Root cause and where the fix belongs
+
+serve/api.py `_create_preview` (:640) does `explicit = (query.get("id") or [""])[0] or None`
+— empty collapses to None = auto. `_create_item` (:695 pre-fix) passed
+`id=body.get("id")` straight into `edit.CreateRequest`, so `""` reached
+`ids.plan_new_id` (explicit_id != None branch) and `split_id("")` refused it.
+
+Chose to normalise at the HTTP boundary (api.py) rather than in ids.py or
+edit.py: `plan_new_id`'s posture — explicit candidates are honoured verbatim
+or refused as malformed, never renumbered — is asserted by
+tests/test_ids.py::test_plan_new_id_explicit_override_is_honoured_or_refused
+(a malformed explicit id is a refusal, not a re-plan), and the
+"an empty HTTP string means the parameter was not given" convention is
+already spelled at the route level for type/board/id/destination in the very
+same module (and for destination again defensively in
+edit._resolve_destination's `.strip()`). The service contract is
+"id=None means next free" (CreateRequest docstring); "" was never a service
+input, it is a wire artefact. So the POST route now does
+`id=body.get("id") or None`, mirroring the preview route's `or None`. The
+frontend (create.js) already omits an empty id from the body, so only raw
+API clients hit this; the fix aligns the wire contract with the preview's.
+
+## Change
+
+- src/refdes/serve/api.py `_create_item`: `id=body.get("id") or None` with a
+  comment naming the preview route as the convention source.
+- tests/test_serve_create.py: new
+  test_http_create_reads_an_empty_id_as_auto_like_the_preview — asserts
+  preview id==empty agree on REQ-012; POST id:"" creates REQ-012; controls:
+  omitted id takes REQ-013, valid explicit REQ-099 honoured; and
+  `id: "   "` is still 422 refused exactly where the preview route reports
+  the same malformed id as `id: null` with a reason.
+- changelog.d/serve-create-empty-id.fixed.md (repo convention seen in
+  8b6a52e/48501ce).
+- Docs: none touched. Only docs/design/editor-vscode-adapter.md and
+  docs/design/form-ingestion.md name the endpoint, both cite the body shape
+  `{type, fields, id?, destination?, amends?, links?}` — still true; neither
+  states empty-id behaviour, so nothing became wrong or needed the new rule.
+
+## Verification (all run in the worktree with the project venv,
+## /home/jorb/work/venv-refdes/bin/python3; tests/conftest.py:13 prepends this
+## worktree's src so the venv's editable install of shared main does not leak in)
+
+- Post-fix probe: create id EMPTY -> 200 created REQ-002 (auto), every other
+  line unchanged.
+- pytest tests/test_serve_create.py tests/test_serve_editor_e2e.py -q: 58 passed.
+- pytest tests/test_ids.py -q: 44 passed (id layer untouched).
+- ruff check src/refdes/serve/api.py tests/test_serve_create.py: 5 findings,
+  byte-identical to the same ruff run against the shared main's copies of
+  those two files (pre-existing DTZ011/RUF100/RUF059, only line numbers
+  shifted); zero introduced by this change. Not touched, per AGENTS.md's
+  "~99 pre-existing findings" note.
+
+## Limits / notes
+
+- Scope: only `id`. `destination: ""` already auto-suggests on the POST
+  (edit._resolve_destination strips empty), `amends: ""` already falsy-skips
+  — verified by reading those paths; no sibling divergence found worth a
+  second change.
+- No push, no PR, no merge, no edits to shared main (its
+  current-main-resweep-editor-api-low.tsv was read only).
+- A whitespace-only id remains a refusal on both routes; the change makes
+  empty mean auto, not "strip and retry".

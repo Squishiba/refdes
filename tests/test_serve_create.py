@@ -1076,6 +1076,104 @@ def test_http_schema_preview_and_create_round_trip(served):
     assert "REQ-012" in ledger.read_text(encoding="utf-8")
 
 
+def test_http_create_reads_an_empty_id_as_auto_like_the_preview(served):
+    """An empty id means "not given" on both create routes. The preview
+    route has always collapsed `?id=` to the auto plan (api.py's `or None`
+    on the query value), but the POST handed the same empty string to
+    `CreateRequest` as an explicit override and the id layer refused it 422
+    -- so saving exactly what the preview had just promised was the one
+    thing that could not be saved. Controls pin the neighbours: an omitted
+    id and a valid explicit id keep their existing meanings."""
+    _app, client, _root = served
+    status, prev_empty = client.api_get("/api/create/preview?type=requirement&id=")
+    status, prev_none = client.api_get("/api/create/preview?type=requirement")
+    assert status == 200
+    assert prev_empty["id"] == prev_none["id"] == "REQ-012"
+
+    status, made = client.api_post(
+        "/api/items/create",
+        {
+            "type": "requirement",
+            "fields": {"text": "Empty id means auto."},
+            "id": "",
+            "destination": "items/reqs.yaml",
+        },
+    )
+    assert status == 200 and made["kind"] == "created", made
+    assert made["id"] == "REQ-012"
+
+    status, omitted = client.api_post(
+        "/api/items/create",
+        {
+            "type": "requirement",
+            "fields": {"text": "No id key at all."},
+            "destination": "items/reqs.yaml",
+        },
+    )
+    assert status == 200 and omitted["id"] == "REQ-013"
+
+    status, explicit = client.api_post(
+        "/api/items/create",
+        {
+            "type": "requirement",
+            "fields": {"text": "Explicit id, honoured."},
+            "id": "REQ-099",
+            "destination": "items/reqs.yaml",
+        },
+    )
+    assert status == 200 and explicit["id"] == "REQ-099"
+
+    # only the *empty* string reads as absent: a whitespace id is still
+    # malformed, refused here exactly as the preview route reports it.
+    status, refused = client.api_post(
+        "/api/items/create",
+        {"type": "requirement", "fields": {"text": "Blank id."}, "id": "   "},
+    )
+    assert status == 422 and refused["kind"] == "refused"
+    assert "not shaped like a display id" in refused["reason"]
+    _status, prev_blank = client.api_get("/api/create/preview?type=requirement&id=%20%20%20")
+    assert prev_blank["id"] is None and prev_blank["reason"]
+
+
+@pytest.mark.parametrize("bad_id", [0, False, [], {}])
+def test_http_create_refuses_a_falsy_non_string_id_and_allocates_nothing(served, bad_id):
+    """The empty-id auto collapse is exact-string, not falsy-truthy: a
+    JSON 0/false/[]/{} is the same 400 shape refusal as any non-string
+    `id` (the `must be a string when given` gate runs before the collapse
+    can see it) and reserves nothing -- a malformed explicit id must never
+    be silently re-planned as the next free one."""
+    _app, client, root = served
+    before = snapshot_tree(root)
+    status, payload = client.api_post(
+        "/api/items/create",
+        {"type": "requirement", "fields": {"text": "X."}, "id": bad_id},
+    )
+    assert status == 400, payload
+    assert "must be a string" in payload["error"]
+    after = snapshot_tree(root)
+    after.pop(".refdes/schema.json", None)
+    before.pop(".refdes/schema.json", None)
+    assert after == before
+
+
+def test_http_create_reads_a_null_id_as_omitted(served):
+    """JSON null keeps its standing meaning on both routes -- "not given"
+    is auto, the same answer an omitted `id` gets (this was the base's
+    behaviour too; the empty-string collapse must not have eaten it)."""
+    _app, client, _root = served
+    status, made = client.api_post(
+        "/api/items/create",
+        {
+            "type": "requirement",
+            "fields": {"text": "Null id means auto."},
+            "id": None,
+            "destination": "items/reqs.yaml",
+        },
+    )
+    assert status == 200 and made["kind"] == "created", made
+    assert made["id"] == "REQ-012"
+
+
 def test_http_refusals_carry_reasons_and_write_nothing(served):
     _app, client, root = served
     before = snapshot_tree(root)

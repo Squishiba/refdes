@@ -1,0 +1,100 @@
+fix EDITOR-API-010 follow-up — review claim: `or None` collapses falsy JSON ids to auto
+date: 2026-10-14
+branch: fix/editor-create-empty-id-20261013, follow-up on 5f267b2 (base 8b6a52e)
+
+## Review claim
+
+5f267b2's `id=body.get("id") or None` was said to normalize every falsy
+JSON value (0, false, [], possibly {}) to auto-allocation, not just the
+empty string the preview treats as absent.
+
+## Reproduction (before touching code)
+
+.scratch/probe-editor-api-010/probe2.py, live EditorApp over HTTP, run
+against BOTH the branch src and the shared main checkout at 8b6a52e
+(read-only; the run only writes its own temp project). Verdict: the
+claimed silent auto-allocation does NOT reproduce, on branch or base.
+
+  base 8b6a52e:  omitted -> 200 REQ-001 | '' -> 422 refused | null -> 200 REQ-002
+                 0 / false / [] / {} -> 400 "id must be a string when given" (all four)
+  branch 5f267b2: identical, except '' -> 200 REQ-002 (the intended fix)
+
+Why: `_create_item` validates `id` (and destination/amends) as "a string
+when given" (api.py, the loop returning "id must be a string when
+given") BEFORE the `or None` line is reached. The value's domain at the
+collapse is exactly {None, str}, and on that domain `or None` is
+observationally identical to a `== ""` collapse. No falsy non-string id
+ever reaches the id layer as "empty". The only behavior 5f267b2 changed
+is "" (422 -> auto), as intended and tested.
+
+## What was changed anyway, and why
+
+The residual risk is real but structural: `or None` is only safe because
+of a gate that sits above it in the function body. A future reorder that
+moves the shape gate after CreateRequest construction would silently
+turn 0/false/[] into auto-allocations. So the collapse is now spelled
+exact-string (`explicit_id = body.get("id")` then
+`id=None if explicit_id == "" else explicit_id`), with a comment naming
+the gate as the reason the two spellings agree today and the reordering
+as the reason they must not diverge later. No behavior change on any
+input (probe2 post-change output byte-equal to pre-change).
+
+Tests added in tests/test_serve_create.py:
+- test_http_create_refuses_a_falsy_non_string_id_and_allocates_nothing
+  (parametrized 0/false/[]/{}): 400 "must be a string", tree byte-
+  identical after (snapshot_tree, schema.json excised, repo idiom).
+- test_http_create_reads_a_null_id_as_omitted: JSON null stays auto
+  (pinning the base behavior so the collapse cannot eat it), takes
+  REQ-012.
+
+## Verification (project venv /home/jorb/work/venv-refdes/bin/python3, run
+## from the worktree; tests/conftest.py:13 prepends this worktree's src)
+
+- probe2 on branch (post-change) == probe2 on branch (pre-change) == the
+  probe2/base triple above, modulo the intended "" line.
+- pytest tests/test_serve_create.py tests/test_serve_editor_e2e.py -q:
+  63 passed (58 before + 5 new).
+- ruff check on the two touched files: same 5 pre-existing findings as
+  the shared-main baseline (DTZ011 x2, RUF100 x2, RUF059; line numbers
+  shifted by the insertions), zero introduced.
+- No changelog.d fragment: user-visible behavior is unchanged by this
+  commit; 5f267b2's fragment already carries the "" story.
+
+## Limits
+
+- Scope: only the create route's `id` normalization and its controls.
+  destination/amends share the same gate and the same (safe) shape;
+  they are not collapsed at all, so nothing to narrow.
+- The whitespace id ("   ") remains a 422 refusal on both routes; null
+  remains auto. Neither is new.
+- No push, no PR, no merge, no stash; shared main untouched (its src was
+  imported read-only by the base probe run).
+
+## PR prep, 2026-10-14 (authorized continuation)
+
+- Pre-flight: cwd = this worktree, branch fix/editor-create-empty-id-20261013
+  at 5e0fe5c, `git status --porcelain` empty (tracked tree clean).
+- `git fetch origin main` once: origin/main == local main == 374a4aa
+  (chore(sweep3) #213, on top of 7c72311 W5a). Main's two new commits touch
+  cli.py/render.py/task_pane/threads/templates/serve_support.py and two
+  changelog.d files -- none of the files this branch edits -- so
+  `git rebase main` was clean, zero conflicts: 5f267b2 -> b0b5cae,
+  5e0fe5c -> 1e51cce (HEAD). Type-gate loop in _create_item untouched by
+  main, preserved verbatim; `git diff main...HEAD -- src/refdes/serve/api.py`
+  shows only the exact-string collapse + its comment.
+- Runtime claims re-forced through this worktree: refdes.__file__ =
+  <worktree>/src/refdes/__init__.py (PYTHONPATH=$PWD/src), and probe2.py
+  over live HTTP on the rebased src: omitted/''/null -> 200 auto,
+  0/false/[]/{} -> 400 "id must be a string when given".
+- Tests post-rebase: pytest tests/test_serve_create.py
+  tests/test_serve_editor_e2e.py tests/test_ids.py -q -> 107 passed
+  (main's #213 serve_support changes integrate: Client/snapshot_tree used
+  by the new controls pass unmodified). Scoped ruff on the two touched
+  files: the same 5 pre-existing findings as the main baseline, zero
+  introduced. No broader suite run -- no concrete risk in the main delta
+  touches create-route code.
+- Pushed branch, opened PR against main; NOT merged (per instruction).
+  Difficulty: none material; the only care taken was verifying the
+  trailers survive the rebase (`git log --format=%B`, present on both
+  commits -- the `%(...)trailers` placeholder query is not to be trusted
+  here, the raw message is).
