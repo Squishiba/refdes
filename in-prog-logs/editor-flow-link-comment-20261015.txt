@@ -66,3 +66,9 @@ block bodies with multiple lines are not single links ("does not link"),
 unrelated pre-existing behavior. Full suite 3858 passed, 2 skipped.
 Reviewer verdict: requested changes (block header) -- addressed by this
 round; flow-list fix verified green, red-probe confirmed.
+
+REVIEW ROUND 1 VERDICT (codex reviewer ed0541d4): MAJOR resolved at
+5c8c768 -- header repro refuses, red-probe confirmed against 83d0259's
+patcher, 216 patcher tests green, indicator/folded/CRLF/tab probes clean.
+APPROVE posted (issuecomment-6198028508). Not merged (per instructions).
+Task finished: PR #254 open, approved, awaiting Jared.
