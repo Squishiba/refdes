@@ -163,3 +163,14 @@ REVIEW ROUND 2 (PR #227, reviewer agent 505cd734, CHANGES REQUESTED):
   deprecation; PATCH via gh api repos/.../pulls/227 works.
 - Status at write time: CI watching (pty gh-pr-checks-227), fresh
   review from 505cd734 to be requested after CI green.
+
+## Round 3 addendum — review handoff
+
+- CI on bd14b13: all 3 checks pass (ubuntu 5m3s, py3.13 6m21s,
+  windows 8m59s). Full suite on rebased head: 3814 passed, 2 skipped,
+  exit 0. Verification record posted as PR comment.
+- Reviewer agent 505cd734 crashed twice (OpenCode server exited with
+  code null — backend failure, not a review verdict). Archived;
+  fresh reviewer 445330b0-01cd-4008-8658-677b950b4fc1 created in the
+  same review worktree with the round-2 checklist; verdict to be
+  posted as a gh PR review against bd14b13.
