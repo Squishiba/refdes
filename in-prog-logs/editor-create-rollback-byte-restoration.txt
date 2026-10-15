@@ -287,3 +287,47 @@ test_serve_create.py 207 passed, 1 skipped at the rebased tree (main at
 zero introduced. Reviewer's stray-file flag (early-write.tmp, written
 outside their checkout by their probe) is theirs to clean, noted for
 the orchestrator. #241/#253 stay separate; no CAS-window work.
+
+------------------------------------------------------------- round 7 (review)
+Reviewer 24df1ec8 (chunk 2 of the 6e225a8 review; chunk 1 APPROVE by
+481c1435): seven findings, all test-side, all addressed.
+1. Dead seam machinery: `_FullDisk`/`gated_open` in
+   test_a_rollback_write_that_fails... provably never fire (the atomic
+   restore never opens the destination for writing; reviewer proved it
+   by raising AssertionError in __init__ -- test stayed green). Removed;
+   the swap seam stays, latched: `swaps == [False, True]` (the create's
+   swap unarmed, the restore's armed) -- red at round-1 head 7451f641
+   (in-place restore = no restore swap), the seam's firing is asserted.
+2. New-md rollback shape (this PR's `pass`->False contract change) was
+   untested: added the landed case (unlink removes the file, tree
+   byte-identical, reason says "was rolled back and") and the FAILED
+   case (faulted unlink -- destination-aimed seam + latch -- reason
+   must NOT claim rolled back, must say "could not be restored"; file
+   stays with the created bytes). Red at main: main's create claimed
+   "was rolled back" UNCONDITIONALLY -- the failed-unlink test pins the
+   lie (verified red at origin/main).
+3. Deleted-destination narrowing (the docstring's claim) reachable and
+   untested: added create-side test (create's swap lands, third party
+   unlinks the destination, reread fails, restore refuses): file stays
+   GONE, temp discarded, reason names known facts. Red at main (the
+   in-place restore would recreate the file). ASSESSED: the narrowing
+   is intentional and safe -- recreating a deliberately deleted file
+   resurrects content the author-side removed; the atomic restore
+   respects the last observed state; only a lock-bypassing writer
+   reaches it (all app writers serialize on the write lock). Production
+   behavior kept, pinned by the test.
+4. The two NEW upload seams (test_a_failed_restore_describes_only...,
+   test_a_reread_failure_that_also_breaks...) were still order-latched
+   -- a swap of ANY other file consumed them, and scribble_then_fail
+   would scribble third-party bytes onto the wrong file. Rescoped to
+   destination + latch (`len(swaps) == 2`), like the round-6 siblings.
+5. Vacuous `assert "rolled back" in result.reason` (the failure reason
+   contains "not rolled back") -- tightened to "was rolled back and".
+6. Mode test gained the tree posture (stray-temp coverage).
+7. Digest guard extended: OLD_CURVE's digest (what a restore that
+   thinks it knows the disk would name) also asserted absent.
+Verified: focused create+edit+upload green (210 passed, 1 skipped at
+rebased tree, main at 1 commit ahead -> clean rebase); create file 71
+passed; scoped ruff 8 == 8 merge-base, zero introduced.
+#241/#253 untouched; no CAS-window work; no production change this
+round.
