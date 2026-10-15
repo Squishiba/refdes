@@ -1531,11 +1531,18 @@ def test_atomic_replace_rolls_back_on_verify_mismatch(tmp_path, monkeypatch):
     root = make_upload_project(tmp_path, {"figures/curve.png": OLD_CURVE})
     project = built_project(root)
     real_replace = os.replace
+    scribbled = []
 
     def replace_then_scribble(src, dst, **kwargs):
         real_replace(src, dst, **kwargs)
-        with open(dst, "wb") as fh:
-            fh.write(b"neither version")
+        if not scribbled:
+            scribbled.append(True)
+            with open(dst, "wb") as fh:
+                fh.write(b"neither version")
+        # the restore's own swap (the second one) lands unscribbled: the
+        # scribble is aimed at the upload's replace, and hitting the
+        # restore's swap too would destroy the bytes this test asserts
+        # come back.
 
     monkeypatch.setattr(edit_mod.os, "replace", replace_then_scribble)
     result = upload_mod.store_asset(

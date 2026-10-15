@@ -650,13 +650,21 @@ def test_a_mismatched_write_is_restored(project_root, monkeypatch):
     back and the save reports the failure -- the re-read is not decoration."""
     path = target(project_root)
     before = read(path)
-    real_unlink = os.unlink
+    real_unlink, real_replace = os.unlink, os.replace
+    swapped = []
 
-    def hijack(src, dst):
-        # the replacement "succeeds" but lands the wrong bytes
-        with open(dst, "wb") as fh:
-            fh.write(b"not what was planned\n")
-        real_unlink(src)
+    def hijack(src, dst, *args, **kwargs):
+        if not swapped:
+            swapped.append(True)
+            # the replacement "succeeds" but lands the wrong bytes
+            with open(dst, "wb") as fh:
+                fh.write(b"not what was planned\n")
+            real_unlink(src)
+            return
+        # the restore's own swap: the real thing. The sabotage is aimed at
+        # the save's replace; scribbling over the restore's swap too would
+        # destroy the very bytes this test asserts come back.
+        return real_replace(src, dst, *args, **kwargs)
 
     monkeypatch.setattr(edit_mod.os, "replace", hijack)
     result = edit_mod.apply_edit(

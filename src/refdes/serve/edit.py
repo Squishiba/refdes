@@ -973,8 +973,12 @@ def _atomic_replace(path: str, payload: bytes) -> str | None:
         _restore(path, original)
         return f"could not re-read {path} after the write: {exc}"
     if written != payload:
-        _restore(path, original)
-        return f"the bytes on disk after the write are not the bytes planned; {path} was restored"
+        if _restore(path, original):
+            return f"the bytes on disk after the write are not the bytes planned; {path} was restored"
+        return (
+            f"the bytes on disk after the write are not the bytes planned, and the original "
+            f"bytes could not be restored; {path} holds the bytes of the failed write"
+        )
     return None
 
 
@@ -985,14 +989,30 @@ def _discard_tmp(tmp: str) -> None:
         pass
 
 
-def _restore(path: str, original: bytes) -> None:
+def _restore(path: str, original: bytes) -> bool:
+    """Put `original` back at `path`, atomically: the bytes are staged in a
+    temp file in the destination's own directory and swapped in, so a
+    restore that fails partway leaves the destination exactly as it found
+    it -- never truncated to zero bytes by the restore itself, the way an
+    in-place `"wb"` open would leave it. Returns True when the swap landed
+    and False when it did not; a caller whose message says the file was
+    put back must ask, not assume."""
+    directory = os.path.dirname(path)
+    tmp = None
     try:
-        with open(path, "wb") as fh:
+        fd, tmp = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.refdes-tmp-", dir=directory)
+        with os.fdopen(fd, "wb") as fh:
+            os.chmod(tmp, os.stat(path).st_mode & 0o777)
             fh.write(original)
             fh.flush()
             os.fsync(fh.fileno())
-    except OSError:  # nothing further to do; the next load reports what it sees
-        pass
+        os.replace(tmp, path)
+        tmp = None  # the swap consumed the temp file
+    except OSError:  # the destination is untouched; the caller reports the failure
+        if tmp is not None:
+            _discard_tmp(tmp)
+        return False
+    return True
 
 
 # ================================================================== creation
@@ -1176,12 +1196,12 @@ def _create_locked(config: str, request: CreateRequest):
         except (OSError, UnicodeDecodeError) as exc:
             return Refused(who, new_id, f"could not read {rel}: {exc}")
         # The rollback payload is the RAW bytes, never the decoded text:
-        # `_restore` writes to the destination opened `"wb"`, which
-        # truncates it to zero bytes before the first write -- handing it
-        # a `str` truncated the file, then raised `TypeError` past
-        # `_restore`'s `except OSError`, out of a function documented to
-        # return a result. The decoded text is only what the append plans
-        # onto; the bytes are what a failed creation restores.
+        # `_restore` writes its payload to a binary file, so handing it a
+        # `str` raised `TypeError` past the `except OSError`, out of a
+        # function documented to return a result -- and an in-place write
+        # of that failed payload left the destination truncated. The
+        # decoded text is only what the append plans onto; the bytes are
+        # what a failed creation restores.
         original = raw
         # The ending of the line the new block is being appended *after*, not
         # "CRLF if the file mentions CRLF anywhere": appending to a file whose
@@ -1229,12 +1249,20 @@ def _create_locked(config: str, request: CreateRequest):
     try:
         ids.reserve_id(before, new_id)
     except OSError as exc:
-        _rollback(path, original)
+        if _rollback(path, original):
+            return Refused(
+                who,
+                new_id,
+                f"the id ledger could not be written ({exc}); {rel} was rolled back "
+                f"and {new_id} was not reserved",
+                path=path,
+            )
         return Refused(
             who,
             new_id,
-            f"the id ledger could not be written ({exc}); {rel} was rolled back "
-            f"and {new_id} was not reserved",
+            f"the id ledger could not be written ({exc}); {new_id} was not "
+            f"reserved, and {rel} could not be restored -- it holds the new "
+            f"item's bytes on disk with an unreserved id",
             path=path,
         )
 
@@ -1646,16 +1674,19 @@ def _atomic_create(path: str, payload: bytes) -> str | None:
     return None
 
 
-def _rollback(path: str, original: bytes | None) -> None:
+def _rollback(path: str, original: bytes | None) -> bool:
     """Undo a completed write when a later step failed: restore the previous
-    bytes, or remove the file that did not exist before."""
+    bytes, or remove the file that did not exist before. Returns True when
+    the undo is known to have landed; False means the destination is not
+    what it was, and the caller must say so rather than claim a rollback
+    that did not happen."""
     if original is None:
         try:
             os.unlink(path)
         except OSError:
-            pass
-        return
-    _restore(path, original)
+            return False
+        return True
+    return _restore(path, original)
 
 
 def preview_creation(

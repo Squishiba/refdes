@@ -54,3 +54,59 @@ Limits documented honestly:
   at the decode); unchanged by this fix.
 
 Ledger: PROGRESS.md row updated to OPEN PR at commit.
+
+-------------------------------------------------------------- round 2 (review)
+Reviewer 57352ec5 on PR #244 (CHANGES REQUESTED) at head b1a135b:
+A MEDIUM: `_restore` was truncate-then-write with a swallowed OSError, so
+   the "was rolled back" reason could be false (probe: rollback write hits
+   ENOSPC -> destination 0 bytes, reason claims the rollback).
+B MEDIUM: no changelog fragment.
+C LOW: vacuous "nothing reserved" assertion (short-circuited on a missing
+   ledger file).
+D LOW: tests named `..._bytes` compared decoded text.
+
+Reproduced A at head b1a135b: probe -> `Refused` "items/reqs.yaml was
+rolled back", size after: 0. New regression
+`test_a_rollback_write_that_fails_never_leaves_a_zero_byte_file_and_says_so`
+(red at head: zero-byte destination + lying reason). Seam: the patched
+reserve_id arms an ENOSPC fault aimed at the destination -- write-opens
+truncate-then-fail and swaps onto it fail -- so it faults the rollback in
+both its old in-place form and its new atomic form; the create's own write
+lands before the arming.
+
+Fix (narrow, atomic -- same PR, new head):
+- `_restore` now stages bytes in a temp file in the destination's
+  directory (same prefix, chmod to the destination's mode -- the
+  PERM-OWNER-001 lesson) and swaps with os.replace; returns bool.
+  A failed restore leaves the destination exactly as it found it.
+- `_rollback` returns bool.
+- `_create_locked` says "was rolled back" only when the rollback landed;
+  otherwise the reason says the file "could not be restored" and names
+  what it holds. The `{rel} was rolled back` lie is gone.
+- `_atomic_replace`'s verify-mismatch branch likewise reports the
+  restore's outcome honestly.
+- B: changelog.d/editor-create-rollback-bytes.fixed.md, house style.
+- C: assertion reads the (possibly missing) ledger once and checks
+  `result.ref` (the planned id on a Refused; Refused has no item_id).
+- D: both round-1 tests compare `path.read_bytes()`.
+
+Seam-scope notes (shared primitive, disclosed):
+- `test_a_mismatched_write_is_restored` (test_serve_edit.py) and
+  `test_atomic_replace_rolls_back_on_verify_mismatch` (test_serve_upload.py)
+  hijacked EVERY os.replace; the restore's own swap (new mechanism) got
+  sabotaged too, destroying the bytes they assert come back. Scoped each
+  seam to the write's swap (first call), sabotage intent unchanged; both
+  pass at the new head.
+- The apply-path `_rollback` caller (edit.py:577) ignores the result and
+  makes no claim in any message -- left as-is (out of scope, honest).
+
+Green: focused tests/test_serve_create.py 64 passed; FULL SUITE 3841
+passed, 2 skipped, exit 0 (PTY pty_2d242976, 303.94s) on head rebased to
+origin/main e1d7bdb; scoped ruff on the four touched py files: 11
+findings == 11 pre-existing at pre-change head (zero introduced).
+Post-fix probe: Refused, reason says "could not be restored", size after
+291 (create's bytes intact), no exception.
+
+Limits: the restore is atomic, not durable-proof: a crash inside the
+restore's own os.replace is the same irreducible window as every other
+write here. The check-vs-replace window (#241) remains untouched/open.

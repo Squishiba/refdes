@@ -615,7 +615,7 @@ def test_a_failed_id_reservation_restores_the_yaml_append_bytes(project_root, mo
     file where the original bytes were. A failed creation burns nothing;
     it must also destroy nothing."""
     path = project_root / "items" / "reqs.yaml"
-    before = read(path)
+    before_bytes = path.read_bytes()
     reserve_id_crash(monkeypatch)
 
     result = create_item(
@@ -628,11 +628,12 @@ def test_a_failed_id_reservation_restores_the_yaml_append_bytes(project_root, mo
 
     assert isinstance(result, Refused), result
     assert "rolled back" in result.reason
-    after = read(path)
-    assert after == before, "the rollback did not restore the original bytes"
-    assert after != "", "the destination was left zero-byte"
+    after_bytes = path.read_bytes()
+    assert after_bytes == before_bytes, "the rollback did not restore the original bytes"
+    assert after_bytes != b"", "the destination was left zero-byte"
     ledger = project_root / ".refdes" / "ids.yaml"
-    assert not ledger.exists() or "REQ-012" not in ledger.read_text(encoding="utf-8")
+    reserved = ledger.read_text(encoding="utf-8") if ledger.exists() else ""
+    assert result.ref not in reserved  # `ref` is the planned id on a Refused
 
 
 def test_a_failed_id_reservation_restores_the_markdown_append_bytes(project_root, monkeypatch):
@@ -640,7 +641,7 @@ def test_a_failed_id_reservation_restores_the_markdown_append_bytes(project_root
     shapes planned against the decoded text, so both fed a `str` to the
     rollback's binary write."""
     path = project_root / "items" / "notes.md"
-    before = read(path)
+    before_bytes = path.read_bytes()
     reserve_id_crash(monkeypatch)
 
     result = create_item(
@@ -652,7 +653,83 @@ def test_a_failed_id_reservation_restores_the_markdown_append_bytes(project_root
     )
 
     assert isinstance(result, Refused), result
-    assert read(path) == before, "the rollback did not restore the original bytes"
+    assert path.read_bytes() == before_bytes, "the rollback did not restore the original bytes"
+
+
+def test_a_rollback_write_that_fails_never_leaves_a_zero_byte_file_and_says_so(
+    project_root, monkeypatch
+):
+    """The rollback's own write can fail -- ENOSPC hits the reservation and
+    the restore alike -- and then the file must not be destroyed and the
+    reason must not lie. A restore that opens the destination `"wb"`
+    truncates it *first*: the write's failure is swallowed by `_restore`'s
+    `except OSError` and `create_item` reports the file "rolled back"
+    while it holds zero bytes. The restore must stage the bytes in a temp
+    file and swap them in, so a failed restore leaves the destination
+    exactly as the create wrote it, and the reason must say it was not
+    restored.
+
+    Seam: the ledger reservation arms a device-full fault (ENOSPC) aimed
+    at the destination -- any write-open of it truncates and then fails,
+    and a swap onto it fails. The create's own write lands before the
+    arming, so this faults exactly the rollback."""
+    path = project_root / "items" / "reqs.yaml"
+    target = os.path.abspath(str(path))
+    armed = []
+
+    def reserve_boom(*_args, **_kwargs):
+        armed.append(True)
+        raise OSError(28, "No space left on device")
+
+    real_open, real_replace, real_abspath = open, os.replace, os.path.abspath
+
+    class _FullDisk:
+        def __init__(self, fh):
+            self._fh = fh  # opened "wb": the destination is already truncated
+
+        def write(self, *_args):
+            raise OSError(28, "No space left on device")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._fh.close()
+            return False
+
+    def gated_open(file, mode="r", *args, **kwargs):
+        if armed and "w" in mode and real_abspath(str(file)) == target:
+            return _FullDisk(real_open(file, mode, *args, **kwargs))
+        return real_open(file, mode, *args, **kwargs)
+
+    def gated_replace(src, dst, *args, **kwargs):
+        if armed and real_abspath(str(dst)) == target:
+            raise OSError(28, "No space left on device")
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(edit_mod.ids, "reserve_id", reserve_boom)
+    monkeypatch.setattr("builtins.open", gated_open)
+    monkeypatch.setattr(edit_mod.os, "replace", gated_replace)
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Unreservable."},
+            destination="items/reqs.yaml",
+        ),
+    )
+
+    assert isinstance(result, Refused), result
+    after = path.read_bytes()
+    assert after != b"", "the failed rollback truncated the destination to zero bytes"
+    assert b"Unreservable." in after, (
+        "the destination does not hold the create's own bytes; a restore that "
+        "failed must leave the file exactly as the create wrote it"
+    )
+    assert "rolled back" not in result.reason, (
+        f"the reason claims a rollback the rollback itself disproves: {result.reason}"
+    )
+    assert "not be restored" in result.reason, result.reason
 
 
 @pytest.mark.parametrize(
