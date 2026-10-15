@@ -56,7 +56,8 @@ says so explicitly; otherwise it builds on them.
 - **Unit assertions and tolerances.** `docs/math.md:336-354`:
   `name = expression | unit` pins the display unit and asserts dimensionality.
   The same evaluator, units, and tolerance propagation apply to inline
-  expressions.
+  expressions; where the `| unit` assertion itself goes in an inline span is
+  open (Q17).
 - **Cross-item value references.** `docs/math.md:95-128`:
   `DEC-PWR-001.V_in` is a real dependency evaluated in dependency order and
   stored expanded as `DISPLAY-ID@key`. The resolved values are captured in the
@@ -156,6 +157,11 @@ Rules:
 - Any code span whose content does **not** match this grammar is treated as an
   ordinary inline code span.
 
+The grammar has no slot for a `| unit` display assertion: in a calc block the
+assertion is split off the *line* before the assignment grammar sees it
+(`src/refdes/calc.py:1349-1357`), so it is not part of `expression` either.
+Where a basic span's unit assertion goes is open (Q17).
+
 Examples (every one parses under the grammar above):
 
 ```markdown
@@ -210,7 +216,7 @@ If `Rtop` later changes and the same expression now computes `4.52 V`, the build
 says:
 
 ```
-WARNING inline-calc Vout: stored result says 4.436 V, but the expression now computes 4.52 V
+WARNING inline-calc Vout at DEC-PWR-001.md:23: stored result says 4.436 V, but the expression now computes 4.52 V
 ```
 
 The check compares:
@@ -390,6 +396,11 @@ to ..` clause, the build reports an error naming the missing bracket.
 After solving, the stored result is the root value. The fill command writes it
 just like any other inline result.
 
+A constraint written as a bare name (§7.1's `Vout`) needs that name defined
+earlier in the item, and to be solvable at all its definition must depend on
+the unknown -- which is a forward reference under source-order evaluation. How
+a span that uses a name a later solve defines is treated is open (Q14).
+
 ### 7.3 E-series suggestion
 
 Using the divider from §8.1 (`Vref = 0.8 V`, `Rtop = 10 kohm`) and the solve
@@ -439,6 +450,12 @@ tolerance-corner tables, and version pinning.
 A calculator keeps the same spirit: calling it is not new code execution; the
 body is evaluated by the existing calc evaluator exactly as if written inline
 (`docs/math.md:436-447`).
+
+Today's equation shape is `params:` + `expr:` (+ `note:`), enforced key by key
+(`EQUATION_KEYS` at `src/refdes/configcheck.py:121`, checked at
+`src/refdes/schema.py:419`), so the calculator keys below are rejected by the
+current validator. How calculators coexist with existing `params:`/`expr:`
+equations is open (Q15).
 
 Proposed shape:
 
@@ -527,7 +544,8 @@ equations:
 
 Each output name is available to later lines, `{{name}}` references, and
 `checks:` the same way any calc assignment is. The exact syntax for multi-output
-calls is open (Q11).
+calls is open (Q11), and so is what a call that binds fewer names than the
+calculator has outputs does (Q16).
 
 ### 8.6 Version pinning per call
 
@@ -586,10 +604,10 @@ line before saving.
 
 | Phase | Deliverables | Dependencies |
 |---|---|---|
-| **P1** | Inline syntax, stored-result verification, `calc_hash` extension, CLI fill command | Q1 (trigger rule), Q2 (tolerance), Q3 (scope), Q4 (calc_hash extension), Q5 (severity/gate), Q6 (command name), Q7 (sealed behavior) |
+| **P1** | Inline syntax, stored-result verification, `calc_hash` extension, CLI fill command | Q1 (trigger rule), Q2 (tolerance), Q3 (scope), Q4 (calc_hash extension), Q5 (severity/gate), Q6 (command name), Q7 (sealed behavior), Q17 (inline `| unit` slot) |
 | **P2** | Live editor fill button, then debounced auto-update with caret/undo handling | P1, plus Q8. |
-| **P3** | One-unknown solve (`:= ? where ... from ... to ...`), E-series suggestions | P1, plus decisions on Q9-Q10. |
-| **P4** | Multi-input/output calculators, version pinning, editor form panel, shipped-library preset | P1, plus decisions on Q11-Q13. |
+| **P3** | One-unknown solve (`:= ? where ... from ... to ...`), E-series suggestions | P1, plus decisions on Q9-Q10 and Q14 (solve ordering). |
+| **P4** | Multi-input/output calculators, version pinning, editor form panel, shipped-library preset | P1, plus decisions on Q11-Q13, Q15 (equations compatibility), and Q16 (single-name binding). |
 
 Each phase is independently shippable and independently testable once its
 dependencies are answered.
@@ -724,6 +742,87 @@ of common calculators?
 - *Recommended default: (a).* The project currently ships no equations
   (`src/refdes/standards/hardware/v3/base.yaml`); let user calculators prove the
   shape first.
+
+**Q14 -- Solve spans and source order.** A solve's constraint must reference
+the unknown (§7.2 substitutes a trial value for it). Under per-item
+source-order evaluation, a span that uses a name a later solve defines
+(`Vout := 0.8 V * (1 + Rtop/Rbot)` written above
+`Rbot := ? where Vout = 3.3 V ...`) hits `Rbot` before it is defined. How
+should that be treated?
+- (a) **Strict source order.** A use before the solve is the ordinary
+  `unknown name` error (`src/refdes/calc.py:613-615`); solves appear before
+  their uses, and a constraint that depends on the unknown spells the
+  expression out in its `where` clause.
+- (b) **Solve-first pass.** Solve spans are evaluated before ordinary inline
+  spans in the same item, so a later solve can define a name an earlier span
+  uses.
+- (c) **Two-pass evaluation.** One pass collects solve roots, a second
+  evaluates every span in source order with the roots available.
+- *Neutral note:* (a) keeps reading order equal to evaluation order, but the
+  natural write-the-equation-then-solve-below-it sheet must inline the
+  expression in the `where` clause; (b) and (c) remove that friction but make
+  an earlier span's stored result depend on text below it, against the
+  later-lines-only scope rule (`docs/math.md:30-32`).
+- *Suggested default: (a).*
+
+**Q15 -- Calculators and the existing `params:`/`expr:` shape.** `equations:`
+entries today are `params:` + `expr:` (+ `note:`), and the validator rejects
+every other key (`EQUATION_KEYS` at `src/refdes/configcheck.py:121`, enforced
+at `src/refdes/schema.py:419`). The calculator shape in §8.1 uses
+`inputs:`/`outputs:`/`valid_if:`. How do the two coexist?
+- (a) **A new equation kind, side by side.** An entry with `params:`/`expr:` is
+  the existing single-output equation and keeps working unchanged; an entry
+  with `inputs:`/`outputs:` is a calculator. The validator accepts either
+  shape per entry and rejects mixtures.
+- (b) **One kind.** The old shape is re-expressed as a one-output calculator
+  (`inputs:` with the same names, one output), and existing project files are
+  migrated or aliased so nothing breaks.
+- (c) **Extend the old keys.** Calculators reuse `params:` -- its entries
+  gaining defaults and list flags -- plus a new `outputs:`, with no `inputs:`
+  key.
+- *Neutral note:* (a) leaves two shapes to validate and document; (b) unifies
+  but touches the validation every existing project already passes; (c)
+  avoids a new key but makes a `params:` entry mean two different things.
+- *Suggested default: (a).*
+
+**Q16 -- Binding fewer names than a calculator has outputs.** §8.5 binds one
+name per output. What does `Vout := divider(0.8 V, 10 kohm, 2.2 kohm)` mean
+when `divider` has two outputs?
+- (a) **The counts must match.** The number of names must equal the number of
+  outputs; a mismatch is a build error, the way call arity is already checked
+  against `params` (`docs/math.md:456-457`).
+- (b) **Bind the first output.** A single name binds the calculator's first
+  output; the rest are evaluated but not bound.
+- (c) **Bind one selected output.** A single name binds a chosen output via a
+  selector such as `divider(...).Vout` (the Q11(b) shape).
+- *Neutral note:* (a) is explicit but forces authors to bind outputs they do
+  not use; (b) is convenient but lets a reader assume an output was verified
+  when it was only evaluated; (c) overlaps the Q11 alternative that was not
+  recommended.
+- *Suggested default: (a).*
+
+**Q17 -- The `| unit` assertion in a basic span.** In a block, `name =
+expression | unit` pins the display unit and asserts dimensionality
+(`docs/math.md:336-354`), and the assertion is split off the line before the
+assignment grammar sees it (`src/refdes/calc.py:1349-1357`) -- it is not part
+of an expression, so the §3.2 basic form has no slot for it. Where does a
+basic span's unit assertion go?
+- (a) **After the expression, before the stored result:**
+  `Vout := 0.8 V * (1 + Rtop/Rbot) | V = 4.436 V`. Same shape as a block line;
+  the assertion checks dimensionality, pins the display unit, and the stored
+  result is written and verified in that unit.
+- (b) **No inline unit slot.** The stored result's own literal carries the
+  unit, dimensionality is checked against it, and display formatting follows
+  the result literal.
+- (c) **Result-side pinning.** The unit is pinned by requiring the stored
+  result to be written in the chosen unit (`= 4436 mV`), with no new syntax.
+- *Neutral note:* (a) adds a grammar slot and a second thing to verify (the
+  stored result against the declared unit); (b) is smaller but leaves a
+  definition-only span (no `= result`) with no unit check at all, losing the
+  use-it-where-getting-the-dimension-wrong-is-expensive guardrail
+  (`docs/math.md:351-354`); (c) needs no new syntax but has no error path
+  independent of the stored text.
+- *Suggested default: (a).*
 
 ## 13. Alternatives considered
 

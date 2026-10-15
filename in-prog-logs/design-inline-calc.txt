@@ -189,8 +189,10 @@ Findings addressed in in-prog-logs/design-inline-calc.txt:
    the PR body).
 3. Made the test commands generic: "Run in the project venv" rather than naming
    a machine-specific interpreter path.
-4. Added the exact command and output used to verify the E-series numbers with
-   src/refdes/calc.py (round 3, item 1).
+4. (Corrected in the handoff round -- see "Handoff (round 9)".) This item
+   originally said round 5 "added the exact command and output used to verify
+   the E-series numbers"; that command and output were already recorded under
+   round 3, item 1, and round 5 added nothing there.
 
 Fix round 6 (chunk 1 doc review and chunk 2 log review, addressed in commit fed44dc)
 ------------------------------------------------------------------------------------
@@ -272,10 +274,54 @@ Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
    stale; the round headings below now provide the count.
 2. Rewrote the PR body from the current doc: short summary, D1-D3 verbatim from
    the doc's "Decision recap" section, and every open question with its
-   recommended default copied from the doc.
+   recommended default copied from the doc. The rewrite was posted with
+   `gh pr edit 250 --body "..."`, and the shell ate the backticks in the
+   double-quoted argument, so the posted body was mangled -- stale Q5/Q8
+   defaults and Q6/Q9/Q11/Q12 reduced to "Default: ." (caught by the round-8
+   chunk-2 review). It was redone from a body file in the handoff round; see
+   "Handoff (round 9)", item 1.
 3. Moved "Difficulties / choices" to the end of the log so it covers all rounds.
 4. Recorded the exact counting command and output for the existing `NAME = value`
    spans figure.
+
+Handoff (round 9)
+-----------------
+A new agent took over the PR at head 46bc89c, after the round-8 chunk-1 (doc)
+and chunk-2 (log) reviews. What it did:
+
+1. PR body. The round-7 body rewrite had been posted with `gh pr edit 250
+   --body "..."` and the shell ate the backticks, leaving mangled question
+   defaults (stale Q5/Q8; Q6/Q9/Q11/Q12 reading "Default: ."). The body was
+   rewritten from the current doc to .scratch/pr250-body.md with a quoted
+   heredoc (`cat > ... <<'EOF'`). `gh pr edit 250 --body-file ...` failed with
+   a GraphQL Projects-classic deprecation error, so it was posted with
+   `gh api -X PATCH repos/Squishiba/refdes/pulls/250 -F body=@...`, then
+   re-fetched and checked against the doc question by question: short
+   summary, D1-D3 verbatim from the doc's "Decision recap", and every open
+   question (Q1-Q17) with its recommended default copied from the doc.
+2. Design gaps from the round-8 chunk-1 review. Added four open questions to
+   the doc, each with 2-3 options, a neutral note, and a suggested default:
+   Q14 (solve spans and source order), Q15 (calculators vs the existing
+   params:/expr: equation shape), Q16 (binding fewer names than a calculator
+   has outputs), Q17 (the `| unit` assertion in a basic span). Fixed the §4.1
+   stale-result example to use the §4.4 message shape
+   (`WARNING inline-calc Vout at DEC-PWR-001.md:23: ...`). Added pointers to
+   the new questions from §2, §3.2, §7.2, §8.1, and §8.5, and extended the
+   §11 phasing table's dependency lists (Q17 -> P1, Q14 -> P3, Q15/Q16 -> P4).
+   Code claims were verified by reading the code: `EQUATION_KEYS` and the
+   per-key rejection (src/refdes/configcheck.py:121, 215-248;
+   src/refdes/schema.py:393-457), the `unknown name` error
+   (src/refdes/calc.py:613-615), the statement-level `| unit` split
+   (src/refdes/calc.py:1349-1357), and the docs/math.md citations (30-32,
+   336-354, 351-354, 413-461, 456-457).
+3. Log accuracy from the round-8 chunk-2 review. Corrected the round-5
+   E-series misattribution (round 5, item 4) and the round-7 body-rewrite item
+   (round 7, chunk 2, item 2) to record the mangling. The claims that D1-D3
+   are reproduced in PR #250's description (header, round 1 item 6, round 5
+   item 2) are true again now that the body carries D1-D3 verbatim.
+4. Re-ran the docs tests with the same commands and got the same results (see
+   "Tests run"). No code was changed; no sabotage applies to a docs-only
+   round.
 
 Counted-spans methodology
 -------------------------
@@ -366,6 +412,9 @@ Difficulties / choices
   ordinary code.
 - This log is now committed without amending so that its commit citations remain
   stable.
+- PR-body edits go through `gh pr edit --body-file` fed by a quoted heredoc; an
+  inline `--body "..."` argument let the shell eat the backticks once (round
+  7), and the handoff round had to redo the body from a file.
 
 Tests run
 ---------
