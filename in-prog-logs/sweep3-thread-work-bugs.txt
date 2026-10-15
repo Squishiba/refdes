@@ -1,0 +1,124 @@
+Task G1 (sweep 3): real bugs in `refdes thread` / `refdes work` from the #191
+and #194 reviews. Branch sweep3-thread-work-bugs, cut from main 374a4aa (just
+after #197 merged). Started: 2026-10-14.
+
+Headline: #197 (7c72311) absorbed most of the #191/#194 review fix rounds
+into main before this branch was cut. Every item below was verified by
+running the tool on the branch (scratch projects under .scratch/, CLI run
+with PYTHONPATH=$PWD/src + the refdes venv python), not from memory.
+
+ITEM VERDICTS (each verified on this branch, line numbers fresh):
+
+G1.1 (conflicting verdict vanishes from `refdes work`) — ALREADY FIXED by
+#197, SKIP. Evidence:
+- threads.project_derived emits a `verdict` derived row for VERDICT_CONFLICTING
+  folds (threads.py:721-722, docstring "it must never vanish because its tip
+  has no open task, review #194 W5"); `_OPEN_VERDICTS` covers proposed/on_hold
+  (threads.py:676).
+- cli._work_authored_blocks prints the verdict line for CONFLICTING too when
+  the tip has open tasks (cli.py:1139-1141), and the ambiguous-task branch no
+  longer `continue`s before the verdict check (review #194 R1).
+- Repro on .scratch/g1-repro (MERGE_CONFLICT shape: LOG-007 accepted +
+  LOG-008 proposed merged into taskless LOG-009), both commands:
+    $ refdes thread LOG-009
+      Tip: LOG-009  2026-08-09  Silent merge.
+      Verdict: conflicting -- entries at the same distance declare different
+      statuses; a continuation must declare one explicitly
+      Tasks at tip: none (never declared)
+    $ refdes work
+      Worklist:
+        (no open tasks authored)
+      Derived (auto clears when fixed):
+        Verdicts:
+          LOG-009  conflicting
+  The verdict surfaces in BOTH commands. Pinned by tests/test_work.py
+  test_a_refused_verdict_fold_is_a_derived_row_even_with_no_open_task (W5,
+  line 562), test_a_refused_verdict_fold_prints_with_its_tip_s_open_tasks_too
+  (W3, 579), test_an_ambiguous_task_fold_does_not_swallow_a_concluding_verdict
+  (R1, 598).
+
+G1.2 (bare KeyError on unknown derived kind) — ALREADY FIXED, SKIP.
+threads.derived_detail raises ValueError(unknown_derived_kind_message(kind))
+naming the kind and the known set (threads.py:206-239, review #194 W6);
+cli._derived_heading wraps the heading-table KeyError in the same ValueError
+(cli.py:924-928). Pinned by tests/test_work.py
+test_an_unknown_derived_kind_is_named_not_a_bare_keyerror (413) — it exercises
+both halves — and the pane-side guards in tests/test_task_pane.py (565, 815,
+822).
+
+G1.3 (explicit id: null / text: null prints "None") — CODE ALREADY FIXED for
+both commands + pane, ONE TEST MISSING, ADDED HERE. cli._task_row_lines
+renders `row.get('id') or '?'` / `row.get('text') or ''` (cli.py:903) and is
+shared: cmd_thread prints task rows through it (cli.py:1097) and
+_work_authored_blocks through it (cli.py:1147), so both commands were fixed
+by the same change (PR #191 review nit); task_pane.py:199-200 matches. Tests
+existed for `refdes work` (tests/test_work.py:338, plus the empty-string
+nit at 363) and the pane (tests/test_task_pane.py:864) but NOT for `refdes
+thread` — the item asks "a test for each command", so I added
+test_an_explicit_null_id_or_text_prints_placeholder_not_the_word_none to
+tests/test_thread_cli.py. It passes on the fix; sabotage (below) proves it
+pins the behavior.
+
+G1.4 (slug-fallback collision for id-less entries) — CANNOT HAPPEN NOW, SKIP
+with recorded why. The label is threads.entry_label = item.id or item.key or
+item.slug (threads.py:289). Item.slug is `id.lower() if id else key`
+(model.py:665-669) — the slug fallback adds nothing beyond the key, and by
+the time cmd_thread builds `v["entries"]`, id-less entries ALWAYS have their
+surrogate key: keys.mint_missing runs on the load (keys.py:745; the warm runs
+printed "(minted N key(s) ...)" on every scratch project). Keys are 11-char
+random alphanumeric minted with `secrets` (keys.py:117-128), duplicate keys
+are caught (keys.validate Layer 2, model.add_item keeps both reachable,
+model.py:1111-1127), duplicate display ids are a build error (build.py:2898),
+and the id/key namespaces are disjoint "display ids contain '-<digits>' and
+surrogate keys never contain '-'" (model.py:1099-1105). Repro attempt on
+.scratch/g1-slug (root LOG-001 + two id-less siblings): each id-less entry
+got its own minted key (8f1z51pe67f / 2s4z5bsbcew), the thread header labels
+them distinctly, no collision constructible. The review's premise (slug =
+filename stem shared by id-less files) predates the keys work; AGENTS.md
+confirms surrogate keys are fully landed.
+
+G1.5 (threads._label private, used from cli.py) — ALREADY FIXED, SKIP.
+The function is public `entry_label` with the rationale in its docstring
+("Public: cli.py's `refdes thread` resolves the requested ref's label with
+it ... (PR #191 review nit)", threads.py:284-289); callers use it:
+cli.py:1035, task_pane.py:97, and threads.py itself (399, 422, 431-432, ...).
+grep shows no `_label` left in cli.py/task_pane.py.
+
+G1.6 (missing on_hold test + comment/code mismatch) — ALREADY FIXED, SKIP.
+Test exists: tests/test_work.py test_an_on_hold_verdict_is_listed_like_a_
+proposed_one (618, added by #194 55176b0) pins the derived row
+`LOG-041  on_hold`. The comment/code question resolves in favor of the
+CODE-side fix #197 made: the filter is status-value IN _OPEN_VERDICTS *and*
+`not verdict["concluding"]` (threads.py:723-728), and the comment above it
+(threads.py:668-676, review #194 W9) now says exactly that ("matched BY
+STATUS VALUE ... MINUS anything rule 4 calls concluding (`not concluding`
+...)"), with the companion test test_a_concluding_on_hold_never_becomes_a_
+lone_worklist_row (636) pinning the overlay case. Comment and code agree.
+
+CHANGELOG: no fragment on this branch. Rule applied (changelog.d/README.md:
+"Each change that deserves a changelog entry gets one fragment"): my only
+change is a test, no user-visible behavior change. The task's suggested
+"fixed" fragments for G1.1/G1.3 do not apply: those fixes shipped in #197,
+and both commands are unreleased (their `added` fragments — thread-command.
+added.md, work-command.added.md — are still pending in changelog.d), so a
+released changelog has nothing to fix.
+
+SABOTAGE: reverted cli.py:903 from `row.get('id') or '?'` / `row.get('text')
+or ''` to the pre-fix `row.get('id', '?')` / `row.get('text', '')`, re-ran
+the new test: FAILED at tests/test_thread_cli.py:430 (the `"None" not in out`
+assertion). Restored the fix; tests/test_thread_cli.py + tests/test_work.py
+58 passed; `git diff --stat` confirms the tree is test-only afterwards.
+
+SUITE + GATES: full suite in the foreground, once, at the end:
+  PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest -q \
+    -p no:cacheprovider > .scratch/suite.txt 2>&1; echo exit=$?
+  -> 3655 passed, 2 skipped in 283.82s; exit=0. The known serve-token-file
+  load flake did not fire, so no solo re-run was needed.
+  ruff check --select E9,F src tests -> All checks passed! (exit 0)
+  python docs-site/gen_examples.py --check -> schema-reference.md and
+  vocabulary.md up to date (exit 0)
+  (all three with the refdes venv python + PYTHONPATH=$PWD/src)
+
+DONE: only change is the G1.3 thread-side test in tests/test_thread_cli.py
+(+25 lines, test-only — no src change, no changelog fragment); log in the
+same commit; push once; PR opened.

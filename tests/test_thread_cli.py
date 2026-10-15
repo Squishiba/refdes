@@ -407,6 +407,31 @@ def test_ambiguous_verdict_prints_as_itself(tmp_path, capsys):
     assert "Verdict: accepted" not in out
 
 
+def test_an_explicit_null_id_or_text_prints_placeholder_not_the_word_none(
+    tmp_path, capsys
+):
+    """PR #191 review nit, the `refdes thread` half (sweep 3 G1.3): a task
+    row written with an explicit null `id`/`text` (shape validation owns the
+    error, and the fold keeps the dict) renders `?`/empty through the shared
+    `cli._task_row_lines` -- never the literal "None", which
+    `row.get('id', '?')` used to print since `get`'s default only covers the
+    *missing* key. The row is the same one `refdes work` prints (that half is
+    pinned in test_work.py); this pins the listing stays intact here too."""
+    text = (
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - {id: LOG-001, summary: Head., date: 2026-08-30}\n"
+        "  - {id: LOG-002, summary: Null-row tip., date: 2026-09-01, follows: LOG-001, tasks: [{id: null, text: null, state: open}]}\n"
+    )
+    config = _setup(tmp_path, text)
+    _warm(tmp_path, config, capsys)
+    assert _run(config, "thread", "LOG-002") == 0
+    out = capsys.readouterr().out
+    assert "None" not in out
+    row = next(line for line in out.splitlines() if line.startswith("  1. [ ]"))
+    assert row.startswith("  1. [ ] ?  ")  # `?` for the null id, empty text
+
+
 def test_derived_block_reads_like_problems_not_tasks(tmp_path, capsys):
     """§5 rule 1's separation on the terminal: derived rows carry no
     checkbox, no number, and the worklist's own vocabulary, while the
