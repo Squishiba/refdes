@@ -9,12 +9,15 @@ Split out of the original monolithic tests/test_refdes.py.
 
 from __future__ import annotations
 
+import hashlib
+import os
+
 import yaml
 from conftest import write_project_config
 from helpers import PARTS_SCHEMA
 
 from refdes import build as build_mod
-from refdes import parse, revise, standards
+from refdes import cli, lifecycle, parse, revise, standards
 from refdes.schema import load_project
 
 
@@ -793,3 +796,163 @@ def test_v3_constrained_by_alone_still_never_feeds_coverage(tmp_path):
     cov = project.coverage["BND-001"]
     assert cov.satisfied_by == []
     assert cov.stage == "open"
+
+
+# ------------------------------------------------- F11: `standard upgrade --dry-run`
+
+
+def _stamped_v2_project(tmp_path):
+    """A hardware@2 project with a stamped revision baseline and a sealed log
+    entry: the tree `refdes standard upgrade --to 3` would rewrite (text: ->
+    body:, title: -> summary:, records: -> follows:), bump the pin on, and
+    carry hashes forward through -- exactly the stamped, multi-file tree F11
+    said you had to `cp -r` by hand to preview."""
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 2, presets: [] }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "req.yaml").write_text(
+        "defaults: { type: requirement, prefix: REQ, status: active }\n"
+        "items:\n  - id: REQ-001\n    text: The unit shall operate from 9 V to 36 V.\n",
+        encoding="utf-8",
+    )
+    (items / "dec.yaml").write_text(
+        "defaults: { type: decision, prefix: DEC }\n"
+        "items:\n  - id: DEC-001\n    title: Regulator topology\n",
+        encoding="utf-8",
+    )
+    (items / "log.yaml").write_text(
+        "defaults: { type: log, prefix: LOG }\n"
+        "items:\n  - id: LOG-001\n    date: 2026-01-02\n"
+        "    summary: First entry.\n    records: [DEC-001]\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=True)
+    assert not project.errors, [str(d) for d in project.errors]
+    outcome = lifecycle.stamp(project, kind="revision", name="rev-a")
+    assert outcome.status == "stamped", outcome
+    return tmp_path
+
+
+def _tree_hashes(root):
+    """relpath -> sha256 of bytes, for every file in the tree (including
+    .refdes/ and dotfiles) -- the byte-identical check for a --dry-run."""
+    files = {}
+    for dirpath, _dirnames, names in os.walk(str(root)):
+        for name in names:
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, str(root)).replace("\\", "/")
+            with open(path, "rb") as fh:
+                files[rel] = hashlib.sha256(fh.read()).hexdigest()
+    return files
+
+
+def test_standard_upgrade_dry_run_prints_the_plan_and_writes_nothing(tmp_path, capsys):
+    """F11: --dry-run on a stamped tree prints the per-file change plan, the
+    standard.version: bump, and the baselines/seals whose hashes would be
+    carried forward -- and leaves every file byte-identical, .refdes/
+    included. Not one item file, no config, no baseline/seal, no minted key,
+    not even the write lock."""
+    root = _stamped_v2_project(tmp_path)
+    config = str(root / "refdes-project.yaml")
+    capsys.readouterr()
+    before = _tree_hashes(root)
+
+    status = cli.main(["-c", config, "standard", "upgrade", "--to", "3", "--dry-run"])
+    out = capsys.readouterr().out
+
+    assert status == 0, out
+    assert "v2 -> v3:" in out
+    assert "standard.version: 2 -> 3 (would be bumped)" in out
+    assert "would change 3 file(s):" in out
+    for rel in ("items/req.yaml", "items/dec.yaml", "items/log.yaml"):
+        assert f"  {rel}" in out
+    assert "baselines would be carried forward: rev-a" in out
+    assert "seals would be carried forward: (base)" in out
+    assert "dry run -- nothing written" in out
+
+    assert _tree_hashes(root) == before
+    assert "version: 2" in (root / "refdes-project.yaml").read_text(encoding="utf-8")
+
+
+def test_standard_upgrade_dry_run_then_the_real_run_still_works(tmp_path, capsys):
+    """The dry run is a preview, not a substitute: the real run afterwards
+    upgrades the same tree normally."""
+    root = _stamped_v2_project(tmp_path)
+    config = str(root / "refdes-project.yaml")
+    assert cli.main(["-c", config, "standard", "upgrade", "--to", "3", "--dry-run"]) == 0
+    capsys.readouterr()
+
+    status = cli.main(["-c", config, "standard", "upgrade", "--to", "3"])
+    out = capsys.readouterr().out
+    assert status == 0, out
+    assert "upgraded to v3." in out
+    assert "baselines carried forward: rev-a" in out
+    assert "seals carried forward: (base)" in out
+
+    project = load_project(config_path=config)
+    assert project.standard_version == 3
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
+    assert not project.errors, [str(d) for d in project.errors]
+    assert "body: The unit shall operate from 9 V to 36 V." in (
+        root / "items" / "req.yaml"
+    ).read_text(encoding="utf-8")
+
+
+def test_standard_upgrade_dry_run_refuses_the_way_the_real_run_refuses(tmp_path, capsys):
+    """A refusal the real run raises -- here, already at the target version,
+    the pre-flight SchemaError -- refuses identically under --dry-run: same
+    exit code, same message, nothing written."""
+    root = _stamped_v2_project(tmp_path)
+    config = str(root / "refdes-project.yaml")
+    capsys.readouterr()
+    before = _tree_hashes(root)
+
+    status_real = cli.main(["-c", config, "standard", "upgrade", "--to", "2"])
+    err_real = capsys.readouterr().err
+    # Snapshot around the dry run: the real run above takes the project
+    # write lock, whose file the dry run must not touch (a dry run takes
+    # no lock at all) -- comparing across both runs would blame the dry
+    # run for the real run's lockfile.
+    before = _tree_hashes(root)
+    status_dry = cli.main(["-c", config, "standard", "upgrade", "--to", "2", "--dry-run"])
+    err_dry = capsys.readouterr().err
+
+    assert status_real == 2
+    assert status_dry == 2
+    assert err_real == err_dry
+    assert "already at hardware@2" in err_dry
+    assert _tree_hashes(root) == before
+
+
+def test_standard_upgrade_dry_run_refused_step_does_not_claim_the_bump(tmp_path, capsys):
+    """The plan promises it cannot drift from the real run, so it must not
+    print the pin bump for a step that refuses: the real run's rollback
+    restores refdes-project.yaml before the bump is ever attempted, so a
+    step refused on a read-only item file leaves standard.version at 2.
+    --dry-run reports that refusal and stays silent about the bump."""
+    root = _stamped_v2_project(tmp_path)
+    config = str(root / "refdes-project.yaml")
+    req = root / "items" / "req.yaml"
+    mode = req.stat().st_mode
+    os.chmod(str(req), mode & ~0o222)
+    try:
+        capsys.readouterr()
+        before = _tree_hashes(root)
+        status = cli.main(["-c", config, "standard", "upgrade", "--to", "3", "--dry-run"])
+        captured = capsys.readouterr()
+    finally:
+        os.chmod(str(req), mode)
+
+    assert status == 1
+    assert "v2 -> v3:" in captured.out
+    assert "would refuse" in captured.err
+    assert "would be bumped" not in captured.out
+    assert "would change" not in captured.out
+    assert _tree_hashes(root) == before

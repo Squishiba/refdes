@@ -331,7 +331,13 @@ def test_revise_under_no_write_reports_plan_without_writing(tmp_path, capsys):
     assert not any(_changed(before, root).values())
 
 
-def test_standard_upgrade_under_no_write_refuses(tmp_path, capsys):
+def test_standard_upgrade_under_no_write_reports_the_plan_like_dry_run(tmp_path, capsys):
+    """`standard upgrade` has a --dry-run now, so --no-write is forced onto
+    it (the convention every command with a --dry-run follows, and the
+    refusal this replaces justified itself by the flag's absence). The
+    fixture project pins no bundled standard, so the plan the dry run reports
+    is the pre-flight refusal -- exit 2, same as the real run, nothing
+    written."""
     root, config = _snapshot_project(tmp_path)
     capsys.readouterr()
     before = _snapshot(root)
@@ -339,8 +345,41 @@ def test_standard_upgrade_under_no_write_refuses(tmp_path, capsys):
     status = _run_no_write(config, ["standard", "upgrade", "--to", "99"])
     err = capsys.readouterr().err
     assert status == 2
-    assert "refusing" in err
+    assert "not pinned to a bundled standard" in err
     assert not any(_changed(before, root).values())
+
+
+def test_standard_upgrade_under_no_write_on_pinned_project_reports_the_plan(tmp_path, capsys):
+    """The other half of the flip, on a project that actually has a plan: a
+    valid hardware@2 project under `--no-write` reports the real run's plan
+    (exit 0, the per-file rewrites, the pin bump, the trailer) and leaves
+    every file byte-identical -- the behaviour the exit-2 refusal used to
+    deny. The refusal-parity test above pins only the pre-flight path; this
+    pins the `dry_run = args.dry_run or args.no_write` branch itself."""
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 2, presets: [] }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement, prefix: REQ, status: active }\n"
+        "items:\n  - id: REQ-001\n    text: Seeded requirement.\n",
+        encoding="utf-8",
+    )
+    config = str(tmp_path / "refdes-project.yaml")
+    capsys.readouterr()
+    before = _snapshot(tmp_path)
+
+    status = _run_no_write(config, ["standard", "upgrade", "--to", "3"])
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "v2 -> v3:" in out
+    assert "standard.version: 2 -> 3 (would be bumped)" in out
+    assert "would change 1 file(s):" in out
+    assert "dry run -- nothing written" in out
+    assert not any(_changed(before, tmp_path).values())
 
 
 def test_standard_add_preset_under_no_write_refuses(tmp_path, capsys):
@@ -526,7 +565,10 @@ def test_no_write_help_lists_every_command_the_docs_table_lists_as_reporting(cap
     reporting = " ".join(out.split("explicit write commands either")[1].split())
     listing = reporting.split(") or refuse")[0]
     listed = {name.strip() for name in listing.split("(", 1)[1].rstrip(")").split(",")}
-    assert listed == {"id", "rename", "calc-rewrite", "stub-tests", "revision", "release", "keys adopt"}
+    assert listed == {
+        "id", "rename", "calc-rewrite", "stub-tests", "revision", "release",
+        "keys adopt", "standard upgrade",
+    }
 
 
 def test_calc_rewrite_under_no_write_reports_and_writes_nothing(tmp_path, capsys):

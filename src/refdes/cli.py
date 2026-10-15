@@ -1962,8 +1962,12 @@ def _print_revision_result(result, dry_run: bool) -> int:
             # that matters: it moved the pin and re-validated the whole
             # project against the new version. Saying "nothing to do" here
             # would describe a real, and possibly refusable, step as a no-op.
-            print("no item file needed rewriting -- standard.version: bumped "
-                  "and the project re-validated against it")
+            if dry_run:
+                print("no item file needed rewriting -- standard.version: would be "
+                      "bumped and the project re-validated against it")
+            else:
+                print("no item file needed rewriting -- standard.version: bumped "
+                      "and the project re-validated against it")
         else:
             print("nothing to do -- mapping doesn't apply to this project")
         return 0
@@ -1982,17 +1986,17 @@ def _print_revision_result(result, dry_run: bool) -> int:
         print("id changes:")
         for old_id, new_id in sorted(result.id_changes.items()):
             print(f"  {old_id} -> {new_id}")
-    if dry_run:
-        return 0
     if result.baselines_updated:
-        print(f"baselines carried forward: {', '.join(result.baselines_updated)}")
+        verb = "would be carried forward" if dry_run else "carried forward"
+        print(f"baselines {verb}: {', '.join(result.baselines_updated)}")
     if result.baselines_skipped_no_standard:
         print(
             "baselines skipped (no recorded standard to migrate from): "
             + ", ".join(result.baselines_skipped_no_standard)
         )
     if result.seals_updated:
-        print(f"seals carried forward: {', '.join(result.seals_updated)}")
+        verb = "would be carried forward" if dry_run else "carried forward"
+        print(f"seals {verb}: {', '.join(result.seals_updated)}")
     if result.stale_references:
         # Not a failure -- prose is deliberately never rewritten -- but never
         # silent either: these lines used to resolve and no longer do. On
@@ -2064,13 +2068,9 @@ def cmd_calc_rewrite(args) -> int:
 
 
 def cmd_standard_upgrade(args) -> int:
-    if args.no_write:
-        return _refuse_no_write(
-            "standard upgrade", "every item file it renames plus "
-            "refdes-project.yaml, and it has no dry-run"
-        )
+    dry_run = args.dry_run or args.no_write
     project_root = _standard_project_root(args)
-    steps = revise_mod.apply_standard_upgrade(project_root, args.to)
+    steps = revise_mod.apply_standard_upgrade(project_root, args.to, dry_run=dry_run)
     ok = True
     for step in steps:
         print(f"v{step.from_version} -> v{step.to_version}:")
@@ -2078,12 +2078,26 @@ def cmd_standard_upgrade(args) -> int:
         # interleave and the refusal lands above the header naming the step
         # it belongs to.
         sys.stdout.flush()
-        status = _print_revision_result(step.result, dry_run=False)
+        status = _print_revision_result(step.result, dry_run=dry_run)
+        if dry_run and step.result.ok:
+            # The pin bump is part of the plan, not a side effect the report
+            # should hide -- so it is named per step, after the step's own
+            # outcome is known: a step that refuses never bumps (the real
+            # run's rollback puts refdes-project.yaml back before the
+            # mutate_config ever runs), and a plan that claimed the bump
+            # for it would be the drift this command promises it can't have.
+            print(
+                f"  standard.version: {step.from_version} -> {step.to_version} "
+                "(would be bumped)"
+            )
         if status != 0:
             ok = False
             break
     if ok:
-        print(f"\nupgraded to v{args.to}.")
+        if dry_run:
+            print(f"\ndry run -- nothing written; the real run would upgrade to v{args.to}.")
+        else:
+            print(f"\nupgraded to v{args.to}.")
     return 0 if ok else 1
 
 
@@ -2552,8 +2566,9 @@ def main(argv: list[str] | None = None) -> int:
         "board/workspace membership manifest, baseline stamping, "
         "and the ID ledger (.refdes/ids.yaml); explicit write commands "
         "either report what would change (id, rename, calc-rewrite, "
-        "stub-tests, revision, release, keys adopt) or refuse (fetch, init, "
-        "standard upgrade, standard add-preset/remove-preset, "
+        "stub-tests, revision, release, keys adopt, standard upgrade) or "
+        "refuse (fetch, init, "
+        "standard add-preset/remove-preset, "
         "former-ids propose --confirm, history capture/redact/"
         "migrate-seals). 'refdes build --no-write' still "
         "writes the site -- that is the command's own output, not a side effect",
@@ -3026,11 +3041,18 @@ def main(argv: list[str] | None = None) -> int:
         "merges steps: a multi-version jump is always applied as its full "
         "chain of individual deltas, in order. Refuses the failing step, "
         "rolling it back cleanly rather than guessing at an ambiguous or "
-        "ill-formed one; earlier steps in the chain stay applied.",
+        "ill-formed one; earlier steps in the chain stay applied. "
+        "--dry-run prints the whole plan -- the per-file rewrites, the "
+        "standard.version: bump, and the baselines and seals whose hashes "
+        "would be carried forward -- and writes nothing.",
     )
     p_standard_upgrade.add_argument(
         "--to", type=int, required=True, metavar="N",
         help="target standard.version: to upgrade to",
+    )
+    p_standard_upgrade.add_argument(
+        "--dry-run", action="store_true",
+        help="show the complete plan without writing",
     )
     p_standard_upgrade.set_defaults(func=cmd_standard_upgrade)
 

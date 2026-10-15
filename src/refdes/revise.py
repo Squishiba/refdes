@@ -2115,7 +2115,9 @@ class UpgradeStepResult:
     result: RevisionResult
 
 
-def apply_standard_upgrade(project_root: str, to_version: int) -> list[UpgradeStepResult]:
+def apply_standard_upgrade(
+    project_root: str, to_version: int, dry_run: bool = False
+) -> list[UpgradeStepResult]:
     """Chain every version's own migration.yaml, in order, from the
     project's currently pinned version up to `to_version` -- one call to
     apply() per version step, each bumping standard.version to *that* step's
@@ -2136,6 +2138,17 @@ def apply_standard_upgrade(project_root: str, to_version: int) -> list[UpgradeSt
     than the point that failed, and every step actually written is already
     independently verified (apply()'s own safety model), so the project is
     left at a fully valid, if not fully upgraded, version.
+
+    `dry_run` follows the convention this repository's other plan-only
+    commands already use (calc_rewrite._dry_run, _simulate_key_ensure): run
+    the real chain on a throwaway copytree of the tree, in a temp directory,
+    and return its own RevisionResults. The plan is the real engine's own
+    output -- files it would rewrite, ids it would rename, baselines and
+    seals whose hashes it would carry forward, refusals it would raise --
+    so it cannot drift from what the real run does, and a refusal (including
+    the pre-flight ones above, which raise identically for a dry run) is the
+    real run's refusal. The real tree is never written: not an item file,
+    not refdes-project.yaml, not .refdes/, not one minted key.
     """
     config_path = os.path.join(project_root, "refdes-project.yaml")
     project = load_project(config_path=config_path)
@@ -2149,10 +2162,37 @@ def apply_standard_upgrade(project_root: str, to_version: int) -> list[UpgradeSt
             f"project is already at {project.standard_base}@{project.standard_version}, "
             f"not below the requested --to {to_version}"
         )
-
     base = project.standard_base
+    start = project.standard_version
+
+    if dry_run:
+        import shutil
+        import tempfile
+
+        tmp = tempfile.mkdtemp(prefix="refdes-upgrade-")
+        try:
+            copy = os.path.join(tmp, "proj")
+            shutil.copytree(
+                project_root, copy, ignore=shutil.ignore_patterns("_site", ".git")
+            )
+            return _run_upgrade_chain(copy, base, start, to_version)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    return _run_upgrade_chain(project_root, base, start, to_version)
+
+
+def _run_upgrade_chain(
+    project_root: str, base: str, current: int, to_version: int
+) -> list[UpgradeStepResult]:
+    """The chain itself; apply_standard_upgrade owns the pre-flight refusals
+    (they read the real tree, which is the tree they refuse on) and the
+    dry-run simulation copy, and calls this on whichever root is live. The
+    starting pin comes from that pre-flight load: the simulation copy is a
+    byte-identical clone of the tree that load read, so re-loading inside
+    this function to re-read the same standard base/version is the redundant
+    second load this signature keeps it from paying."""
     results: list[UpgradeStepResult] = []
-    current = project.standard_version
     while current < to_version:
         next_version = current + 1
         raw = standards_mod.load_migration_raw(base, next_version)
