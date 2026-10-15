@@ -1,0 +1,157 @@
+fix-init-gitignore — DIAG-TRACE-006 — 2026-10-12
+
+Task: fix the confirmed DIAG-TRACE-006 init refusals at 8b6a52e (row 3 of
+the base checkout's in-prog-logs/current-main-resweep-cli-refusals.tsv):
+`refdes init` with a malformed/unreadable/directory `.gitignore` escapes
+as a traceback, and the directory shape half-creates the project
+(refdes-project.yaml + .vscode/settings.json written, then
+IsADirectoryError at scaffold's gitignore write).
+
+What was done
+
+- src/refdes/scaffold.py: new `read_existing_gitignore(target_dir)`.
+  Returns the file's text, or `None` when absent; raises `SchemaError`
+  for the three documented shapes — lexists-but-not-a-regular-file
+  (directory, symlink-to-directory), unreadable (`PermissionError`),
+  non-UTF-8 (`UnicodeDecodeError`). `SchemaError` is already init's
+  refusal channel (`init` raises it for existing config / bad preset)
+  and `main()` prints it as `configuration error: ...` at exit 2 —
+  which docs/cli-reference.md line 14 documents as the configuration
+  error code, so no new exit-code surface.
+- `scaffold.init` now calls the preflight BEFORE `os.makedirs`/the
+  config write, so a refused init creates nothing — the transactional
+  guarantee lives in the library, not just in the CLI's ordering.
+- src/refdes/cli.py `cmd_init`: the announcement pre-read of
+  `.gitignore` (the old raw `textio.read_text`) is replaced by the
+  same preflight call, so shapes 1-2 refuse at the CLI's first
+  filesystem touch too, and the preflight read doubles as the
+  announcement's "before" text (no second read added).
+- tests/test_scaffold.py: four new tests — non-UTF-8, unreadable
+  (chmod 000, POSIX-only skipif copied from
+  test_citation_path_hygiene.py's proven pattern), directory shape
+  incl. "same dir inits cleanly after `rmdir`", and a library-level
+  test that `scaffold.init` itself (not just cmd_init) refuses before
+  creating anything.
+
+Verification
+
+- Real CLI probes in .scratch/fix-init-gitignore-20261012/probe.sh, run
+  with PYTHONPATH pointed at the worktree src — verified via
+  refdes.__file__ = .../fix-init-gitignore-20261012/src/refdes/... (the
+  venv's `refdes` script is an editable install of the BASE checkout,
+  /home/jorb/work/refdes/src, so probes must set PYTHONPATH; the
+  baseline run without it still reproduces the old traceback +
+  survivors, proving the probes discriminate). All three shapes: exit
+  2, named refusal on stderr, no traceback, zero half-creation
+  survivors; binary .gitignore byte-identical after.
+- Normal behavior intact: clean init (exit 0, all three announcements,
+  hardware@3 note), pre-existing valid .gitignore still appended
+  once/idempotent (already-covered `.refdes/copies/` not re-added),
+  --no-write refusal unchanged.
+- Targeted suites: test_scaffold/test_exit_codes/test_no_write/
+  test_schema_json/test_readonly_explicit_writes = 168 passed; plus
+  test_component_rejected/test_candidate_parts_doc/test_docs_examples
+  = 16 passed. Full suite: 3606 passed, 2 skipped (4.5 min).
+- ruff on the three touched files: 9 findings, all on pre-existing
+  lines (imports at cli.py:3, subprocess/SIM115 in test_scaffold.py
+  lines 69-273, all above my additions); per AGENTS.md the repo
+  baseline is not clean and I did not touch it.
+
+Difficulties / notes
+
+- The AGENTS.md rm -rf denial rejected the first baseline-reproduction
+  command; re-ran with a fresh unique .scratch dir instead of clearing.
+- Scope decisions: the non-regular-file check uses lexists-and-not-
+  isfile, so a symlink-to-directory is refused too (it used to
+  half-create identically); a symlink to a real readable file behaves
+  as before. A dangling symlink now also refuses instead of silently
+  creating its target — a deliberate small behavior change, same
+  family of obstacle.
+- NOT fixed, deliberately out of scope (additional failure paths on
+  other files, not the documented .gitignore shapes): a read-only CWD
+  still tracebacks at the refdes-project.yaml write (scaffold.py
+  ~line 415) and would half-create nothing but ugly; unwritable
+  `.vscode` parent would half-create (config written, settings write
+  dies). Both predate this bug id and touch init's core writes; they
+  deserve their own diag rows rather than being folded in here.
+- Exit code for these shapes moved 1 (uncaught-exception interpreter
+  exit) -> 2, matching every other init refusal; the TSV recorded the
+  old exit 1 as part of the traceback symptom.
+
+Status: finished. Committed on branch fix/init-gitignore-refusal-20261012
+(one commit: scaffold.py, cli.py, test_scaffold.py).
+
+REVIEW FOLLOW-UP (same day): read-only-but-readable .gitignore
+
+Reviewer reproduced a remaining same-family half-creation
+(.scratch/review-init-gitignore-20261012/readonly-gitignore, base
+checkout, this branch's src): .gitignore is valid UTF-8, chmod 0444.
+The first preflight passes (the read works), init writes the config and
+.vscode/settings.json, then the append in _ensure_gitignore_entries
+dies of PermissionError at the open() -- survivors
+refdes-project.yaml + .vscode. Reproduced independently in
+.scratch/fix-init-gitignore-20261012/repro-readonly-* before fixing.
+
+Fix (second commit on this branch):
+- scaffold.init now assembles the wanted gitignore entries BEFORE its
+  first write. That required hoisting the "will we write
+  .vscode/settings.json" decision from _write_vscode_settings's return
+  value to a pre-write check of vscode_settings_exists -- the same
+  predicate that method branches on, so behavior is identical (no
+  external caller passes write_vscode_settings=False; verified by
+  grep).
+- New scaffold._refuse_unwritable_gitignore(target_dir, wanted): reads
+  via read_existing_gitignore, and when some wanted entry is NOT
+  already addressed, refuses with SchemaError if
+  os.access(path, W_OK) fails -- named, exit 2, nothing written.
+  Conditional on having something to append: a read-only .gitignore
+  that already covers all wanted patterns inits fine (new test pins
+  that, so the fix does not regress the append-nothing case).
+- Honest TOCTOU statement in the helper's docstring: a chmod landing
+  between the check and the actual append still surfaces as a
+  write-time traceback -- no check can close that (the two files are
+  not atomically writable anyway); the promise is that an obstacle
+  present when init starts is named before anything is created.
+- Prose corrected: the original docstring/comment claimed the
+  announcement pre-read and the preflight were "the same read" of a
+  single read -- cmd_init and scaffold.init in fact each call
+  read_existing_gitignore (and _ensure_gitignore_entries reads once
+  more at append time). Now documented per-call, with why the read
+  count is the least interesting property here.
+
+Tests: two new in test_scaffold.py -- read-only-needs-append refuses
+(exit 2, named, nothing written) and inits cleanly after chmod 0644;
+read-only-covering-everything proceeds (exit 0). skipif nt-or-root on
+the first (same repo pattern), none on the second (it asserts success,
+which holds regardless of whether the platform honors 0444).
+Targeted suites 170 passed (was 168); probe.sh all PASS + normal init
+and existing-gitignore announce paths re-checked.
+
+
+PR PREP (2026-10-14): rebase onto moved main, changelog fragment
+
+- origin/main moved 8b6a52e -> 9f83092 while this branch sat (includes
+  #219 WRITE-ATOMIC-003 scaffold.py changes and #197 cli.py changes).
+  Inspected before rebasing: #219 touches only the add/remove-preset
+  write functions (_config_write_target/atomic_write_text, scaffold.py
+  ~528-690) -- disjoint from the init/gitignore region (~204-490).
+  #197's cli.py hunks are the thread/work/printing region (lines
+  801-1207, 2880) -- cmd_init untouched. Pending G2 PR #224 (OPEN,
+  not merged) touches cli.py at 639/1143-1173/2834/3081 (release,
+  work, main-parser) -- no overlap with cmd_init ~1860.
+- Rebased 3 commits onto 9f83092: clean, zero conflicts.
+- Added changelog.d/init-gitignore-refusal.fixed.md (repo convention:
+  one fragment per change, folded at release; my fix commits had
+  none -- that was an omission, caught against #212/#219's file lists
+  in this pass).
+- Post-rebase verification: refdes.__file__ = worktree src under
+  forced PYTHONPATH; probe.sh all shapes PASS (binary/unreadable/dir
+  refusal, normal init, existing-gitignore announcement, --no-write);
+  read-only-needs-append refuses named exit 2 with .gitignore the
+  only survivor; read-only-covering-everything inits exit 0.
+  Targeted suites incl. #219's new test_preset_write_atomicity.py:
+  183 passed. Scoped ruff: same 9 pre-existing findings, none mine.
+- No unrelated survivors checked by `ls -A` on every probe project:
+  refusals leave only the .gitignore obstacle; successes add only
+  refdes-project.yaml/.vscode/.gitignore; no .refdes/, temp litter.
+- Task finished. PR opened against main (no merge).

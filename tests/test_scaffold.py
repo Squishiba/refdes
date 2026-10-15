@@ -318,6 +318,146 @@ def test_init_appends_with_the_existing_gitignore_line_ending(tmp_path):
     assert raw.count(b"\n") == raw.count(b"\r\n"), "appended block grew an LF island"
 
 
+# -------------------------------------------- DIAG-TRACE-006: an unusable
+# .gitignore is refused by name, before anything is written -- not escaped
+# as a traceback (and, for the directory shape, not after half the project)
+
+
+def test_init_refuses_a_non_utf8_gitignore_without_touching_anything(
+    tmp_path, monkeypatch, capsys
+):
+    """Binary bytes used to escape as a UnicodeDecodeError traceback out of
+    `cmd_init`'s pre-read. Now a named exit-2 refusal; the file keeps its
+    bytes and the project is not started."""
+    raw = b"\xff\xfe\x00\x80not utf-8\n"
+    (tmp_path / ".gitignore").write_bytes(raw)
+    monkeypatch.chdir(tmp_path)
+    assert cli_mod.main(["init"]) == 2
+    err = capsys.readouterr().err
+    assert "not valid UTF-8" in err
+    assert (tmp_path / ".gitignore").read_bytes() == raw
+    assert not (tmp_path / "refdes-project.yaml").exists()
+    assert not (tmp_path / ".vscode").exists()
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permission bits: chmod 0o000 does not stop Windows (or root) "
+    "from opening the file, so the unreadable case cannot be produced that way",
+)
+def test_init_refuses_an_unreadable_gitignore_without_touching_it(
+    tmp_path, monkeypatch, capsys
+):
+    """A mode-000 `.gitignore` used to escape as a PermissionError traceback.
+    Now the refusal names the file and the OS's reason, and nothing else
+    appears in the directory."""
+    (tmp_path / ".gitignore").write_text("_site/\n", encoding="utf-8")
+    (tmp_path / ".gitignore").chmod(0o000)
+    monkeypatch.chdir(tmp_path)
+    try:
+        assert cli_mod.main(["init"]) == 2
+    finally:
+        (tmp_path / ".gitignore").chmod(0o644)
+    err = capsys.readouterr().err
+    assert "cannot read" in err
+    assert "Permission denied" in err
+    assert not (tmp_path / "refdes-project.yaml").exists()
+    assert not (tmp_path / ".vscode").exists()
+
+
+def test_init_refuses_a_directory_named_gitignore_before_writing_anything(
+    tmp_path, monkeypatch, capsys
+):
+    """The worst shape: it used to write `refdes-project.yaml` and
+    `.vscode/settings.json` first, then die with an IsADirectoryError
+    traceback, leaving a half-created project whose orphaned config made
+    every retry refuse to overwrite it. Now nothing is written, and the
+    same directory inits cleanly once the obstacle is removed."""
+    (tmp_path / ".gitignore").mkdir()
+    monkeypatch.chdir(tmp_path)
+    assert cli_mod.main(["init"]) == 2
+    err = capsys.readouterr().err
+    assert "not a regular file" in err
+    assert not (tmp_path / "refdes-project.yaml").exists()
+    assert not (tmp_path / ".vscode").exists()
+    (tmp_path / ".gitignore").rmdir()
+    assert cli_mod.main(["init"]) == 0
+    capsys.readouterr()
+    assert (tmp_path / "refdes-project.yaml").exists()
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permission bits: chmod 0o444 does not stop Windows (or root) "
+    "from writing the file, so the unwritable case cannot be produced that way",
+)
+def test_init_refuses_a_readonly_gitignore_it_would_have_to_append_to(
+    tmp_path, monkeypatch, capsys
+):
+    """Review follow-up: a readable mode-0444 `.gitignore` passed the first
+    preflight, so init wrote the config and the editor file and only THEN
+    died of `PermissionError` appending its entries -- the directory
+    shape's half-creation through a different door. Now the refusal names
+    the file before anything is created, and the same project inits
+    cleanly once it is writable again."""
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text("_site/\n", encoding="utf-8")
+    gitignore.chmod(0o444)
+    monkeypatch.chdir(tmp_path)
+    try:
+        assert cli_mod.main(["init"]) == 2
+        err = capsys.readouterr().err
+        assert "not writable" in err
+        assert not (tmp_path / "refdes-project.yaml").exists()
+        assert not (tmp_path / ".vscode").exists()
+        gitignore.chmod(0o644)
+        assert cli_mod.main(["init"]) == 0
+        capsys.readouterr()
+        assert (tmp_path / "refdes-project.yaml").exists()
+        assert ".refdes/schema.json" in gitignore.read_text(encoding="utf-8").splitlines()
+    finally:
+        gitignore.chmod(0o644)
+
+
+def test_init_proceeds_with_a_readonly_gitignore_that_already_covers_everything(
+    tmp_path, monkeypatch, capsys
+):
+    """The refusal is conditional on having something to write: a read-only
+    `.gitignore` that already states the project's position on every path
+    `init` wants needs no append, and must not become a refusal reason --
+    otherwise this fix would break the ordinary append-nothing case for
+    anyone who (say) mounts their project tree read-write except that
+    file."""
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text(
+        ".vscode/settings.json\n.refdes/copies/\n.refdes/schema.json\n"
+        ".refdes-write.lock\n",
+        encoding="utf-8",
+    )
+    gitignore.chmod(0o444)
+    monkeypatch.chdir(tmp_path)
+    try:
+        assert cli_mod.main(["init"]) == 0
+        capsys.readouterr()
+    finally:
+        gitignore.chmod(0o644)
+    assert (tmp_path / "refdes-project.yaml").exists()
+    assert gitignore.read_text(encoding="utf-8").count("\n") == 4
+
+
+def test_scaffold_init_refuses_an_unusable_gitignore_before_creating_anything(
+    tmp_path,
+):
+    """The transactional guarantee lives in `scaffold.init`, not only in the
+    order of `cmd_init`'s pre-read: a direct library caller gets the same
+    refusal and the same untouched directory."""
+    (tmp_path / ".gitignore").mkdir()
+    with pytest.raises(SchemaError, match="not a regular file"):
+        scaffold_mod.init(str(tmp_path))
+    assert not (tmp_path / "refdes-project.yaml").exists()
+    assert not (tmp_path / ".vscode").exists()
+
+
 @pytest.mark.parametrize(
     ("covering", "pattern"),
     [

@@ -201,6 +201,94 @@ def _gitignore_patterns(text: str) -> list[str]:
     ]
 
 
+def read_existing_gitignore(target_dir: str) -> str | None:
+    """Read the project's `.gitignore` -- or refuse before `init` touches
+    anything (DIAG-TRACE-006). Returns `None` when there is no `.gitignore`
+    yet.
+
+    Three shapes used to escape as tracebacks out of init: binary bytes
+    (`UnicodeDecodeError` on the read), a file the process cannot read
+    (`PermissionError`), and a *directory* named `.gitignore`
+    (`IsADirectoryError` on the write). The first two died before anything
+    was written, ugly but survivable; the third died *after*
+    `refdes-project.yaml` and `.vscode/settings.json` were on disk, leaving
+    a half-created project whose orphaned config then made every retry
+    refuse to overwrite it. Here all three raise `SchemaError` instead,
+    which `main()` prints as a named, exit-2 refusal, and they raise before
+    any file is created: `init` does not begin writing until the file it
+    will have to append to is proven readable text, absent, or a clean
+    refusal.
+
+    `cmd_init` keeps the returned text for the announcement diff
+    (`added_gitignore_patterns`) -- within that call the preflight and the
+    announcement's pre-read are one read. `scaffold.init` calls this too,
+    under `_refuse_unwritable_gitignore`, as its own preflight for direct
+    library callers, and `_ensure_gitignore_entries` reads the file again
+    when it actually appends: a project init runs once and the file is
+    small, so the refusal ordering is what matters here, not the read
+    count.
+    """
+    path = os.path.join(target_dir, ".gitignore")
+    if os.path.lexists(path) and not os.path.isfile(path):
+        raise SchemaError(
+            f"{path} exists but is not a regular file -- refdes init refuses "
+            "to start rather than write a project around it; remove or "
+            "rename it and run init again"
+        )
+    if not os.path.isfile(path):
+        return None
+    try:
+        return textio.read_text(path)
+    except UnicodeDecodeError as exc:
+        raise SchemaError(
+            f"cannot read {path}: not valid UTF-8 text at byte {exc.start} "
+            f"({exc.reason}) -- .gitignore must be plain text; convert or "
+            "remove it and run init again"
+        ) from None
+    except OSError as exc:
+        raise SchemaError(
+            f"cannot read {path}: {exc.strerror or exc} -- make .gitignore "
+            "readable, or remove it, and run init again"
+        ) from None
+
+
+def _refuse_unwritable_gitignore(target_dir: str, entries: list[_GitignoreEntry]) -> None:
+    """Refuse an existing `.gitignore` that cannot be appended to, BEFORE
+    `init` writes anything (DIAG-TRACE-006, review follow-up).
+
+    The read-only-but-readable shape -- a mode-0444 file with valid UTF-8
+    text -- passed the first preflight: the read worked, init wrote
+    `refdes-project.yaml` and `.vscode/settings.json`, and only then did
+    `_ensure_gitignore_entries`' own write die of `PermissionError`, the
+    same half-created project the directory shape left. So `init` asks
+    `os.access(..., W_OK)` up front instead of finding out at the write.
+
+    The refusal is conditional on having something to write: an existing
+    `.gitignore` that already states the project's position on every
+    wanted path (an ignore or a deliberate `!`) needs no append, and a
+    read-only file holding exactly that is not a reason to refuse -- that
+    project inits. Only a read-only file that is *missing* an entry
+    cannot receive it, and that init refuses with nothing written.
+
+    What this cannot promise: a `chmod` concurrent with init, landing
+    between this check and the append, still surfaces as a write-time
+    traceback -- no check can close that, because init's two files could
+    not be written atomically even with a perfect check. The guarantee is
+    that an obstacle present when init starts is named before anything is
+    created, not that the filesystem holds still mid-command.
+    """
+    text = read_existing_gitignore(target_dir)
+    if text is None:
+        return
+    if any(not _gitignore_addresses(text, entry) for entry in entries):
+        path = os.path.join(target_dir, ".gitignore")
+        if not os.access(path, os.W_OK):
+            raise SchemaError(
+                f"cannot append to {path}: file is not writable -- make "
+                ".gitignore writable, or remove it, and run init again"
+            )
+
+
 def _ensure_gitignore_entries(target_dir: str, entries: list[_GitignoreEntry]) -> None:
     """Make sure the project's `.gitignore` ignores each entry's path,
     creating `.gitignore` when the project has none.
@@ -346,8 +434,13 @@ def init(
     (`added_gitignore_patterns`).
 
     Returns the path written. Raises SchemaError if refdes-project.yaml already
-    exists at the target, or if `presets` is given with `standard=None`
-    (every preset's types target base types, so presets require a base).
+    exists at the target, if `presets` is given with `standard=None`
+    (every preset's types target base types, so presets require a base), or
+    if a `.gitignore` is in the way -- unreadable, malformed, not a regular
+    file (see `read_existing_gitignore`), or existing-but-not-appended-to
+    while still missing a wanted entry (see `_refuse_unwritable_gitignore`).
+    Every `.gitignore` check runs here, before anything is created, so a
+    refused init leaves the directory exactly as it found it.
     """
     presets = presets or []
     if standard is None and presets:
@@ -374,19 +467,27 @@ def init(
                     f"(available: {available}).{hint}"
                 )
 
+    # The wanted entries are assembled BEFORE the first write, because the
+    # `.gitignore` preflight below has to know whether there is anything to
+    # append. The `.refdes/` entries always: those files are written by
+    # `build`, `check`, `fetch` and the rest whatever happened with the
+    # editor files, so a project that skipped schema completion is exactly
+    # the one still holding a multi-megabyte datasheet copy. The `.vscode`
+    # entry only when we will write that file ourselves -- and whether we
+    # will is knowable now, from the same predicate `_write_vscode_settings`
+    # checks, rather than only from its return value after the fact.
+    wants_vscode_entry = write_vscode_settings and not vscode_settings_exists(target_dir)
+    wanted: list[_GitignoreEntry] = (
+        [_VSCODE_SETTINGS_GITIGNORE] if wants_vscode_entry else []
+    ) + list(_REFDES_GITIGNORE)
+    _refuse_unwritable_gitignore(target_dir, wanted)
+
     os.makedirs(target_dir, exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as fh:
         fh.write(_init_yaml(standard, version, presets))
 
-    # The `.refdes/` entries always: those files are written by `build`,
-    # `check`, `fetch` and the rest whatever happened with the editor files, so
-    # a project that skipped schema completion is exactly the one still holding
-    # a multi-megabyte datasheet copy. The `.vscode` entry only when we wrote
-    # that file ourselves.
-    wanted: list[_GitignoreEntry] = []
-    if write_vscode_settings and _write_vscode_settings(target_dir):
-        wanted.append(_VSCODE_SETTINGS_GITIGNORE)
-    wanted += _REFDES_GITIGNORE
+    if wants_vscode_entry:
+        _write_vscode_settings(target_dir)
     _ensure_gitignore_entries(target_dir, wanted)
 
     return config_path

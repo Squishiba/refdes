@@ -1815,11 +1815,14 @@ def cmd_init(args) -> int:
     # Read before init runs: `scaffold.init` returns only the config path, so
     # this is the only way the announcement below can say which ignore patterns
     # actually appeared -- including when the answer is none, because the
-    # project's own .gitignore already covered them.
+    # project's own .gitignore already covered them. The read doubles as the
+    # first preflight (DIAG-TRACE-006): an unreadable or malformed .gitignore
+    # refuses here, as a `SchemaError`, before anything is written. The
+    # writability refusal belongs to `scaffold.init` instead (only scaffold
+    # knows the wanted-entry list), and init preflights for itself, so the
+    # no-half-creation guarantee does not depend on this call site's ordering.
     gitignore_path = os.path.join(cwd, ".gitignore")
-    gitignore_before = (
-        textio.read_text(gitignore_path) if os.path.isfile(gitignore_path) else None
-    )
+    gitignore_before = scaffold_mod.read_existing_gitignore(cwd)
     path = scaffold_mod.init(cwd, standard=standard, presets=presets)
     rel = os.path.relpath(path, cwd).replace("\\", "/")
     print(f"wrote {rel}")
