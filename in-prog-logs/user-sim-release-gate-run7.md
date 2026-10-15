@@ -9,9 +9,11 @@ Open PRs **not** on main and therefore not tested: #238, #242, #243.
 invocations, real HTTP — reporting friction and bugs, fixing nothing. Reported
 version: `refdes 0.5.0` (`refdes --version`).
 
-Harness (per `.scratch/COMMON.txt`): `.scratch/rr <projectdir> <args…>` cd's
-into the project inside the script and runs
-`PYTHONPATH=<worktree>/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli`.
+Harness (per `.scratch/COMMON.txt`, author-side — see Appendix B): an `rr`
+wrapper cd's into the project and runs
+`PYTHONPATH=<worktree>/src python -m refdes.cli` with the author's own venv
+interpreter (a machine-specific path, deliberately not given here — the
+portable checkout-side equivalent is Appendix A).
 Every project under `.scratch/run7/`, made with `refdes init` + a synthetic
 five-item set (REQ-PWR-001/002, BND-THM-001, LOG-PWR-001, CMP-PWR-001 with a
 citation over a locally generated 8-page PDF, TST-PWR-001), built and stamped
@@ -26,11 +28,14 @@ Severity levels as in run 6a: B = bug, F = friction/nit.
 
 ## 0. Headline summary
 
-The delta's 17 user-facing behaviours all landed as advertised: every CLI
+The delta's 17 user-facing behaviours landed as advertised — every CLI
 fix (#216, #217, #219, #223, #229, #230, #231, #232, #233, #234, #236, #239,
 plus #215, #220, #214/#224) reproduced from its fragment's own claims with
 the exact diagnostics, the citation-picker HTTP surface held on all the
-corrupt-input shapes (#218, #225), and #227/#221 shipped in the served JS.
+corrupt-input shapes (#218, #225), and #227/#221 shipped in the served JS —
+with one exception: #212 matches its fragment in every state tested except
+the YAML-corrupt adoption marker, which `keys adopt` silently overwrites
+instead of refusing (F12).
 Carry-forward closed five more (6a B6/B7/F9/F11, 6b B2/F3, run-4 F3); F10 is
 still open, B1 stays Jared's design question, F2 waits on #243.
 
@@ -511,14 +516,53 @@ Carry-forward status is in §1; B1/F2/F10 stay open as recorded there.
 
 ---
 
-## Appendix — how to reproduce this run
+## Appendix — reproduction
 
-`rr` as in run 6a/6b. `.scratch/run7/pristine` = `refdes init` + the
-five-item synthetic set + `refdes fetch` + `build` + `revision r1`; the PDF is
+### A. From a fresh checkout
+
+This report tests the delta `374a4aa..885e9e6`, pinned to HEAD `885e9e6`;
+main has moved ahead of that commit since the run (e.g. #246, #251, #254),
+and every claim here is against the tested HEAD, not current main. The
+commands are the project's own documented surface, so a clean checkout
+reproduces them:
+
+```console
+$ git checkout 885e9e6                # tested HEAD
+$ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+$ .venv/bin/refdes --version
+refdes 0.5.0
+$ mkdir proj && cd proj && ../.venv/bin/refdes init   # init writes into cwd
+$ ../.venv/bin/refdes ls
+no items match
+```
+
+(Verified on this branch's tree with Python 3.13.5.) The synthetic
+five-item set (REQ-PWR-001/002, BND-THM-001, LOG-PWR-001, CMP-PWR-001) and
+each sweep case's single edit are quoted inline in the section that uses
+them; a case not quoted in full is described by its edit from the pristine
+project. The page-count findings (#233, #236, #215's anchors, F13) want an
+8-page PDF at `docs/manual.pdf` before `refdes fetch`; the bytes quoted in
+this report come from a deterministic (timestamp-free) generator —
+author-side, uncommitted — yielding sha256
+`b39acdb7979cf9463251b26f9c100b8bdeb284ee185752da4ae4bd302e5568c5`, so any
+self-made 8-page PDF reproduces the diagnostic *shapes* at its own digest.
+The editor sweeps follow the `docs/cli-reference.md` serve pattern: launch
+`refdes serve --no-open --token-file <path>` on a chosen port, read the
+launch URL (token included) from that owner-only file — the token is
+per-launch and local, and none is reproduced in this report.
+
+### B. Author-side harness notes (not committed)
+
+`.scratch/` is gitignored, so this section is a record of the author's
+machine, not a reproduction path. `rr <projectdir> <args…>` wraps
+`PYTHONPATH=<worktree>/src <author-venv>/bin/python -m refdes.cli` inside
+the project. `_pristine` = `refdes init` + the five-item set +
+`refdes fetch` + `build` + `revision r1`; the PDF is
 `.scratch/run7/mkpdf.py <path> <pages>` (a hand-written 8-page PDF). Sweep
-cases are `cf-*` / `t*` copies of `_pristine` with one edit each. The editor
-sweeps ran against `refdes serve --no-open --port 8741 --token-file
-.scratch/run7/ed-token.txt` (PID recorded, killed by PID); the cookie jar is
-`.scratch/run7/jar2.txt` (the login cookie is `refdes_token_8741=`, set by
-`GET /edit/?token=…`). `ed-sweep` carries one leftover probe item (REQ-001,
-empty body) from the #218/create probes; `cf-*` projects are not cleaned.
+cases are `cf-*` / `t*` copies of `_pristine` with one edit each. The
+editor sweeps ran on port 8741 with the token file at
+`.scratch/run7/ed-token.txt` (PID recorded, killed by PID); the cookie jar
+is `.scratch/run7/jar2.txt` (the login cookie is `refdes_token_8741=`, set
+by `GET /edit/?token=…`). `ed-sweep` carries one leftover probe item
+(REQ-001, empty body) from the #218/create probes; `cf-*` projects are not
+cleaned.
