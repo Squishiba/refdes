@@ -113,3 +113,27 @@ PR prep (2026-10-14) — rebase onto current main, open PR
     tests/test_reseal_audit.py tests/test_seal.py tests/test_yaml_loaders.py -> 85 passed.
   * scoped ruff on the three touched files: the same 10 pre-existing findings, none on
     added lines (repo-wide ruff baseline is not clean; see AGENTS.md).
+
+PR #225 review round (2026-10-15) — reviewer 82f0e729: CHANGES REQUESTED
+-------------------------------------------------------------------------
+- Review verdict: code, full suite (3695 passed / 2 skipped) and all CI jobs
+  verified; one required fix — the change has no `changelog.d/<slug>.<category>.md`
+  fragment (changelog.d/README.md: "Commit the fragment together with the change
+  it describes"). Added `changelog.d/serve-pdf-oversized-coordinates.fixed.md`
+  (`fixed` = bug fix; content is the changelog bullet, `- ` start, no headings,
+  per README).
+- PR body edit (separate reviewer note): the body's first line cites
+  `in-prog-logs/current-main-resweep-cli-refusals.tsv`, which lives only in the
+  base checkout and is not tracked by this branch — a dangling reference for a
+  PR reader. The body itself states the defect, so the reference is reworded to
+  point at the evidence in this branch (the new tests + the probe outputs named
+  in the log), not at the untracked TSV. No mass-commit of the resweep TSV.
+- Rebase: origin/main had advanced f7df34d -> 3a3c101 -> cb24891 (incl. #233,
+  citations.py page-count provenance, and #231/#230/#216/#211). `git rebase
+  origin/main` clean, zero conflicts; new head: fix commit 2c41b6e, log commit
+  47328c3. Verified at the head: MAX_PAGE_DIGITS/page_number bound at
+  citations.py:308-328 and the _pdf_proposal length check at sources.py:864
+  co-present with #233's PAGE_COUNT_SHA256_KEY provenance work at
+  citations.py:735 (disjoint hunks).
+- Post-rebase verification: targeted pytest (same six files as before) and the
+  scoped ruff on the touched files, results below in the report.
