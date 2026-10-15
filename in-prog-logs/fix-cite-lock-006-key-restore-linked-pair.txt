@@ -1,0 +1,77 @@
+CITE-LOCK-006: keys restore falsely refuses a batch restoring a linked pair
+
+Branch: fix/key-restore-linked-pair-20261015 (base 9bc1304, current main tip).
+Claimed in shared .scratch/PROGRESS.md (Sol lane).
+
+## Finding verification (reproduced at current main, not the old pin)
+
+Repro: .scratch/cite-lock-006/repro.py, PYTHONPATH pinned to this worktree
+(refdes.__file__ checked). Project: REQ-001 (keyed) + REQ-002 refining it,
+both keyed; baseline `rev-b` stamped with both keys present; then both `key:`
+lines deleted. `key_restore.apply(root, ["REQ-001@k1", "REQ-002@k2"])` at
+HEAD: REFUSED —
+
+  refusing to move key '...' onto REQ-002: baseline 'rev-b' records that key
+  under 'REQ-002' with different content -- content hash: baseline ..., now ...
+
+Reproduced in both argument orders, with the composite link (`REQ-001@k1` →
+`!unresolved:` sentinel) and the bare link (keyless target → `!nokey:REQ-001`
+sentinel). force=True succeeded, and the post-restore REQ-002 hash then equals
+the baseline's recorded hash exactly — same item, same content, so the refusal
+is false against the documented promise (cli-reference.md: --force is for "the
+same item, edited since that baseline was stamped").
+
+## Mechanism
+
+`apply` ran `_baseline_content_conflict` on the live pre-restore project
+(hashes computed at the top via `build.compute_hashes(project)`). An item's
+content hash embeds its links' *resolved target keys* (build.py
+`_link_hash_token`, keys.md §5), so the owner's pre-restore hash sees the
+keyless target as a sentinel, not its lost key — a mismatch the baseline
+reads as moved content. The target's own hash is key-independent, which is
+why target-first-then-owner as two commands always worked.
+
+## Fix (src/refdes/key_restore.py)
+
+The baseline comparison moved to run on the *candidate* — the project loaded
+from the in-memory overlay of all planned key restores, after the
+blocking-errors check — so it judges the proposed post-restore state: in a
+pair batch the target already carries its restored key. Genuine conflicts
+are untouched: content/title genuinely moved (either half), target key lost
+and NOT in the batch (sentinel stands in post-restore too), reused display
+id — all still refused, and nothing is written on refusal. `--force` skips
+the comparison as before. The now-unneeded `compute_hashes` on the live
+project is gone; it runs on the candidate (inside `not force`).
+
+## Tests (tests/test_keys_restore.py)
+
+- test_linked_pair_restored_in_one_command_needs_no_force — 4 cases (both
+  orders × composite/bare link): RED on base (all 4), GREEN after fix.
+- test_linked_pair_with_content_moved_since_the_baseline_still_refuses —
+  owner edited / target edited in a pair batch: refused, names the right
+  side, snapshot unchanged (passes before and after — guard preserved).
+- test_linked_pair_force_restores_despite_the_refusal — CLI: exit 1 names
+  --force; --force restores the whole pair.
+
+Red proof: file saved to .scratch, HEAD version restored via git checkout of
+that one path, 4/4 pair tests failed; fix file copied back. No git stash used.
+
+## Verification
+
+- tests/test_keys_restore.py: 45 passed (38 existing + 7 new).
+- Adjacent: keys/keys_adopt/keys_links/lifecycle/seal/revise/
+  revise_keys_cleanup/checks_keys/history_seal/show_item_keys: 288 passed.
+- Full suite: 3859 passed, 2 skipped.
+- ruff on the two touched files: 4 findings = 4 on the HEAD versions (all
+  pre-existing, lines untouched).
+
+## Docs
+
+Checked docs/cli-reference.md (keys restore section) and
+docs/troubleshooting.md: neither claims the comparison runs against the live
+pre-restore state; the fix aligns behavior with the existing promise ("the
+same item, edited since that baseline was stamped" needs --force; an
+unedited same item does not). No doc change needed. Changelog fragment:
+changelog.d/key-restore-linked-pair.fixed.md.
+
+Status: DONE. Pushed; PR open; not merged.

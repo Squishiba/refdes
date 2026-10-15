@@ -365,6 +365,132 @@ def test_same_item_edited_since_the_baseline_needs_force(tmp_path):
     assert key_restore.apply(str(tmp_path), [f"REQ-001@{original}"], force=True).ok
 
 
+def _pair_fixture(root, composite=True):
+    """REQ-002 refines REQ-001, both keyed -- a linked pair whose keys can be
+    lost together. `composite` picks the on-disk link shape (expanded
+    `DISPLAY@key` vs bare display id); both hash their target as the resolved
+    key, so both see the target's key in the owner's baseline hash.
+    """
+    config = write_project_config(root, CONFIG)
+    (root / "items").mkdir()
+    target_key, owner_key = keys.mint(), keys.mint()
+    (root / "items/target.md").write_text(
+        f"---\nid: REQ-001\nkey: '{target_key}'\ntype: requirement\ntitle: Target\n---\nBody.\n"
+    )
+    link_target = f"REQ-001@{target_key}" if composite else "REQ-001"
+    (root / "items/source.yaml").write_text(
+        "defaults: {type: requirement}\nitems:\n"
+        f"  - id: REQ-002\n    key: '{owner_key}'\n    title: Source\n    refines: [{link_target}]\n"
+    )
+    return str(config), target_key, owner_key
+
+
+def _drop_key_lines(root):
+    for name in ("target.md", "source.yaml"):
+        path = root / "items" / name
+        textio.write_text(
+            str(path),
+            "".join(
+                l
+                for l in textio.read_text(str(path)).splitlines(keepends=True)
+                if not l.lstrip().startswith("key:")
+            ),
+        )
+
+
+@pytest.mark.parametrize("order", ["target_first", "owner_first"])
+@pytest.mark.parametrize("composite", [True, False])
+def test_linked_pair_restored_in_one_command_needs_no_force(
+    tmp_path, order, composite
+):
+    """CITE-LOCK-006: the pair's own hashes are judged after the restore.
+
+    The owner's baseline hash embeds the target's resolved key, so hashing it
+    against the pre-restore project -- where the target is keyless and the
+    link hashes as the `!nokey:`/`!unresolved:` sentinel -- sees moved content
+    in an untouched item. The comparison runs on the proposed post-restore
+    project, where the target carries its restored key and the hashes match
+    the record, in either argument order.
+    """
+    config, target_key, owner_key = _pair_fixture(tmp_path, composite)
+    assert cli.main(["-c", config, "revision", "rev-a"]) == 0
+    _drop_key_lines(tmp_path)
+    targets = [f"REQ-001@{target_key}", f"REQ-002@{owner_key}"]
+    if order == "owner_first":
+        targets.reverse()
+
+    result = key_restore.apply(str(tmp_path), targets)
+    assert result.ok, result.errors
+    assert {item_id for item_id, _before, _after in result.changes} == {"REQ-001", "REQ-002"}
+    restored = loader.load_readonly(config)
+    assert not restored.errors
+    assert restored.item_by_id("REQ-001").key == target_key
+    assert restored.item_by_id("REQ-002").key == owner_key
+    assert restored.item_by_id("REQ-002").resolved_links == {"refines": ["REQ-001"]}
+
+
+@pytest.mark.parametrize("edited", ["owner", "target"])
+def test_linked_pair_with_content_moved_since_the_baseline_still_refuses(
+    tmp_path, edited
+):
+    """The refusal survives: a genuine difference in either half of the pair.
+
+    Restoring the pair is only safe when the post-restore hashes describe the
+    recorded items. Editing the owner's title (the half whose hash includes
+    the link) or the target's title (which the owner's restored hash resolves
+    against -- renaming the keyless half cannot rescue a moved title either
+    way) is the same hazard the single-key guard refuses, so the batch
+    refuses and writes nothing.
+    """
+    config, target_key, owner_key = _pair_fixture(tmp_path, composite=True)
+    assert cli.main(["-c", config, "revision", "rev-a"]) == 0
+    _drop_key_lines(tmp_path)
+    path = tmp_path / "items" / ("source.yaml" if edited == "owner" else "target.md")
+    text = textio.read_text(str(path))
+    textio.write_text(str(path), text.replace("Source", "Source, revised").replace("Target", "Target, revised"))
+    before = _snapshot(tmp_path)
+
+    result = key_restore.apply(str(tmp_path), [f"REQ-001@{target_key}", f"REQ-002@{owner_key}"])
+    assert not result.ok
+    refused = "REQ-002" if edited == "owner" else "REQ-001"
+    moved_key = owner_key if edited == "owner" else target_key
+    assert f"refusing to move key {moved_key!r} onto {refused}" in result.errors[0]
+    assert "pass --force" in result.errors[0]
+    assert _snapshot(tmp_path) == before
+
+
+def test_linked_pair_force_restores_despite_the_refusal(tmp_path, capsys):
+    """`--force` stays the override for the batch, exactly as for one key."""
+    config, target_key, owner_key = _pair_fixture(tmp_path, composite=True)
+    assert cli.main(["-c", config, "revision", "rev-a"]) == 0
+    _drop_key_lines(tmp_path)
+    source = tmp_path / "items/source.yaml"
+    textio.write_text(str(source), textio.read_text(str(source)).replace("title: Source", "title: Source, revised"))
+
+    assert cli.main(["-c", config, "keys", "restore", f"REQ-001@{target_key}", f"REQ-002@{owner_key}"]) == 1
+    assert "--force" in capsys.readouterr().err
+    assert (
+        cli.main(
+            [
+                "-c",
+                config,
+                "keys",
+                "restore",
+                f"REQ-001@{target_key}",
+                f"REQ-002@{owner_key}",
+                "--force",
+            ]
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "restored REQ-001" in out and "restored REQ-002" in out
+    restored = loader.load_readonly(config)
+    assert restored.item_by_id("REQ-001").key == target_key
+    assert restored.item_by_id("REQ-002").key == owner_key
+    assert restored.item_by_id("REQ-002").resolved_links == {"refines": ["REQ-001"]}
+
+
 @pytest.mark.parametrize("stamped", [False, True])
 def test_restore_is_unchanged_when_no_baseline_records_the_key(tmp_path, stamped):
     """No record of the key means nothing to compare against, so today stands.
