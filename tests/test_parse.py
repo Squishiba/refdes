@@ -696,6 +696,142 @@ def test_a_repeat_in_a_defaults_block_is_reported_as_such(tmp_path):
     assert _item(project, "REQ-001").fields["owner"] == "A. Rivera"
 
 
+def test_a_top_level_repeat_under_flow_defaults_is_not_blamed_on_the_defaults(tmp_path):
+    """DIAG-WORD-001: a flow-style `defaults:` on the file's first line starts
+    its mapping on the same line as the document's own top-level mapping, and
+    the repeat's attribution was decided by comparing those lines -- so a
+    second `items:` was reported as a repeat inside the defaults, a clause
+    pointing the author at a line that contains no such thing. The
+    attribution is structural (which mapping the record was collected from),
+    and the top-level mapping is not the defaults'."""
+    project = _dup_project(tmp_path, {
+        "r.yaml": (
+            "defaults: { type: requirement, prefix: REQ }\n"
+            "items:\n"
+            "  - id: REQ-001\n"
+            "    text: one\n"
+            "items:\n"
+            "  - id: REQ-002\n"
+            "    text: two\n"
+        ),
+    })
+
+    errors = _dup_errors(project)
+    assert len(errors) == 1
+    assert "duplicate key 'items'" in errors[0].message
+    assert "in this file's defaults:" not in errors[0].message
+    assert "lines 2 and 5" in errors[0].message
+    # No item owns the file's top-level mapping, so nothing is named.
+    assert errors[0].item_id is None
+    # YAML's last-wins answer is unchanged: only the second items: list loads.
+    assert set(project.items_by_id) == {"REQ-002"}
+
+
+def test_a_top_level_repeat_under_block_defaults_is_not_blamed_on_the_defaults(tmp_path):
+    """The control the finding isolated: the same repeat with a block-style
+    `defaults:` (whose mapping starts on line 2, so the line comparison
+    already agreed with the structure) never carried the clause. The
+    structural attribution keeps it that way."""
+    project = _dup_project(tmp_path, {
+        "r.yaml": (
+            "defaults:\n"
+            "  type: requirement\n"
+            "  prefix: REQ\n"
+            "items:\n"
+            "  - id: REQ-001\n"
+            "    text: one\n"
+            "items:\n"
+            "  - id: REQ-002\n"
+            "    text: two\n"
+        ),
+    })
+
+    errors = _dup_errors(project)
+    assert len(errors) == 1
+    assert "duplicate key 'items'" in errors[0].message
+    assert "in this file's defaults:" not in errors[0].message
+    assert "lines 4 and 7" in errors[0].message
+    assert errors[0].item_id is None
+    assert set(project.items_by_id) == {"REQ-002"}
+
+
+def test_a_repeat_inside_flow_defaults_shares_line_one_and_keeps_the_clause(tmp_path):
+    """The other side of the shared line: a repeat written INSIDE a flow-style
+    `defaults:` on line 1 sits in a mapping that starts on the same line as
+    the document's own -- treating that line as the top-level's would drop the
+    clause the block-style control test pins (`...is_reported_as_such`). The
+    defaults mapping wins its own line against the top-level mapping, exactly
+    as the top-level mapping won it in the flow-defaults control above."""
+    project = _dup_project(tmp_path, {
+        "r.yaml": (
+            "defaults: { type: requirement, owner: J. Bin, owner: A. Rivera }\n"
+            "items:\n"
+            "  - id: REQ-001\n"
+            "    text: one\n"
+        ),
+    })
+
+    errors = _dup_errors(project)
+    assert len(errors) == 1
+    assert "duplicate key 'owner'" in errors[0].message
+    assert "in this file's defaults:" in errors[0].message
+    assert "twice on line 1" in errors[0].message
+    assert errors[0].item_id is None
+    assert _item(project, "REQ-001").fields["owner"] == "A. Rivera"
+
+
+def test_a_top_level_repeat_and_a_flow_defaults_repeat_are_told_apart(tmp_path):
+    """Both repeats in one file, both starting on line 1: each keeps its own
+    attribution, and the grouped survivor-chaining never mixes them."""
+    project = _dup_project(tmp_path, {
+        "r.yaml": (
+            "defaults: { type: requirement, owner: a, owner: b }\n"
+            "items:\n"
+            "  - id: REQ-001\n"
+            "    text: one\n"
+            "items:\n"
+            "  - id: REQ-002\n"
+            "    text: two\n"
+        ),
+    })
+
+    errors = _dup_errors(project)
+    assert len(errors) == 2
+    by_key = {e.message.split(" in one mapping")[0]: e for e in errors}
+    items_error = by_key["duplicate key 'items'"]
+    defaults_error = by_key["duplicate key 'owner'"]
+    assert "in this file's defaults:" not in items_error.message
+    assert "in this file's defaults:" in defaults_error.message
+    assert set(project.items_by_id) == {"REQ-002"}
+
+
+def test_a_repeat_nested_inside_a_defaults_block_is_not_blamed_on_the_defaults(tmp_path):
+    """DIAG-WORD-005's shape, pinned as the boundary of this fix: a repeat one
+    level DOWN inside the `defaults:` mapping is in neither the defaults
+    mapping itself nor the top-level one, so it keeps the shape it has today
+    -- no clause, no item -- while the structural identity keeps that answer
+    stable (the record belongs to the nested mapping, not the defaults')."""
+    project = _dup_project(tmp_path, {
+        "r.yaml": (
+            "defaults:\n"
+            "  on_change:\n"
+            "    fields:\n"
+            "      owner: ignore\n"
+            "      owner: log\n"
+            "items:\n"
+            "  - id: REQ-001\n"
+            "    text: one\n"
+        ),
+    })
+
+    errors = _dup_errors(project)
+    assert len(errors) == 1
+    assert "duplicate key 'owner'" in errors[0].message
+    assert "in this file's defaults:" not in errors[0].message
+    assert "lines 4 and 5" in errors[0].message
+    assert errors[0].item_id is None
+
+
 def test_a_repeat_in_a_flow_mapping_is_reported_as_one_line(tmp_path):
     """A single-line flow mapping puts both occurrences on one line, and
     "(lines 3 and 3)" reads like a bug in the diagnostic rather than in the

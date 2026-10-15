@@ -215,8 +215,16 @@ class DuplicateKey(NamedTuple):
     parse a slice (a Markdown front-matter block) shift them to file lines
     before reporting. `mapping_line` is where the mapping holding the repeat
     starts, which is how a list file recognizes the entry it belongs to
-    (a list entry's `__line__` is its own mapping's start) and how a
-    `defaults:` block is told apart from an item.
+    (a list entry's `__line__` is its own mapping's start).
+
+    `is_top` and `is_defaults` are the mapping's structural identity, read
+    off the node graph while it is being constructed: the document's own
+    top-level mapping, and the mapping a top-level `defaults:` key points
+    at. Line numbers alone cannot tell those two apart: with
+    `defaults: { type: requirement }` written in flow style on the file's
+    first line, the document's mapping and the defaults mapping both
+    *start* on that line, and a repeat of a top-level key (`items:` twice)
+    compared by line reads as a repeat inside the defaults.
     """
 
     key: str
@@ -225,6 +233,8 @@ class DuplicateKey(NamedTuple):
     mapping_line: int
     first_value: str | None
     second_value: str | None
+    is_top: bool = False
+    is_defaults: bool = False
 
 
 def _scalar_text(node: yaml.Node) -> str | None:
@@ -234,8 +244,13 @@ def _scalar_text(node: yaml.Node) -> str | None:
     return node.value if len(node.value) <= _MAX_ECHOED_VALUE else None
 
 
-def _duplicate_keys(node: yaml.MappingNode) -> list[DuplicateKey]:
+def _duplicate_keys(
+    node: yaml.MappingNode, is_top: bool = False, is_defaults: bool = False
+) -> list[DuplicateKey]:
     """Every key written twice in `node`, one record per repeat after the first.
+
+    `is_top`/`is_defaults` carry `node`'s structural identity onto every
+    record (see DuplicateKey).
 
     Each repeat is paired with the occurrence immediately before it rather
     than with the first one, so a key written three times names every line
@@ -266,6 +281,8 @@ def _duplicate_keys(node: yaml.MappingNode) -> list[DuplicateKey]:
                     mapping_line=node.start_mark.line + 1,
                     first_value=earlier_value,
                     second_value=value,
+                    is_top=is_top,
+                    is_defaults=is_defaults,
                 )
             )
         last_seen[key_node.value] = (line, value)
@@ -296,7 +313,27 @@ class _PurePythonLineLoader(_PurePythonKeySafeLoader):
     """Always pure-Python SafeLoader for byte-identical YAML error diagnostics."""
 
 
-def _collect_duplicates(loader, node: yaml.MappingNode) -> None:
+def _note_document_root(loader, node: yaml.MappingNode) -> bool:
+    """True when `node` is the document's own top-level mapping.
+
+    Construction walks the composed graph depth-first from the root, so a
+    loader's first constructed mapping is its document's root -- and the
+    root's `defaults:` key names the one mapping whose lost values every
+    item inherits. The value node is kept by identity: every node of a
+    composed document stays alive through construction, so `is` compares
+    are exact where line numbers are not (see DuplicateKey.is_defaults).
+    """
+    if getattr(loader, "mappings_constructed", 0):
+        return False
+    loader.mappings_constructed = 1
+    for key_node, value_node in node.value:
+        if isinstance(key_node, yaml.ScalarNode) and key_node.value == "defaults":
+            loader.defaults_node = value_node
+            break
+    return True
+
+
+def _collect_duplicates(loader, node: yaml.MappingNode, is_top: bool = False) -> None:
     """Record this mapping's repeated keys on the loader instance.
 
     Collected rather than raised: the caller still wants the rest of the file
@@ -305,7 +342,8 @@ def _collect_duplicates(loader, node: yaml.MappingNode) -> None:
     against. The one caller that cannot proceed either way is a config file,
     which raises once it has the whole list.
     """
-    duplicates = _duplicate_keys(node)
+    is_defaults = node is getattr(loader, "defaults_node", None)
+    duplicates = _duplicate_keys(node, is_top=is_top, is_defaults=is_defaults)
     if not duplicates:
         return
     collected = getattr(loader, "duplicate_keys", None)
@@ -322,7 +360,7 @@ def _base_constructor(loader):
 
 def _construct_mapping(loader, node: yaml.MappingNode) -> dict:
     _preserve_surrogate_scalars(node)
-    _collect_duplicates(loader, node)
+    _collect_duplicates(loader, node, _note_document_root(loader, node))
     mapping = _base_constructor(loader).construct_mapping(loader, node, deep=True)
     mapping["__line__"] = node.start_mark.line + 1
     return mapping
@@ -357,7 +395,7 @@ def _construct_mapping_dupes(loader, node: yaml.MappingNode) -> dict:
     # checked variant must too -- otherwise the two loaders disagree on the
     # same bytes and `schema.load_project` crashes on `tname[:3]`.
     _preserve_surrogate_scalars(node)
-    _collect_duplicates(loader, node)
+    _collect_duplicates(loader, node, _note_document_root(loader, node))
     return _base_constructor(loader).construct_mapping(loader, node, deep=True)
 
 
@@ -563,17 +601,22 @@ _MARKDOWN_MERGE_REMEDY = (
 
 
 def _duplicate_entry_id(
-    entries: list[Any], defaults_line: int | None, record: DuplicateKey
+    entries: list[Any], record: DuplicateKey
 ) -> tuple[str | None, str]:
     """Whose mapping a duplicate sits in: (item id, context) for the message.
 
     An entry's own `__line__` is the start line of the mapping the entry *is*,
     so a repeat among the entry's top-level keys names the item exactly. A
     repeat further down -- inside `on_change:`, say -- belongs to the entry that
-    contains it, found by the last entry starting at or before it. A `defaults:`
-    block is named for what it is, since a value lost there is inherited by
-    every item in the file. Anything else (a repeat in the file's own
-    top-level mapping) has no item to name.
+    contains it, found by the last entry starting at or before it. A repeat
+    *inside* the `defaults:` mapping is named for what it is, since a value
+    lost there is inherited by every item in the file -- identified by the
+    node's structural identity (DuplicateKey.is_defaults), not by line: an
+    inline-flow `defaults: { ... }` on the file's first line starts the
+    defaults mapping on the same line as the document's own top-level
+    mapping, and a line comparison attributed a top-level repeat (a second
+    `items:`) to the defaults block. Anything else (a repeat in the file's
+    own top-level mapping) has no item to name.
     """
     starts = {
         entry["__line__"]: entry
@@ -582,8 +625,10 @@ def _duplicate_entry_id(
     }
     if record.mapping_line in starts:
         return _entry_item_id(starts[record.mapping_line]), ""
-    if defaults_line is not None and record.mapping_line == defaults_line:
+    if record.is_defaults:
         return None, " (in this file's defaults:, so every item here inherited it)"
+    if record.is_top:
+        return None, ""
     enclosing = [start for start in starts if start <= record.first_line]
     if enclosing:
         return _entry_item_id(starts[max(enclosing)]), ""
@@ -687,14 +732,16 @@ def _report_duplicate_keys(
         )
     if records:
         project.duplicate_key_files.add(rel)
-    id_by_mapping: dict[int, list[DuplicateKey]] = {}
+    id_by_mapping: dict[tuple[int, bool, bool], list[DuplicateKey]] = {}
     for record in records:
         if (
             record.key == "id"
             and record.first_value is not None
             and record.second_value is not None
         ):
-            id_by_mapping.setdefault(record.mapping_line, []).append(record)
+            id_by_mapping.setdefault(
+                (record.mapping_line, record.is_defaults, record.is_top), []
+            ).append(record)
     # Grouped by mapping because a caller that hands over a whole file's
     # records (the shape-error bails in parse_list_file) mixes mappings:
     # entry A's lost id must not chain to entry B's survivor.
@@ -1611,13 +1658,17 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
         # is itself dropped -- and leave a reference to REQ-001 unnamed).
         # Every record of a mapping resolves to the same entry, so the
         # entry identity is computed once from the group's first record.
-        records_by_mapping: dict[int, list[DuplicateKey]] = {}
+        # Grouped by the mapping's structural identity, not its start line
+        # alone: an inline-flow `defaults:` on the file's first line and the
+        # document's own top-level mapping both start there, and merging
+        # their records into one group would let either claim the other's
+        # attribution.
+        records_by_mapping: dict[tuple[int, bool, bool], list[DuplicateKey]] = {}
         for record in duplicates:
-            records_by_mapping.setdefault(record.mapping_line, []).append(record)
+            key = (record.mapping_line, record.is_defaults, record.is_top)
+            records_by_mapping.setdefault(key, []).append(record)
         for mapping_records in records_by_mapping.values():
-            item_id, context = _duplicate_entry_id(
-                entries, defaults_line, mapping_records[0]
-            )
+            item_id, context = _duplicate_entry_id(entries, mapping_records[0])
             _report_duplicate_keys(
                 project, rel, mapping_records, _LIST_MERGE_REMEDY,
                 item_id=item_id, context=context,
