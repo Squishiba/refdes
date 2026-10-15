@@ -102,3 +102,60 @@ tracebacks are the bug, one fragment per change, committed with it).
 Verification: full suite 3606 passed, 2 skipped, exit 0
 (.scratch/suite.txt); ruff check --select E9,F src tests clean;
 docs-site/gen_examples.py --check clean. Task finished.
+
+========================================================================
+PR #212 fix round 1 (review), against head f62a1d1. Tree: MERGEABLE +
+`git merge-tree --write-tree origin/main HEAD` clean -> normal push, no
+rebase (main moved: #197, #213 merged).
+
+F1 (MEDIUM, tests): the F2-round companion test had been inserted into
+the middle of test_real_loaders_keep_main_malformed_yaml_behavior, so
+the three config-loader pins (bad-settings / SCHEMA_NAME / standard
+file) ran inside it and its docstring described cases it no longer
+held. Moved the three pins back into the original test; the companion
+is now a pure append. Verified with `git diff origin/main --
+tests/test_yaml_loaders.py`: the original test's body is untouched
+except the five deliberate class updates; new test appended whole.
+
+F2: reproduced first on a copy of the probe project
+(.scratch/f2probe: proj + refdes-schema.yaml opting `log` into
+`sealing: build` so a seal file exists); corrupted
+.refdes/log-seal-board-a.yaml with b"\xff" -> `refdes check` and
+`refdes build` both ended in
+`ValueError: …/log-seal-board-a.yaml: seal file is not valid UTF-8 (…)`
+as a traceback, exit 1. Full traceback recorded in
+.scratch/f2-traceback.txt.
+Fix: all four corrupt-file raises in seal.py _load_seal_data (UTF-8,
+YAMLError, must-be-a-mapping, malformed reseal history) now raise the
+project's SchemaError (from .model, imported) -- the exact path
+boards/ids/lifecycle use for their store files: cli main()'s existing
+`except SchemaError` (~3309) prints "configuration error: <path>: …"
+exit 2. No cli.py change, no new class, no new except clause (the
+HistoryError path needs per-command clauses, so the SchemaError path
+won). One supporting catch update: history.py's uncaptured-edit
+diagnostic deliberately declines an unparseable seal file so
+seal.verify reports it -- its `except ValueError` became
+`except (ValueError, SchemaError)` (SchemaError is not a ValueError
+subclass; verified model.py:121 `class SchemaError(Exception)`),
+comment untouched, behavior preserved.
+Probe after fix: check and build both print one
+`configuration error: …/log-seal-board-a.yaml: seal file is not valid
+UTF-8 (…)` line, exit 2; the `a: [unterminated` shape likewise exit 2.
+CLI test: tests/test_seal.py::
+test_a_corrupt_seal_file_is_a_clean_cli_error_not_a_traceback (exit
+code 2, stderr names log-seal-board-a.yaml, no "Traceback"). Pins
+that followed the class: test_yaml_loaders.py (seal do-parse + UTF-8
+raises, docstring) and test_reseal_audit.py
+test_malformed_history_is_never_silently_discarded (same class it
+already imports pattern: SchemaError). Sabotage: reverted the UTF-8
+raise to ValueError -> the CLI test and
+test_store_files_name_a_non_utf8_file… both fail; restored, green.
+Total well under the 30-line budget; nothing deferred.
+PR body L2 table: the seal.py row updated (ValueError/deferred ->
+SchemaError/exit-2, #212 round 1).
+
+F4 (nit): history.py _read_store_file docstring "review #209's found
+the object store's …" -> "review #209 found the object store's …".
+
+F3 (nit): changelog.d/store-read-decode-errors.fixed.md now ends with
+a newline.

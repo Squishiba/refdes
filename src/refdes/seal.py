@@ -39,7 +39,7 @@ import yaml
 
 from . import keys as keys_mod
 from . import model
-from .model import SEALING_BUILD, SEALING_HISTORY, Item, Project
+from .model import SEALING_BUILD, SEALING_HISTORY, Item, Project, SchemaError
 from .parse import yaml_safe_load
 
 SEAL_FILE = ".refdes/log-seal.yaml"
@@ -155,11 +155,11 @@ def _load_seal_data(project: Project, board: str = "") -> dict:
         with open(path, "r", encoding="utf-8") as fh:
             data = yaml_safe_load(fh) or {}
     except UnicodeDecodeError as exc:
-        raise ValueError(f"{path}: seal file is not valid UTF-8 ({exc})") from exc
+        raise SchemaError(f"{path}: seal file is not valid UTF-8 ({exc})") from exc
     except yaml.YAMLError as exc:
-        raise ValueError(f"{path}: seal file does not parse ({exc})") from exc
+        raise SchemaError(f"{path}: seal file does not parse ({exc})") from exc
     if not isinstance(data, dict):
-        raise ValueError(f"{path}: seal file must be a mapping")
+        raise SchemaError(f"{path}: seal file must be a mapping")
     for record_id, value in (data.get("sealed") or {}).items():
         if isinstance(value, Mapping) and value.get("id"):
             keys_mod.report_storage_key(project, record_id, path)
@@ -182,7 +182,7 @@ def _load_seal_data(project: Project, board: str = "") -> dict:
         or (event["action"] == "remove" and event["new_hash"] is not None)
         for event in events
     ):
-        raise ValueError(f"{path}: malformed reseal history; refusing to discard it")
+        raise SchemaError(f"{path}: malformed reseal history; refusing to discard it")
     return data
 
 

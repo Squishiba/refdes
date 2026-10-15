@@ -65,8 +65,9 @@ def test_real_loaders_keep_main_malformed_yaml_behavior(tmp_path):
 
     The store half of this pin changed with review #209's class fix (the
     history object store's raw reads were the trigger): an unparseable store
-    file is now a SchemaError (manifest, ledger, baseline) or the seal
-    module's own corrupt-file ValueError, each naming the path. A raw
+    file is now a SchemaError naming the path -- manifest, ledger, baseline
+    and, since review #212, the seal file too, so `check`/`build` print
+    `configuration error: …` and exit 2 instead of a traceback. A raw
     YAMLError -- let alone a UnicodeDecodeError, which is not even a
     YAMLError -- escaped as a traceback out of every command that read the
     file. The lockfile's LockfileError was the earlier instance of the same
@@ -80,7 +81,7 @@ def test_real_loaders_keep_main_malformed_yaml_behavior(tmp_path):
         boards.load_manifest(project)
 
     _write_malformed(Path(seal.seal_path(project)))
-    with pytest.raises(ValueError, match="seal file does not parse"):
+    with pytest.raises(SchemaError, match="seal file does not parse"):
         seal.load_seals(project)
 
     _write_malformed(Path(ids.ledger_path(project)))
@@ -99,6 +100,20 @@ def test_real_loaders_keep_main_malformed_yaml_behavior(tmp_path):
 
     _write_malformed(Path(keys.adoption_marker_path(project)))
     assert keys.is_adopted(project) is False
+
+    settings = tmp_path / "bad-settings.yaml"
+    _write_malformed(settings)
+    with pytest.raises(yaml.YAMLError):
+        load_project(config_path=str(settings))
+
+    _write_malformed(tmp_path / SCHEMA_NAME)
+    with pytest.raises(yaml.YAMLError):
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+
+    standard = tmp_path / "bad-standard.yaml"
+    _write_malformed(standard)
+    with pytest.raises(yaml.YAMLError):
+        standards._read_yaml(str(standard))
 
 
 def test_store_files_name_a_non_utf8_file_instead_of_a_traceback(tmp_path):
@@ -122,7 +137,7 @@ def test_store_files_name_a_non_utf8_file_instead_of_a_traceback(tmp_path):
     assert "boards.yaml" in str(exc_info.value)
 
     _corrupt(Path(seal.seal_path(project)))
-    with pytest.raises(ValueError, match="seal file is not valid UTF-8") as exc_info:
+    with pytest.raises(SchemaError, match="seal file is not valid UTF-8") as exc_info:
         seal.load_seals(project)
     assert "log-seal.yaml" in str(exc_info.value)
 
@@ -143,17 +158,3 @@ def test_store_files_name_a_non_utf8_file_instead_of_a_traceback(tmp_path):
 
     _corrupt(Path(keys.adoption_marker_path(project)))
     assert keys.is_adopted(project) is False
-
-    settings = tmp_path / "bad-settings.yaml"
-    _write_malformed(settings)
-    with pytest.raises(yaml.YAMLError):
-        load_project(config_path=str(settings))
-
-    _write_malformed(tmp_path / SCHEMA_NAME)
-    with pytest.raises(yaml.YAMLError):
-        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
-
-    standard = tmp_path / "bad-standard.yaml"
-    _write_malformed(standard)
-    with pytest.raises(yaml.YAMLError):
-        standards._read_yaml(str(standard))

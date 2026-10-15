@@ -63,7 +63,7 @@ from . import keys as keys_mod
 from . import model
 from . import seal as seal_mod
 from . import textio
-from .model import Item
+from .model import Item, SchemaError
 from .parse import yaml_safe_load
 
 HISTORY_FORMAT = 1
@@ -314,7 +314,7 @@ def _read_store_file(path: str, kind: str) -> object:
     the store -- review #191 wrapped ``load_events`` this way, review
     #207's leftover found ``append_event``'s existing-file read holding
     the same record under the same failure with no wrap at all, and review
-    #209's found the object store's ``save_object``/``load_object`` pair
+    #209 found the object store's ``save_object``/``load_object`` pair
     still raw. One helper, every reader; ``kind`` keeps each message
     truthful ("event file", "object file"). Each caller keeps its own
     posture for what a parsed record must look like.
@@ -792,7 +792,7 @@ def uncaptured_edits(project) -> list:
         seal_files = [("", seal_mod.load_seals(project, ""))] + [
             (board, seal_mod.load_seals(project, board)) for board in sorted(project.boards)
         ]
-    except ValueError:
+    except (ValueError, SchemaError):
         # A seal file that cannot be parsed is `seal.verify`'s to report, and
         # it runs one step later in the same build; declining here keeps this
         # diagnostic source from being the thing that changes that.

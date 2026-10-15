@@ -6,11 +6,13 @@ Split out of the original monolithic tests/test_refdes.py.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from conftest import write_project_config
 from helpers import _build_at
 
 from refdes import build as build_mod
+from refdes import cli as cli_mod
 from refdes import keys as keys_mod
 from refdes import parse, seal
 from refdes.schema import load_project
@@ -604,3 +606,24 @@ def test_the_repro_rewrite_then_rebuild_needs_no_reseal(tmp_path):
     fixed = _load_and_build(root, seal_write=True, reseal=False)
     assert not fixed.errors
     assert "LOG-001" in seal.load_seals(fixed)
+
+
+def test_a_corrupt_seal_file_is_a_clean_cli_error_not_a_traceback(sealed_board_project, capsys):
+    """Review #212 F2: a seal file that does not decode was a bare ValueError
+    out of seal._load_seal_data, and main() printed it as a traceback (the
+    recorded repro is in .scratch/f2-traceback.txt). It raises the project's
+    SchemaError now, the same class boards/ids/lifecycle raise for their own
+    corrupt store files, so main()'s SchemaError handler -- the path every
+    config error takes -- prints one line and exits 2."""
+    project = _build_at(sealed_board_project)
+    build_mod.build(project, seal_write=True)
+    Path(seal.seal_path(project, "board-a")).write_bytes(b"\xff")
+
+    code = cli_mod.main(["-c", str(sealed_board_project / "refdes-project.yaml"), "check"])
+
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "configuration error" in err
+    assert "log-seal-board-a.yaml" in err
+    assert "seal file is not valid UTF-8" in err
+    assert "Traceback" not in err
