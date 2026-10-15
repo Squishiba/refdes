@@ -254,16 +254,24 @@ types:
     sealing: build
 ```
 
-With that overlay in place `check` and `build` both say so, on every run, so
-the decision is visible rather than something you confirm by editing an entry
-and seeing whether the build fails:
+With that overlay in place `check` and `build` say so when the decision is
+news — the first run after the overlay appears, and again when the set of
+opted-in types changes — so the decision is visible rather than something you
+confirm by editing an entry and seeing whether the build fails:
 `note: refdes-schema.yaml opts the 'log' type back into build sealing -- an
 edit to a sealed entry is a build error again, not the history-backed 'edited
 after captured' warning`. It names the type and the file, because the two
 questions an author actually has are "did it take effect" and "is this here on
 purpose, or did someone forget it". It is a note and not a warning: it changes
-no exit code and no `N errors, M warnings` count. A project with no overlay
-prints nothing, which is the state the rest of this section describes.
+no exit code and no `N errors, M warnings` count. It prints once and goes
+quiet (run-6a F10), the same posture as the `.refdes/schema.json ... refreshed`
+note: the announced set lives in a gitignored record under `.refdes/`, and a
+run that prints leaves it in step. Taking the overlay back out is recorded
+too, so re-adding it prints again. A `--no-write` (or `build --dry-run`) run
+prints by the same rule and records nothing, so the next writable run still
+prints; `--verbose` always prints, on the run you asked for it. A project
+with no overlay prints nothing and grows no record, which is the state the
+rest of this section describes.
 
 The entries stay append-only in the authoring sense — a correction is still a
 new entry that `amends` the old one — but nothing is sealed any more:

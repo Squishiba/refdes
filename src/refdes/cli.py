@@ -77,8 +77,16 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     return loader_mod.load_tree(
         args.config,
         require_ids=require_ids,
-        write=not (args.no_write or getattr(args, "dry_run", False)),
+        write=_writes_allowed(args),
     )
+
+
+def _writes_allowed(args) -> bool:
+    """The one answer to "may this run write into the tree", shared by the
+    load (`_load`) and by everything else a command gates on the same promise
+    -- `--no-write` and a command's own `--dry-run` are the same promise made
+    by different names (docs/design/keys.md §2)."""
+    return not (args.no_write or getattr(args, "dry_run", False))
 
 
 def _refuse_no_write(command: str, what: str) -> int:
@@ -213,14 +221,84 @@ def _sealing_optin_note(project: Project) -> str | None:
     )
 
 
-def _announce_sealing_optin(project: Project) -> None:
+#: The tool-managed record of the opt-in set the note was last printed for,
+#: the same posture as `.refdes/schema.json` (docs/design/standard-library.md
+#: §12): the state lives in a gitignored file under `.refdes/`, a writable
+#: run puts it back in step, and the note is the trip-wire that fires when it
+#: no longer describes the project. Run-6a F10: a note that prints on every
+#: run is a permanent one-liner in every CI check log, and it "trains people
+#: to skim notes" -- the confirmation has to be there when the decision is
+#: news and quiet after it is not.
+SEALING_OPTIN_STATE_REL = ".refdes/sealing-optin.json"
+
+
+def _sealing_optin_state_path(project: Project) -> str:
+    return os.path.join(project.root, *SEALING_OPTIN_STATE_REL.split("/"))
+
+
+def _announced_sealing_optins(project: Project) -> list[str] | None:
+    """The set the note was last printed for, sorted; None when nothing is
+    recorded. A missing, unreadable or corrupt file reads as unrecorded, so
+    the note prints again and the next writable run rewrites the file -- a
+    lost tool state re-derives, it does not silence the note it guards."""
+    try:
+        with open(_sealing_optin_state_path(project), encoding="utf-8") as fh:
+            state = json.load(fh)
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    optins = state.get("opted_in") if isinstance(state, dict) else None
+    if not isinstance(optins, list) or not all(isinstance(n, str) for n in optins):
+        return None
+    return sorted(optins)
+
+
+def _record_sealing_optins(project: Project, names: list[str]) -> None:
+    """Write the announcement state. Mirrors `schema_json.write_schema`'s
+    handling of a refused write: the tree being read-only is a condition of
+    the filesystem, not of the project, so the run continues and says so."""
+    path = _sealing_optin_state_path(project)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        textio.write_text(path, json.dumps({"opted_in": names}) + "\n")
+    except OSError:
+        project.load_writes.blocked.append(SEALING_OPTIN_STATE_REL)
+        project.warn(model.read_only_refusal(), file=SEALING_OPTIN_STATE_REL)
+
+
+def _announce_sealing_optin(
+    project: Project, *, write: bool, verbose: bool = False
+) -> None:
     """`check` and `build` only -- the two commands run-5 F3 names, and the two
     an author reaches for to ask whether their config took effect. Nothing to
     print for a project with no overlay, which is most projects and every one
-    that has never thought about sealing at all."""
-    note = _sealing_optin_note(project)
-    if note:
-        print(note, file=sys.stderr)
+    that has never thought about sealing at all.
+
+    Once, not forever (run-6a F10): the note prints when it first takes
+    effect -- the first announcement whose set differs from the set recorded
+    in `.refdes/sealing-optin.json` -- and again when the set of opted-in
+    types changes, the same mtime-trip-wire posture as the
+    `.refdes/schema.json ... refreshed` note, with the set (not the mtimes)
+    as the state, because the config can be edited back to a set the note
+    already announced. Removing the overlay is recorded too (silently):
+    re-adding it is a decision again, and prints again. `--verbose` always
+    prints: a reader who asked for everything should see the confirmation on
+    the run they asked for it.
+
+    `write=False` (`--no-write`, and `build --dry-run`, the same promise made
+    by a different name) prints by the same rule but records nothing, so the
+    next writable run -- the one that owns the tree -- still prints it.
+    """
+    names = sorted(project.sealing_optins)
+    recorded = _announced_sealing_optins(project)
+    if names and (verbose or recorded != names):
+        print(_sealing_optin_note(project), file=sys.stderr)
+    if not write:
+        return
+    if names:
+        if recorded != names:
+            _record_sealing_optins(project, names)
+    elif recorded:
+        _record_sealing_optins(project, [])
 
 
 def _print_late_refusals(project: Project, announced: int) -> None:
@@ -299,7 +377,9 @@ def cmd_check(args) -> int:
     # per-file warnings reach this command through `_report` below, so the
     # notice names only what landed.
     _announce_load_writes(project, name_blocked=False)
-    _announce_sealing_optin(project)
+    _announce_sealing_optin(
+        project, write=_writes_allowed(args), verbose=args.verbose
+    )
     if schema_was_stale:
         # Name the file that actually triggered it: the mtime check is a max
         # across both config files, and a warning pointing at the wrong one
@@ -377,7 +457,9 @@ def cmd_check(args) -> int:
 def cmd_build(args) -> int:
     project, _stale = _load(args)
     _announce_load_writes(project, name_blocked=False)
-    _announce_sealing_optin(project)
+    _announce_sealing_optin(
+        project, write=_writes_allowed(args), verbose=args.verbose
+    )
     if args.out:
         project.out_dir = args.out
     if args.reseal and args.reseal != seal_mod.RESEAL_ALL and args.reseal not in project.boards:

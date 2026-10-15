@@ -1,0 +1,73 @@
+F10 — the sealing opt-back-in note prints once, not on every load
+(branch: sealing-note-once)
+
+Task: from in-prog-logs/user-sim-release-gate-run6a.md §F10 — `check`/`build`
+of a project whose refdes-schema.yaml opts a type back into build sealing
+printed the `note: ... back into build sealing ...` line on EVERY run.
+
+Reproduced on this branch first (verified, not assumed): scratch project in
+.scratch/f10-proj with `types: {log: {sealing: build}}`; two `check` runs,
+grep -c of the note = 1 then 1. (Note: `python -m refdes` doesn't work —
+package has no __main__; probes ran via `-c "from refdes.cli import main;
+main([...])"` with PYTHONPATH=this worktree's src.)
+
+Mechanism chosen (task: "same mechanism or the same state" as the
+`.refdes/schema.json ... refreshed` note): refreshed achieves once via state
+in a gitignored file under `.refdes/` (schema.json's mtime) that a writable
+run refreshes, with `write=False` (--no-write/--dry-run) skipping the write
+while keeping the verdict (schema_json.write_schema, src/refdes/schema_json.py:404).
+The set (not mtimes) is the right state here, because the config can be
+edited back to a set the note already announced. So:
+- `.refdes/sealing-optin.json` records `{"opted_in": [sorted set]}`.
+- `_announce_sealing_optin(project, write=, verbose=)` prints when the set
+  differs from the record (or under --verbose), and a writable run records
+  the current set. Removal of the overlay is recorded (silently, as []), so
+  re-adding prints again. Corrupt/missing record reads as "never announced"
+  (self-heals, mirrors keys.is_adopted's read-None pattern).
+- `--no-write`/`--dry-run` print by the same rule, record nothing.
+- `--verbose` (decided, stated in PR): always prints; records as usual, so
+  a verbose run on an unannounced set IS that set's announcement.
+- Refused marker write mirrors write_schema: append to load_writes.blocked +
+  project.warn(read_only_refusal, file=...).
+- Small refactor: `_writes_allowed(args)` factored out of `_load`'s
+  `not (args.no_write or args.dry_run)` expression, shared by the load and
+  both announce call sites.
+
+Verified by hand in .scratch/f10-proj: first check prints, second is silent;
+--no-write on a fresh tree prints and leaves no marker; writable run after
+still prints, then quiet; -v always prints; removal → re-add prints once.
+One probe surprise: adding `decision: {sealing: build}` to the overlay did
+NOT change the announced set — correct per standards.build_sealing_optins
+(only a type the standard had MOVED off build counts; hardware@3 moves only
+`log`, base.yaml:290). The bundle can therefore only produce [] / ["log"];
+the set-change test exercises []↔["log"] via removal/re-add.
+
+Files:
+- src/refdes/cli.py: SEALING_OPTIN_STATE_REL + 3 helpers, rewrites
+  _announce_sealing_optin (docstring now describes the once-behaviour,
+  per the task), _writes_allowed, two call sites.
+- tests/test_sealing_optin_note.py: 8 new tests (two-checks-once,
+  set-change-once, --no-write doesn't consume, --dry-run doesn't consume,
+  verbose-always, no-overlay-no-state-file, corrupt-record, settled-project
+  keeps counts/exit codes). Two existing tests updated WITH REASONS in their
+  docstrings (they looped check+build on ONE tree, which the cadence fix
+  makes one-note-per-tree; the summary/exit-code test now measures fresh
+  first runs instead of settled ones).
+- tests/test_thread_cli.py: test_the_command_itself_never_seals's tree
+  filter matched "seal" as a substring and now also sees
+  sealing-optin.json — excluded with a comment. Fixture updated with reason.
+- docs/design-log.md: the "both say so, on every run" paragraph rewritten to
+  the once cadence (only place docs describe the note; grep -rn
+  "back into build sealing" docs/ hits design-log.md:260 only).
+- changelog.d/sealing-optin-note-once.changed.md — CHANGELOG-README rule
+  applied: category `changed` (existing behaviour changed, non-breaking),
+  fragment per change, committed with the change; user-visible, so a
+  fragment is owed.
+
+Sabotage: replaced the gating condition with `if names and True:` (print
+every run) → 6 failures in tests/test_sealing_optin_note.py (two-checks-once,
+set-change, no-write-consume, verbose, corrupt-record, settled-counts).
+Restored the condition; 19/19 green in the file.
+
+Sweep-3 items checked: none encountered on this task (no stale tooling
+behavior found; ruff scoped as instructed, suite command as COMMON.txt).

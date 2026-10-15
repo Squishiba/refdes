@@ -669,12 +669,19 @@ def test_the_command_itself_never_seals(tmp_path, capsys):
     config = _setup(tmp_path, config_text=BUILD_SEALED)
     assert _run(config, "build") == 0  # writable: this one DOES seal
     capsys.readouterr()
-    sealed = [p for p in _tree(tmp_path) if "seal" in p]
+    # `sealing-optin.json` is the note's once-per-set record (run-6a F10),
+    # not a seal: it matches the "seal" substring, so the fixture's own
+    # proof has to name it out to stay a proof about seals.
+    sealed = [
+        p for p in _tree(tmp_path) if "seal" in p and "sealing-optin" not in p
+    ]
     assert sealed == [".refdes/log-seal.yaml"]  # the fixture proves itself
     (tmp_path / ".refdes" / "log-seal.yaml").unlink()
     assert _run(config, "thread", "LOG-001") == 0
     capsys.readouterr()
-    assert [p for p in _tree(tmp_path) if "seal" in p] == []
+    assert [
+        p for p in _tree(tmp_path) if "seal" in p and "sealing-optin" not in p
+    ] == []
 
 
 def test_derived_row_self_closes_after_a_real_fix(tmp_path, capsys):

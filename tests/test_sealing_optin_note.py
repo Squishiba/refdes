@@ -24,6 +24,14 @@ A `project.info()` diagnostic was rejected for the same reason the note is not
 one: `_visible()` hides info unless `--verbose`, which leaves the author still
 unable to see that the overlay took effect.
 
+Run-6a F10 fixed the *cadence*: printing on every run is "a permanent one-liner
+in every CI check log [that] trains people to skim notes". The note now prints
+when the decision is news — the first run after the opt-in appears, and again
+when the set of opted-in types changes — with the set recorded under
+`.refdes/`, the same posture as the `.refdes/schema.json ... refreshed` note.
+A `--no-write`/`--dry-run` run prints by the same rule and records nothing;
+`--verbose` always prints.
+
 Nothing here may change an exit code — that is the whole of the contract, and
 each test below asserts it.
 """
@@ -54,6 +62,15 @@ def _setup(tmp_path, config: str) -> str:
     items.mkdir(exist_ok=True)
     (items / "log.yaml").write_text(LOG_ITEMS, encoding="utf-8")
     return str(tmp_path / "refdes-project.yaml")
+
+
+def _setup_in(root, config: str) -> str:
+    """A whole project in its own directory. Run-6a F10 made the note
+    once-per-tree stateful, so a test that wants the note from two commands
+    needs two trees: the second command runs on a project that has already
+    heard it."""
+    root.mkdir(parents=True, exist_ok=True)
+    return _setup(root, config)
 
 
 def _run(capsys, cfg: str, *args: str) -> tuple[int, str]:
@@ -96,9 +113,12 @@ def test_build_announces_the_overlay_and_still_exits_zero(tmp_path, capsys):
 def test_the_note_names_the_type_and_the_file_that_declared_it(tmp_path, capsys):
     """The two things run-5 F3 asked for: which type, and where the decision
     came from. Without the file the reader cannot find the line again; without
-    the type a project with more than one append-only type learns nothing."""
-    cfg = _setup(tmp_path, BASE + OPT_IN)
+    the type a project with more than one append-only type learns nothing.
+
+    Two trees, because run-6a F10: on one tree only the first of the two
+    commands still hears the note."""
     for command in ("check", "build"):
+        cfg = _setup_in(tmp_path / command, BASE + OPT_IN)
         _code, output = _run(capsys, cfg, command)
         note = _notes(output)[0]
         assert "refdes-schema.yaml" in note, command
@@ -137,18 +157,21 @@ def test_the_summary_and_exit_codes_are_identical_with_and_without(tmp_path, cap
     """The whole point of the note is that nothing else moves: same summary
     line, same exit code, from both commands, overlay or not.
 
-    Each state is measured on a *settled* project — one run first to absorb
-    the one-time `.refdes/schema.json was older than refdes-schema.yaml`
-    refresh that adding the overlay provokes. That warning is run-5 F3's own
-    "unrelated one-time" line, is not this note's doing, and goes away on the
-    next run; measuring it would be measuring the editor-completion trip-wire.
+    Each side is measured on a *fresh* tree, on the first run of each
+    command: run-6a F10 made the note once-per-tree, so the run that carries
+    it is the run that first sees the overlay, and the settled-state measure
+    this test used to take (one run to absorb the one-time
+    `.refdes/schema.json was older than refdes-schema.yaml` refresh, then
+    measure) now measures the run *after* the note and sees only silence.
+    A fresh tree absorbs the schema.json refresh the same way -- the file
+    is created, not found stale -- so the summaries stay comparable.
     """
-    cfg = _setup(tmp_path, BASE)
-    _run(capsys, cfg, "check")  # settle: first run mints keys and schema.json
+    cfg = _setup_in(tmp_path / "plain", BASE)
     before = {cmd: _run(capsys, cfg, cmd) for cmd in ("check", "build")}
-    (tmp_path / "refdes-schema.yaml").write_text(OPT_IN, encoding="utf-8")
-    _run(capsys, cfg, "check")  # settle: the overlay refreshes schema.json once
-    after = {cmd: _run(capsys, cfg, cmd) for cmd in ("check", "build")}
+    cfgs = {
+        cmd: _setup_in(tmp_path / cmd, BASE + OPT_IN) for cmd in ("check", "build")
+    }
+    after = {cmd: _run(capsys, cfgs[cmd], cmd) for cmd in ("check", "build")}
 
     for cmd in ("check", "build"):
         assert before[cmd][0] == 0, cmd
@@ -158,6 +181,122 @@ def test_the_summary_and_exit_codes_are_identical_with_and_without(tmp_path, cap
         ), cmd
         assert len(_notes(after[cmd][1])) == 1, cmd
         assert _notes(before[cmd][1]) == [], cmd
+
+
+# ---------------------------------------------------- once, not on every run (F10)
+
+
+def _state_file(tmp_path):
+    return tmp_path / ".refdes" / "sealing-optin.json"
+
+
+def test_two_consecutive_checks_print_the_note_once(tmp_path, capsys):
+    """Run-6a F10: the note confirms a decision, and a decision is news once.
+    Two consecutive `check` runs print it on the first and are silent on the
+    second — the same posture as the `.refdes/schema.json ... refreshed`
+    note, which prints when the state under `.refdes/` goes out of step and
+    goes quiet when a writable run puts it back. `build` after `check` is
+    silent for the same reason: one set, one announcement, across commands."""
+    cfg = _setup(tmp_path, BASE + OPT_IN)
+    _code, first = _run(capsys, cfg, "check")
+    assert len(_notes(first)) == 1
+    _code, second = _run(capsys, cfg, "check")
+    assert _notes(second) == []
+    _code, third = _run(capsys, cfg, "build")
+    assert _notes(third) == []
+
+
+def test_the_note_returns_once_when_the_set_of_opted_in_types_changes(
+    tmp_path, capsys
+):
+    """The set is the state, not the file's existence: taking the overlay out
+    is recorded (silently — there is nothing to confirm), and putting it back
+    is a decision again, printed exactly once. The run that re-adds has to be
+    measured against the *third* run to show the note is once-per-set again,
+    not just "printed once more, then forever"."""
+    cfg = _setup(tmp_path, BASE + OPT_IN)
+    assert len(_notes(_run(capsys, cfg, "check")[1])) == 1
+    (tmp_path / "refdes-schema.yaml").write_text("types: {}\n", encoding="utf-8")
+    assert _notes(_run(capsys, cfg, "check")[1]) == []  # removal: silent
+    (tmp_path / "refdes-schema.yaml").write_text(OPT_IN, encoding="utf-8")
+    assert len(_notes(_run(capsys, cfg, "check")[1])) == 1  # re-added: once
+    assert _notes(_run(capsys, cfg, "check")[1]) == []  # and quiet again
+
+
+def test_a_no_write_run_prints_the_note_without_consuming_it(tmp_path, capsys):
+    """`--no-write` promises the tree is untouched, and recording "already
+    announced" *is* touching it (docs/design/keys.md §2). So a read-only run
+    prints by the same rule — set differs from what is recorded — but records
+    nothing: the next writable run, the one that owns the tree, still prints
+    it, and only that run goes quiet afterwards."""
+    cfg = _setup(tmp_path, BASE + OPT_IN)
+    assert len(_notes(_run(capsys, cfg, "--no-write", "check")[1])) == 1
+    assert not _state_file(tmp_path).exists(), "--no-write recorded a state file"
+    assert len(_notes(_run(capsys, cfg, "--no-write", "check")[1])) == 1
+    assert len(_notes(_run(capsys, cfg, "check")[1])) == 1  # not consumed
+    assert _notes(_run(capsys, cfg, "check")[1]) == []
+
+
+def test_a_dry_run_build_does_not_consume_the_note(tmp_path, capsys):
+    """`build --dry-run` is `--no-write`'s promise made under its own name
+    (cli._load says so); its load writes nothing, and its announcement
+    records nothing for the same reason."""
+    cfg = _setup(tmp_path, BASE + OPT_IN)
+    assert len(_notes(_run(capsys, cfg, "build", "--dry-run")[1])) == 1
+    assert not _state_file(tmp_path).exists()
+    assert len(_notes(_run(capsys, cfg, "check")[1])) == 1
+
+
+def test_verbose_always_prints_the_note(tmp_path, capsys):
+    """The decided answer for `--verbose` (run-6a F10): a reader who asked to
+    see everything sees the confirmation on the run they asked for it,
+    settled project or not. It records as usual: a `--verbose` run on an
+    unannounced set is that set's announcement, so the next plain run of the
+    same project is already settled and quiet."""
+    cfg = _setup(tmp_path, BASE + OPT_IN)
+    assert len(_notes(_run(capsys, cfg, "check", "-v")[1])) == 1
+    assert len(_notes(_run(capsys, cfg, "check", "-v")[1])) == 1  # settled: still
+    fresh = _setup_in(tmp_path / "fresh", BASE + OPT_IN)
+    assert len(_notes(_run(capsys, fresh, "check", "-v")[1])) == 1  # prints...
+    assert _notes(_run(capsys, fresh, "check")[1]) == []  # ...and records
+
+
+def test_a_project_without_the_overlay_never_grows_the_state_file(
+    tmp_path, capsys
+):
+    """Most projects have no overlay, and for them this whole mechanism must
+    be invisible: no note (pinned above), and no file under `.refdes/` to
+    gitignore, to wonder about, or to `git add`."""
+    cfg = _setup(tmp_path, BASE)
+    for cmd in ("check", "build"):
+        assert _run(capsys, cfg, cmd)[0] == 0, cmd
+    assert not _state_file(tmp_path).exists()
+
+
+def test_a_corrupt_state_file_prints_the_note_and_is_rewritten(tmp_path, capsys):
+    """A lost tool state re-derives: an unparseable record reads as
+    "never announced", so the note prints and the next writable run rewrites
+    the file — it does not silence the note it guards."""
+    cfg = _setup(tmp_path, BASE + OPT_IN)
+    assert len(_notes(_run(capsys, cfg, "check")[1])) == 1
+    _state_file(tmp_path).write_text("{not json", encoding="utf-8")
+    assert len(_notes(_run(capsys, cfg, "check")[1])) == 1  # re-printed
+    assert _notes(_run(capsys, cfg, "check")[1]) == []  # record repaired
+
+
+def test_the_note_still_changes_no_count_and_no_exit_code_after_settling(
+    tmp_path, capsys
+):
+    """The run-5 F3 contract re-pinned through the F10 lens: the settled
+    project — the state every later CI run lives in — prints nothing and
+    scores exactly like a project that never had the overlay. A note that
+    leaked into the counts, once per run or not, breaks this."""
+    cfg = _setup(tmp_path, BASE + OPT_IN)
+    _run(capsys, cfg, "check")  # first run: the note, and it records
+    code, output = _run(capsys, cfg, "check")
+    assert code == 0
+    assert _notes(output) == []
+    assert _summary(output) == "1 items, 0 errors, 0 warnings"
 
 
 # ------------------------------------------------------ what counts as an opt-in
