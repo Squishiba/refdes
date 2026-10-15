@@ -261,3 +261,29 @@ text fixes, no code behavior touched.
 - Mode-test docstring: 0600 NARROWS a 0640 file (I wrote "widen").
 Targeted tests (tests/test_serve_create.py) green; no code change, so
 no full suite (per orchestrator).
+
+------------------------------------------------------------- round 6 (review)
+Reviewer d470eeaa (chunk 2 of the head-6fcf2c7 review): CHANGES REQUESTED.
+MEDIUM (verified with a probe): the two RESCOPED seams (test_serve_edit
+test_a_mismatched_write_is_restored, test_serve_upload
+test_atomic_replace_rolls_back_on_verify_mismatch) latched on the FIRST
+os.replace, and the comment claimed a mis-aim "fails loudly". False for
+the likeliest mis-aim: an EARLIER _atomic_replace on ANOTHER file
+consume the latch (its own verify restores it), the mismatch branch
+stops running, and both tests pass for the wrong reason.
+Fix (mechanical, the reviewer's pattern -- the one the two NEW upload
+tests already use): aim each seam at the DESTINATION (abspath match),
+keep first-match so the write's swap is the one sabotaged (the restore's
+swap shares the destination and matches second), and assert the latch
+fired -- a seam that never fires is now loud, not silently green.
+Falsifiability preserved: a `_restore` mutant that claims success and
+restores nothing reddens both seams (probe .scratch/mut7).
+LOW: the negative assertion in test_a_failed_restore_describes_only...
+rejected exactly one historical sentence; added the general guard --
+the payload's digest_of(NEW_CURVE) must be absent from the reason.
+Verified: tests/test_serve_edit.py+test_serve_upload.py+
+test_serve_create.py 207 passed, 1 skipped at the rebased tree (main at
+4686a49, clean rebase, 8 commits on top); scoped ruff 8 == 8 merge-base,
+zero introduced. Reviewer's stray-file flag (early-write.tmp, written
+outside their checkout by their probe) is theirs to clean, noted for
+the orchestrator. #241/#253 stay separate; no CAS-window work.
