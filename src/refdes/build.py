@@ -2963,12 +2963,15 @@ def _process_images(
             # no content read -- so the reference carries the same named
             # error as any other unreadable src; `readable_probe` keeps a
             # heavily-referenced asset directory at one open per file.
-            # A successful open is the answer only for a *regular* file:
-            # the registration walk takes FIFOs too, a bare-name
-            # reference resolves to one, and the copy loop's `isfile`
-            # then silently skips it -- so a probe that stops at "opened"
-            # records a reference publish will dangle (IMAGE-ASSET-007
-            # review round 6, F2). `fstat` on the opened fd decides.
+            # A successful open is the answer only for a *regular* file.
+            # The resolution gate's `os.path.isfile` turns a FIFO away
+            # with "does not exist" -- this branch sees a non-regular
+            # file only through the gate->probe shape swap, a race
+            # (round-7 review, F2, correcting this comment's first
+            # draft) -- and the copy loop's `isfile` then skips the
+            # file, so a probe that stopped at "opened" would record a
+            # reference publish will dangle (round 6, F2). `fstat` on
+            # the opened fd decides.
             # O_NONBLOCK: the blocking O_RDONLY open of a FIFO waits for
             # a writer, which hung the whole command on the very branch
             # added to gate references -- base attempted no open here at

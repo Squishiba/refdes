@@ -15,8 +15,10 @@
   that file out. A `site.assets:` file no reference gates is refused by
   every build — `refdes check` names it (a command that renders, never
   publishes, cannot leave an unreadable declared asset unreported) and the
-  site publishes without it; a file an item *references* is reported at the
-  reference, with the reference's own sentence (one error per reference,
-  like a missing image) -- never with advice
-  to remove a file a live reference needs.
+  site publishes without it; a file an item's body references *as an
+  image* is reported at the reference, with the reference's own sentence
+  (one error per reference, like a missing image). The gate is image-only:
+  a *hyperlink* to an unreadable registered file gets the removal advice,
+  and its published page keeps the link dangling to a file the site did
+  not publish.
 

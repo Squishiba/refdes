@@ -243,3 +243,26 @@ at /home/jorb/work/refdes/.scratch/PROGRESS.md -- which is why repo-tree
 searches find neither. Claims are true; records live in the main
 checkout, not in commits.
 Gates: targeted 36 passed; full suite below; scoped ruff = baseline.
+
+## Review round 7 (text-only, review bca0c361)
+
+Finding 1 (medium, accepted -- docs/changelog narrowed, no gate change):
+the "never the removal advice" claim covers IMAGE references only. A
+HYPERLINK ([x](/assets/f)) to an unreadable registered file is not seen
+by the image gate, gets the registration check's removal advice, and the
+published page keeps the link dangling. docs/markdown.md and the
+changelog now say so plainly; PR body lists it as a known limitation.
+Teaching the registration check about link targets is a wider change
+(link resolution is a different pass) and stays out of this ticket.
+Finding 2 (low, accepted): the probe comment claimed a bare-name
+reference "resolves to" a FIFO -- the gate's os.path.isfile rejects
+FIFOs with "does not exist"; the S_ISREG branch is race-only. Comment
+corrected.
+Finding 4 (nit, accepted): the lane's artifact paths are in the MAIN
+CHECKOUT, not this worktree -- express them relative to that checkout:
+<main checkout>/in-prog-logs/current-main-resweep-image-digests.tsv and
+<main checkout>/.scratch/PROGRESS.md. Suite counts of the earlier
+rounds in this log (3891/3923/3928/3937/3939) are round-local; the
+current head count is the one in the PR body.
+Gates this round: docs-anchor tests + focused image tests; docs/changelog
+text only, no code behavior change (comment text in build.py only).
