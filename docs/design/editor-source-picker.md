@@ -269,17 +269,16 @@ snapshot of the naming lines — one authorized walk of the project's
 `source()` lines — runs inside the write lock on every accept, and step 6's
 tree re-parse runs on the refusal path; both are bounded walks of the same
 tree `fetch` walks, and the seconds-long gate stays outside the lock. The
-pair lands together, and the race is proven both ways, with the
-interleaving built on events
-rather than on timing, in `tests/test_citations_lockfile_locking.py`, with
-the identical-bytes race in
-`tests/test_serve_sources_accept.py::test_a_conflicting_identical_accept_does_not_unpin_the_save_that_adopted_it`,
-with the pre-named adoption in
-`tests/test_serve_sources_accept.py::test_a_rolled_back_accept_does_not_erase_a_pin_adopted_over_a_pre_named_key`,
- and with the rollback-inside-the-gate in
- `tests/test_serve_sources_accept.py::test_a_rollback_that_deleted_our_pin_inside_the_gate_is_reapplied_before_the_body`,
- and its refusal posture in
- `tests/test_serve_sources_accept.py::test_a_gate_passed_save_is_refused_when_the_lockfile_cannot_be_repaired_midflight`.
+pair lands together, and the race is proven both ways: the interleaving is
+built on events rather than on timing in
+`tests/test_citations_lockfile_locking.py`; the identical-bytes race is in
+`tests/test_serve_sources_accept.py::test_a_conflicting_identical_accept_does_not_unpin_the_save_that_adopted_it`;
+the pre-named adoption is in
+`tests/test_serve_sources_accept.py::test_a_rolled_back_accept_does_not_erase_a_pin_adopted_over_a_pre_named_key`;
+the rollback-inside-the-gate is in
+`tests/test_serve_sources_accept.py::test_a_rollback_that_deleted_our_pin_inside_the_gate_is_reapplied_before_the_body`;
+the refusal posture is in
+`tests/test_serve_sources_accept.py::test_a_gate_passed_save_is_refused_when_the_lockfile_cannot_be_repaired_midflight`.
 
 **The browser never re-pins a changed file.** Acceptance extracts under
 fetch's existing non-`--update` policy (`calc-sources.md` §5's command

@@ -52,11 +52,10 @@ from both sides: the accept whose gate passed over a cooperating writer's pin
 re-asserts, under the same lock that writes its body, that the pin is still on
 disk, and puts it back if a cooperating rollback deleted it mid-gate -- or
 refuses the save, both files as they were, if the pins cannot be put back
-(§4).
-Both of those
-lockfile mutations -- the read-modify-write that pins and the read-compare-
-restore that undoes it -- are one section under the project's cross-process
-write lock, the same `project_write_lock` `cli.main` wraps its commands in
+(§4). Both of those lockfile mutations -- the read-modify-write that pins and
+the read-compare-restore that undoes it -- are one section under the
+project's cross-process write lock, the same `project_write_lock` `cli.main`
+wraps its commands in
 (`serve`, `init`, `new` and `schema` exempt, as are read-only runs), so no
 cooperating writer can land between their read and their replace; the delta
 gate between them deliberately does not hold it. It is still one
@@ -535,16 +534,19 @@ class _LockfileWrite:
     cooperating accept can land a body over exactly that pre-named, newly
     pinned pair during this window, and restoring the bytes this writer read
     would erase the adoption. `referents` None means the snapshot's names
-    could not be computed, and the rollback declines.
+    could not be computed, and the rollback declines. Both `watched` and
+    `referents` are required, deliberately: a lockfile write that did not
+    answer the guard would be one that silently opted out of it, and the
+    safe answer to no question is decline.
     """
 
     path: str
     root: str
     previous: bytes | None
     staged: bytes
+    watched: frozenset
+    referents: tuple | None
     written: bool = False
-    watched: frozenset = frozenset()
-    referents: tuple | None = ()
 
     def rollback(self) -> None:
         if not self.written:

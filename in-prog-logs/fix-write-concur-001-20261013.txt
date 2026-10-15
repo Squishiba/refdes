@@ -234,3 +234,57 @@ E501 at edit.py:1380 (untouched create-item block). Docs-only + one
 comment + one test; F1/F2 fixes untouched.
 
 Status: finished, new head pushed to PR #240.
+
+=======================================================================
+PHASE 4 -- PR #240 round-2 review (chunk 1 CHANGES REQUESTED, 6e243fa8;
+chunk 2 APPROVE, bb7273da), 2026-10-15, Qwen3.8-Flash-Next
+
+Reviewer found no correctness defect; findings were a fail-open default,
+broken prose, and the log-citation reproducibility. Addressed:
+
+1 (Medium, serve/edit.py:541-547 -- fail-open defaults): `_LockfileWrite`
+declared `watched: frozenset = frozenset()` and `referents: tuple | None
+= ()`. An omitted `watched` skips the tree guard (line ~629 `if self.watched
+and ...`); an omitted `referents` defaulted to `()` = "no naming lines
+expected", not the documented decline value `None`. Both defaulted to the
+permissive answer, so a future construction that forgot them silently opted
+out of the guard. Fix: both fields are now required (no defaults), and
+`referents` is typed `tuple | None` with the docstring stating `None` is
+the decline value -- the safe answer to no question. The one constructor
+in `_accept_pins` already passes both explicitly, so F1/F2 behavior is
+unchanged. Pinned by
+test_a_lockfile_write_cannot_opt_out_of_the_tree_guard (constructing
+without them raises TypeError).
+
+2 (Low, this log -- reproducibility): the "Output at the base" numbers at
+lines 24-30 and the probe recipes at lines 24-28 point at
+`.scratch/probe-wc001/test_probe_write_concur_001.py` (gitignored, absent
+from a PR checkout), `/home/jorb/work/venv-refdes/bin/python` and
+`in-prog-logs/current-main-rq01.tsv` in the shared main checkout -- none
+runnable from a PR checkout. Recorded plainly: those are author-side
+phase-1 notes; the reproducible evidence a reviewer can run from the PR
+head is the committed tests named in the changelog fragment and §4, and
+this log's phase-2/3 Verification sections. Phase-1 line numbers left
+as-written (history), pointed at by this note.
+
+3 (Low, serve/edit.py:55-58 module docstring): "Both of those / lockfile
+mutations" was broken mid-paragraph by a phase-3 reflow; reflowed.
+
+4 (Low, docs §4:206, 259-265, 279-282): the numbered-list item and the
+proven-cases paragraph had stray leading spaces and an awkward
+"with\nthe identical-bytes race" reflow; reflowed into a clean
+semicolon-separated list of the four proving tests.
+
+5 (Nit, changelog fragment): 59 lines of internal detail. Trimmed the
+mechanism/cost prose (points at §4 for it); kept the user-visible
+behaviour and the four test citations.
+
+Tests: tests/test_serve_sources_accept.py 31 passed (new required-fields
+guard test included); ruff --select E9,F on the changed files clean, E501
+only the pre-existing create-item line at edit.py:1382. Docs/comment/
+one-test-only; F1/F2 lock and rollback behaviour untouched.
+
+CI on head 7ae6c0d was pending on all three jobs when the reviewer ran;
+not asserted green here.
+
+Status: finished, new head pushed to PR #240.

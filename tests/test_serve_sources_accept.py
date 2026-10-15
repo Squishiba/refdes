@@ -521,6 +521,19 @@ def test_a_rollback_that_deleted_our_pin_inside_the_gate_is_reapplied_before_the
     assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
 
 
+def test_a_lockfile_write_cannot_opt_out_of_the_tree_guard():
+    # PR #240 round-2 review: the guard fields have no defaults. A
+    # `_LockfileWrite` built without an answer to the tree guard would be
+    # one that silently opted out of it -- an empty `watched` skips the
+    # check, and a `referents` default of `()` reads "no lines expected",
+    # not "decline" -- so construction asks the question, and `None` is the
+    # only decline value.
+    with pytest.raises(TypeError):
+        edit_mod._LockfileWrite(
+            path=".refdes/citations.yaml", root="/p", previous=None, staged=b""
+        )
+
+
 def test_a_gate_passed_save_is_refused_when_the_lockfile_cannot_be_repaired_midflight(
     served, monkeypatch
 ):
