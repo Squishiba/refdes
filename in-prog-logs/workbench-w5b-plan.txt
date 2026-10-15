@@ -180,3 +180,19 @@ the value rename log -> timeline is P9 (vocabulary-review.md:951, landed
 311-373; row.glyph stays :360. Citation base stays 374a4aa. Checks:
 test_docs_anchors + test_linkify_anchors -> 15 passed; gen_examples
 --check -> up to date. Pushed normally (PR is MERGEABLE, no rebase).
+
+Round 3 (PR #211 chunk 1 re-review, 74de2e69, 2026-10-14): three accuracy
+fixes, verified by reading the cited code. (1) Q2's sub-question claimed
+the (b) window is the state uncaptured_edits (history.py:760-824) exists
+to diagnose; it is not -- that check fires only for capture-less entries
+whose live bytes no longer match a legacy seal record's hash, skips
+never-recorded entries (:810-811), and the W5b save changes no predecessor
+bytes (R2), so nothing diagnoses the window today; (a) stays the default
+*because* the gap is invisible, not because a diagnostic catches it.
+(2) object_payload's identity split is key/id/source -- links stay in the
+digest (semantic_payload:177); follows: exclusion now rests on "the new
+entry names its own tip", id/key on the split. (3) drafts.js shape:
+emptyDraft (:10-14) is scalar fields, body, pins and pending link
+adds/removes per item handle -- not "scalars only"; the no-task-rows /
+not-keyed-by-tip point stands. Checks: pytest docs/linkify tests -> 15
+passed; gen_examples --check -> up to date. Pushed normally.

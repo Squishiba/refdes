@@ -132,8 +132,9 @@ live copy in the page's memory (`memory`, `:8`), a `sessionStorage` mirror keyed
 `beforeunload` prompt (`:132-136`). The save side is `editor.js`: one POST per
 dirty part with the file revision the form opened on (`:234-236`) and the
 three-outcome conflict screen — keep mine / keep theirs / copy it out
-(`:295-320`). The mechanism is real; its draft shape is
-`{revision, fields, body, pins, links}` — per item, scalars only.
+(`:295-320`). The mechanism is real; its draft shape per item handle is
+scalar `fields`, `body`, `pins`, and pending link adds/removes
+(`emptyDraft`, `:10-14`) — no task rows, not keyed by tip.
 
 **The serve-only seam for anything that writes.** `serve/server.py:_decorate`
 (`:738-776`) injects the preview toolbar and `_reload_probe` (`:62-73`) into the
@@ -424,9 +425,12 @@ mechanism (`append-yaml` / `append-md`, `edit.py:1289-1330`), with `follows:`
 naming the tip as a `DISPLAY-ID@key` composite, an id reserved from the
 destination file's `defaults.prefix` series, and `tasks:` the tip's whole list
 with ticked rows `done`. **Which fields are copied** is the live question:
-(a) the tip's own declared fields verbatim minus identity (`id`, `key`) and
-minus `follows:` — the same exclusion list the history payload's identity split
-implies (`history.object_payload`, `:204-211`) — so `board`, `author`, `date`,
+(a) the tip's own declared fields verbatim minus identity (`id`, `key` —
+their exclusion is what `history.object_payload`'s identity split,
+`:204-211`, implies; the split's third member is `source`, and links stay
+*in* the digest, `semantic_payload:177`) and minus `follows:` — not from
+that split, but because the new entry names its own tip, so `follows:` is
+set by the save, not copied — so `board`, `author`, `date`,
 `summary` and friends carry over; or (b) copy nothing but `tasks:` and `follows:`,
 forcing the author to fill a form. (a) matches "copied-and-updated list" and
 the `defaults:` inheritance the append shape already does; (b) is more explicit
@@ -453,9 +457,16 @@ caller. **Sub-question, and it is not cosmetic:** does the save also write the
 predecessor's `followed` event? Today it does not (§2, "a `followed` event from
 a save"). `living-notes.md:185-188` asks for entry + event in one transaction.
 (a) W5b.5 writes both from the one locked operation; (b) leave it to the next
-writable load. **Default: (a)** — (b) leaves a window where the newest entry is
-live and its predecessor un-captured, which is the state
-`uncaptured_edits` (`history.py:760`) exists to diagnose.
+writable load. **Default: (a)** — (b) leaves a window where the newest entry
+is live and its predecessor un-captured, and **nothing today diagnoses it**:
+`uncaptured_edits` (`history.py:760-824`) reports a capture-less entry only
+when its live bytes no longer match a legacy seal record's hash — a rewrite
+of an entry recorded before — and an entry with no seal record at all is
+skipped (`:810-811`); the W5b save changes no predecessor bytes (R2), so the
+window is invisible to it. The next writable load closes the window by
+capturing (§2), so (b)'s real promise is "eventually captured, with an
+undiagnosed gap in between" — and that gap being invisible is itself the
+argument for (a), which closes it in the one locked operation.
 
 **Q3 — the tip moves while a draft is open** (another tab, VS Code, a CLI
 write, another author).
