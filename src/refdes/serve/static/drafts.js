@@ -112,10 +112,28 @@ export function draftLinkRemove(handle, verb, target) {
   return draft;
 }
 
-export function setDraftRevision(handle, revision) {
+// A save op applied: it stops being pending, and the file moved to a new
+// revision. Drop it and record the revision in one step that persists once,
+// at the end: if the mirror were written while the applied op was still in
+// the draft (the revision update persisting first, the drop never), a reload
+// would restore the applied edit as still-pending and a retry would re-post
+// it. The mirror must only ever hold what memory still holds.
+export function dropAppliedOp(handle, op, revision) {
   const draft = getDraft(handle);
+  if (op.op === 'set_field') delete draft.fields[op.field];
+  else if (op.op === 'set_body') {
+    draft.body = null;
+    draft.pins = [];
+  } else {
+    const side = op.op === 'add_link' ? 'add' : 'remove';
+    const list = draft.links[side][op.verb] || [];
+    const at = list.indexOf(op.target);
+    if (at >= 0) list.splice(at, 1);
+    if (!list.length) delete draft.links[side][op.verb];
+  }
   draft.revision = revision;
   persist(handle, draft);
+  return draft;
 }
 
 export function clearDraft(handle) {

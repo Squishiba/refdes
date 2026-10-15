@@ -1,0 +1,83 @@
+Fix EDITOR-API-002: session mirror persists applied op, reload restores it dirty
+Date: 2026-10-13
+Worktree: fix/editor-draft-mirror-20261013, base main 8b6a52e
+
+## Finding (from in-prog-logs/current-main-resweep-editor-revision.tsv, shared main)
+
+EDITOR-API-002 PRESENT/REPRODUCED: editor.js postAll (:238-249) called
+setDraftRevision(handle, rev) -- which persists the whole draft to
+sessionStorage -- BEFORE dropping the just-applied op from the in-memory
+draft; the drop was never re-persisted (persist is not exported from
+drafts.js). After a partial save (op1 200, op2 422/409) the mirror kept the
+applied op; a reload (fresh drafts.js memory over the same sessionStorage)
+restored it as still-pending/dirty.
+
+## Reproduction
+
+.scratch/fix-editor-draft-mirror-20261013/probe_api002.mjs drives the REAL
+editor.js/drafts.js/api.js headless under node v22 (stubbed
+document/window/sessionStorage/fetch, click the real Save button). Pre-fix
+run: mirror = {"revision":"rev-1","fields":{"status":"approved"},...}
+while memory fields={} ; reload restores fields:{status:"approved"},
+dirty=true. VERDICT: BUG (exit 1). Post-fix: mirror fields={}, reload
+clean of the applied op, pending body survives. VERDICT: OK (exit 0).
+
+## Fix
+
+- drafts.js: setDraftRevision replaced by dropAppliedOp(handle, op,
+  revision) -- drops the applied op (set_field / set_body+pins /
+  add_link/remove_link, same branches postAll had), records the revision,
+  and persists once at the end. Memory and the mirror can no longer
+  disagree about which ops are pending.
+- editor.js: postAll now calls dropAppliedOp(handle, one, rev) instead of
+  setDraftRevision + the inline mutation; import updated. setDraftRevision
+  had no other callers (grep over src/ docs/ tests/ is clean).
+
+## Test
+
+tests/test_editor_draft_mirror.py: node-driven pytest (same posture as
+test_vscode_extension.py's node execution, skipif no node; one spawn,
+120 s timeout). Scenario "partial": field op applies (200 rev-1), body op
+refused (422) -> mirror holds only the refused body (never the applied
+field), reload restores fields={} with the body still pending, posts
+sequence asserted. Scenario "complete": field+link ops both apply -> save
+clears the draft, mirror key gone, reload not dirty. Verified red against
+pre-fix source (git checkout of the two JS files, run, restore) and green
+after.
+
+## Verification
+
+- tests/test_editor_draft_mirror.py + tests/test_serve_static.py +
+  tests/test_serve_editor_e2e.py: 52 passed (PYTHONPATH=this worktree src;
+  shared venv editable install points to sibling).
+- changelog.d/editor-draft-mirror-applied-op.fixed.md added.
+
+## Difficulties
+
+- First pytest run failed on my harness bug (reloadDrafts is async, call
+  site lacked await) -- fixed in the test, not product code.
+- No browser/DOM harness exists; FakeNode stub grew exactly to what
+  createEditor/pickers touch (createElement/appendChild/listeners/
+  click); picker eager fetches (/api/images, /sources) answered with {}.
+
+Finish status: TASK FINISHED. Commit: see git log (fix(serve): ...).
+Scope kept to the mirror/drop ordering issue; EDITOR-API-004 (undo-add
+becomes remove) and others from the same TSV untouched.
+
+## PR pass (2026-10-14)
+
+- Verified cwd (this worktree), HEAD c92baec, tracked tree clean.
+- `git fetch origin main` once: origin/main at a4c27d4 (past 21fb2c4/374a4aa).
+- Rebased the single commit onto origin/main: clean, no conflicts. Main's
+  four new commits (workbench task pane #197, sweep3 lows #213, thread test
+  #214, parse surrogate #217) touch no serve/static JS; the only serve-adjacent
+  main changes are tests/serve_support.py + tests/test_serve_cli.py.
+- Post-rebase tests (PYTHONPATH=this src): test_editor_draft_mirror.py +
+  test_serve_static.py + test_serve_editor_e2e.py = 52 passed;
+  test_serve_cli.py (broadened for the #213 serve-helper change) = 16 passed;
+  scoped ruff clean; probe_api002.mjs VERDICT: OK.
+- Integration dependency for reviewers: the separate branch
+  fix/draft-corruption-recovery-20261013 also edits drafts.js; it must rebase
+  on this one (setDraftRevision -> dropAppliedOp is a rename of a public
+  export). No changes to that worktree were made or combined here.
+Finish status: pushed, PR opened against main (not merged).
