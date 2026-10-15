@@ -8,7 +8,8 @@ run the upgrade path from `3010883` (run 5's tree) to main. Run 5 was at
 
 **Method, unchanged:** documented surfaces only — `docs/`, `--help`, real CLI
 invocations, real HTTP — and the original scenario re-run rather than the fix
-read. Reported version: (fill in `refdes --version`).
+read. Reported version: `refdes 0.5.0` (`refdes --version`, on both `3010883`
+and `374a4aa` — §3).
 
 Harness: `.scratch/rr <projectdir> <args…>` cd's into the project and runs
 `PYTHONPATH=<worktree>/src <venv python> -m refdes.cli "$@"`, with
@@ -45,13 +46,14 @@ citation page counts intact; the verb/reserved-key collision is a config error
 naming verb and key; the seal-era edit warning and `history migrate-seals` exist
 and work.
 
-**New findings, four:** B6 — `tags`/`refdes` accept a list element that is a
+**New findings, five:** B6 — `tags`/`refdes` accept a list element that is a
 mapping silently (`check` clean, site renders a Python dict repr, `ls --tag`
 matches); F9 — the link-verb version of the same element is caught, but as a
 dangling-reference message quoting a loader dict with `'__line__'` in it;
 **B7** — threads-4a's retired `decision` type strands the *default* `3010883`
 project shape (v3 pin): a bare `unknown type 'decision'.` with no pointer to
 the merge, and `standard upgrade --to 3` refuses the project by definition;
+F10 — the sealing opt-back-in note prints on every load, not once;
 F11 — `standard upgrade` is the only multi-file mutating command with no
 `--dry-run`. Run 4's F3 (the duplicate-key diagnostic repointing references in
 *other* files with no warning) is **still open**, reproduced (§4).
@@ -195,24 +197,35 @@ at the docs page (and, if feasible, a hand-migration recipe), the way the
 ### B6 — `tags` and `refdes` accept a list element that is a mapping
 
 ```console
-$ cat > items/one.yaml <<'EOF'
-- id: CMP-001
-  type: component
-  title: TPS62130
-  status: selected
-  part_number: TPS62130DRRT
-  tags:
-    - power
-    - name: not-a-string
-      verdict: x
-  refdes:
-    - U1
-    - name: also-not-a-string
-      verdict: y
+$ cat > items/one.md <<'EOF'
+---
+id: CMP-001
+type: component
+title: TPS62130
+part_number: TPS62130DRRT
+tags:
+  - power
+  - name: not-a-string
+    verdict: x
+refdes:
+  - U1
+  - name: also-not-a-string
+    verdict: y
+---
+
+Body.
 EOF
-$ rr <case> check    # and rr <case> build
-1 items, 0 errors, 0 warnings          # exit 0, both commands
+$ rr <case> check    # first load also prints (minted 1 key(s) while loading)
+1 items, 0 errors, 0 warnings          # exit 0
+$ rr <case> build
+1 items, 0 errors, 0 warnings          # exit 0, site written
+$ rr <case> ls --tag x
+CMP-001  component  TPS62130
 ```
+
+(A bulk list file takes the same items under a top-level `items:` key; a bare
+YAML list is refused — `ERROR items/one.yaml:1 — list file must be a mapping
+with an 'items:' key` — so the front-matter form above is the repro.)
 
 The built page renders the tags row as a Python dict repr —
 `{&#39;name&#39;: &#39;not-a-string&#39;, &#39;verdict&#39;: &#39;x&#39;}`
@@ -227,10 +240,15 @@ exit 1, on every type.
 
 ```console
 $ # same case shape, but on a link verb:
-$ sed -i 's/^  tags:/  satisfies:/' items/one.yaml; # element stays the mapping
+$ sed -i 's/^tags:/satisfies:/' items/one.md    # both list elements stay
 $ rr <case> check
-ERROR   items/one.yaml:2 [CMP-001] — satisfies points at "{'name': 'not-a-string', 'verdict': 'x', '__line__': 6}", which does not exist -- a typo, a deleted item, …
+ERROR   items/one.md:2 [CMP-001] — satisfies points at 'power', which does not exist -- …
+ERROR   items/one.md:2 [CMP-001] — satisfies points at "{'name': 'not-a-string', 'verdict': 'x', '__line__': 8}", which does not exist -- …
+1 items, 2 errors, 0 warnings                    # exit 1
 ```
+
+The first error is the converted plain `power` tag — an honest dangling ref;
+the finding is the second line.
 
 The element *is* caught (exit 1, `check` and `build` agree), but as a
 dangling-reference message quoting an internal loader dict with its `'__line__'`
@@ -277,9 +295,10 @@ $ grep -n satisfies items/log/regulator.md
 The composite reference in a **different file** is silently repointed at the
 item that won the duplicate-key collision, on disk, on a plain `check`, and the
 diagnostic's remedy ("put the '- ' back on its own line") protects only the
-reporting file. `grep -c regulator.md` over the check output: **0** — the
-repointed file is never named. Expected: the duplicate-key error (or an added
-warning) names the file(s) whose references were repointed and says the rewrite
+reporting file. Grepping the check output for the repointed file
+(`grep -c 'regulator.md'`) yields **0** matches — the repointed file is never
+named. Expected: the duplicate-key error (or an added warning) names the
+file(s) whose references were repointed and says the rewrite
 already happened on disk.
 
 
