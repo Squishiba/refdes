@@ -2,9 +2,11 @@
 // One picker per verb the server declared editable (`item.edit.links`), with
 // the schema-declared target types of the verb deciding which items the
 // picker offers -- fetched through the same /api/items filter the list pane
-// uses, so there is one query language and one snapshot behind both. Adds and
-// removes are draft ops like a field edit: nothing posts until Save, and the
-// same revision check, conflict screen, and refusal handling cover them.
+// uses, so there is one query language and one snapshot behind both (an
+// empty declared list means the verb accepts any type, so the picker
+// fetches the unfiltered list). Adds and removes are draft ops like a
+// field edit: nothing posts until Save, and the same revision check,
+// conflict screen, and refusal handling cover them.
 //
 // The picker never sends a composite: it sends the handle of the candidate
 // and the service writes DISPLAY-ID@key. Removal names the target as it is
@@ -25,10 +27,20 @@ function displayHalf(target) {
   return at > 0 ? target.slice(0, at) : target;
 }
 
+// An empty declared list is not an empty candidate list: it is how the
+// schema spells "unrestricted" -- model.Project.accepts_type says so in its
+// docstring, build.resolve_links skips the type check for it, and the
+// editor gate serves it as "any declared type" (the standard verb
+// `log.blocked_by: []` is the live case). The picker offers exactly what
+// the server accepts: the declared types when there are any, the whole
+// project when the list is empty.
 async function candidatesFor(types) {
   const out = [];
-  for (const type of types || []) {
-    const payload = await api(`/api/items?type=${encodeURIComponent(type)}`);
+  const queries = types && types.length
+    ? types.map((type) => `/api/items?type=${encodeURIComponent(type)}`)
+    : ['/api/items'];
+  for (const query of queries) {
+    const payload = await api(query);
     out.push(...(payload.items || []));
   }
   out.sort((a, b) => String(a.id || a.handle).localeCompare(String(b.id || b.handle)));
