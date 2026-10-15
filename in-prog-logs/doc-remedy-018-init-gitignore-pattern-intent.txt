@@ -1,0 +1,95 @@
+DOC-REMEDY-018 — honor gitignore globs and negation during init
+Branch: fix/init-gitignore-pattern-intent-20261015
+Date: 2026-10-15
+
+## Task
+
+Shared-main resweep (current-main-resweep-doc-remedy-b, row 018, PRESENT/
+REPRODUCED): `scaffold.py`'s `_covers` produced a literal frozenset consumed
+by whole-line compare in `_gitignore_addresses`, so `.gitignore` spellings
+like `.vscode/*`, `!.vscode/*` (intent to track), and bare-basename
+`settings.json` were all invisible. In a real repo, init appended its own
+`.vscode/settings.json` line after `!.vscode/*`, git's last-match-wins made
+the appended line the winner, and `git add -n -- .vscode/settings.json`
+refused the file as ignored.
+
+## Verified the finding on current main first
+
+Branch tip == main tip (7e49a20). Reproduced in `.scratch/p018/repro` with
+the real CLI (`PYTHONPATH=src python3 -m refdes.cli init`, module identity
+checked via `refdes.scaffold.__file__`): appended block written,
+`git check-ignore -v --no-index` showed `.gitignore:8:.vscode/settings.json`
+as the winning match, `git add -n` exited 1. Not a no-op fix.
+
+## Policy decided
+
+"Already covered" is git's question, so in a repository ask git:
+`git check-ignore --no-index -v -- <path> <parent-dir>`. True addressed =
+the winning match's SOURCE is the project's own `.gitignore` (ignore match
+= covered; negation match = intent to track, must not be out-ranked). The
+parent directory is asked in the same call because `.vscode/` + `!.vscode/`
+puts the intent on the directory, and the file itself matches nothing.
+Matches from `.git/info/exclude`, a global `core.excludesFile`, a parent
+project's `.gitignore`, or a deeper nested `.gitignore` are NOT the
+project's own position -> init appends (its file then wins by depth for
+paths under the project). `--no-index` so staged state never colors the
+answer. Not a git repo / no git binary / git fails / timeout -> `None` ->
+literal fallback (kept, widened with basename and one-level-glob spellings,
+`.vscode/*`-style and `.vscode/**`-style, all of which genuinely cover the
+path). No `.gitignore` at all: unchanged (init writes a fresh file, no
+append, no git consulted). Preflight `_refuse_unwritable_gitignore` uses
+the same function, so the #231 read-only refusal behavior is preserved for
+files that genuinely miss an entry (a read-only gitignore with the negation
+covering vscode still gets refused for the missing `.refdes/` lines, as
+before).
+
+## Empirical git semantics recorded (scratch probes, git 2.47.3)
+
+- `check-ignore -v` exits 0 on ANY winning match including negations (the
+  `!` prefix in the output pattern marks track-intent), 1 on no match.
+- In a NON-repo directory it exits 1 (not 128!) -> repo membership must be
+  probed separately: `rev-parse --show-toplevel` (rc!=0 -> fall back).
+- Source paths are reported relative to the repo TOPLEVEL, not cwd
+  (`hardware/board-a/.gitignore:...` when run from the project subdir) ->
+  compare with relpath(target/.gitignore, toplevel), plus a realpath
+  variant for symlinked temp dirs (macOS /var).
+- git strips trailing CR from patterns; basename/glob/CRLF spellings all
+  verified against real `git check-ignore`.
+
+## Red/green
+
+tests/test_scaffold.py, 6 new tests (git-repo ones skipif no git):
+negated-glob intent (red: appended + un-addable; green), bare basename
+(red: duplicate; green), negated whole directory (green already via
+literal dir spellings, kept as regression), git-repo control with an
+unrelated `_site/` (green: all five blocks still appended), read-only
+gitignore whose negation covers vscode (red: exit 2 refusal; green: exit 0,
+file untouched), and the no-git fallback asserting glob+basename spellings
+are recognized (red; green). Suites: test_scaffold.py (86 passed) + 14
+init-touching suites (390 passed total). Scoped ruff on the two touched
+files: no new findings vs HEAD baseline (added explicit check=False on my
+four subprocess.run sites; file's pre-existing PLW1510 probes untouched per
+AGENTS.md).
+
+## Difficulties
+
+- My first `check-ignore -v` test assertion assumed rc==1 means tracked;
+  -v exits 0 on negation wins too. Fixed to assert the winning pattern
+  ends `:!.vscode/*` and `git add --dry-run` succeeds.
+- An external process ran `git reset --hard` in this worktree mid-task
+  (reflog: two "reset: moving to HEAD" entries; tree was clean of any other
+  session's work at both checks — no stash used, per AGENTS.md). It wiped
+  my uncommitted edits; all were re-applied verbatim from the session
+  record, committed immediately (675905c), and the end-to-end CLI
+  reproduction re-verified green afterward. Flagging in the PR body.
+- Probe litter: one scratch probe block created `G/` (nested probe repos)
+  in the worktree root; moved to `.scratch/p018/root-litter/G`, not
+  deleted. All later probes stay under `.scratch/p018/`.
+
+## End-to-end verification (committed state)
+
+`.scratch/p018/verify3` (real git init + real CLI): announcement lists only
+the four `.refdes/` patterns (no vscode line), `check-ignore -v` reports
+`!` winner (`!.vscode/*`), `git add -n` prints the path (addable).
+
+Status: COMPLETE on this branch.
