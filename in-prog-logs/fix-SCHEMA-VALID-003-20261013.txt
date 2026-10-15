@@ -137,3 +137,62 @@ the two guard tests pass. In the fixed worktree: 34 passed in that file.
 Finished. Commit: "fix(checks): a bare key in `against:` gets the link
 diagnostic" (this file, build.py, tests/test_checks_keys.py and the changelog
 fragment in one commit), with the `Co-authored-by: Qwen3.8-Flash-Next` trailer.
+
+## PR prep (same day, next session turn)
+
+Start: `pwd` = this worktree, branch `fix/checks-bare-key-diagnostic-20261013`
+at 38c4d32, tree clean. `.scratch/PROGRESS.md` in main was not opened (read-only
+to me; the owner updates it).
+
+`git fetch origin main` -> origin/main a4c27d4 (#217), i.e. four merged PRs
+past my base 8b6a52e: #197 (workbench W5a task pane), #213 (serve test-helper
+lows), #214 (thread null task id pin), #217 (config loader keeps a
+surrogate-shaped scalar spelled as written). None of them touches
+`src/refdes/build.py` (`git diff --stat 8b6a52e..origin/main` -- cli.py,
+parse.py, render.py, task_pane.py, threads.py, templates, tests, docs). #217 is
+the only surrogate-adjacent one and it lives in the *config* loader
+(`refdes-project.yaml` / `refdes-schema.yaml` scalars), not in the item-target
+diagnostics this fix touches, so no semantic interaction.
+
+Open-PR overlap on build.py: among the open PRs (#221 #220 #219 #216 #215 #212
+#211, read with `gh pr view --json files`) only **#220** touches
+`src/refdes/build.py`, and its single hunk is at ~2193
+(`_image_inputs_hash_value`, sorting the digest set so the `None` sentinel
+never meets a str). My hunk is at ~1686-1740 in `run_checks`. Disjoint files
+regions and disjoint concerns -- both PRs can land in either order; nothing to
+sequence. #211/#212 were inspected for that file list only; not edited, not
+touched.
+
+Rebase: `git rebase origin/main` -> clean, no conflicts, 1 commit replayed. The
+remote-tracking ref moved during prep (a4c27d4 -> 594b401, #218 serve-create
+empty-id, merged by a concurrent session -- worktrees here share one .git), and
+the rebase landed on 594b401. #218's files are `serve/api.py` +
+`tests/test_serve_create.py` + docs/fragments, so no build.py overlap either.
+New head 09323da; `git merge-base --is-ancestor origin/main HEAD` confirms
+linear on top of main; `git diff --stat origin/main..HEAD` is exactly my 4
+files.
+
+Gates on the rebased tree:
+- targeted: `tests/test_checks_keys.py tests/test_keys.py tests/test_keys_links.py
+  tests/test_keys_restore.py tests/test_calc.py tests/test_checks_unknown_keys.py
+  tests/test_check_severity_status.py tests/test_run5_friction_f1_f2_f6_f8.py`
+  -> 300 passed.
+- full suite from the worktree -> 3667 passed, 2 skipped in 289s (main's own
+  count rose with the five merged PRs; 3606 -> 3667 is main's, not mine).
+- real CLI, PYTHONPATH forced to this worktree's src (the shared venv's editable
+  install points at /home/jorb/work/refdes/src, so the import is pinned first:
+  `python -c "import refdes; print(refdes.__file__)"` printed the worktree
+  path): `refdes --no-write check` on `.scratch/probe-003/proj` prints the
+  uniform pair -- `constrained_by points at key 'k7f3m2q9x4a', which no item
+  declares. ...` and `check against key 'k7f3m2q9x4a', which no item
+  declares. ...`, exit 1.
+- scoped ruff: `ruff check --select E9,F src/refdes/build.py
+  tests/test_checks_keys.py` -> clean. Default rule set on those two files ->
+  2 I001 import-sort findings, byte-identical to the same command on a pristine
+  `git archive origin/main` copy of both files in
+  `.scratch/baseline-originmain/`; left alone per AGENTS.md (not this change's,
+  and not silenced).
+
+No code change in this pass -- the log update and this section are the only new
+content, committed on top with the trailer, so every commit on the branch
+carries `Co-authored-by: Qwen3.8-Flash-Next <noreply@refdes.local>`.
