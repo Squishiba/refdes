@@ -613,8 +613,11 @@ def test_a_failed_id_reservation_restores_the_yaml_append_bytes(project_root, mo
     `TypeError` -- past `_restore`'s `except OSError`, out of `create_item`
     where the contract says it returns a result -- and leaves a zero-byte
     file where the original bytes were. A failed creation burns nothing;
-    it must also destroy nothing."""
+    it must also destroy nothing -- the whole tree is byte-identical
+    after, so a ledger write, a stray restore temp, or destination drift
+    all fail this, not just the destination's bytes."""
     path = project_root / "items" / "reqs.yaml"
+    before_tree = tree(project_root, "items", ".refdes")
     before_bytes = path.read_bytes()
     reserve_id_crash(monkeypatch)
 
@@ -631,9 +634,10 @@ def test_a_failed_id_reservation_restores_the_yaml_append_bytes(project_root, mo
     after_bytes = path.read_bytes()
     assert after_bytes == before_bytes, "the rollback did not restore the original bytes"
     assert after_bytes != b"", "the destination was left zero-byte"
-    ledger = project_root / ".refdes" / "ids.yaml"
-    reserved = ledger.read_text(encoding="utf-8") if ledger.exists() else ""
-    assert result.ref not in reserved  # `ref` is the planned id on a Refused
+    # the module's own posture: every "no" is a result AND a byte-identical
+    # tree -- covers the unreserved id (no ledger write), any stray
+    # `.refdes-tmp` the restore may leave, and the destination in one.
+    assert tree(project_root, "items", ".refdes") == before_tree
 
 
 def test_a_failed_id_reservation_restores_the_markdown_append_bytes(project_root, monkeypatch):
@@ -641,6 +645,7 @@ def test_a_failed_id_reservation_restores_the_markdown_append_bytes(project_root
     shapes planned against the decoded text, so both fed a `str` to the
     rollback's binary write."""
     path = project_root / "items" / "notes.md"
+    before_tree = tree(project_root, "items", ".refdes")
     before_bytes = path.read_bytes()
     reserve_id_crash(monkeypatch)
 
@@ -654,6 +659,33 @@ def test_a_failed_id_reservation_restores_the_markdown_append_bytes(project_root
 
     assert isinstance(result, Refused), result
     assert path.read_bytes() == before_bytes, "the rollback did not restore the original bytes"
+    assert tree(project_root, "items", ".refdes") == before_tree
+
+
+def test_a_successful_rollback_keeps_the_destination_mode(project_root, monkeypatch):
+    """The restore swaps the bytes in, and a swap takes the TEMP's mode --
+    so the temp must carry the destination's mode before the swap lands.
+    A 0640 file restored by a 0600 temp would silently widen to 0600...
+    or, if the chmod were dropped, the destination would narrow; the
+    mode round-trips only while the copy is in place. (The chmod runs
+    after the write, so a crashed partial temp stays 0600 -- the
+    PERM-OWNER-001 ordering.)"""
+    path = project_root / "items" / "reqs.yaml"
+    path.chmod(0o640)
+    before_bytes = path.read_bytes()
+    reserve_id_crash(monkeypatch)
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Unreservable."},
+            destination="items/reqs.yaml",
+        ),
+    )
+
+    assert isinstance(result, Refused), result
+    assert path.read_bytes() == before_bytes
+    assert path.stat().st_mode & 0o777 == 0o640
 
 
 def test_a_rollback_write_that_fails_never_leaves_a_zero_byte_file_and_says_so(
@@ -726,10 +758,14 @@ def test_a_rollback_write_that_fails_never_leaves_a_zero_byte_file_and_says_so(
         "the destination does not hold the create's own bytes; a restore that "
         "failed must leave the file exactly as the create wrote it"
     )
-    assert "rolled back" not in result.reason, (
+    assert "was rolled back" not in result.reason, (
         f"the reason claims a rollback the rollback itself disproves: {result.reason}"
     )
     assert "not be restored" in result.reason, result.reason
+    # the failed restore cleans up its own temp: the destination keeps the
+    # create's bytes (a tree-identity check is not this scenario), so the
+    # stray-temp half of "destroy nothing" is asserted directly
+    assert [n for n in os.listdir(path.parent) if "refdes-tmp" in n] == []
 
 
 @pytest.mark.parametrize(

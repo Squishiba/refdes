@@ -1015,10 +1015,17 @@ def _restore(path: str, original: bytes) -> bool:
     try:
         fd, tmp = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.refdes-tmp-", dir=directory)
         with os.fdopen(fd, "wb") as fh:
-            os.chmod(tmp, os.stat(path).st_mode & 0o777)
+            mode = os.stat(path).st_mode & 0o777
             fh.write(original)
             fh.flush()
             os.fsync(fh.fileno())
+            # the destination's (often world-readable) mode is applied only
+            # once the contents are fully written: a crashed or partial
+            # temp keeps mkstemp's 0600, so the file's PREVIOUS contents
+            # are never left permissive in the directory mid-restore
+            # (the PERM-OWNER-001 discipline; _atomic_replace stages the
+            # author's new payload and keeps its own ordering)
+            os.chmod(tmp, mode)
         os.replace(tmp, path)
         tmp = None  # the swap consumed the temp file
     except OSError:  # the destination is untouched; the caller reports the failure
@@ -1270,12 +1277,18 @@ def _create_locked(config: str, request: CreateRequest):
                 f"and {new_id} was not reserved",
                 path=path,
             )
+        # Known facts only: the reservation failed, the rollback did not
+        # land, and a failed restore touches nothing -- so the file was
+        # left as the restore found it. What is ON the file is not
+        # asserted: the create's write landed, but a writer outside the
+        # lock can have moved the destination since, and the restore
+        # never re-reads to know.
         return Refused(
             who,
             new_id,
             f"the id ledger could not be written ({exc}); {new_id} was not "
-            f"reserved, and {rel} could not be restored -- it holds the new "
-            f"item's bytes on disk with an unreserved id",
+            f"reserved, and {rel} could not be restored: the creation's bytes "
+            f"were not rolled back, and the file was left as it was found",
             path=path,
         )
 

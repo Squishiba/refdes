@@ -164,3 +164,76 @@ holds the new item's bytes") stays -- the reviewer cleared it as
 accurate (the create's own write lands before the reservation fails).
 Full suite on the round-3 head: 3842 passed, 2 skipped, exit 0 (PTY
 pty_01cd75ac, 335.40s).
+
+------------------------------------------------------------- round 4 (review)
+Reviewer 21089cf8 on #244 at 5f33aa3: CHANGES REQUESTED.
+MEDIUM: PR body stale -- describes round 1 only ("rollback only, `original`
+  keeps raw bytes"), omits the atomic `_restore` rewrite, the truthful
+  reason changes, the two test-seam rescopes, and cites round-1 counts
+  (63 focused / 3827 full) while the head is 64 / 3842.
+LOW: the round-2/3 log lines cite "the reviewer cleared it" -- those
+  reviews are Paseo sessions OUTSIDE this repo (verifiable only via
+  `paseo logs <id>`, and #244 has no GitHub reviews), and the
+  "PROGRESS.md row updated" line points at the shared ledger file
+  OUTSIDE this repo (not in any commit). Recorded here as a disclosure:
+  the two claims are real but not repo-verifiable.
+LOW: ledger assertion in the yaml rollback test stayed vacuous -- the
+  fixture never has a ledger (see test_preview_reserves_nothing...) and
+  reserve_id is patched to always raise, so `result.ref not in
+  reserved` can never fail. Round 2 reworded C without making it live.
+LOW: no stray-temp assertion in the new create tests (the atomic restore
+  adds temp writes inside items/).
+LOW: create-side failed-restore reason claimed "it holds the new item's
+  bytes on disk" -- disk content the restore never observed (a
+  lock-bypassing writer, or a deleted destination -- the stat fails and
+  nothing is on disk -- falsify it).
+
+Fixes (round 4 head):
+- Create-side reason -> "the creation's bytes were not rolled back, and
+  the file was left as it was found": our own actions only, no claim
+  about disk content. The round-2 test's negation assertion tightened to
+  the affirmative lie ("was rolled back") -- the new message contains
+  "rolled back" only inside "not rolled back", so the loose substring
+  check was updated to the claim it exists to catch (not a weakening:
+  it is red at 5f33aa3, where the affirmative claim is present).
+- yaml test: vacuous ledger read replaced by the module's own posture,
+  `tree(project_root, "items", ".refdes")` byte-identity -- one
+  unfailable assertion covering no-ledger-write (the unreserved id),
+  no stray restore temp, and destination bytes. Markdown test: same
+  tree assertion added.
+- Round-2 test: direct stray-temp assertion (listdir has no
+  refdes-tmp entries); tree-identity can't apply there because the
+  destination legitimately keeps the create's bytes.
+- PR body rewritten via gh to describe the ACTUAL head: round-1 bytes
+  fix, round-2 atomic restore + truthful reasons + seam rescopes,
+  round-3 known-facts wording, this round's assertion repairs; current
+  counts.
+
+Green: focused create+upload+edit 198 passed, 1 skipped (pre-existing
+skipif) at this head; full-suite + CI on the pushed head reported in
+the PR. Scoped ruff on touched files: see below.
+
+Limits: no #241 CAS-window work (split stays); _restore atomic, not
+crash-durable inside its own swap; deleted-destination narrowing stays
+documented in `_restore`, coding a recreate remains out of scope;
+#241 untouched.
+
+------------------------------------------- round 4 addendum (second reviewer)
+Reviewer 3389f9ee APPROVED the pre-round-4 head 5f33aa3 (stale once round 4
+pushes). Two in-scope LOWs, both addressed:
+- `_restore` chmod'ed the temp to the destination's (world-readable) mode
+  BEFORE writing: a crashed/partial temp held the file's PREVIOUS contents
+  permissive in items/ (PERM-OWNER-001 class). chmod now runs after the
+  write+fsync, so a mid-restore temp keeps mkstemp's 0600; a new test
+  pins the mode round-trip (0640 survives the restore; red for a
+  chmod-removal mutant). `_atomic_replace`/`_atomic_create` keep their
+  ordering (they stage the author's NEW payload) -- not changed.
+- The deleted-destination sub-case of the old create-side reason ("it
+  holds the new item's bytes on disk") was already voided by this round's
+  known-facts wording: the message claims nothing about disk content.
+Out-of-scope follow-up (NOT fixed here, needs its own ticket):
+`src/refdes/history.py` redact's rollback (removed_files loop) is the
+same truncate-then-write shape -- probe showed 390-byte event file -> 0
+bytes under a faulted restore, and the OSError escapes `except Exception`
+replacing the original error. Reviewer's probe .scratch/review244 (their
+checkout); defect recorded here for the ticket.
