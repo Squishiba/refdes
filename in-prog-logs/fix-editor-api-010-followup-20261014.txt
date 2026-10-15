@@ -69,3 +69,32 @@ Tests added in tests/test_serve_create.py:
   remains auto. Neither is new.
 - No push, no PR, no merge, no stash; shared main untouched (its src was
   imported read-only by the base probe run).
+
+## PR prep, 2026-10-14 (authorized continuation)
+
+- Pre-flight: cwd = this worktree, branch fix/editor-create-empty-id-20261013
+  at 5e0fe5c, `git status --porcelain` empty (tracked tree clean).
+- `git fetch origin main` once: origin/main == local main == 374a4aa
+  (chore(sweep3) #213, on top of 7c72311 W5a). Main's two new commits touch
+  cli.py/render.py/task_pane/threads/templates/serve_support.py and two
+  changelog.d files -- none of the files this branch edits -- so
+  `git rebase main` was clean, zero conflicts: 5f267b2 -> b0b5cae,
+  5e0fe5c -> 1e51cce (HEAD). Type-gate loop in _create_item untouched by
+  main, preserved verbatim; `git diff main...HEAD -- src/refdes/serve/api.py`
+  shows only the exact-string collapse + its comment.
+- Runtime claims re-forced through this worktree: refdes.__file__ =
+  <worktree>/src/refdes/__init__.py (PYTHONPATH=$PWD/src), and probe2.py
+  over live HTTP on the rebased src: omitted/''/null -> 200 auto,
+  0/false/[]/{} -> 400 "id must be a string when given".
+- Tests post-rebase: pytest tests/test_serve_create.py
+  tests/test_serve_editor_e2e.py tests/test_ids.py -q -> 107 passed
+  (main's #213 serve_support changes integrate: Client/snapshot_tree used
+  by the new controls pass unmodified). Scoped ruff on the two touched
+  files: the same 5 pre-existing findings as the main baseline, zero
+  introduced. No broader suite run -- no concrete risk in the main delta
+  touches create-route code.
+- Pushed branch, opened PR against main; NOT merged (per instruction).
+  Difficulty: none material; the only care taken was verifying the
+  trailers survive the rebase (`git log --format=%B`, present on both
+  commits -- the `%(...)trailers` placeholder query is not to be trusted
+  here, the raw message is).
