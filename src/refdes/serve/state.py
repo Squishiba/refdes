@@ -24,6 +24,7 @@ import time
 from dataclasses import dataclass, field
 
 from .. import loader
+from ..build import walk_site_assets
 from ..model import Project
 from ..parse import source_files
 from .preview import PreviewManager
@@ -36,7 +37,8 @@ _DISPOSABLE_STATE = {"schema.json"}
 
 
 def asset_files(project: Project) -> set[str]:
-    """Every file under a declared `site.assets:` directory, walked.
+    """Every file under a declared `site.assets:` directory that is really
+    inside the project root, walked.
 
     Images are build inputs (Jared's 2026-09-25 decision, docs/design/
     editor-image-upload.md 15.1), and image resolution is a *query*:
@@ -46,21 +48,16 @@ def asset_files(project: Project) -> set[str]:
     the subset some body currently names -- adding an image can retire an
     absent/ambiguous error, and deleting one can create it.
 
-    The walk mirrors those two functions exactly (same directories, same
-    no-reference-needed breadth, missing directory skipped) so the watcher can
-    never watch a file the build cannot resolve, or miss one it can. The image
-    picker's list reads the same walk (`serve.api._images`), so the editor
-    cannot offer an image the build would not resolve either.
+    The walk *is* the build's (`build.walk_site_assets`, the one walk all
+    asset readers share), including its per-file real-path confinement: a
+    symlinked file pointing outside the root -- or a declared directory
+    retargeted into a symlink after the load that validated the config --
+    names bytes no build will ever copy or resolve, and the poller must not
+    hash them either (IMAGE-ASSET-006). The image picker's list reads this
+    same function (`serve.api._images`), so the editor cannot offer an image
+    the build would not resolve either.
     """
-    found: set[str] = set()
-    for rel_dir in project.asset_dirs:
-        full_dir = os.path.join(project.root, rel_dir)
-        if not os.path.isdir(full_dir):
-            continue
-        for dirpath, _dirnames, filenames in os.walk(full_dir):
-            for name in filenames:
-                found.add(os.path.join(dirpath, name))
-    return found
+    return {full_path for full_path, _rel, contained in walk_site_assets(project) if contained}
 
 
 def project_inputs(project: Project) -> list[str]:

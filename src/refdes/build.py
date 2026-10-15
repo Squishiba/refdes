@@ -9,6 +9,7 @@ import json
 import os
 import re
 import threading
+from collections.abc import Iterator
 
 from markdown_it import MarkdownIt
 
@@ -2677,16 +2678,11 @@ def _search_image_matches(project: Project, src: str) -> list[str]:
     never resolve a bare src differently; error reporting stays with the
     caller that renders."""
     matches: list[str] = []
-    for rel_dir in project.asset_dirs:
-        full_dir = os.path.join(project.root, rel_dir)
-        if not os.path.isdir(full_dir):
+    for _full_path, rel, contained in walk_site_assets(project):
+        if not contained or rel.rpartition("/")[2] != src:
             continue
-        for dirpath, _dirnames, filenames in os.walk(full_dir):
-            if src in filenames:
-                rel = os.path.relpath(os.path.join(dirpath, src), project.root)
-                rel = rel.replace("\\", "/")
-                if rel not in matches:
-                    matches.append(rel)
+        if rel not in matches:
+            matches.append(rel)
     return matches
 
 
@@ -3163,6 +3159,49 @@ def render_pages(project: Project) -> None:
 # --------------------------------------------------------------------- static assets
 
 
+def walk_site_assets(project: Project) -> Iterator[tuple[str, str, bool]]:
+    """Walk every declared `site.assets:` directory once: yields
+    (absolute path, project-root-relative path with forward slashes,
+    contained?) per file, in walk order.
+
+    *Contained* means the file's real path -- what a symlink actually names,
+    resolved at walk time, not at load -- is inside the project root. A
+    symlinked file pointing outside is yielded as not contained, because
+    `schema._confined_asset_dirs` can only judge the configuration at load
+    while the tree keeps moving: the serve poller re-walks on a timer, and
+    an author's own tree can swap a symlink under any of us. A *directory*
+    whose real path leaves the root -- retargeted into a symlink after the
+    load that accepted it, or pointing at the root itself -- is not entered
+    at all: enumerating the outside tree to filter it afterwards is already
+    reading information out of it, and `os.walk` never descends into nested
+    symlinked directories to begin with. What remains is the race between
+    one of these checks and the syscall that follows it; this layer shrinks
+    the window from "however long since the config loaded" to one poll
+    step, not to zero.
+
+    Every asset reader walks through here -- the poller's revision inputs
+    (`serve.state.asset_files`), this module's bulk registration and
+    bare-name search -- so a file outside the root is never hashed,
+    published, or resolved by one reader and missed by another
+    (IMAGE-ASSET-006). Callers decide what a file outside the root means:
+    silence for a watcher, a diagnostic for a build.
+    """
+    root = project.root
+    root_real = os.path.realpath(root)
+    for rel_dir in project.asset_dirs:
+        full_dir = os.path.join(root, rel_dir)
+        if not os.path.isdir(full_dir):
+            continue
+        if not os.path.realpath(full_dir).startswith(root_real + os.sep):
+            continue
+        for dirpath, _dirnames, filenames in os.walk(full_dir):
+            for name in filenames:
+                full_path = os.path.join(dirpath, name)
+                contained = os.path.realpath(full_path).startswith(root_real + os.sep)
+                rel = os.path.relpath(full_path, root).replace("\\", "/")
+                yield full_path, rel, contained
+
+
 def collect_static_assets(project: Project) -> None:
     """Register every file under a `site.assets:` directory, no reference needed.
 
@@ -3177,17 +3216,32 @@ def collect_static_assets(project: Project) -> None:
     into a `site.assets:`-backed link, so hashing the destination would
     silently break it with no way for the tool to catch that at build time
     (docs/design/index-blocks.md §10's explicit scope line).
+
+    A directory or file whose real path leaves the project root
+    (IMAGE-ASSET-006) is refused rather than copied -- publishing it would
+    ship bytes the repository does not contain -- with a warning naming the
+    escaped entry, since silence would read as a working asset directory.
     """
+    root_real = os.path.realpath(project.root)
     for rel_dir in project.asset_dirs:
         full_dir = os.path.join(project.root, rel_dir)
         if not os.path.isdir(full_dir):
             project.warn(f"site.assets entry {rel_dir!r} is not a directory", file="refdes-project.yaml")
+        elif not os.path.realpath(full_dir).startswith(root_real + os.sep):
+            project.warn(
+                f"site.assets entry {rel_dir!r} resolves outside the project "
+                "root (via a symlink?) and nothing under it is published",
+                file="refdes-project.yaml",
+            )
+    for _full_path, rel, contained in walk_site_assets(project):
+        if not contained:
+            project.warn(
+                f"site.assets file {rel!r} resolves outside the project root "
+                "(via a symlink?) and is not published",
+                file="refdes-project.yaml",
+            )
             continue
-        for dirpath, _dirnames, filenames in os.walk(full_dir):
-            for name in filenames:
-                full_path = os.path.join(dirpath, name)
-                rel = os.path.relpath(full_path, project.root).replace("\\", "/")
-                project.assets[rel] = rel
+        project.assets[rel] = rel
 
 
 # ------------------------------------------------------------------------ entry point
