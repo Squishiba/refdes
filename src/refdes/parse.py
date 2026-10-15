@@ -687,6 +687,28 @@ def _report_duplicate_keys(
         )
     if records:
         project.duplicate_key_files.add(rel)
+    id_by_mapping: dict[int, list[DuplicateKey]] = {}
+    for record in records:
+        if (
+            record.key == "id"
+            and record.first_value is not None
+            and record.second_value is not None
+        ):
+            id_by_mapping.setdefault(record.mapping_line, []).append(record)
+    # Grouped by mapping because a caller that hands over a whole file's
+    # records (the shape-error bails in parse_list_file) mixes mappings:
+    # entry A's lost id must not chain to entry B's survivor.
+    for mapping_records in id_by_mapping.values():
+        # YAML keeps the last, so with `id:` written three times every
+        # earlier value is lost to the mapping's FINAL one, not to the value
+        # on its own record's second line (records pair consecutive
+        # occurrences).
+        survivor = mapping_records[-1].second_value
+        for record in mapping_records:
+            if record.first_value != survivor:
+                project.duplicate_id_losses.setdefault(
+                    record.first_value, (survivor, rel)
+                )
 
 
 def _shift_duplicates(
@@ -1581,10 +1603,23 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
         return []
 
     if duplicates:
+        # One call per mapping, not per record: the survivor of a repeated
+        # `id:` is the mapping's LAST value, and _report_duplicate_keys can
+        # only chain to it when it sees the mapping's records together (a
+        # 3-way repeat arrives as two consecutive-pair records; reporting
+        # them one at a time would chain REQ-001 to REQ-002 -- a value that
+        # is itself dropped -- and leave a reference to REQ-001 unnamed).
+        # Every record of a mapping resolves to the same entry, so the
+        # entry identity is computed once from the group's first record.
+        records_by_mapping: dict[int, list[DuplicateKey]] = {}
         for record in duplicates:
-            item_id, context = _duplicate_entry_id(entries, defaults_line, record)
+            records_by_mapping.setdefault(record.mapping_line, []).append(record)
+        for mapping_records in records_by_mapping.values():
+            item_id, context = _duplicate_entry_id(
+                entries, defaults_line, mapping_records[0]
+            )
             _report_duplicate_keys(
-                project, rel, [record], _LIST_MERGE_REMEDY,
+                project, rel, mapping_records, _LIST_MERGE_REMEDY,
                 item_id=item_id, context=context,
             )
 

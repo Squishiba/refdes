@@ -142,7 +142,7 @@ def load_tree(
     # expansion also protects this append-only-sensitive rewrite.
     anchored_follows = links_mod.anchor_follows(project, write=write)
     # The tally of everything this load itself rewrote, for whoever reports on
-    # the run (see `Project.load_writes`). All five steps return [] when
+    # the run (see `Project.load_writes`). All four steps return [] when
     # `write` is False, so a `--no-write`/`--dry-run` load leaves this falsy
     # and its caller prints nothing about writes it did not make.
     project.load_writes.rewritten_targets = (
@@ -150,6 +150,20 @@ def load_tree(
         + len(expanded_checks)
         + len(expanded_calc_refs)
         + len(anchored_follows)
+    )
+    # Run-4 F3: a repoint that followed an `id:` collision's surviving key
+    # lands in files OTHER than the one with the duplicate, so the count
+    # above cannot point anyone at them. Every list fed to this is empty
+    # under --no-write, so the naming (and its "already on disk") is true
+    # whenever it prints.
+    links_mod.warn_repointed_by_duplicate_key(
+        project,
+        [
+            *expanded_links,
+            *expanded_checks,
+            *expanded_calc_refs,
+            *anchored_follows,
+        ],
     )
     if anchored_follows:
         # The follows-anchor writer is the one later source rewrite that still

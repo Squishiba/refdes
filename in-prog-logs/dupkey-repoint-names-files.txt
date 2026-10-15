@@ -1,0 +1,110 @@
+TASK: run-4 F3 -- the duplicate-key diagnostic names the files whose references it repointed
+(branch: dupkey-repoint-names-files, base fd47a56, tree clean at start)
+
+## Progress
+
+- Read AGENTS.md rules, COMMON.txt, TASK.txt, and the report
+  (in-prog-logs/user-sim-release-gate-run6a.md:283 "### run-4 F3").
+- VERIFIED STILL OPEN: reproduced exactly in .scratch/dupkey-repro/proj (a
+  hardware-less 2-file project): items/power.yaml entry carries
+  `id: REQ-PWR-002`, `key: q432vshabxe`, then a second `id: REQ-PWR-004`
+  line; items/log.yaml refs `refines: [REQ-PWR-002@q432vshabxe]`.
+  Plain `check` prints the duplicate-key ERROR naming only items/power.yaml
+  and the generic "(minted 1 key(s) and rewrote 1 reference(s) while
+  loading)"; items/log.yaml is rewritten on disk to
+  REQ-PWR-004@q432vshabxe and is NEVER named in the output. Confirmed by
+  grep of the run output: no "log.yaml" anywhere.
+- Mechanism (read narrow): parse._report_duplicate_keys (parse.py:658) emits
+  the error at parse time and records the file in
+  project.duplicate_key_files; the repoint is links._planned_target
+  (links.py:323) refreshing a stale composite display half (the ordinary
+  rename case -- the lost id names nothing live), applied by
+  expand_missing / expand_missing_checks / expand_missing_calc_refs /
+  anchor_follows, tallied at loader.py:148.
+
+## Decision (justify in PR)
+
+- Chose a WARNING per affected file over extending the duplicate-key ERROR:
+  the ERROR is emitted during parse_items, BEFORE any rewrite is even
+  planned, so the reporting site cannot know which files a later step will
+  repoint. The warning is emitted in loader.load_tree right after the
+  rewrite steps have run, from the list of rewrites ACTUALLY applied, so it
+  can name files precisely and can honestly say "already on disk". Under
+  --no-write all five rewrite steps return [] (loader.py's documented
+  invariant), so the warning is silent there -- it can never claim a rewrite
+  that did not happen.
+- Plumbing: Project.duplicate_id_losses {lost id: (surviving id, collision
+  file)} filled by parse._report_duplicate_keys (only for `id:`-key records
+  where values differ; the 3-way chain maps every lost id to the LAST value,
+  which is what YAML keeps); links.warn_repointed_by_duplicate_key matches
+  each applied rewrite whose OLD target is a composite whose display half is
+  a lost id and whose NEW display half is the surviving id -- i.e. the
+  repoint happened BECAUSE of the collision, not an ordinary rename.
+
+- Implemented: model.Project.duplicate_id_losses (dict, filled by
+  parse._report_duplicate_keys for `id:` records only, chained to the LAST
+  value so a 3-way repeat maps every lost id to what YAML actually keeps);
+  links.warn_repointed_by_duplicate_key (groups applied rewrites by
+  (file, old, new), requires old composite display half == a lost id AND
+  new display half == the survivor, so an ordinary rename refresh keeps its
+  silence); called from loader.load_tree over the concatenation of the four
+  rewrite lists, right after the rewrites tally.
+- Verified by hand in .scratch/dupkey-repro: plain check now prints
+  "WARNING items/log.yaml:3 [REQ-LOG-001] — 1 reference naming
+  'REQ-PWR-002@q432vshabxe' in items/log.yaml was repointed to
+  'REQ-PWR-004@q432vshabxe' on disk by this load: ... The rewrite has
+  already happened -- fix the duplicate 'id' line ... restore the reference
+  text (back to REQ-PWR-002@q432vshabxe) if the lost item was the one
+  meant."
+- NOTE on the --no-write probe: `check --no-write` is NOT the spelling
+  (--no-write is a global flag, before the subcommand; argparse refuses the
+  trailing one -- my first scratch probe of it silently ran a failed
+  parse). `--no-write check` verified: exit 1 (the dup-key error), zero
+  "repointed/rewrote" claims, items/log.yaml byte-identical.
+- Tests in tests/test_load_time_writes.py (file that owns the load-writes
+  notices and the duplicate-key write-withholding tests):
+  test_the_duplicate_key_repoint_names_the_file_it_repointed,
+  test_the_no_write_duplicate_key_run_makes_no_repoint_claim. Both pass.
+- Sabotage: inserted an unconditional early `return` in
+  links.warn_repointed_by_duplicate_key -> the naming test FAILS
+  (AssertionError at the "items/s.yaml" assertion), the --no-write test
+  stays green (it asserts absence). Removed the sabotage, both green again.
+- changelog.d/dupkey-repoint-names-files.fixed.md -- rule: user-visible
+  (a new warning line on a real failure mode), category `fixed` (silent
+  rewrite diagnostic gap).
+- Gates: full suite in the foreground once: 3821 passed, 2 skipped, exit 0
+  (no load flake to re-run). ruff check --select E9,F src tests: clean.
+  docs-site/gen_examples.py --check: up to date.
+- Task finished: YES. Committed on dupkey-repoint-names-files, pushed once,
+  PR opened against main.
+
+## Fix round (PR #237 review, agent fbe31d6)
+
+- Finding 1 (MEDIUM): 3-way id: repeat silently repointed. Reproduced the
+  reviewer's probe in .scratch/dupkey-repro3 (id: REQ-PWR-001/002/003 one
+  entry, refines: [REQ-PWR-001@q432vshabxe] in items/log.yaml): output
+  named nothing, log.yaml rewritten to REQ-PWR-003@q432vshabxe. Root cause
+  confirmed: parse_list_file called _report_duplicate_keys per record
+  ([record]), so each call's survivor chain saw one record and REQ-001
+  chained to REQ-002 (itself dropped). Fix: parse_list_file groups
+  duplicates by record.mapping_line and reports each mapping's records
+  together (entry identity computed once from the group's first record --
+  _duplicate_entry_id is mapping-based, so identical per record); verified
+  probe now prints the naming WARNING for REQ-PWR-001@... -> REQ-PWR-003@...
+  Test: test_the_3way_repeat_repoint_names_the_file_for_every_lost_id
+  (both lost ids referenced, both named, disk carries survivor twice).
+- Finding 2 (minor): whole-file bail paths (parse.py 1583/1596 shape
+  errors) pass the file's duplicates at once; survivor chained across
+  mappings. Fix: _report_duplicate_keys groups id: records by mapping_line
+  before chaining. Test: test_the_whole_file_report_chains_survivors_per_
+  mapping -- top-level-list file (bails at 1583) with two entries each
+  duplicating id:, asserts duplicate_id_losses == {REQ-001:(REQ-002,...),
+  REQ-003:(REQ-004,...)} (pre-fix: REQ-001 -> REQ-004).
+- Finding 3: 'five' -> 'four' in links.py docstring (the rewrite sources)
+  and loader.py:145 comment (the four-term tally).
+- Finding 4: no action, as instructed.
+- Sabotage: per-record grouping (records_by_mapping = one record per
+  mapping_line) -> the 3-way test FAILS (AssertionError at the REQ-001
+  assertion), the other three stay green. Restored.
+- Full suite foreground, once: 3823 passed, 2 skipped, exit 0 (+2 = the
+  new tests; no flake). ruff E9,F clean; gen_examples --check up to date.
