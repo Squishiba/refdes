@@ -1686,14 +1686,31 @@ def run_checks(project: Project) -> None:
 
             name, target_id = str(entry["value"]), str(entry["against"])
 
-            # `against:` accepts a bare display id or a `DISPLAY-ID@key`
-            # composite, resolved exactly as a structured link target is
-            # (docs/design/keys.md §3) -- reusing resolve_link_target and the
-            # same Layer 1/3 diagnostics rather than re-implementing either.
-            if "@" in target_id:
+            # `against:` accepts a bare display id, a bare key, or a
+            # `DISPLAY-ID@key` composite, resolved exactly as a structured
+            # link target is (docs/design/keys.md §3) -- reusing
+            # resolve_link_target and the same Layer 1/3 diagnostics rather
+            # than re-implementing either. That includes the *gate*: the key
+            # half of Layer 1/3 runs on a key-shaped token with no `@` too,
+            # exactly as `resolve_links` and the calc resolver do. Gating on
+            # `@` alone left a bare key reported as a plain dangling id --
+            # a typo's remedy for a corrupt key, and `keys restore`'s
+            # diagnostic replaced by a dead end for an unknown one, while
+            # the same key in the item's own `links:` got the key text
+            # (docs/design/keys.md's Layer 3: one diagnostic for all three
+            # reference shapes).
+            bare_key = _is_bare_key_token(target_id)
+            if "@" in target_id or bare_key:
                 label, _, key = target_id.partition("@")
+                if bare_key:
+                    key = target_id
                 malformed = keys_mod.malformed_key_message(
-                    key, context=f" in check against target (labelled {label})",
+                    key,
+                    context=(
+                        f" in check against target (labelled {label})"
+                        if "@" in target_id
+                        else " in check against target"
+                    ),
                 )
                 if malformed is not None:
                     project.error(
@@ -1712,8 +1729,9 @@ def run_checks(project: Project) -> None:
             result = CheckResult(value_name=name, against=display_against)
 
             if target is None:
-                if "@" in target_id:
-                    result.detail = f"key {target_id.partition('@')[2]!r} does not resolve"
+                if "@" in target_id or bare_key:
+                    key = target_id if bare_key else target_id.partition("@")[2]
+                    result.detail = f"key {key!r} does not resolve"
                     message = _unknown_key_message(project, "check against", target_id)
                 else:
                     result.detail = f"{target_id} does not exist"

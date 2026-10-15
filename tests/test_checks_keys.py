@@ -339,6 +339,122 @@ def test_dangling_bare_against_names_the_remedy_a_hand_rename_needs(tmp_path):
     assert message.count(". ") <= 1
 
 
+# ------------------------------- a bare key in `against:` (docs/design/keys.md Layer 1/3)
+#
+# `run_checks` gated its key diagnostics on `"@" in target_id`, while
+# `resolve_links` gates on `"@" in target_id or _is_bare_key_token(target_id)`.
+# A key written without its display half therefore took the display-id branch
+# in `against:` and the key branch in a `links:` target -- the same undeclared
+# key in the same file read `refdes keys restore ...` from `constrained_by:`
+# and "write the item's new id here" from `against:`, and a corrupt one read as
+# a typo instead of corruption. docs/design/keys.md's Layer 3 promises the
+# opposite: "The same diagnostic serves structured links, `checks: against:`,
+# and cross-item calc references." These pin the two key-shaped spellings to
+# the shared text, and the two non-key shapes (a resolving bare key, a
+# dangling bare display id) to staying as they were.
+#
+# The hardware standard is used here rather than CHECKS_SCHEMA because the
+# comparison needs a real, declared link type to put the same token in a
+# `links:` position.
+
+_HARDWARE_CONFIG = (
+    "site: { title: Checks bare key, out: _site }\n"
+    "standard: { base: hardware, version: 3 }\n"
+)
+
+_UNDECLARED_BARE_KEY = "k7f3m2q9x4a"  # well-formed, declared by no item here
+_CORRUPT_BARE_KEY = "k7f3m2Q9x4a"  # same token, one uppercase: corruption, not a typo
+
+
+def _bare_key_project(tmp_path, target: str, declare_key: bool = False):
+    """One bound and one log entry whose `constrained_by:` and `checks:`
+    `against:` both name `target`, so a single token gets both diagnostics."""
+    write_project_config(tmp_path, _HARDWARE_CONFIG)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "bnd.md").write_text(
+        "---\nid: BND-PWR-001\ntype: bound\ntitle: Peak junction temperature\n"
+        + (f"key: {target}\n" if declare_key else "")
+        + 'limit: "<= 85 degC"\nstatus: active\n---\n\nThe bound.\n',
+        encoding="utf-8",
+    )
+    (items / "log.md").write_text(
+        "---\nid: LOG-PWR-001\ntype: log\nsummary: Thermal verdict\n"
+        "status: proposed\n"
+        f"constrained_by: [{target}]\n"
+        "checks:\n"
+        "  - value: T_j\n"
+        f"    against: {target}\n"
+        "---\n\n```calc\nT_j = 60 degC\n```\n\nThe verdict.\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def _messages(project):
+    return [d.message for d in project.errors]
+
+
+def test_undeclared_bare_key_in_against_gets_the_same_layer3_text_as_a_link(tmp_path):
+    project = _built(_bare_key_project(tmp_path, _UNDECLARED_BARE_KEY))
+    messages = _messages(project)
+    assert len(project.errors) == 2  # one per reference, never both messages for one
+    link = next(m for m in messages if "constrained_by points at" in m)
+    check = next(m for m in messages if m.startswith("check against key"))
+
+    assert "which no item declares" in check
+    assert "refdes keys restore" in check
+    # One diagnostic, three shapes: only the pointer phrase may differ.
+    assert check == link.replace("constrained_by points at key", "check against key", 1)
+    # The display-id dead end must not be what an author reads for a key.
+    assert "which does not exist" not in check
+    assert "write the item's new id here" not in check
+
+
+def test_malformed_bare_key_in_against_is_corruption_not_a_typo(tmp_path):
+    project = _built(_bare_key_project(tmp_path, _CORRUPT_BARE_KEY))
+    messages = _messages(project)
+    assert len(project.errors) == 2  # the corruption report, not also a resolution failure
+    link = next(m for m in messages if "in constrained_by target is malformed" in m)
+    check = next(m for m in messages if "in check against target is malformed" in m)
+
+    assert "restore it from git rather than guessing" in check
+    assert check == link.replace("constrained_by", "check against", 1)
+    # Neither of the two messages that treat a corrupt key as an absent item.
+    assert "which no item declares" not in check
+    assert "which does not exist" not in check
+
+
+def test_resolving_bare_key_in_against_still_evaluates(tmp_path):
+    """The gate's happy path: `resolve_link_target` already took a bare key
+    when it was well-formed and declared, so widening the diagnostic gate must
+    not swallow the check or turn a passing check into an error."""
+    root = _bare_key_project(tmp_path, _UNDECLARED_BARE_KEY, declare_key=True)
+    project = _built(root)
+
+    assert not [m for m in _messages(project) if "does not exist" in m or "no item declares" in m]
+    check = project.item_by_id("LOG-PWR-001").checks[0]
+    assert check.ok is True
+    assert check.against == "BND-PWR-001"
+
+
+def test_dangling_bare_display_id_in_against_keeps_the_dangling_message(tmp_path):
+    """The gate's other side: a hyphenated display id is not key-shaped, so
+    widening the gate for key tokens must not drag the ordinary typo into the
+    key diagnostic (which would name a `keys restore` remedy for an id that
+    never had a key)."""
+    root = _bare_key_project(tmp_path, "BND-PWR-404")
+    project = _built(root)
+    messages = _messages(project)
+
+    check = next(m for m in messages if m.startswith("check against 'BND-PWR-404'"))
+    assert "which does not exist" in check
+    assert "write the item's new id here" in check
+    assert "which no item declares" not in check
+    link = next(m for m in messages if "constrained_by points at" in m)
+    assert "which does not exist" in link
+
+
 # ----------------------------------------------------- evaluation through a composite
 
 
