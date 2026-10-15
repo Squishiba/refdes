@@ -663,7 +663,13 @@ def test_a_mismatched_write_is_restored(project_root, monkeypatch):
             return
         # the restore's own swap: the real thing. The sabotage is aimed at
         # the save's replace; scribbling over the restore's swap too would
-        # destroy the very bytes this test asserts come back.
+        # destroy the very bytes this test asserts come back. Order is the
+        # only discriminator available -- the save's swap and the restore's
+        # use the same temp prefix and the same destination, so no argument
+        # identifies "the write's" call. An earlier `os.replace` added to
+        # the write path would aim this at the wrong call: the real swap
+        # then lands the planned bytes, the verify passes, and this test
+        # fails loudly on its own Refused assertion, not silently.
         return real_replace(src, dst, *args, **kwargs)
 
     monkeypatch.setattr(edit_mod.os, "replace", hijack)

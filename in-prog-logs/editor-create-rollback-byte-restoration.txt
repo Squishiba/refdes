@@ -110,3 +110,57 @@ Post-fix probe: Refused, reason says "could not be restored", size after
 Limits: the restore is atomic, not durable-proof: a crash inside the
 restore's own os.replace is the same irreducible window as every other
 write here. The check-vs-replace window (#241) remains untouched/open.
+
+------------------------------------------------------------- round 3 (review)
+Reviewer d4a6dad7 on #244 at f3d0098: CHANGES REQUESTED.
+MEDIUM: the `_atomic_replace` verify-mismatch restore-failure reason
+  asserted "{path} holds the bytes of the failed write" -- an unverified
+  fact in the branch that exists precisely because the destination's
+  bytes are not this process's to describe (third-party writer can land
+  a third thing between swap and re-read).
+LOW: `_atomic_replace` docstring still said the original bytes "are put
+  back" unconditionally; `_restore` silently narrowed (a destination
+  deleted before the restore is not recreated -- the mode stat fails --
+  latent, unreachable from today's call sites); the two rescoped test
+  seams depend on replace ORDERING.
+
+Reproduced MEDIUM deterministically (red at f3d0098):
+`test_a_failed_restore_describes_only_what_the_write_observed`
+(test_serve_upload.py). Seam: the upload's swap lands third-party bytes
+(so the verify re-read disagrees), the restore's swap hits ENOSPC. At
+head the reason named "the bytes of the failed write" while the
+destination held b"third-party bytes" -- the reviewer's exact probe.
+
+Fix (narrow):
+- reason -> "the bytes on disk after the write are not the bytes
+  planned, the original bytes could not be restored, and {path} was left
+  as it was found". Known facts only: mismatch observed, restore failed,
+  the restore touches nothing on failure (mkstemp/write/replace failures
+  all leave the destination untouched; POSIX keeps the destination
+  unchanged when replace itself fails). No re-read -- that would only be
+  a fresh guess. Refusal unchanged (test asserts Refused/500 + bytes).
+- `_atomic_replace` docstring: the put-back is conditional on the
+  restore landing; on failure the file is left as found and the reason
+  says so.
+- `_restore` docstring: states the deleted-destination narrowing and
+  that no call site reaches it (every restore runs on the file its own
+  write landed). Chose to document, not code: recreating a deleted
+  destination from the rollback path would be inventing a file the
+  author deleted, outside this PR's scope, unreachable today.
+- seam ORDERING assessed, not weakened: order is the seams' only
+  discriminator (the write's swap and the restore's share the temp
+  prefix AND the destination -- no argument identifies "the write's"
+  call). Mis-aiming (an earlier replace in the write path) lands the
+  planned bytes on the real swap, the verify passes, and both tests fail
+  LOUDLY on their own Refused assertions; documented in both seams.
+
+Green: the new test (red at head) + focused 198 passed, 1 skipped
+(pre-existing skipif) over upload/edit/create suites; full suite in
+PTY pty_01cd75ac (result appended below); scoped ruff 11 == 11
+pre-existing, zero introduced.
+
+Limits unchanged: no #241 CAS window work; the create-side reason ("it
+holds the new item's bytes") stays -- the reviewer cleared it as
+accurate (the create's own write lands before the reservation fails).
+Full suite on the round-3 head: 3842 passed, 2 skipped, exit 0 (PTY
+pty_01cd75ac, 335.40s).

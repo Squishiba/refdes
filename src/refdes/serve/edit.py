@@ -944,7 +944,10 @@ def _atomic_replace(path: str, payload: bytes) -> str | None:
     """Write `payload` to `path` atomically; return None on success, a reason
     on failure. A failed replacement leaves the original bytes in place: the
     temp file is discarded, and if the destination was somehow replaced and
-    the re-read disagrees, the original bytes are put back."""
+    the re-read disagrees, the original bytes are put back -- when the
+    restore itself lands. When it does not, the file is left as it was
+    found (the bytes on disk are not this process's to name) and the reason
+    says so."""
     directory = os.path.dirname(path)
     tmp = None
     try:
@@ -975,9 +978,14 @@ def _atomic_replace(path: str, payload: bytes) -> str | None:
     if written != payload:
         if _restore(path, original):
             return f"the bytes on disk after the write are not the bytes planned; {path} was restored"
+        # What is known and nothing more: a mismatch was observed, the
+        # restore did not land, and it left the file as it found it.
+        # What is ON the file is not known -- this branch is reached
+        # precisely because the bytes on disk are not this process's to
+        # describe, and a re-read here would only be a fresh guess.
         return (
-            f"the bytes on disk after the write are not the bytes planned, and the original "
-            f"bytes could not be restored; {path} holds the bytes of the failed write"
+            f"the bytes on disk after the write are not the bytes planned, the "
+            f"original bytes could not be restored, and {path} was left as it was found"
         )
     return None
 
@@ -996,7 +1004,12 @@ def _restore(path: str, original: bytes) -> bool:
     it -- never truncated to zero bytes by the restore itself, the way an
     in-place `"wb"` open would leave it. Returns True when the swap landed
     and False when it did not; a caller whose message says the file was
-    put back must ask, not assume."""
+    put back must ask, not assume. The swap preserves the destination's
+    mode, copied from the file itself -- which also narrows the old
+    in-place write: a destination DELETED before the restore is not
+    recreated (the mode stat fails and the restore reports failure), and
+    no call site reaches that shape today, since every restore runs on
+    the file its own write just landed."""
     directory = os.path.dirname(path)
     tmp = None
     try:
