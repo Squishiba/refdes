@@ -1530,23 +1530,22 @@ def test_atomic_replace_rolls_back_on_verify_mismatch(tmp_path, monkeypatch):
     work and then scribbles, which is the only way to reach the branch."""
     root = make_upload_project(tmp_path, {"figures/curve.png": OLD_CURVE})
     project = built_project(root)
-    real_replace = os.replace
+    destination = str(root / "figures" / "curve.png")
+    real_replace, real_abspath = os.replace, os.path.abspath
     scribbled = []
 
-    def replace_then_scribble(src, dst, **kwargs):
-        real_replace(src, dst, **kwargs)
-        if not scribbled:
+    def replace_then_scribble(src, dst, *args, **kwargs):
+        real_replace(src, dst, *args, **kwargs)
+        # aimed at the DESTINATION, not at call order: an earlier
+        # os.replace on another file (an _atomic_replace, e.g.) passes
+        # through unscribbled instead of silently consuming the seam
+        if not scribbled and real_abspath(str(dst)) == real_abspath(destination):
             scribbled.append(True)
             with open(dst, "wb") as fh:
                 fh.write(b"neither version")
-        # the restore's own swap (the second one) lands unscribbled: the
-        # scribble is aimed at the upload's replace, and hitting the
-        # restore's swap too would destroy the bytes this test asserts
-        # come back. Order is the seam's only discriminator (both swaps
-        # share the temp prefix and the destination); mis-aiming it by an
-        # earlier replace in the write path makes the real swap land the
-        # planned bytes, the verify pass, and this test fail loudly on its
-        # Refused assertion.
+        # the restore's own swap shares the destination; the write's swap
+        # matches first, and the restore lands unscribbled -- scribbling
+        # over it too would destroy the bytes this test asserts come back
 
     monkeypatch.setattr(edit_mod.os, "replace", replace_then_scribble)
     result = upload_mod.store_asset(
@@ -1558,6 +1557,7 @@ def test_atomic_replace_rolls_back_on_verify_mismatch(tmp_path, monkeypatch):
     )
     monkeypatch.undo()
 
+    assert scribbled, "the seam never fired: no swap of the destination was sabotaged"
     assert isinstance(result, upload_mod.Refused), result
     assert result.status == 500
     assert (root / "figures" / "curve.png").read_bytes() == OLD_CURVE, "the original bytes are back"
@@ -1607,6 +1607,9 @@ def test_a_failed_restore_describes_only_what_the_write_observed(tmp_path, monke
     assert "holds the bytes of the failed write" not in result.reason, (
         f"the reason names bytes the restore never read: {result.reason}"
     )
+    # the general guard, not just the one historical sentence: a reason
+    # that names the payload by digest is naming the bytes too
+    assert upload_mod.digest_of(NEW_CURVE) not in result.reason, result.reason
     assert [n for n in os.listdir(root / "figures") if "refdes-tmp" in n] == []
 
 
