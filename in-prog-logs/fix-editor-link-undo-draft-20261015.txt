@@ -80,5 +80,7 @@ composite-target rendering checks. /usr/bin/chromium exists on this
 machine; a real-DOM e2e of the picker is out of scope for this fix and
 the suite has no harness for it.
 
-Finish status: TASK FINISHED. Committed and pushed as a narrow PR; no
-merge, no self-review.
+Finish status: TASK FINISHED. Committed, rebased on current main
+(`9bc1304`), pushed, and opened as PR #249 (narrow: two static JS files,
+one test, changelog, this log); no merge, no self-review. Shared ledger
+row "Editor pending-link undo keeps draft clean" updated to PR-open.
