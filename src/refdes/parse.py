@@ -280,7 +280,7 @@ _PurePythonLineLoader.add_constructor(
 
 
 class _DupSafeLoader(_SafeLoaderClass):
-    """SafeLoader that records a repeated mapping key, and nothing else.
+    """SafeLoader that records a repeated mapping key, and adds no bookkeeping.
 
     `_LineLoader`'s `__line__` tagging is exactly what a config file must not
     have: `configcheck` walks every key of every block and would report the
@@ -293,6 +293,13 @@ class _PurePythonDupLoader(_PurePythonLoaderBase):
 
 
 def _construct_mapping_dupes(loader, node: yaml.MappingNode) -> dict:
+    # The surrogate-scalar retag is not optional here: a hand-written
+    # `refdes-schema.yaml` may declare a type whose name is 11 digits of the
+    # key alphabet, and YAML 1.1 resolves that to an int. `yaml_safe_load`
+    # (via `_construct_key_mapping`) keeps such a key a string, so the
+    # checked variant must too -- otherwise the two loaders disagree on the
+    # same bytes and `schema.load_project` crashes on `tname[:3]`.
+    _preserve_surrogate_scalars(node)
     _collect_duplicates(loader, node)
     return _base_constructor(loader).construct_mapping(loader, node, deep=True)
 
