@@ -188,6 +188,8 @@ def _load_baseline_file(path: str, project: Project) -> Baseline:
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = yaml_safe_load(fh) or {}
+    except IsADirectoryError as exc:
+        raise SchemaError(f"{path}: baseline file is a directory, not a file") from exc
     except UnicodeDecodeError as exc:
         raise SchemaError(f"{path}: baseline file is not valid UTF-8 ({exc})") from exc
     except yaml.YAMLError as exc:
@@ -213,7 +215,7 @@ def _load_baseline_file(path: str, project: Project) -> Baseline:
 
 def load_baseline(project: Project, name: str) -> Baseline | None:
     path = baseline_path(project, name)
-    if not os.path.isfile(path):
+    if not os.path.exists(path):
         return None
     return _load_baseline_file(path, project)
 

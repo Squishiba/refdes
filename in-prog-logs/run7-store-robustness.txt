@@ -1,0 +1,80 @@
+run7-store-robustness — user-sim run 7 findings B9 + F12
+=========================================================
+
+Started from main 35c2304 (branch tip == main, clean tree).
+
+Verification of the two findings (both REPRODUCE on this branch):
+
+- B9: .scratch/run7-b9f12/probe.py — project with a DIRECTORY named
+  .refdes/baselines/r9.yaml -> `refdes check` dies with a raw
+  `IsADirectoryError: [Errno 21] Is a directory: .../baselines/r9.yaml`
+  (list_baselines scans *.yaml names and hands the directory straight to
+  _load_baseline_file's open(); lifecycle.py:189). Confirmed.
+- F12: same probe — .refdes/keys-adopted.yaml = "adopted: [" (valid UTF-8,
+  bad YAML): `refdes keys adopt` exits 0 and OVERWRITES the marker with
+  `adopted: true`. Confirmed. adopt.py:301-313 guards UnicodeDecodeError
+  only; keys.is_adopted (keys.py:647) swallows YAMLError into "not
+  adopted", so the plan proceeds and the rewrite clobbers the author's
+  file. The changelog.d/store-read-decode-errors.fixed.md fragment claims
+  a corrupt marker "refuses with the file named".
+
+Store-reader class survey (directory where a file is expected):
+- lifecycle.list_baselines/_load_baseline_file: raw IsADirectoryError. FIX.
+  lifecycle.load_baseline: isfile-guarded -> a directory is silently "no
+  baseline". Route it through the same wrap (exists guard).
+- seal._load_seal_data: isfile-guarded -> directory silently = no seals. FIX.
+- ids.load_ledger: isfile-guarded -> directory silently = empty ledger. FIX.
+- boards.load_manifest: isfile-guarded -> directory silently = empty
+  manifest. FIX (same class; store readers list in #212 fragment includes it).
+- citations.load_lockfile: isfile-guarded -> directory silently = {} =
+  "pinned nothing", which the class docstring explicitly forbids ("none of
+  them is allowed to become {}"). FIX with LockfileError.
+- history._read_store_file: raw IsADirectoryError (open() on a directory
+  named *.yaml under events/; save_object/append_event exist-guards route
+  a directory into the same read). FIX in the helper — one wrap, every
+  reader.
+- keys.is_adopted: swallows OSError (IsADirectoryError included) ->
+  "not adopted". That is the documented posture of #212's fragment
+  ("an unreadable marker still simply means not adopted") — KEEP.
+  But adopt.py's own read + write over a directory marker crashes raw at
+  write time -> keys adopt must refuse a directory marker too, naming it.
+
+No shared cross-module store-read helper exists (_read_store_file is
+history-private and raises HistoryError); each module wraps in its own
+error type, matching the #209/#212 pattern.
+
+Fixes applied:
+- B9 (directory-store-reader class):
+  * lifecycle._load_baseline_file: wrap IsADirectoryError -> SchemaError
+    "... baseline file is a directory, not a file"; load_baseline guard
+    isfile->exists so a directory under the exact name routes through it.
+  * seal._load_seal_data, ids.load_ledger, boards.load_manifest,
+    citations.load_lockfile: isfile->exists guard + IsADirectoryError wrap
+    in each module's own error class (SchemaError x3, LockfileError
+    "is a directory, not a file" -- str() names .refdes/citations.yaml).
+  * history._read_store_file: one wrap, every reader (load_events scan,
+    load_object, save_object/append_event existing-file reads).
+  * keys.is_adopted: KEEP the swallow (documented "unreadable = not
+    adopted" posture, #212 fragment).
+  * adopt.apply(): refuse a directory marker up front (its own read was
+    isfile-guarded; the write transaction would die raw on the directory).
+- F12: adopt.apply() parses the UTF-8-clean marker in the plan phase; a
+  YAMLError is an AdoptionResult refusal naming
+  .refdes/keys-adopted.yaml, "repair it by hand or delete it"; returns
+  before any write, file untouched.
+
+Tests (5 new):
+- tests/test_yaml_loaders.py::test_store_files_name_a_directory_where_a_file_is_expected
+- tests/test_yaml_loaders.py::test_check_reports_a_directory_baseline_by_path_and_exits_2
+- tests/test_history.py::test_a_directory_where_a_store_file_is_expected_is_a_history_error
+- tests/test_keys_adopt.py::test_adopt_refuses_a_yaml_corrupt_adoption_marker_and_leaves_it
+- tests/test_keys_adopt.py::test_adopt_refuses_a_directory_where_the_adoption_marker_is
+
+Sabotage: removed the IsADirectoryError wrap from
+lifecycle._load_baseline_file -> both B9 tests in test_yaml_loaders.py
+failed with the raw IsADirectoryError (the original symptom), restored ->
+2 passed.
+
+changelog.d: store-read-directory.fixed.md + keys-adopt-corrupt-marker.fixed.md
+(rule applied: changelog.d/README.md -- each user-visible change gets one
+fragment; both are behavior fixes -> `fixed` category, one file per change).

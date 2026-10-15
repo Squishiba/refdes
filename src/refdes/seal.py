@@ -149,11 +149,13 @@ def _with_seal_hash(value: SealValue, new_hash: str, hash_format: int) -> SealVa
 
 def _load_seal_data(project: Project, board: str = "") -> dict:
     path = seal_path(project, board)
-    if not os.path.isfile(path):
+    if not os.path.exists(path):
         return {}
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = yaml_safe_load(fh) or {}
+    except IsADirectoryError as exc:
+        raise SchemaError(f"{path}: seal file is a directory, not a file") from exc
     except UnicodeDecodeError as exc:
         raise SchemaError(f"{path}: seal file is not valid UTF-8 ({exc})") from exc
     except yaml.YAMLError as exc:

@@ -123,11 +123,13 @@ def ledger_path(project: Project) -> str:
 
 def load_ledger(project: Project) -> dict:
     path = ledger_path(project)
-    if not os.path.isfile(path):
+    if not os.path.exists(path):
         return {"burned": {}, "allocated": []}
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = yaml_safe_load(fh) or {}
+    except IsADirectoryError as exc:
+        raise SchemaError(f"{path}: id ledger file is a directory, not a file") from exc
     except UnicodeDecodeError as exc:
         raise SchemaError(f"{path}: id ledger file is not valid UTF-8 ({exc})") from exc
     except yaml.YAMLError as exc:

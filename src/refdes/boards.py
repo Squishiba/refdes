@@ -232,11 +232,15 @@ def load_manifest(project: Project) -> Manifest:
     `workspaces:` is actually in use for this project.
     """
     path = manifest_path(project)
-    if not os.path.isfile(path):
+    if not os.path.exists(path):
         return {"boards": {}, "workspaces": {}}
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = yaml_safe_load(fh) or {}
+    except IsADirectoryError as exc:
+        raise SchemaError(
+            f"{path}: membership manifest file is a directory, not a file"
+        ) from exc
     except UnicodeDecodeError as exc:
         raise SchemaError(f"{path}: membership manifest file is not valid UTF-8 ({exc})") from exc
     except yaml.YAMLError as exc:

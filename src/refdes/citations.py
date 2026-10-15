@@ -1185,11 +1185,13 @@ def load_lockfile(project: Project) -> dict[str, dict]:
     them is allowed to become `{}`.
     """
     path = lockfile_path(project)
-    if not os.path.isfile(path):
+    if not os.path.exists(path):
         return {}
     try:
         with open(path, "r", encoding="utf-8") as fh:
             text = fh.read()
+    except IsADirectoryError as exc:
+        raise LockfileError("is a directory, not a file") from exc
     except UnicodeDecodeError as exc:
         raise LockfileError(f"is not valid UTF-8: {exc}") from exc
 

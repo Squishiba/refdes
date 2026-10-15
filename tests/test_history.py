@@ -523,6 +523,37 @@ def test_load_object_of_a_corrupt_file_is_a_history_error(root, payload, expecte
     assert expected in str(exc_info.value)
 
 
+def test_a_directory_where_a_store_file_is_expected_is_a_history_error(root):
+    """User-sim run 7 B9's history half: open() on a *directory* named
+    *.yaml raises IsADirectoryError -- an OSError, neither a
+    UnicodeDecodeError nor a YAMLError -- so the #191/#207/#209 wraps
+    missed it. The events scan handed every such name to the reader (raw
+    traceback out of every command that reads history), and the
+    exists-guards in save_object/append_event routed a directory
+    straight into the same read. _read_store_file now names it like every
+    other corrupt record."""
+    os.makedirs(os.path.join(history.events_dir(root), "stray.yaml"))
+    with pytest.raises(history.HistoryError) as exc_info:
+        history.load_events(root)
+    assert "stray.yaml" in str(exc_info.value)
+    assert "is a directory" in str(exc_info.value)
+
+    eid = history.event_id("followed", "K1", "S1")
+    os.makedirs(os.path.join(history.events_dir(root), f"{eid}.yaml"))
+    with pytest.raises(history.HistoryError) as exc_info:
+        history.append_event(root, "followed", "K1", "a" * 64, successor_key="S1")
+    assert f"{eid}.yaml" in str(exc_info.value)
+    assert "event file is a directory" in str(exc_info.value)
+
+    item, digest, path = _saved_note(root)
+    os.remove(path)
+    os.makedirs(path)
+    with pytest.raises(history.HistoryError) as exc_info:
+        history.save_object(root, item)
+    assert os.path.basename(path) in str(exc_info.value)
+    assert "object file is a directory" in str(exc_info.value)
+
+
 def test_duplicate_edge_under_two_ids_is_loud(root):
     """Only possible if ids were ever random (the doc's original sketch): the
     same (kind, item_key, successor_key) fact recorded twice. The derived-id

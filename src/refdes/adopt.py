@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+import yaml
+
 from . import boards as boards_mod
 from . import build as build_mod
 from . import keys as keys_mod
@@ -13,6 +15,7 @@ from . import links as links_mod
 from . import schema as schema_mod
 from . import seal as seal_mod
 from .model import SchemaError
+from .parse import yaml_safe_load
 
 _MARKER_TEXT = """\
 # Refdes surrogate-key adoption state.
@@ -298,6 +301,15 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
     marker_existed = os.path.isfile(marker_path)
     marker_was_adopted = keys_mod.is_adopted(project)
     marker_before = ""
+    if os.path.isdir(marker_path):
+        return AdoptionResult(
+            ok=False,
+            errors=[
+                f"{keys_mod.ADOPTION_MARKER}: adoption marker file is a directory, "
+                f"not a file; repair it by hand or delete it and run again"
+            ],
+            dry_run=dry_run,
+        )
     if marker_existed:
         try:
             with open(marker_path, "r", encoding="utf-8", newline="") as fh:
@@ -308,6 +320,17 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
                 errors=[
                     f"{keys_mod.ADOPTION_MARKER}: adoption marker file is not valid "
                     f"UTF-8 ({exc}); repair it by hand or delete it and run again"
+                ],
+                dry_run=dry_run,
+            )
+        try:
+            yaml_safe_load(marker_before)
+        except yaml.YAMLError as exc:
+            return AdoptionResult(
+                ok=False,
+                errors=[
+                    f"{keys_mod.ADOPTION_MARKER}: adoption marker file does not "
+                    f"parse ({exc}); repair it by hand or delete it and run again"
                 ],
                 dry_run=dry_run,
             )

@@ -9,7 +9,7 @@ import yaml
 from conftest import write_project_config
 from helpers import COVERAGE_SCHEMA
 
-from refdes import boards, citations, ids, keys, lifecycle, parse, seal, standards
+from refdes import boards, citations, cli as cli_mod, ids, keys, lifecycle, parse, seal, standards
 from refdes.parse import _PurePythonLineLoader, _yaml_error_report
 from refdes.schema import SCHEMA_NAME, SchemaError, load_project
 
@@ -158,3 +158,73 @@ def test_store_files_name_a_non_utf8_file_instead_of_a_traceback(tmp_path):
 
     _corrupt(Path(keys.adoption_marker_path(project)))
     assert keys.is_adopted(project) is False
+
+
+def test_store_files_name_a_directory_where_a_file_is_expected(tmp_path):
+    """User-sim run 7 B9: a *directory* named `*.yaml` under
+    .refdes/baselines/ made every command die with a raw
+    `IsADirectoryError` traceback -- open() on a directory raises it, the
+    baselines scanner hands each `*.yaml` name straight to the loader, and
+    the loader wrapped only UnicodeDecodeError/YAMLError. The same class at
+    the other store paths (seal file, id ledger, membership manifest,
+    citation lockfile) was the silent half of the same hole: an isfile
+    guard read a directory as "absent" -- an empty ledger, `{}` for the
+    lockfile, which the lockfile's own contract says is never allowed.
+    Every store loader now raises its own error class naming the path;
+    the adoption marker keeps its deliberate swallow (unreadable means
+    not adopted)."""
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+
+    def _as_directory(path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.mkdir()
+
+    _as_directory(Path(boards.manifest_path(project)))
+    with pytest.raises(
+        SchemaError, match="membership manifest file is a directory"
+    ) as exc_info:
+        boards.load_manifest(project)
+    assert "boards.yaml" in str(exc_info.value)
+
+    _as_directory(Path(seal.seal_path(project)))
+    with pytest.raises(SchemaError, match="seal file is a directory") as exc_info:
+        seal.load_seals(project)
+    assert "log-seal.yaml" in str(exc_info.value)
+
+    _as_directory(Path(ids.ledger_path(project)))
+    with pytest.raises(SchemaError, match="id ledger file is a directory") as exc_info:
+        ids.load_ledger(project)
+    assert "ids.yaml" in str(exc_info.value)
+
+    _as_directory(Path(citations.lockfile_path(project)))
+    with pytest.raises(citations.LockfileError, match="is a directory") as exc_info:
+        citations.load_lockfile(project)
+    assert citations.LOCKFILE in str(exc_info.value)
+
+    _as_directory(Path(lifecycle.baseline_path(project, "probe")))
+    with pytest.raises(SchemaError, match="baseline file is a directory") as exc_info:
+        lifecycle.load_baseline(project, "probe")
+    assert "probe.yaml" in str(exc_info.value)
+    with pytest.raises(SchemaError, match="baseline file is a directory"):
+        lifecycle.list_baselines(project)
+
+    _as_directory(Path(keys.adoption_marker_path(project)))
+    assert keys.is_adopted(project) is False
+
+
+def test_check_reports_a_directory_baseline_by_path_and_exits_2(tmp_path, capsys):
+    """The end-to-end half of B9: the raw traceback left the user with no
+    actionable line. `refdes check` now prints the configuration error
+    naming the offending path and exits 2, like every other corrupt store
+    file."""
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    baselines = tmp_path / ".refdes" / "baselines"
+    baselines.mkdir(parents=True)
+    (baselines / "r9.yaml").mkdir()
+
+    assert cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "check"]) == 2
+    err = capsys.readouterr().err
+    assert "configuration error" in err
+    assert "r9.yaml" in err
+    assert "is a directory, not a file" in err

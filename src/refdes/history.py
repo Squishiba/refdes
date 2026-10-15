@@ -322,6 +322,8 @@ def _read_store_file(path: str, kind: str) -> object:
     try:
         with open(path, "r", encoding="utf-8") as fh:
             return yaml_safe_load(fh)
+    except IsADirectoryError as exc:
+        raise HistoryError(f"{path}: {kind} is a directory, not a file") from exc
     except UnicodeDecodeError as exc:
         raise HistoryError(f"{path}: {kind} is not valid UTF-8 ({exc})") from exc
     except yaml.YAMLError as exc:

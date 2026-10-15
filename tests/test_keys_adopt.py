@@ -432,3 +432,46 @@ def test_adopt_refuses_a_corrupt_adoption_marker(tmp_path, capsys):
     output = capsys.readouterr().err
     assert ".refdes/keys-adopted.yaml" in output
     assert "not valid UTF-8" in output
+
+
+def test_adopt_refuses_a_yaml_corrupt_adoption_marker_and_leaves_it(tmp_path, capsys):
+    """User-sim run 7 F12: the same guard covered UTF-8 only. A marker that
+    reads as UTF-8 but does not parse (`adopted: [` -- a truncated edit)
+    was silently read as "not adopted", and the real (non-dry) run
+    proceeded and OVERWROTE the author's marker file, exit 0 -- the exact
+    opposite of the #212 fragment's claim that a corrupt marker "refuses
+    with the file named and says to repair it by hand or delete it".
+    apply() now parses the marker in the plan phase and refuses on the same
+    channel, leaving the file untouched."""
+    _write_shape_project(tmp_path)
+    marker = tmp_path / keys_mod.ADOPTION_MARKER
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("adopted: [\n", encoding="utf-8")
+    config = str(tmp_path / "refdes-project.yaml")
+    before = _snapshot(tmp_path)
+    assert cli_mod.main(["-c", config, "keys", "adopt"]) == 1
+    output = capsys.readouterr().err
+    assert ".refdes/keys-adopted.yaml" in output
+    assert "does not parse" in output
+    assert "repair it by hand or delete it" in output
+    assert (tmp_path / keys_mod.ADOPTION_MARKER).read_text(encoding="utf-8") == "adopted: [\n"
+    assert _snapshot(tmp_path) == before
+
+
+def test_adopt_refuses_a_directory_where_the_adoption_marker_is(tmp_path, capsys):
+    """B9's class at the marker path: keys adopt's own read is isfile-guarded,
+    so a directory named keys-adopted.yaml planned a write straight over the
+    directory -- the transaction then died on IsADirectoryError mid-write.
+    It refuses up front, naming the file, and the directory stands."""
+    _write_shape_project(tmp_path)
+    marker = tmp_path / keys_mod.ADOPTION_MARKER
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.mkdir()
+    config = str(tmp_path / "refdes-project.yaml")
+    before = _snapshot(tmp_path)
+    assert cli_mod.main(["-c", config, "keys", "adopt"]) == 1
+    output = capsys.readouterr().err
+    assert ".refdes/keys-adopted.yaml" in output
+    assert "is a directory" in output
+    assert marker.is_dir()
+    assert _snapshot(tmp_path) == before
