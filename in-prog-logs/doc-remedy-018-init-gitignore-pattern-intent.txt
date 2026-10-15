@@ -93,3 +93,40 @@ the four `.refdes/` patterns (no vscode line), `check-ignore -v` reports
 `!` winner (`!.vscode/*`), `git add -n` prints the path (addable).
 
 Status: COMPLETE on this branch.
+
+## Review round 2 (reviewer agent 035e4ff6: CHANGES REQUESTED)
+
+Rebased onto origin/main (35c2304, includes #266) — clean, no conflicts.
+
+F1 [medium, REAL — reproduced]: non-ASCII project dir below the toplevel
+(`repo/café`): git quotes non-ASCII bytes in reported paths by default,
+so the reported source `"caf\303\251/.gitignore"` matched no computed own
+path, verdict became "says nothing", and init appended over the negation
+— the original harm, reproduced. Fix: `-c core.quotePath=false` on both
+git calls, plus `encoding="utf-8", errors="surrogateescape"` (text=True
+under a C locale would have raised UnicodeDecodeError, which the
+OSError/SubprocessError catch does not cover). Verified: no append,
+negation still wins.
+
+F2 [medium-low, REAL — reproduced]: a deeper `.vscode/.gitignore`
+winning over the project's own covering line — `check-ignore -v` names
+only the winner, so the verdict was a false "no" → init appended a
+duplicate (main did not; regression), and the read-only preflight
+refused (exit 2) a file needing no append (main exited 0). Fix: a git
+"yes" is authoritative; git's "no" now falls through to the literal
+own-text check (info/exclude/global/parent positions never appear as
+lines of own text, so the append policy survives intact). Verified:
+file untouched; read-only repo inits with exit 0.
+
+F3 [low, REAL]: ~20 git spawns per init → per-init verdict cache
+(toplevel + verdicts keyed by entry.pattern; disjoint entry paths make
+it safe within one call). Measured with a subprocess.run spy: 5 calls
+per init (1 rev-parse + 4 check-ignore).
+
+Tests: 3 regressions added (non-ASCII dir, deeper outvote, read-only +
+deeper outvote). tests/test_scaffold.py 89 passed. Full suite: 3925
+passed, 2 skipped (pre-existing case-filesystem skips), 341s. Scoped
+ruff: 9 findings, all pre-existing in tests/test_scaffold.py,
+scaffold.py clean.
+
+Status: round 2 COMPLETE on this branch.

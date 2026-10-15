@@ -713,6 +713,98 @@ def test_init_falls_back_to_literal_spellings_outside_a_git_repo(tmp_path):
     assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == before
 
 
+def test_init_judges_by_git_in_a_project_dir_with_a_non_ascii_name(tmp_path):
+    """A project directory named `café` below the toplevel: git quotes
+    non-ASCII bytes in reported paths (`"caf\\303\\251/.gitignore"`) by
+    default, and a quoted source matches no computed path -- the git verdict
+    silently became "says nothing" and init appended over the negation
+    again. The judge is asked with core.quotePath=false."""
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not on PATH")
+    repo = tmp_path / "repo"
+    proj = repo / "café"
+    proj.mkdir(parents=True)
+    subprocess.run([git, "init", "-q", str(repo)], check=True)
+    (proj / ".gitignore").write_text(".vscode/*\n!.vscode/*\n", encoding="utf-8")
+
+    scaffold_mod.init(str(proj))
+
+    patterns = _gitignore_patterns(proj / ".gitignore")
+    assert ".vscode/settings.json" not in patterns, (
+        "git's quoted report of a non-ASCII project dir lost the verdict and "
+        "init appended over the project's negation"
+    )
+    probe = _git_check_ignore(proj, ".vscode/settings.json")
+    assert probe.returncode == 0 and probe.stdout.split("\t")[0].endswith(":!.vscode/*"), (
+        f"the negation no longer wins: {probe.stdout}"
+    )
+
+
+def test_init_leaves_its_own_line_alone_when_a_deeper_gitignore_outvotes_it(tmp_path):
+    """`check-ignore -v` names only the winning match, so a `.vscode/.gitignore`
+    out-voting the project's own covering line is invisible in the report --
+    a git "no" here is git saying nothing, and the project's own text has
+    stated its position. Appending the duplicate line is exactly what
+    append-only-and-idempotent promises not to do (and it was main's
+    behavior not to)."""
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not on PATH")
+    repo = tmp_path / "repo"
+    proj = repo / "proj"
+    (proj / ".vscode").mkdir(parents=True)
+    subprocess.run([git, "init", "-q", str(repo)], check=True)
+    own = (
+        ".vscode/settings.json\n.refdes/copies/\n.refdes/schema.json\n"
+        ".refdes/sealing-optin.json\n.refdes-write.lock\n"
+    )
+    (proj / ".gitignore").write_text(own, encoding="utf-8")
+    (proj / ".vscode" / ".gitignore").write_text("settings.json\n", encoding="utf-8")
+
+    scaffold_mod.init(str(proj))
+
+    assert (proj / ".gitignore").read_text(encoding="utf-8") == own
+    probe = _git_check_ignore(proj, ".vscode/settings.json")
+    assert probe.returncode == 0, f"the file must stay ignored: {probe.stdout}"
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permission bits: chmod 0o444 does not stop Windows (or root) "
+    "from writing the file, so the unwritable case cannot be produced that way",
+)
+def test_cli_init_proceeds_with_a_readonly_gitignore_a_deeper_file_outvotes(
+    tmp_path, monkeypatch, capsys
+):
+    """The same invisible out-vote in the read-only preflight: every line is
+    there, nothing needs appending, so the file being unwritable is not a
+    refusal reason -- the preflight's git "no" must not outrank the project's
+    own text any more than the append pass's does."""
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not on PATH")
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text(
+        ".vscode/settings.json\n.refdes/copies/\n.refdes/schema.json\n"
+        ".refdes/sealing-optin.json\n.refdes-write.lock\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".vscode").mkdir()
+    (tmp_path / ".vscode" / ".gitignore").write_text("settings.json\n", encoding="utf-8")
+    subprocess.run([git, "init", "-q", str(tmp_path)], check=True)
+    gitignore.chmod(0o444)
+    monkeypatch.chdir(tmp_path)
+    try:
+        assert cli_mod.main(["init"]) == 0
+        capsys.readouterr()
+    finally:
+        gitignore.chmod(0o644)
+    assert (tmp_path / "refdes-project.yaml").exists()
+    assert (tmp_path / ".vscode" / "settings.json").exists()
+    assert gitignore.read_text(encoding="utf-8").count("\n") == 5
+
+
 def test_init_explains_the_serve_write_lock_it_ignores(tmp_path):
     """The block says why the file is not worth committing, because that is the
     whole decision: a per-machine coordination file with no content in it, and

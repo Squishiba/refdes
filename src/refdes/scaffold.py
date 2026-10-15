@@ -212,11 +212,14 @@ _REFDES_GITIGNORE = (
 _OWN_GITIGNORE_MATCH = re.compile(r"^(.*):(\d+):(.*)$")
 
 
-def _git_ignore_verdict(target_dir: str, entry: _GitignoreEntry) -> bool | None:
+def _git_ignore_verdict(
+    target_dir: str,
+    entry: _GitignoreEntry,
+    cache: dict[str, Any] | None = None,
+) -> bool | None:
     """git's own answer to "does this project's `.gitignore` already state a
-    position on `entry.pattern`" -- True for yes, False for no, `None` for
-    "git cannot be asked" (the caller then falls back to `_covers`'s literal
-    spellings).
+    position on `entry.pattern`" -- True for yes, False for git's no, `None`
+    for "git cannot be asked" (the caller then consults the text itself).
 
     `check-ignore -v` is the question, and it is the only tool that answers
     git's real pattern language: globs, basename spellings, and -- the case
@@ -227,64 +230,122 @@ def _git_ignore_verdict(target_dir: str, entry: _GitignoreEntry) -> bool | None:
     intent about everything inside it, and the file's own path matches
     nothing in that shape.
 
-    Only the project's own `.gitignore` counts as an answer. git resolves
+    Only the project's own `.gitignore` counts as a yes. git resolves
     `.git/info/exclude`, a global `core.excludesFile`, and any parent
     directory's `.gitignore` ahead of it (and a file's negation of a
     parent-project pattern is that project's business, not a position this
     project's file has taken), so a winning match from anywhere else means
-    the project's own file still says nothing.
+    git's yes is unavailable here. It is not a git no, though: the report
+    names only the *winning* match, so a deeper nested `.gitignore`
+    out-voting a line the project's own file did state is invisible in this
+    output -- which is why a git no never vetoes the caller's own-text
+    check, and why init still appends for info/exclude, global, and
+    parent-only positions (none of those appear as lines of the project's
+    own text).
 
     `--no-index` so the answer is the pattern chain alone, never an artifact
-    of what happens to be staged in this checkout."""
+    of what happens to be staged in this checkout.
+
+    `cache` is a per-`init`-call dict: the toplevel lookup is the same for
+    every entry, and one init's passes (writability preflight, then append)
+    ask the same questions -- the entries name disjoint paths, so no entry's
+    answer can change between the two passes."""
     git = shutil.which("git")
     if git is None:
         return None
+    if cache is not None and entry.pattern in cache:
+        return cache[entry.pattern]
     paths = [entry.pattern]
     stem = entry.pattern.rstrip("/")
     parent = stem.rpartition("/")[0]
     if parent:
         paths.append(parent)
     try:
-        top = subprocess.run(
-            [git, "-C", target_dir, "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-        if top.returncode != 0:
-            return None
+        if cache is not None and "toplevel" in cache:
+            top_path = cache["toplevel"]
+            if top_path is None:
+                return None
+        else:
+            top = subprocess.run(
+                [
+                    git,
+                    "-c",
+                    # core.quotePath=false: git octal-quotes non-ASCII bytes
+                    # in reported paths by default ("caf\\303\\251/.gitignore"),
+                    # which matches no computed path and silently loses the
+                    # verdict for a project directory with a non-ASCII name.
+                    "core.quotePath=false",
+                    "-C",
+                    target_dir,
+                    "rev-parse",
+                    "--show-toplevel",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="surrogateescape",
+                timeout=15,
+                check=False,
+            )
+            top_path = top.stdout.strip() if top.returncode == 0 else None
+            if cache is not None:
+                cache["toplevel"] = top_path
+            if top_path is None:
+                return None
         probe = subprocess.run(
-            [git, "-C", target_dir, "check-ignore", "-v", "--no-index", "--", *paths],
+            [
+                git,
+                "-c",
+                "core.quotePath=false",
+                "-C",
+                target_dir,
+                "check-ignore",
+                "-v",
+                "--no-index",
+                "--",
+                *paths,
+            ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             timeout=15,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
     if probe.returncode == 1:
-        return False
-    if probe.returncode != 0:
-        return None
-    top_path = top.stdout.strip()
-    own = os.path.relpath(
-        os.path.join(target_dir, ".gitignore"), top_path
-    ).replace(os.sep, "/")
-    # and the same path through realpath, for platforms whose temp dirs reach
-    # the repository through a symlink (git reports the toplevel resolved).
-    own_real = os.path.relpath(
-        os.path.realpath(os.path.join(target_dir, ".gitignore")),
-        os.path.realpath(top_path),
-    ).replace(os.sep, "/")
-    for line in probe.stdout.splitlines():
-        match = _OWN_GITIGNORE_MATCH.match(line.split("\t", 1)[0])
-        if match is not None and match.group(1) in (own, own_real):
-            return True
-    return False
+        verdict = False
+    elif probe.returncode != 0:
+        verdict = None
+    else:
+        own = os.path.relpath(
+            os.path.join(target_dir, ".gitignore"), top_path
+        ).replace(os.sep, "/")
+        # and the same path through realpath, for platforms whose temp dirs
+        # reach the repository through a symlink (git reports the toplevel
+        # resolved).
+        own_real = os.path.relpath(
+            os.path.realpath(os.path.join(target_dir, ".gitignore")),
+            os.path.realpath(top_path),
+        ).replace(os.sep, "/")
+        verdict = False
+        for line in probe.stdout.splitlines():
+            match = _OWN_GITIGNORE_MATCH.match(line.split("\t", 1)[0])
+            if match is not None and match.group(1) in (own, own_real):
+                verdict = True
+                break
+    if cache is not None:
+        cache[entry.pattern] = verdict
+    return verdict
 
 
-def _gitignore_addresses(target_dir: str, text: str, entry: _GitignoreEntry) -> bool:
+def _gitignore_addresses(
+    target_dir: str,
+    text: str,
+    entry: _GitignoreEntry,
+    verdict_cache: dict[str, Any] | None = None,
+) -> bool:
     """Whether the project's `.gitignore` already states its position on
     `entry.pattern` -- an ignore pattern or an explicit `!` negation.
 
@@ -292,11 +353,14 @@ def _gitignore_addresses(target_dir: str, text: str, entry: _GitignoreEntry) -> 
     and git takes the *last* matching pattern, so appending ours would quietly
     out-rank a deliberate choice. Comments and blank lines do not.
 
-    Inside a git repository git itself decides (see `_git_ignore_verdict`);
-    the literal `_covers` spellings answer only where git cannot be asked."""
-    verdict = _git_ignore_verdict(target_dir, entry)
-    if verdict is not None:
-        return verdict
+    Inside a git repository a yes from git itself is authoritative (see
+    `_git_ignore_verdict`); git's no and git's silence both fall through to
+    the literal `_covers` spellings of the project's own text, because
+    `check-ignore -v` names only the winning pattern and a deeper nested
+    `.gitignore` out-voting one of the project's own lines is invisible in
+    that report."""
+    if _git_ignore_verdict(target_dir, entry, verdict_cache):
+        return True
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -366,7 +430,11 @@ def read_existing_gitignore(target_dir: str) -> str | None:
         ) from None
 
 
-def _refuse_unwritable_gitignore(target_dir: str, entries: list[_GitignoreEntry]) -> None:
+def _refuse_unwritable_gitignore(
+    target_dir: str,
+    entries: list[_GitignoreEntry],
+    verdict_cache: dict[str, Any] | None = None,
+) -> None:
     """Refuse an existing `.gitignore` that cannot be appended to, BEFORE
     `init` writes anything (DIAG-TRACE-006, review follow-up).
 
@@ -394,7 +462,10 @@ def _refuse_unwritable_gitignore(target_dir: str, entries: list[_GitignoreEntry]
     text = read_existing_gitignore(target_dir)
     if text is None:
         return
-    if any(not _gitignore_addresses(target_dir, text, entry) for entry in entries):
+    if any(
+        not _gitignore_addresses(target_dir, text, entry, verdict_cache)
+        for entry in entries
+    ):
         path = os.path.join(target_dir, ".gitignore")
         if not os.access(path, os.W_OK):
             raise SchemaError(
@@ -403,7 +474,11 @@ def _refuse_unwritable_gitignore(target_dir: str, entries: list[_GitignoreEntry]
             )
 
 
-def _ensure_gitignore_entries(target_dir: str, entries: list[_GitignoreEntry]) -> None:
+def _ensure_gitignore_entries(
+    target_dir: str,
+    entries: list[_GitignoreEntry],
+    verdict_cache: dict[str, Any] | None = None,
+) -> None:
     """Make sure the project's `.gitignore` ignores each entry's path,
     creating `.gitignore` when the project has none.
 
@@ -421,7 +496,7 @@ def _ensure_gitignore_entries(target_dir: str, entries: list[_GitignoreEntry]) -
     missing = [
         entry
         for entry in entries
-        if not _gitignore_addresses(target_dir, existing, entry)
+        if not _gitignore_addresses(target_dir, existing, entry, verdict_cache)
     ]
     if not missing:
         return
@@ -598,7 +673,12 @@ def init(
     wanted: list[_GitignoreEntry] = (
         [_VSCODE_SETTINGS_GITIGNORE] if wants_vscode_entry else []
     ) + list(_REFDES_GITIGNORE)
-    _refuse_unwritable_gitignore(target_dir, wanted)
+    # One git-verdict cache for the whole call: the preflight below and the
+    # append pass above ask identical questions (the entries name disjoint
+    # paths, so nothing init writes between them answers any of them
+    # differently), and each answer is a `git` process.
+    verdict_cache: dict[str, Any] = {}
+    _refuse_unwritable_gitignore(target_dir, wanted, verdict_cache)
 
     os.makedirs(target_dir, exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as fh:
@@ -606,7 +686,7 @@ def init(
 
     if wants_vscode_entry:
         _write_vscode_settings(target_dir)
-    _ensure_gitignore_entries(target_dir, wanted)
+    _ensure_gitignore_entries(target_dir, wanted, verdict_cache)
 
     return config_path
 
