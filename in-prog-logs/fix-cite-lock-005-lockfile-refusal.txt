@@ -168,3 +168,98 @@ test_calc_sources / test_citations / test_build — 271 passed, 1 skipped;
 test_lockfile_corruption + test_citations_lockfile_locking — 143 passed;
 ruff on the touched files: byte-identical findings to the same files at
 HEAD (zero new).
+
+PR PREP — rebase onto current main (2026-10-14)
+================================================
+
+Task: prepare this independently-reviewed branch (was head cf0fd00, base
+8b6a52e) as a PR to current refdes main. Worked only in this Paseo worktree.
+
+Facts verified by running (not memory):
+- origin/main fetched: 9f83092. Merge-base of the branch was 8b6a52e (main
+  advanced 11 commits). `git rebase origin/main` — clean, ZERO conflicts;
+  both commits replayed. Head 321f613.
+- Main then advanced twice more during prep (a busy multi-session repo):
+  to c608363 (#224/#228/#230/#232), then b164df0 where the OPEN #233
+  (CITE-LOCK-004 page-count provenance) MERGED. Rebases onto each — all
+  clean, ZERO conflicts (3 commits replayed each). Final head a3fbc46 on
+  b164df0.
+  * #232 build.py change sits at imports + render/collect_static_assets
+    (~2677-3216); this branch's build.py edits are
+    `_run_item_calcs`/`run_calcs` (~1384/1541) — disjoint.
+  * #233 citations.py change lands in `load_lockfile` (~1128) +
+    `_record_problem`/`page_count_gaps`/`_apply_page`/`fetch_all` + new
+    `PAGE_COUNT_SHA256_KEY`; this branch edits `read_lockfile` (~1239) —
+    disjoint (co-present at the head: UTF-8 guard :1152,
+    PAGE_COUNT_SHA256_KEY :715, read_lockfile success return :1276). Its
+    `_record_problem` "not a mapping" message (which this branch's
+    CITE-LOCK-005 test asserts on) is unchanged by #233 — re-verified green.
+- Invariants confirmed co-present at 321f613 (git show HEAD:...):
+  * citations.read_lockfile keeps the pair nowhere (success returns
+    `load_lockfile(project), None`; no `_lockfile_problem` write).
+  * build._run_item_calcs + run_calcs write `_source_lock` and
+    `_lockfile_problem` from the SAME read, as one pair.
+  * serve/sources._lockfile: a memo hit checks `project._lockfile_problem`
+    before trusting `{}` and raises SourceRefusal with the lockfile's reason.
+  * serve/api._item_sources catches SourceRefusal -> _refused (422), same
+    vocabulary as the other three source routes.
+
+Overlap inspection (shared files citations.py / build.py / serve/api.py):
+- #212 (MERGED, in main = 1a1c960): citations.py change is in `load_lockfile`
+  (~1070, raises LockfileError on non-UTF-8). This branch changes
+  `read_lockfile` (~1182). Disjoint functions -> no conflict; the UTF-8
+  guard and this fix co-present at the head.
+- main's build.py changes: `run_checks` (~1686, bare-key #223) and
+  `_image_inputs_hash_value` (~2211, #220). This branch changes
+  `_run_item_calcs`/`run_calcs` (~1390/1552). Disjoint.
+- main's serve/api.py change: `_create_item` (~686, #218). This branch
+  changes `_item_sources` (~329). Disjoint.
+- #225 (OPEN, PDF digit guard): citations.py at page_number/MAX_PAGE_DIGITS
+  (~294-330), serve/sources.py at _pdf_proposal (~852), test_serve_pdf_sources.py.
+  Disjoint from this branch's citations.read_lockfile / serve/sources._lockfile /
+  test_serve_sources.py. (Its own log records a clean rebase onto main too.)
+- #233 (OPEN, page-count provenance CITE-LOCK-004): citations.py hunks all in
+  _record_problem/page_count_gaps/_apply_page/fetch_all (698-2916), cli.py,
+  test_lockfile_corruption.py. None touch read_lockfile (~1182); its
+  `_record_problem` message edit keeps the "not a mapping" substring this
+  branch's CITE-LOCK-005 test asserts on. No shared test file. Disjoint.
+- Net: no overlapping hunks and no clashing test expectations with #212/#225/
+  #233. Open PRs are not in main, so they do not affect this rebase.
+
+Verification (PYTHONPATH pinned to THIS worktree src; every run confirmed
+refdes.__file__ = .../fix-citation-lockfile-refusal-20261013/src/refdes;
+conftest.py:13 also inserts this src at sys.path[0]):
+- Targeted CITE-LOCK-005 EditorApp HTTP regression tests (real EditorApp,
+  live HTTP): 5 passed (unreadable-lockfile refusal on files/entries/propose,
+  single diagnostic across repeats, repaired-mid-build memo not unpoisoned,
+  readable-empty stays ordinary unpinned 200).
+- Adjacent citation/serve set (test_serve_sources, _accept, _serve_pdf_sources,
+  test_lockfile_corruption, _citations_lockfile_locking, _calc_sources,
+  _citations): 379 passed, 1 skipped (gated).
+- Rebase-coexistence set (test_calc, test_checks_keys, test_image_hash,
+  test_serve_api, test_serve_create, test_serve_edit_http, and the #212-area
+  test_history/_keys_adopt/_reseal_audit/_seal/_yaml_loaders): 372 passed.
+- Scoped ruff on the 5 touched files: 12 findings, ALL pre-existing — 8 in the
+  four src files are byte-identical to the same files at origin/main (only
+  line numbers shift from added docstring lines), and the 4 test RUF059 exist
+  in the merge-base test file (lines 306/570/824/859, shifted +1 by one added
+  import). Zero findings on added lines; none silenced (repo baseline is not
+  clean — see AGENTS.md).
+
+Final re-verification on the newest base (b164df0, after #233 merged),
+PYTHONPATH pinned to this worktree src (refdes.__file__ confirmed):
+- Targeted CITE-LOCK-005 real EditorApp HTTP tests: 5 passed.
+- Adjacent citation/serve set (now incl. #233's updated
+  test_citations/test_lockfile_corruption + test_citation_pages +
+  test_run5_friction): 465 passed, 1 skipped (gated).
+- build coexistence + #212 area (test_calc/test_site_assets_confinement/
+  test_serve_api/test_serve_create/test_history/test_seal/test_yaml_loaders):
+  296 passed.
+- Scoped ruff on the touched files: 12 findings, all pre-existing (zero on
+  added lines; none silenced).
+
+PR: #234 (base main). Status: rebased onto newest main (a3fbc46 on b164df0),
+verified, pushed. No main/Claude worktree touched. Not merged (by design).
+Note: main is a moving target this session — if it advances again, the branch
+is a clean descendant (GitHub reports MERGEABLE); a further no-conflict rebase
+is mechanical.
