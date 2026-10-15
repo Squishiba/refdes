@@ -282,6 +282,25 @@ export function draftLinkRemove(handle, verb, target) {
   return draft;
 }
 
+// Cancelling a pending op -- what the undo button means: the op leaves the
+// draft and the link returns to what the server holds. It is not a toggle
+// onto the other side. An undo of a pending add that becomes a pending
+// remove names a link the item does not have (and of a pending remove, a
+// link it already has); the server refuses exactly those ops with 422, and
+// a refused save leaves the whole draft behind (EDITOR-API-004).
+export function draftLinkCancel(handle, verb, target) {
+  const draft = getDraft(handle);
+  for (const side of ['add', 'remove']) {
+    const list = draft.links[side][verb];
+    if (!list) continue;
+    const at = list.indexOf(target);
+    if (at >= 0) list.splice(at, 1);
+    if (!list.length) delete draft.links[side][verb];
+  }
+  persist(handle, draft);
+  return draft;
+}
+
 // A save op applied: it stops being pending, and the file moved to a new
 // revision. Drop it and record the revision in one step that persists once,
 // at the end: if the mirror were written while the applied op was still in

@@ -1,0 +1,86 @@
+EDITOR-API-004: undo of a pending link add kept the draft dirty (fix/editor-link-undo-draft-20261015)
+
+Task (ledger row "Editor pending-link undo keeps draft clean"): undo of a
+pending link add in the browser editor called draftLinkRemove, minting a
+pending `remove_link` for a link the item does not have; the real server
+refuses that op with 422, so Save is refused and the draft persists (and
+survives a reload). Fix the semantics in the narrow drafts.js/links.js
+path, no server link-validation changes, regression that fails on base.
+
+Base: branch created at origin/main e1d7bdb; `git status` clean; no stash
+ever used; tree was clean at start (shared-session rule observed).
+
+Reproduction (on base, before any edit):
+- JS half: .scratch/link-undo/probe_undo.mjs runs the REAL served modules
+  under node v22 (document/window/sessionStorage/fetch stubbed at the
+  module boundary, same posture as tests/test_editor_draft_mirror.py),
+  driving the real editor.js -> links.js picker. Click add on a candidate
+  -> draft.links.add.satisfies=['REQ-002']. Click the pending-add line's
+  undo -> draft.links.remove.satisfies=['REQ-002'], isDirty true, the
+  sessionStorage mirror holds it, a fresh import of drafts.js over the
+  same storage reloads it dirty. Click Save -> posts
+  `remove_link satisfies REQ-002`; the stub refuses like the real server;
+  the mirror survives the refusal. Mirror case (valid link-remove then
+  its undo) left a pending `add_link` of REQ-001@k1 -- the link the item
+  already has. PRESENT, REPRODUCED.
+- Server half (verified by running, per AGENTS.md): pytest against a live
+  EditorApp on the test_serve_edit_http_links project (scratch probe,
+  since removed from tests/): `remove_link satisfies REQ-002` on DEC-001
+  -> 422 refused "item DEC-001 does not link REQ-002", tree unchanged;
+  `add_link` naming the composite the undo stamps -> 422 refused "no
+  item 'REQ-001@...' in this project to link to". So the bogus op costs
+  the author a red Save plus a draft that reloads dirty -- the sticky
+  draft the report describes.
+
+Fix:
+- drafts.js: new export `draftLinkCancel(handle, verb, target)` -- drops
+  the target from the pending side(s) for that verb and persists. This
+  is the undo's meaning: the op leaves, the link returns to what the
+  server holds. Not a toggle onto the other side.
+- links.js: both pending-line undo buttons call draftLinkCancel (with the
+  exact stored target text they render). The candidate Add button cancels
+  the pending removal (under the server's target text, via the new
+  serverTargetFor lookup that matches display/key halves like isLinked)
+  when the row is a server link -- which is precisely when its Add button
+  is enabled -- and only mints a new add for a non-server row.
+- Server link validation, patcher, editor.js save loop: untouched.
+
+Tests:
+- tests/test_editor_link_undo.py (new, node harness like
+  test_editor_draft_mirror.py, skipped when node is absent):
+  undo-add leaves no op on either side, mirror gone, Save disabled,
+  reload clean; a Save of the flipped op is refused and the draft
+  survives it (documents why a bogus op is sticky); undo-remove returns
+  to the server state; Add-on-pending-removed cancels; the valid-removal
+  control saves exactly one `remove_link` and clears the draft.
+  FAILS on base at the core assertion (pending remove survives), PASSES
+  after. 1 passed.
+- Targeted suites green: test_editor_draft_mirror, test_serve_static,
+  test_serve_edit_http_links, test_serve_drafts_corruption,
+  test_serve_editor_e2e, test_serve_edit_http (116 passed), and
+  test_serve_edit, test_serve_edit_links, test_serve_api,
+  test_serve_create, test_links, test_keys_links (194 passed).
+- ruff check tests/test_editor_link_undo.py --select F,E9: clean. (Full
+  `ruff check .` is not a baseline gate in this repo -- ~99 pre-existing
+  findings, per AGENTS.md.)
+
+Difficulty found: test_serve_static.py's brace-balance scanner treats an
+apostrophe in a comment as the start of a string, so a new comment
+containing one flips bracket parity for the rest of the file and the
+"served js parses" test fails on valid JS. Existing comments in those
+files avoid apostrophes for that reason; mine do too (verified with
+`node --check` plus the suite).
+
+Browser-harness limits: no browser runs in this suite and no DOM exists
+under node, so the picker is driven through the same module-boundary stub
+the draft-mirror test uses (FakeNode, sessionStorage stub); "reload" is a
+fresh import of drafts.js over the same storage -- faithful to the memory/
+storage split, not to real tab semantics. No layout, real events, or
+composite-target rendering checks. /usr/bin/chromium exists on this
+machine; a real-DOM e2e of the picker is out of scope for this fix and
+the suite has no harness for it.
+
+Finish status: TASK FINISHED. Committed, rebased on current main
+(`9bc1304`), pushed, and opened as PR #249 (narrow: two static JS files,
+one test, changelog, this log); no merge, no self-review. Shared ledger
+row "Editor pending-link undo keeps draft clean" updated to PR-open.
