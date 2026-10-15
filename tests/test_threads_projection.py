@@ -1,13 +1,19 @@
 """Living notes phase H7a: the thread-view projection and the index key.
 
 Every bullet under plan §H7 "Verified against" that belongs to the projection
-half is a test here (the two CLI commands are H7b/H7c): one tip's tasks with
-age, a forked thread with one task block and one branch-local verdict per tip
-and no single current status anywhere, derived rows that self-close without
-recording anything, the `threads` key present for threaded projects and
-absent otherwise, and the two reproducibility guarantees of the read surface
-(no clock, no writes). The sabotage matrix is recorded in
+half is a test here (the two CLI commands are H7b/H7c, and they have their own
+files): one tip's tasks with age, a forked thread with one task block and one
+branch-local verdict per tip and no single current status anywhere, derived
+rows that self-close without recording anything, the `threads` key present for
+threaded projects and absent otherwise, and the two reproducibility guarantees
+of the read surface (no clock, no writes). The sabotage matrix is recorded in
 `in-prog-logs/living-notes-h7a-threads-projection.txt`.
+
+The file grew past H7a: the review-fix matrix section pins H7b's
+projection-side review fixes (they are projection behaviour, not CLI
+behaviour), and the worklist section pins H7c's whole-project half
+(`threads.project_derived`/`threads.work_projection` — what `refdes work`
+renders is `test_work.py`'s).
 
 The shape rules under test are living-notes.md §5's five binding rules read as
 *structure* (two separate groups, self-closing derived rows, absolute ages,
@@ -601,9 +607,12 @@ def test_partially_malformed_list_keeps_the_valid_rows_and_counts_the_rest(tmp_p
 
 
 def test_task_rows_are_copied_never_the_authored_field_itself(tmp_path):
-    """H7b review fix (d)'s factual half: `rows` are copies -- `open_since`
-    is *added* to the copy -- so a consumer poking a projection row can
-    never rewrite `item.fields` (or the file through the item)."""
+    """H7b review fix (d)'s factual half: `rows` are *top-level* copies
+    (`dict(row)`: nested values are shared with the authored row) --
+    `open_since` is *added* to the copy -- so a consumer poking a projection
+    row's own keys can never rewrite `item.fields` (or the file through the
+    item). No surface mutates a row's nested value; this pins the top level,
+    which is what the projection actually adds to."""
     project = _project(tmp_path, ONE_TIP)
     (view,) = threads.threads_projection(project)
     tasks = view["branches"][0]["tasks"]
@@ -713,6 +722,39 @@ def test_project_derived_builds_no_chain_graph_when_threads_are_passed(tmp_path)
     ):
         rows = threads.project_derived(project, threads=views)
     assert rows and all(row["kind"] in threads._KIND_ORDER for row in rows)
+
+
+def test_work_projection_computes_the_derived_state_exactly_once(tmp_path):
+    """Review #194 r2 c4: one `work_projection` run used to compute
+    `_derived_problems` twice -- once in `threads_projection`, once in
+    `project_derived` -- for the same project and the same answer. The
+    caller now computes it once and passes it through, so the counter sees
+    exactly one call. The projection's output is byte-identical either way
+    (the dict is only ever read: `uncovered`/`unverified` membership tests
+    and `blocked.get`), which is what the CLI-level tests keep pinning."""
+    project = _derived_project(tmp_path)
+    calls = []
+    real = threads._derived_problems
+
+    def counting(p):
+        calls.append(p)
+        return real(p)
+
+    with mock.patch.object(threads, "_derived_problems", counting):
+        work = threads.work_projection(project)
+    assert len(calls) == 1
+    assert work["threads"] and work["derived"]
+
+    # Each half on its own still computes its own state (the passthrough is
+    # the caller's, not a cached global): one call each, no more.
+    for name, run in (
+        ("threads_projection", lambda: threads.threads_projection(project)),
+        ("project_derived", lambda: threads.project_derived(project)),
+    ):
+        calls.clear()
+        with mock.patch.object(threads, "_derived_problems", counting):
+            assert run()
+        assert len(calls) == 1, name
 
 
 def test_project_derived_lists_each_item_gap_once_project_wide(tmp_path):

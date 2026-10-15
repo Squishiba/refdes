@@ -28,7 +28,7 @@ from unittest import mock
 from conftest import write_project_config
 
 from refdes import cli as cli_mod
-from refdes import history
+from refdes import history, loader
 
 CONFIG = (
     "site: { title: Thread CLI, out: _site }\n"
@@ -300,6 +300,49 @@ def test_json_prints_the_projection_entry(tmp_path, capsys):
     assert verdict["concluding"] is True
 
 
+def test_as_of_earlier_than_the_declaring_date_says_so(tmp_path, capsys):
+    """Review #194 r3 c5, the `refdes thread` half: an open task declared
+    *after* the --as-of date has no age to measure, and the line says that
+    in words rather than printing a negative span (the shared
+    `threads.age_suffix` composer's `days < 0` posture, spelled once for
+    both commands)."""
+    config = _setup(tmp_path)
+    _warm(tmp_path, config, capsys)
+    assert _run(config, "thread", "LOG-001", "--as-of", "2026-08-01") == 0
+    out = capsys.readouterr().out
+    assert "(open since LOG-001, 2026-08-30 -- declared after --as-of)" in out
+    assert " -- -" not in out  # never a negative day count
+    assert _run(config, "thread", "LOG-001") == 0
+    assert "declared after --as-of" not in capsys.readouterr().out
+
+
+def test_json_prints_the_refused_verdict_as_the_conflicting_state_it_is(tmp_path, capsys):
+    """The machine-readable half of review #191 r2 c4: `test_ambiguous_verdict_prints_as_itself`
+    pins the printed line, this pins the JSON. `--json` is the projection
+    entry the index payload carries, so a consumer reading the door the pane
+    reads must see `verdict.state == "conflicting"` (the projection's own
+    state word) with no status/declared_by invented to fill it in -- not a
+    null verdict, which would render as "nothing concluded"."""
+    text = (
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - {id: LOG-001, summary: Accepted parent., date: 2026-08-01, status: accepted}\n"
+        "  - {id: LOG-002, summary: Held parent., date: 2026-08-02, status: proposed}\n"
+        "  - {id: LOG-003, summary: Silent merge., date: 2026-08-03, follows: [LOG-001, LOG-002]}\n"
+    )
+    config = _setup(tmp_path, text)
+    assert _run(config, "thread", "LOG-003", "--json") == 0
+    view = json.loads(capsys.readouterr().out)
+    (branch,) = view["branches"]
+    assert branch["verdict"] == {
+        "state": "conflicting",
+        "status": None,
+        "declared_by": None,
+        "declared_on": None,
+        "concluding": False,
+    }
+
+
 def test_json_on_a_cold_project_that_mints_keys_is_still_json(tmp_path, capsys):
     """--json owns stdout exactly like `index`'s does (review B1): on a
     never-opened project the load itself mints keys and anchors the edge,
@@ -366,7 +409,8 @@ def test_fork_prints_one_labelled_block_per_tip_and_no_global_status(
 def test_task_block_states_print_as_themselves(tmp_path, capsys):
     """Each fold posture earns its own line rather than rendering as an
     empty list: reconciliation required (§5 rule 3), never declared, and
-    cleared-by-nobody-who-declared."""
+    cleared -- with the entry whose explicit `tasks: []` did the clearing
+    named in the line itself."""
     text = (
         "defaults: { type: log }\n"
         "items:\n"
@@ -458,7 +502,6 @@ def test_capture_line_names_the_time_the_store_records(tmp_path, capsys):
     timeless form."""
     config = _setup(tmp_path)
     _warm(tmp_path, config, capsys)
-    from refdes import loader
 
     loaded, _ = loader.load_tree(config, write=True)
     result = history.capture(
@@ -478,7 +521,6 @@ def test_capture_line_of_a_corrected_edge_says_so(tmp_path, capsys):
     words, clockless like every store-written capture."""
     config = _setup(tmp_path)
     _warm(tmp_path, config, capsys)
-    from refdes import loader
 
     # The fixture's single `followed` event is removed first so LOG-001
     # has exactly one capture to render, then the event is hand-written

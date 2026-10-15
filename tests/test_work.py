@@ -367,6 +367,35 @@ def test_an_explicit_empty_string_id_prints_the_placeholder_too():
     assert cli_mod._task_row_lines(rows, None, "%Y-%m-%d") == ["  1. [x] ?  Still renders."]
 
 
+def test_work_prints_the_malformed_row_note_thread_prints(tmp_path, capsys):
+    """Review #194 r3 c3: `refdes thread` rides the dropped-row count on the
+    heading ("(N malformed row(s) not shown)", review #197 B1's note), and
+    `refdes work` used to print the bare heading -- so the worklist silently
+    showed 1 of a declared 2 rows and the author's malformed row vanished
+    from the one command they run to see what is left. Same note, same
+    composer (`threads.task_malformed_note`), on both surfaces."""
+    text = (
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - {id: LOG-001, summary: Head., date: 2026-08-30}\n"
+        "  - id: LOG-002\n"
+        "    summary: Tip with one good row and one malformed one.\n"
+        "    date: 2026-09-01\n"
+        "    follows: LOG-001\n"
+        "    tasks:\n"
+        "      - {id: T-good, text: Real open work., state: open}\n"
+        "      - a bare string is not a task row\n"
+    )
+    config = _setup(tmp_path, ("malformed.yaml", text))
+    _warm(tmp_path, config, capsys)
+    assert _run(config, "work") == 0
+    out = capsys.readouterr().out
+    assert "Tasks at tip: (1 malformed row(s) not shown)" in out
+    assert "T-good" in out
+    assert _run(config, "thread", "LOG-002") == 0
+    assert "Tasks at tip: (1 malformed row(s) not shown)" in capsys.readouterr().out
+
+
 def test_concluding_verdict_prints_with_its_open_tasks(tmp_path, capsys):
     """§5 rule 4, the worklist half: the tip's `accepted` verdict is concluding
     while a task is still open, so the verdict prints directly above that tip's
@@ -734,6 +763,22 @@ def test_as_of_adds_relative_ages_and_without_it_there_are_none(tmp_path, capsys
     assert "(open since LOG-001, 2026-08-30 -- 3 days)" in out
     assert _run(config, "work") == 0
     assert " -- 3 days" not in capsys.readouterr().out
+
+
+def test_as_of_earlier_than_the_declaring_date_says_so(tmp_path, capsys):
+    """Review #194 r3 c5, the `refdes work` half: an open task declared
+    *after* the --as-of date has no age to measure, and the worklist says
+    that in words rather than printing a negative span (the shared
+    `threads.age_suffix` composer's `days < 0` posture, spelled once for
+    both commands)."""
+    config = _authored(tmp_path)
+    _warm(tmp_path, config, capsys)
+    assert _run(config, "work", "--as-of", "2026-08-01") == 0
+    out = capsys.readouterr().out
+    assert "(open since LOG-001, 2026-08-30 -- declared after --as-of)" in out
+    assert " -- -" not in out  # never a negative day count
+    assert _run(config, "work") == 0
+    assert "declared after --as-of" not in capsys.readouterr().out
 
 
 def test_output_does_not_depend_on_the_wall_clock(tmp_path, capsys):

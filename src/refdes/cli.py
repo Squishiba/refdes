@@ -639,7 +639,8 @@ def cmd_release(args) -> int:
 
 
 def cmd_index(args) -> int:
-    """Emit items.json to stdout without rendering the site.
+    """Print the resolved project as one JSON document on stdout, rendering
+    no HTML.
 
     Editor tooling needs the index on every save; rendering hundreds of HTML files
     each time would make that unusable. This does everything `check` does and
@@ -1143,7 +1144,16 @@ def _work_authored_blocks(views: list[dict], as_of, date_format: str) -> list[li
             if state == "ambiguous":
                 lines.append(f"{heading} {threads_mod.TASK_POSTURE_AMBIGUOUS}")
                 continue
-            lines.append(heading)
+            # Same dropped-row note `refdes thread` rides on the heading
+            # (review #194 r3 c3): the rows are `build.validate_items`'s
+            # report, and a worklist that silently shows 1 of 2 declared
+            # rows hides an authoring error from the one command an author
+            # runs to see what is left.
+            malformed = tasks.get("malformed")
+            note = (
+                f" {threads_mod.task_malformed_note(malformed)}" if malformed else ""
+            )
+            lines.append(f"{heading}{note}" if note else heading)
             lines.extend(_task_row_lines(open_rows, as_of, date_format))
         if lines is not None:
             blocks.append(lines)
@@ -1163,8 +1173,12 @@ def cmd_work(args) -> int:
     computes no fold, coverage stage, or check of its own. It never touches the
     network: remote citation drift is `citations.refresh` under `check --refresh`
     alone, so it is deliberately absent (§5's table names it as the one
-    networked row). Writes nothing but the load's own key minting/expansions;
-    the build runs `seal_write=False` like `index`/`ls`/`thread`.
+    networked row). Writes nothing of its own; on a never-opened project the
+    load itself writes, and this command's cold run is a normal load: key
+    minting and reference expansion in `items/`, the first capture of each new
+    `follows:` edge into `.refdes/history/`, and the regenerated
+    `.refdes/schema.json`. The build runs `seal_write=False` like
+    `index`/`ls`/`thread`.
 
     The two groups (§5 rule 1) print as separate blocks with separate numbering:
     the authored open tasks numbered per tip, the derived rows unnumbered with
@@ -2834,7 +2848,10 @@ def main(argv: list[str] | None = None) -> int:
         "(`citations.refresh`, under `check --refresh` only) and this command "
         "never touches the network. A read/list command, not a gate (H8 is the "
         "gate), so a non-empty worklist exits 0; it writes nothing beyond the "
-        "load's own key minting/expansions.",
+        "load's own writes, which on a never-opened project are key minting "
+        "and reference expansion in `items/`, the first capture of each new "
+        "`follows:` edge into `.refdes/history/`, and the regenerated "
+        ".refdes/schema.json.",
     )
     p_work.add_argument(
         "--json",
@@ -3081,7 +3098,12 @@ def main(argv: list[str] | None = None) -> int:
     # asked for the old name to stop showing up at all. Same arguments, same
     # handler, so behaviour and exit codes are identical; `args.command` is the
     # name actually typed, which is what the note in cmd_rename keys on.
-    p_revise = sub.add_parser("revise", help=argparse.SUPPRESS)
+    # No `help=argparse.SUPPRESS` here: on this Python (3.13.5) it is not
+    # what hides a subparser -- `_format_action` ignores SUPPRESS and prints
+    # the sentinel as the row's help text -- and `_hide_command` below is what
+    # actually drops the row and the usage entry (verified: with this parser
+    # built plainly, `refdes --help` shows neither `revise` nor `==SUPPRESS==`).
+    p_revise = sub.add_parser("revise")
     p_revise.description = p_rename.description
     _add_rename_arguments(p_revise)
     p_revise.set_defaults(func=cmd_rename)
