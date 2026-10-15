@@ -1176,8 +1176,9 @@ refdes init --standard none
 Presets ship with `hardware@1` and `hardware@2`; the `hardware@3` that `init`
 pins today (bundled, unreleased — see `CHANGELOG.md`'s `[Unreleased]`) declares
 no presets of its own, so `refdes init --preset design-debate` is a
-configuration error there: `preset 'design-debate' does not exist for
-hardware@3 (available: [])`, exit 2, nothing written. Add a preset to a project
+configuration error there: stderr prints `configuration error: preset
+'design-debate' does not exist for hardware@3 (available: []).`, exit 2,
+nothing written. Add a preset to a project
 after the fact with [`refdes standard add-preset`](#refdes-standard-add-preset-remove-preset).
 
 Refuses to run if `refdes-project.yaml` already exists in the current
@@ -1212,7 +1213,7 @@ An unknown type exits 1 with a did-you-mean suggestion, the same as an
 unknown type anywhere else in the tool. Outside a project it still works,
 falling back to the bundled standard. `refdes new` writes nothing itself —
 most commands that load a project refresh `.refdes/schema.json` (the list is
-under `refdes schema --json`), and this one deliberately does not.
+in the `refdes schema --json` section below), and this one deliberately does not.
 
 ---
 
@@ -1298,12 +1299,15 @@ standard add-preset'` names the way back.
 Both exit 2 without touching the config on a name that isn't a usable
 change: `add-preset` on a preset already selected, `remove-preset` on one
 that isn't, and either on a name that doesn't exist at the pinned version.
-Both also exit 2 when `standard.presets:` is written in block-list style
-(one item per line) rather than `presets: [...]`: the edit is a text
-substitution on the flow list, and the tool refuses to guess at block
-structure — `configuration error: could not find a 'presets: [...]' list to
-edit in refdes-project.yaml -- if standard.presets: is written in block-list
-style, edit it by hand`.
+`remove-preset` also exits 2 when `standard.presets:` is written in
+block-list style (one item per line) rather than `presets: [...]`: the edit
+is a text substitution on the flow list, and the tool refuses to guess at
+block structure — `configuration error: could not find a 'presets: [...]'
+list to edit in refdes-project.yaml -- if standard.presets: is written in
+block-list style, edit it by hand`. `add-preset` checks the name first (the
+two name-check messages above), and with the bundled standards — one preset
+per version, none at `hardware@3` — every add on a block-list project is
+stopped by a name check before the list edit is ever attempted.
 
 ---
 
@@ -2240,7 +2244,7 @@ python -m http.server -d _site 8000
 | `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, kept-copy flag, resolved sections, the pinned document's page count and the digest that count was taken from); written by `refdes fetch`, and by `refdes serve` when an editor accept pins a source value (`docs/design/editor-source-picker.md` §4). Every write is a read-modify-write inside the project's cross-process write lock |
 | `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes rename`, `refdes calc-rewrite` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename or a spelling-only rewrite |
 | `.refdes/keys-adopted.yaml` | **yes** | Adoption marker written once by `refdes keys adopt`; its presence is what makes future stamps, seals and membership manifests use key-keyed storage |
-| `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by most commands that load the project in a writable tree (see `refdes schema --json` for the list). `refdes init` puts it in the project's `.gitignore` |
+| `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by most commands that load the project in a writable tree (the list is in the `refdes schema --json` section of this page). `refdes init` puts it in the project's `.gitignore` |
 | `.refdes/sealing-optin.json` | **no, gitignored** | The set of opt-back-in types the `check`/`build` sealing note has already announced (run-6a F10); rewritten on writable runs whenever the announced set changes — including the run that removes the overlay, which prints no note. A refused write is silent and best-effort: unlike `schema.json`'s, whose refusal is a counted warning, this record's adds no warning (the note's no-count contract) — the note just prints again next run. Per-checkout state, like
 `schema.json`: the record is gitignored, so a fresh clone — CI included — starts
 unannounced and prints the note on its first writable run. `refdes init` puts it

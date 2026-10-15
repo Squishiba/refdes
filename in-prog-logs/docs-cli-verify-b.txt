@@ -150,3 +150,25 @@ REVIEW ROUND (e0b29969, CHANGES REQUESTED @ 9a82f59)
   as WRONG 5; VERIFIED 78 / WRONG 5 / NOT CHECKED 3.
 - serve stays out of the writer list (disclosed, not probed); NOT CHECKED
   items unchanged; no changelog fragment (docs-only).
+
+REVIEW ROUND 2 (94806cb4, CHANGES REQUESTED @ 066656b)
+- F1 (block-list message attributed to add-preset): agreed, fixed. Re-proved
+  on a block-list hardware@2 project: `add-preset design-debate` ->
+  "preset 'design-debate' is already selected", `add-preset nope` ->
+  "preset 'nope' does not exist for hardware@2 (available:
+  ['design-debate']).", both exit 2 -- the name checks fire first and with
+  bundled standards (one preset per version) add-preset never reaches the
+  list-edit refusal; only `remove-preset` prints the quoted
+  "could not find a 'presets: [...]' list to edit" message (re-proved, exit
+  2 verbatim). Paragraph now attributes it to remove-preset and explains
+  add-preset's door.
+- F2 (PR body count): agreed, metadata-only. Body said WRONG: 4; the
+  merge_types rename sample fix makes it 5. Body updated via gh pr edit.
+- F3 (nits): agreed, fixed. The init quote now includes the
+  `configuration error: ` prefix and trailing period (verbatim stderr,
+  matching the block-list quote's convention); the two
+  "see/under `refdes schema --json` for the list" pointers say
+  "the list is in the `refdes schema --json` section" (the JSON document
+  itself has no command list).
+- No code changes in the review round -> no new tests; full suite re-run as
+  the gate.
