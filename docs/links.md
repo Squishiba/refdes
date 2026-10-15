@@ -58,6 +58,13 @@ is readable context that the tool refreshes automatically when the target item
 is renamed: on the next writable load, a stale `OLD-ID@key` becomes
 `NEW-ID@key`.
 
+When you do need to write the `ID@key` half by hand — a merge of items files
+needs composite pins, because a bare id anchors on the tip and collides — the
+key is printed by `refdes ls --keys` (its own column), by `refdes thread
+<ref> --keys` (the whole thread, composite form, on the header line) and per
+entry in `refdes thread <ref> --json`, all of it the same value the index
+payload reports as `items[].key`.
+
 This expansion and refresh is **suppressed by `--no-write`** (the global flag,
 placed before the subcommand), which makes the load read-only: bare references
 stay bare, stale display halves are not refreshed, and no source files are
