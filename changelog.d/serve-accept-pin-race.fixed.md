@@ -1,10 +1,11 @@
-- A conflicting `refdes serve` save of a source-value accept no longer
-  deletes the pin of a *successful* accept of the **same** key, and a
-  successful accept's pin now survives a *conflicting* accept that fails
-  inside its gate. The
-  `serve-accept-conflict-keeps-other-writers-pin` compare
-  (`_LockfileWrite.rollback` restores only while the lockfile still holds
-  exactly the bytes this writer wrote) cannot see this spelling of the race:
+- The two-file transaction behind a `refdes serve` save of a source-value
+  accept (`pin` with `set_body`) now holds under concurrent accepts of the
+  same key: a loser's rollback no longer erases the pin a winner of the
+  **same** key has adopted, and a winner's pin no longer disappears from
+  under the body whose gate passed over it. The byte compare
+  `_LockfileWrite.rollback` gained for #182 -- restore only while the
+  lockfile still holds exactly the bytes this writer wrote --
+  cannot see this spelling of the race:
   two accepts of the same key stage the same bytes, so the winner's own
   lockfile write is a no-op, the file still holds exactly the *loser's*
   bytes, and the loser's late revision check then compares them to nothing.
@@ -43,9 +44,16 @@
   project lock across the candidate gate, which
   `docs/design/editor-source-picker.md` §4 declines for the seconds it
   would idle every other lock-taking writer; the tree question is answered
-  under the lock instead, and a read-only parse of the project on the
-  refusal path is the accepted cost. Pinned by
+  under the lock instead, and the accepted costs are the work the lock now
+  sections: `_accept_pins` snapshots the project's naming lines -- one
+  authorized walk of its `source()` lines -- inside the write lock on every
+  accept, and the rollback re-parses the tree on the refusal path. Five
+  outcomes of the final-section re-check (lockfile unreadable, lockfile
+  unparseable, a source file whose hash has moved, a failed replace, a lock
+  that cannot be taken) refuse a save that has already passed its gate,
+  both files as they were. Pinned by
   `tests/test_serve_sources_accept.py::test_a_conflicting_identical_accept_does_not_unpin_the_save_that_adopted_it`,
   `tests/test_serve_sources_accept.py::test_a_rolled_back_accept_does_not_erase_a_pin_adopted_over_a_pre_named_key`,
+  `tests/test_serve_sources_accept.py::test_a_rollback_that_deleted_our_pin_inside_the_gate_is_reapplied_before_the_body`,
   and
-  `tests/test_serve_sources_accept.py::test_a_rollback_that_deleted_our_pin_inside_the_gate_is_reapplied_before_the_body`.
+  `tests/test_serve_sources_accept.py::test_a_gate_passed_save_is_refused_when_the_lockfile_cannot_be_repaired_midflight`.

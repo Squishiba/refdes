@@ -175,3 +175,62 @@ module docstring carries both; changelog fragment rewritten and renamed to
 serve-accept-pin-race.fixed.md.
 
 Status: finished, amended into the branch commit.
+
+=======================================================================
+PHASE 3 -- PR #240 review round (chunk 1 CHANGES REQUESTED, 52191570;
+chunk 2 APPROVE, 9f0d57e9), 2026-10-15, Qwen3.8-Flash-Next
+
+No code defect found by the review; findings were documentation
+accuracy. Addressed:
+
+1 (Medium, docs/design/editor-source-picker.md + serve/edit.py docstring):
+the "Two locks" note said the final section re-checks and re-applies the
+pins; it never said the save can be REFUSED there, and step 6 still read
+"Pass -> write the body". Both fixed: step 6 now says pass -> re-check
+under the project lock, put the pins back, **or refuse**; the note names
+the five refusal outcomes (lockfile unreadable, unparseable, source-file
+hash moved, failed replace, lock unavailable) and states the posture:
+both files stay as found, a gate-passed save can come back Refused. The
+module docstring carries the same clause. New deterministic regression
+on the reachable spelling:
+test_a_gate_passed_save_is_refused_when_the_lockfile_cannot_be_repaired_midflight
+(gate judged clean, then a cooperating rollback deletes the pin AND the
+source file's hash moves -- the re-stage is fetch's extraction under
+fetch's policy, so fetch's own "changed since it was pinned" refusal is
+returned, and the assertions pin that both files are exactly as the
+refusal found them, body never landed).
+2 (Low, §4 + changelog fragment): the lock-held cost was framed as
+refusal-path only; `_accept_pins` in fact walks the snapshot's source()
+lines inside the write lock on EVERY accept. Both texts now say so
+(step 4's naming-lines snapshot on every accept; step 6's tree re-parse
+on the refusal path; both bounded walks of the tree fetch walks; gate
+stays outside).
+3 (Low, changelog fragment): the fragment's opening was near-verbatim
+the sibling fragment's first sentence and cited the sibling's FILENAME
+(`serve-accept-conflict-keeps-other-writers-pin`) as if it named the
+compare -- a pointer that dangles when release_cli deletes fragments.
+Opening rewritten; the compare is now named by what it is (the byte
+compare `_LockfileWrite.rollback` gained for #182).
+4 (Low, serve/edit.py): `_pins_referents_moved`'s bare
+`except Exception: return True` now carries the same
+`# noqa: BLE001 - decline, do not propagate` its sibling at the
+referents snapshot uses.
+5 (Low, this log): the probes the Verification sections cite
+(`.scratch/probe-wc001/`, `.scratch/probe-review-f12/`, and the
+reviewer's `.scratch/probe-accept-gate-window/`) live in the author's
+and the reviewer's worktrees' gitignored `.scratch/` -- that is where
+AGENTS.md puts them, and they are not committable. The durable,
+review-inspectable evidence is the committed tests: the three race
+regressions in tests/test_serve_sources_accept.py (all verified red on
+the pre-fix code, green on the fix), the two in
+tests/test_citations_lockfile_locking.py, and the new refusal-posture
+test. `in-prog-logs/current-main-rq01.tsv` row 16 is the WRITE-CONCUR-001
+ticket row in the shared main checkout; it is the report this branch
+answers, not a verification artifact.
+
+Tests: tests/test_serve_sources_accept.py 30 passed (new posture test
+included); ruff scoped to the two changed files: only the pre-existing
+E501 at edit.py:1380 (untouched create-item block). Docs-only + one
+comment + one test; F1/F2 fixes untouched.
+
+Status: finished, new head pushed to PR #240.

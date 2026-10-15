@@ -50,7 +50,9 @@ read them named, in which case the file has passed to a save that landed
 during the gate and the rollback leaves it alone (§4). The window is checked
 from both sides: the accept whose gate passed over a cooperating writer's pin
 re-asserts, under the same lock that writes its body, that the pin is still on
-disk, and puts it back if a cooperating rollback deleted it mid-gate (§4).
+disk, and puts it back if a cooperating rollback deleted it mid-gate -- or
+refuses the save, both files as they were, if the pins cannot be put back
+(§4).
 Both of those
 lockfile mutations -- the read-modify-write that pins and the read-compare-
 restore that undoes it -- are one section under the project's cross-process
@@ -671,7 +673,7 @@ def _pins_referents_moved(root: str, watched: frozenset, referents: tuple | None
             os.path.join(root, CONFIG_NAME), require_ids=False, write=False
         )
         uses = citations_mod.collect_source_uses(project)
-    except Exception:
+    except Exception:  # noqa: BLE001 - decline, do not propagate
         return True
     disk = tuple(
         sorted(

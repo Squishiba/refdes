@@ -521,6 +521,56 @@ def test_a_rollback_that_deleted_our_pin_inside_the_gate_is_reapplied_before_the
     assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
 
 
+def test_a_gate_passed_save_is_refused_when_the_lockfile_cannot_be_repaired_midflight(
+    served, monkeypatch
+):
+    # The re-check's refusals are §4's refusals: when the final section finds
+    # the lockfile no longer holds this accept's pins, it re-stages them
+    # under fetch's own policy -- and fetch's policy can say no. A save that
+    # has already passed its gate comes back `Refused`, and both files stay
+    # exactly as the refusal found them: no half-transaction, no body under
+    # a missing pin. The reachable spelling: the cooperating accept whose
+    # rollback deletes our pin is also the one that moves the source file
+    # out from under the hash this accept read -- the refusal fetch itself
+    # makes, in fetch's own words, pointing at the terminal.
+    _app, client, root = served
+    item_file = root / "items" / "decisions.yaml"
+    lock_file = root / ".refdes" / "citations.yaml"
+    pre_accept_bytes = lock_bytes(root)
+    original_gate = edit_mod._blocking_diagnostics
+    as_found = {}
+
+    def cooperator_rolls_back_and_moves_the_file(before, after, item, op):
+        # The gate judges the candidate as it was; the cooperating writers
+        # land after it, before the final section: the pin this gate passed
+        # over is gone, and the file the pins are staged from is not the
+        # file the hash in the record names.
+        blocking = original_gate(before, after, item, op)
+        if not blocking:
+            lock_file.write_bytes(pre_accept_bytes)
+            (root / CSV_PATH).write_text(
+                CSV.replace("eff,0.93", "eff,0.61"), encoding="utf-8", newline=""
+            )
+            as_found["item"] = item_file.read_bytes()
+            as_found["lock"] = lock_file.read_bytes()
+        return blocking
+
+    monkeypatch.setattr(
+        edit_mod, "_blocking_diagnostics", cooperator_rolls_back_and_moves_the_file
+    )
+    status, payload = accept(
+        client, root, text=calc_body(RAIL, EFF), pins=pin("eff", name="eff")
+    )
+    assert status == 422, payload
+    assert payload["kind"] == "refused"
+    assert "changed since it was pinned" in payload["reason"]
+    assert f"refdes fetch --update --path {CSV_PATH}" in payload["reason"]
+    # the refusal found the files in the state the cooperating writers left,
+    # and left them there -- not the pre-accept state, not a half-write
+    assert item_file.read_bytes() == as_found["item"]
+    assert lock_file.read_bytes() == as_found["lock"]
+
+
 def test_a_rolled_back_accept_does_not_erase_a_pin_adopted_over_a_pre_named_key(
     tmp_path, monkeypatch
 ):
