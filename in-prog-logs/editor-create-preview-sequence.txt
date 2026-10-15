@@ -1,0 +1,76 @@
+# EDITOR-API-011: stale create-preview response overwrites newer input
+
+Branch: `fix/editor-create-preview-sequence-20261015`, base `3793ac9`
+(current main, includes #256 workspace form — preserved: the workspace
+select/param wiring in `create.js` is untouched).
+
+## Finding
+
+`src/refdes/serve/static/create.js` `refreshPreview` fired an unawaited
+`/api/create/preview` on every id/destination keystroke and type/board/
+workspace change, with no in-flight/sequence guard. Its continuation wrote
+`idPreview.textContent`/`className` and `destInput.value` unconditionally,
+so a late response for superseded input could land last and show a stale
+"would be" id / stale destination suggestion — and a late *failure* stamped
+"preview failed" over the newest request's good answer. Baseline evidence
+was CODE_READ (no DOM harness existed); this task added one.
+
+## Reproduction (red baseline)
+
+`tests/test_editor_create_preview_sequence.py` drives the REAL `create.js`
+headless under node (same posture as `test_editor_create_workspace.py`:
+FakeNode DOM, real `api.js`), with the fetch stub handing preview requests
+DEFERRED resolvers so the test pins completion order. First run against the
+unmodified `create.js`:
+
+    assert results["afterStale"]["id"] == "would be REQ-042"
+    E  AssertionError: assert 'would be REQ-001' == 'would be REQ-042'
+
+i.e. the late initial preview (REQ-001, fired before the id keystroke)
+overwrote the badge the newer response (REQ-042) had just written. The same
+harness (extracted via ast from the final test file) run against the
+unmodified HEAD `create.js` in `.scratch/editor-api-011/red-static/` shows
+all three failure modes:
+
+    afterNewest        {'id': 'would be REQ-042', 'dest': 'items/explicit.yaml'}  # control writes
+    afterStale         {'id': 'would be REQ-001', 'dest': 'items/old.yaml', ...}  # id AND dest overwritten
+    afterStaleFailure  {'id': 'preview failed: boom', 'cls': 'badge bad'}          # stale error stamps
+    afterTypeChange    {'id': 'would be REQ-001'}                                   # previous type's late id wins
+    controlFreshWrite  {'id': 'would be REQ-007', 'dest': 'my/dest.yaml'}          # fresh path fine
+
+(One harness bug found en route: asserting `"bad" not in cls` matches the
+"bad" inside "badge" — assertions now use exact class equality.)
+
+## Fix (minimal, one JS seam)
+
+`create.js` only: a form-scoped `previewSeq` counter; each `refreshPreview`
+takes `seq = ++previewSeq` and both continuations (success and catch) return
+without writing when `seq !== previewSeq`. This guards all three write sites
+(id badge text, badge class, destination suggestion) against any superseded
+response/error, including the type/board/workspace-change overlaps. No
+AbortController (no request cancellation is needed — only the writes are
+the problem), no changes to serve/edit.py, api.py, or the workspace rows
+from #256.
+
+## Verification
+
+- New harness, green at fix: stale success (id + destination + class),
+  stale failure (no banner stamp), late answer after type change, plus
+  controls (newest response writes badge + destination suggestion; a
+  user-typed destination is never overwritten).
+- Focused suites: `test_editor_create_preview_sequence.py`,
+  `test_editor_create_workspace.py`, `test_editor_draft_mirror.py`,
+  `test_serve_static.py`, `test_serve_create.py`, `test_editor_link_undo.py`,
+  `test_serve_drafts_corruption.py` → 144 passed;
+  `test_serve_editor_e2e.py` → 2 passed.
+- `test_serve_static.py::test_served_js_parses_as_es2020_modules` caught a
+  lone apostrophe in the new comment (its naive balance checker opens a
+  string at every `'`, so existing comments avoid apostrophes) — comment
+  reworded, green.
+- No Python touched → no ruff run.
+
+## Finish state
+
+FINISHED. Files: `src/refdes/serve/static/create.js` (+11),
+`tests/test_editor_create_preview_sequence.py` (new),
+`changelog.d/editor-create-preview-sequence.fixed.md`, this log.

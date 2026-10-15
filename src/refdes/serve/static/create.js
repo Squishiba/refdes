@@ -136,13 +136,23 @@ export function createForm(initial = {}) {
       }
     }
 
+    // Requests overlap (one per keystroke), and network completions arrive in
+    // any order: each refresh takes the next sequence number and its
+    // continuation -- success AND failure -- writes only while it is still
+    // the newest, so a late answer for superseded input can never stamp a
+    // stale "would be" id, a stale destination suggestion, or a stale failure
+    // badge over the answer of the newest request.
+    let previewSeq = 0;
+
     async function refreshPreview() {
+      const seq = ++previewSeq;
       const params = new URLSearchParams({ type: typeSelect.value });
       if (boardSelect && boardSelect.value) params.set('board', boardSelect.value);
       if (workspaceSelect && workspaceSelect.value) params.set('workspace', workspaceSelect.value);
       if (idInput.value.trim()) params.set('id', idInput.value.trim());
       try {
         const prev = await api(`/api/create/preview?${params.toString()}`);
+        if (seq !== previewSeq) return;
         if (prev.id) {
           idPreview.textContent = `would be ${prev.id}`;
           idPreview.className = 'badge id-preview';
@@ -155,6 +165,7 @@ export function createForm(initial = {}) {
           destInput.placeholder = prev.destination;
         }
       } catch (err) {
+        if (seq !== previewSeq) return;
         idPreview.textContent = `preview failed: ${err.message}`;
         idPreview.className = 'badge bad';
       }
