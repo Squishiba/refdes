@@ -77,3 +77,22 @@ FOLLOW-UP (review of 1254e9c): two lifecycle gaps in the recovery flow
   through the same node harness; discard-survives uses a 3-process
   reload chain). Both gap tests fail against 1254e9c, pass now.
   Full suite 3615 passed, 2 skipped; test_serve_static 49 green.
+
+PR PREP: rebased onto origin/main f7df34d (PR #221, EDITOR-API-002, is
+merged). #221 replaced setDraftRevision with dropAppliedOp in drafts.js
+adjacent to this branch's export-region additions -- rebase was clean,
+no textual conflict. Semantics checked on the merged file:
+dropAppliedOp (getDraft -> drop -> revision -> one persist) composes
+with load()'s recovery re-arm (dropAppliedOp's getDraft hits the same
+load that re-arms a corrupt mirror); setDraftRevision is gone from
+drafts.js and editor.js imports dropAppliedOp. Added a combined test
+test_applied_op_drop_and_corrupt_recovery_coexist: after corruption is
+detected, an edit + dropAppliedOp leaves only the refused op in the
+mirror at the new revision, and the recovery copy stays discoverable
+(banner + prompt) across a reload. Static-source paths checked: both
+test files resolve drafts.js from tests/../src (worktree src), not the
+sibling editable install (python -c "import refdes" points at
+/home/jorb/work/refdes -- only server-driven tests are affected, these
+are file/node-driven). Tests: 14+2+49 = 64 green on the JS/serve-static
+set; full suite 3700 passed, 2 skipped. Branch commits 4110fa2/05128d3
+(+ this prep commit) carry the Qwen Co-authored-by trailer.

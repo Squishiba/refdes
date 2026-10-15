@@ -109,6 +109,12 @@ if (scenario === 'edited') {
   drafts.setDraftField(handle, 'title', 'Y');
   result = { corrupted: result, edited: snapshot() };
 }
+if (scenario === 'applied') {
+  drafts.setDraftField(handle, 'title', 'Y');
+  drafts.setDraftBody(handle, 'new body');
+  drafts.dropAppliedOp(handle, { op: 'set_field', field: 'title' }, 'r8');
+  result = { corrupted: result, applied: snapshot() };
+}
 if (scenario === 'editedDiscard') {
   const button = body.children[0] && body.children[0].findButton();
   drafts.setDraftField(handle, 'title', 'Y');
@@ -284,6 +290,30 @@ def test_discard_after_editing_keeps_the_newer_draft(tmp_path):
     assert second["banners"] == []
     assert second["prompted"] is True  # the newer unsaved draft still arms the prompt
     assert json.loads(second["storage"][DRAFT_KEY])["fields"] == {"title": "Y"}
+
+
+def test_applied_op_drop_and_corrupt_recovery_coexist(tmp_path):
+    """#221's dropAppliedOp and the corrupt-mirror recovery share one mirror:
+    the applied op leaves the mirror (memory and storage) at the new
+    revision, the refused op stays pending, and the recovery copy keeps
+    riding along, discoverable on every reload."""
+    first = _run(tmp_path, "applied", {DRAFT_KEY: TRUNCATED})
+    applied = first["applied"]
+    assert applied["draft"]["fields"] == {}, "the applied op stayed pending"
+    assert applied["draft"]["body"] == "new body"
+    assert applied["draft"]["revision"] == "r8"
+    assert applied["isDirty"] is True
+    mirror = json.loads(applied["storage"][DRAFT_KEY])
+    assert mirror["fields"] == {} and mirror["revision"] == "r8"
+    assert applied["corrupt"] is not None and applied["corrupt"]["raw"] == TRUNCATED
+    assert applied["storage"][CORRUPT_KEY] == TRUNCATED
+    assert applied["prompted"] is True
+    second = _run(tmp_path, "corrupt", applied["storage"])
+    assert second["draft"]["body"] == "new body"
+    assert second["draft"]["revision"] == "r8"
+    assert second["corrupt"] is not None and second["corrupt"]["raw"] == TRUNCATED
+    assert len(second["banners"]) == 1
+    assert second["prompted"] is True
 
 
 def test_unreachable_storage_still_costs_persistence_not_editing(tmp_path):
