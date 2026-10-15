@@ -203,8 +203,14 @@ function verbPicker(item, handle, verb, spec, onChange) {
       pickers.appendChild(line);
     }
     if (!shown) pickers.appendChild(el('p', 'muted', 'no candidates match'));
-    if (totalFound !== null && all.length < totalFound)
-      pickers.appendChild(el('p', 'muted', `showing the first ${all.length} of ${totalFound} targets -- the filter searches only these`));
+    // Count what is pickable, not what was fetched: the self row (at most
+    // one, the item under edit) is in the fetched page and in the server
+    // total, and is offered by neither -- the counts must not claim it.
+    const selfRows = all.filter(isSelf).length;
+    const offered = all.length - selfRows;
+    const pickable = totalFound === null ? null : totalFound - selfRows;
+    if (pickable !== null && offered < pickable)
+      pickers.appendChild(el('p', 'muted', `showing the first ${offered} of ${pickable} targets -- the filter searches only these`));
   }
 
   let all = [];

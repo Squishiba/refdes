@@ -24,10 +24,13 @@ Two halves, one per side of the seam:
   `target_types: []`, and `POST .../edit` applies an add of any type.
 - Node, the REAL served modules (red before the fix): with `target_types: []`
   the picker must fetch the unfiltered list and offer every item as a
-  candidate -- except the item being edited, which the picker never offers
-  (a self-link is not a choice to make from a list) -- and clicking Add
-  must draft the add; a verb with declared types must keep fetching exactly
-  those types and offering exactly their items.
+  candidate, and clicking Add must draft the add; a verb with declared
+  types must keep fetching exactly those types and offering exactly their
+  items. A SEPARATE, deliberate picker choice from the PR review is pinned
+  by its own assertion below: the picker never offers the item under edit.
+  That is NOT part of this ticket's empty-list contract -- the server
+  accepts a self-link wherever the verb permits one -- it is a picker-side
+  product decision, tested here because links.js is one file.
   The list API caps at a page of rows (`filters.py`: default 500, max 5000),
   so the picker must ask for the full page -- a 600-item project must offer
   all 600, not a silently truncated 500 -- and must say so honestly when
@@ -258,8 +261,9 @@ globalThis.document = {
 globalThis.window = { addEventListener: () => {} };
 
 // Three items, one per type: an unrestricted picker must offer ALL of
-// them except the item under edit; a verb declaring `requirement` must
-// offer exactly REQ-001.
+// them (never the one under edit -- a separate review decision, see the
+// module docstring); a verb declaring `requirement` must offer exactly
+// REQ-001.
 const ALL = [
   { id: 'REQ-001', handle: 'REQ-001', key: 'k1', title: 'Rail', type: 'requirement' },
   { id: 'DEC-001', handle: 'DEC-001', key: 'k2', title: 'Buck', type: 'decision' },
@@ -329,8 +333,11 @@ function findMuted(editor) {
 const results = {};
 
 // -- unrestricted: a verb declared with `target_types: []` must offer every
-//    item (the server accepts a link to any of them) EXCEPT the item under
-//    edit, and Add must draft.
+//    item (the server accepts a link to any of them), and Add must draft.
+//    The item under edit is LOG-001, present in the universe by handle, id,
+//    and key: offering it back as a target is the deliberate picker choice
+//    this scenario also pins (see the module docstring: a review decision,
+//    not the empty-list contract).
 {
   const handle = 'LOG-001';
   UNIVERSE = ALL;
@@ -412,6 +419,33 @@ const results = {};
   results.cappedNotice = findMuted(editor);
 }
 
+// -- capped AND the item under edit in the fetched page: the notice counts
+//    what is pickable, not what was fetched. The self row is in the page
+//    (selfRows fetched) and in the server total (selfRows pickable), and
+//    offered by neither, so it must be in neither count (chunk 1 nit).
+{
+  const handle = 'LOG-001';
+  UNIVERSE = [
+    ALL[2],
+    ...Array.from({ length: 6000 }, (_, i) => ({
+      id: `REQ-${String(i + 1).padStart(5, '0')}`,
+      handle: `REQ-${String(i + 1).padStart(5, '0')}`,
+      key: `q${i}`, title: `R${i}`, type: 'requirement',
+    })),
+  ];
+  fetchCalls.length = 0;
+  const editor = createEditor(
+    editItem(
+      { blocked_by: { editable: true, target_types: [], targets: [] } },
+      { id: 'LOG-001', key: 'k3' }
+    ),
+    handle, () => {}, () => {},
+  );
+  await tick(100);
+  results.cappedSelfCount = findAll(editor.node, 'link-add').length;
+  results.cappedSelfNotice = findMuted(editor);
+}
+
 console.log(JSON.stringify(results));
 """
 
@@ -440,10 +474,17 @@ def test_the_picker_offers_every_item_for_an_unrestricted_verb():
         "DEC-001 — Buck",
         "REQ-001 — Rail",
     ], (
-        "the picker offered no candidates (or offered the item under edit) "
-        "for a verb the server accepts to every type -- an empty target "
-        "list is unrestricted, not empty (EDITOR-API-006), and the picker "
-        "must not offer a self-link"
+        "the picker offered no candidates for a verb the server accepts to "
+        "every type -- an empty target list is unrestricted, not empty "
+        "(EDITOR-API-006)"
+    )
+    # The self-exclusion is a deliberate picker-side product decision from
+    # the PR review (the server accepts a self-link wherever the verb
+    # permits one, so this is NOT the empty-list contract; see the module
+    # docstring): the picker must not offer the item under edit.
+    self_offered = [t for t in results["unrestrictedCandidates"] if "LOG-001" in t]
+    assert self_offered == [], (
+        f"the picker offered the item under edit as a target: {self_offered!r}"
     )
     assert results["unrestrictedAdd"] == {"blocked_by": ["REQ-001"]}, (
         "clicking Add on an unrestricted verb's candidate must draft the add"
@@ -481,4 +522,16 @@ def test_the_picker_offers_every_item_for_an_unrestricted_verb():
         "a truncated candidate list must say so, and say it honestly: the "
         "filter only searches the fetched rows, so a notice that suggests "
         "filtering reaches the rest is a false remedy"
+    )
+
+    # capped AND the self row inside the fetched page (chunk 1 nit): the
+    # counts are of what is PICKABLE, not of what was fetched. 5000 rows
+    # fetched include the item under edit (offered: 4999); 6001 rows total
+    # include it (pickable: 6000).
+    assert results["cappedSelfCount"] == 4999
+    assert results["cappedSelfNotice"] == [
+        "showing the first 4999 of 6000 targets -- the filter searches only these"
+    ], (
+        "the notice must not count the self row in fetched or total: it is "
+        "offered by neither side"
     )

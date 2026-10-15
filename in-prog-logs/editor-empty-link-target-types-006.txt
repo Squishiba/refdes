@@ -149,3 +149,24 @@ fails the node spawn, which reads like a harness crash).
 
 Round-2 note: the .scratch/ probes are gitignored scratch, not PR-
 reproducible; the in-test HTTP pins carry the equivalent evidence.
+
+## Round 4: split review -- chunk 1 APPROVE (d15966f), chunk 2 CHANGES REQUESTED (6519751a)
+
+1. Chunk 2 Low (test asserts self-exclusion beyond the ticket): KEPT by
+   orchestrator decision -- an earlier review round asked for it. Answered
+   in a PR comment: the server accepts a self-link wherever the verb
+   permits one (verified live round 2: the gate accepts, cycle rules
+   enforce at save), so the exclusion is a picker-side product decision,
+   NOT the empty-list contract. The test docstring now says exactly that,
+   the contract assertion is pure again, and the self-check is a dedicated
+   assertion.
+2. Chunk 1 nit (capped notice counted the fetched page incl. self):
+   FIXED -- renderCandidates subtracts the self row from fetched and total
+   (at most one row), so the notice counts what is pickable. New scenario:
+   capped AND self in the fetched page -> "showing the first 4999 of 6000
+   targets -- the filter searches only these".
+3. PR body was stale (chunk 1 Low, docs): rewritten via gh pr edit to
+   describe everything the diff does -- unfiltered fetch, PICKER_LIMIT=5000
+   on every picker query, the honest capped notice, self-exclusion on both
+   paths, and the utf-8 test decode.
+Rebased onto main 8ed01c5. No edit.py touched.
