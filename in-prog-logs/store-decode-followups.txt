@@ -1,0 +1,184 @@
+WORK LOG — store-decode-followups (branch store-decode-followups)
+Task: #212 follow-up lows (5 items). Started on clean tree at 509a487.
+
+Probe setup: .scratch/probe1 — minimal hardware@3 project (items/log.yaml,
+two log items, follows: edge), run via .scratch/probe1/run.py with
+PYTHONPATH=$PWD/src (the venv's refdes binary points at the main checkout,
+so it is not used). Captured LOG-001's snapshot via writable build, then
+corrupted .refdes/history/objects/<digest>.yaml with b'\xff\xfe\x00garbage'.
+
+ITEM 1 (changelog.d/store-read-decode-errors.fixed.md lines 5-6) — VERIFIED
+STILL APPLIES, FIXED.
+Probes against the corrupt snapshot (all with this worktree's code):
+- refdes build: exit 0, silent. No pending capture -> object never read.
+- refdes check: exit 0, silent.
+- refdes serve: starts, / and /preview/log-001.html and summary.html all
+  200, no traceback. Its loading is side-effect-free; rendering reads
+  events (capture_index), not the object file.
+- refdes history capture LOG-001 (same content, digest exists on disk):
+  exit 1, "error: <path>: object file is not valid UTF-8 (...)" — the clean
+  HistoryError. This is save_object (history.py:261-262) reading the
+  existing file before refusing to overwrite.
+- history capture of CHANGED content: exit 0 (writes a new digest, corrupt
+  file untouched). Re-capture with the event already present: exit 0
+  no-op ("already captured; nothing was written") — capture_followed
+  returns at the event-exists check (history.py:617-618) before save_object.
+- history redact reads object files in binary ("rb", history.py:996) —
+  unaffected.
+So "a corrupt snapshot now fails `refdes build`, `refdes history`, and
+every capture" is false for build/check/serve and for captures that do not
+re-save that exact digest. Narrowed the fragment to: the captures that must
+save that snapshot fail with the HistoryError; build/check/serve with no
+capture pending never read it.
+
+ITEM 2 (AST gate in tests/test_history.py) — VERIFIED STILL APPLIES, FIXED.
+Old gate matched only ast.Name yaml_safe_load calls in history.py. history.py
+itself has: bare call line 324 + open(encoding) line 323 (both inside
+_read_store_file, lines 306-328), binary rb/wb opens in redact (988/996/1022,
+no encoding kwarg -> legit, gate stays quiet), no attribute-form call (the
+attribute form really occurs at tests/test_history.py:244, the spelling the
+gate must also catch). Widened the gate: callee() resolves Name.id AND
+Attribute.attr; flags yaml_safe_load (either spelling) and open(...) with an
+encoding= keyword; helper-scoped assert unchanged. No existing history.py code
+flagged (all hits inside helper), so no allowlist entries needed.
+Sabotage: appended an uncalled def with `parse.yaml_safe_load(open(...,
+encoding="utf-8"))` to history.py -> gate FAILED naming history.py:1131;
+removed, 29/29 pass. (First sabotage attempt put the call at module level and
+crashed the import with NameError before the gate ran — that detects the
+tamper too, just noisily; the def form fails the gate itself.)
+
+ITEM 3 (tests/test_seal.py corrupt-seal test) — VERIFIED STILL APPLIES, FIXED.
+test_a_corrupt_seal_file_is_a_clean_cli_error_not_a_traceback pinned `check`
+only; added the same run+pins for `build` (exit 2, "configuration error",
+file named, "seal file is not valid UTF-8", no Traceback) and extended the
+docstring to say the claim covers check and build.
+
+ITEM 4 (src/refdes/imports.py:41-46) — VERIFIED STILL APPLIES, FIXED.
+Probe (.scratch/probe5b, project with imports: + \xff\xfe artifact):
+load_tree raised RAW UnicodeDecodeError — confirmed. Fix: added
+UnicodeDecodeError to the except tuple so it takes the same
+`import <name>: could not read <path>: ...` project.error. Test
+test_a_non_utf8_artifact_is_a_clean_read_error_not_a_traceback in
+tests/test_imports.py.
+Sabotage: reverted the except tuple -> test FAILED with the raw
+UnicodeDecodeError at codecs decode; restored, 65/65 in the three touched
+files pass.
+
+ITEM 5 (docs exit-code sentence) — DONE.
+docs/troubleshooting.md covers corrupt store files (citations lockfile decode
+entries, keys section). Verified the exit-code claims by probe (.scratch/
+probe5b): corrupt ledger + `refdes index` -> configuration error exit 2;
+corrupt baseline + `former-ids propose` -> exit 2; corrupt manifest +
+`keys adopt` -> configuration error (SchemaError handler = exit 2); corrupt
+citations.yaml + check -> 1 error, exit 1; corrupt keys-adopted.yaml +
+`keys adopt` -> refusal exit 1; seal exit 2 pinned by the (now widened)
+test_seal test. Added one sentence to the citations section of
+docs/troubleshooting.md (three postures: manifest/ledger/baseline/seal exit 2,
+lockfile check diagnostic exit 1, adoption-marker refusal exit 1 / "not
+adopted" elsewhere).
+
+CHANGELOG: changelog.d/import-non-utf8-artifact.fixed.md added (item 4,
+user-visible: a raw traceback became a clean project error). Rule applied
+per changelog.d/README.md: `<slug>.fixed.md`, bullet, no headings. Item 1's
+wording correction edits the EXISTING fragment (task: only item 4 is
+user-visible plus that correction).
+
+SUITE: (appended below after the run)
+
+SUITE (foreground, once, at the end): 3826 passed, 2 skipped in 324.31s,
+exit=0 (.scratch/suite.txt; no flakes — the known stale-token serve test
+passed in place). ruff check --select E9,F src tests: clean.
+docs-site/gen_examples.py --check: up to date. Task finished.
+
+============================================================
+FIX ROUND for PR #242 (review in paseo logs b1116fb, VERDICT
+CHANGES REQUESTED, one P3 finding)
+
+P3: docs/troubleshooting.md:566-570 "three exit-code postures" omits
+history-store errors. REPRODUCED (.scratch/probe6): corrupt
+.refdes/history/events/<id>.yaml + `refdes history redact LOG-001
+--confirm` -> "error: <path>: event file is not valid UTF-8 (...)",
+real exit 1 (first probe measured tail's exit through the pipe -- the
+reviewer's exit 1 is right).
+Other history subcommands, probed with the same corrupt event file:
+- history capture LOG-001: exit 0, "already captured; nothing was
+  written" -- capture() checks the derived-id event path (history.py:859
+  os.path.exists), never reads the store; a NEW manual capture (LOG-002)
+  also exits 0 (append_event only reads its own event path, absent).
+- history migrate-seals: exit 0, "no legacy seal files" -- migrate_seals
+  (history.py:1045-1127) has NO load_events call at all; never touches
+  the event store.
+- check/build with the corrupt event file: exit 0, WARNING
+  "edited-after-captured was not checked: the history store could not be
+  read (<path>: event file is not valid UTF-8 ...)" (lifecycle.py:739
+  swallow); index exit 0 (capture_index swallowed, render.py:682); the
+  read-only report at cli.py:1521 prints "(not checked: ...)"; a
+  load-time follows: edge capture swallows HistoryError (links.py:760)
+  and is silently skipped.
+Sentence rewritten: "one of four exit-code postures" (count fixed),
+history case added with the redact-1 / check+build-warning-0 /
+captures-ride-past / migrate-seals-never-touches breakdown, all claims
+probe-verified above.
+Docs tests: test_docs_anchors, test_docs_examples, test_schema_doc_key,
+test_standard_docs_complete, test_candidate_parts_doc: 31 passed.
+gen_examples --check: up to date. Suite: (below)
+
+SUITE (foreground, once): 3826 passed, 2 skipped in 309.27s, exit=0
+(.scratch/suite-round2.txt). Docs-only change; no sabotage needed
+(no behaviour fix).
+
+============================================================
+FIX ROUND 2 for PR #242 (review in paseo logs 8596964, P3):
+the per-subcommand list of which history commands die on a corrupt
+history file kept being incomplete -- replaced with the general rule.
+VERIFIED BEFORE WRITING (probes .scratch/probe6 + .scratch/probe7):
+- redact, corrupt event file: exit 1, "error: <events path>: event
+  file is not valid UTF-8 (...)" (redact decodes the event store).
+- capture, corrupt OBJECT file it must re-save (deleted the item's
+  captured event, corrupted its digest's object, `history capture
+  LOG-001`): exit 1, "error: <objects path>: object file is not valid
+  UTF-8 (...)" -- the reviewer's repro, reproduced.
+- capture with files it must read intact (derived-id no-op): exit 0.
+- redact with a corrupt object + intact events (probe7): exit 0 --
+  redact copies the doomed object in binary ("rb"), never decodes it.
+  That is why the sentence says "read and decode".
+- migrate-seals: no load_events in its body at all.
+check/build demotion to a warning (exit 0) re-probed round 1.
+Docs tests (anchors/examples/schema-doc/standard-docs/candidate-parts):
+31 passed. gen_examples --check: up to date. Docs only, no changelog
+fragment, no sabotage needed (no behaviour change). Suite: (below)
+
+SUITE (foreground, once): 3826 passed, 2 skipped in 303.73s, exit=0
+(.scratch/suite-round3.txt). Task finished.
+
+============================================================
+FIX ROUND 3 for PR #242 (review in paseo logs d4672a1, last round).
+(1) RENDERING: the posture paragraph was glued to the citations
+    entry (no blank line -> renders inside that entry's <p>). Blank
+    line added after "almost always the whole fix.".
+(2) LEDGER CLAIM: re-verified (.scratch/probe8, fresh project, keys
+    minted via refines link): corrupt .refdes/ids.yaml ->
+      check: exit 0, silent -- also with an item needing minting
+      build: exit 2 "configuration error: ... id ledger file is not
+             valid UTF-8"
+      index: exit 2
+    Sentence now says the manifest/baseline/seal are exit 2 and the
+    ledger is exit 2 "for the commands that read it -- `check` never
+    reads the ledger and rides past (exit 0)".
+(3) DUP EXIT CODE: "exits 1 (**exit 1**)" -> "exits with that error
+    (**exit 1**)".
+(4) OPEN GATE: detection extracted to _raw_read_calls() in
+    tests/test_history.py; open(..., encoding=...) now counts only in
+    READ modes (no mode arg, mode containing 'r', or '+' update modes;
+    w/a/x writes and 'rb' stay quiet). Negative test
+    test_the_open_half_of_the_gate_is_scoped_to_read_modes pins
+    [2, 6] for no-mode/'r+' flagged, 'w'/mode='a'/'rb' not. First
+    draft of the mode test caught a real bug in the new condition
+    ('r+' excluded by a w/a/x/+ test); fixed to test for 'r'/'+'.
+Docs tests: 31 passed. gen_examples --check: up to date. Suite: below
+
+SUITE (foreground, once): 3827 passed, 2 skipped in 310.47s, exit=0
+(.scratch/suite-round4.txt; 3827 = the new negative test). ruff E9,F
+clean. First suite run of this round caught the negative test's BFS
+ordering assumption (ast.walk is breadth-first) -> pinned sorted.
+Task finished.
