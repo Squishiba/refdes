@@ -239,6 +239,36 @@ def test_a_name_the_renderer_would_encode_is_reported_not_offered(tmp_path):
         app.stop()
 
 
+def test_an_ampersand_name_is_offered_and_the_reference_renders(tmp_path):
+    """IMAGE-ASSET-002: `&` is the one rewrite the renderer makes that the
+    build undoes -- the markdown src parses to the exact authored token, the
+    renderer escapes it to `&amp;` in the attribute, and the build decodes
+    that one entity layer back to the real file. So the picker offers the
+    name, and the exact line it hands over saves and renders."""
+    root = make_image_project(tmp_path, {"figures/a&b.png": PNG})
+    app, client = _serve(root)
+    try:
+        _status, payload = client.api_get("/api/images?item=REQ-001")
+        row = _rows(payload)["figures/a&b.png"]
+        assert row["insertable"] is True, row
+        assert row["markdown"] == "![a&b](../figures/a&b.png)"
+        _status, item = client.api_get("/api/item/REQ-001")
+        status, result = client.api_post(
+            "/api/item/REQ-001/edit",
+            {
+                "op": "set_body",
+                "text": row["markdown"],
+                "expected_revision": item["edit"]["file_revision"],
+            },
+        )
+        assert status == 200, result
+        assert result["kind"] == "applied"
+        _status, _headers, page = client.page("/preview/req-001.html")
+        assert b'<img src="assets/figures/a&amp;b.' in page
+    finally:
+        app.stop()
+
+
 def test_alt_text_is_the_filename_stem_and_never_empty(served):
     _app, client, root = served
     (root / "figures" / "chart.2026-09.png").write_bytes(PNG)

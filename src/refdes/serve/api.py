@@ -813,19 +813,24 @@ def referenceable(src: str) -> bool:
     """Whether the build could resolve `src` exactly as written.
 
     Markdown's renderer percent-encodes a destination it does not consider
-    URL-safe, and the build resolves the *rendered* `src` against the
-    filesystem without decoding it (`build._process_images` walks the HTML), so
-    a file whose name carries a space or a non-ASCII character cannot be
-    referenced by any spelling: `![a](<figures/thermal curve.png>)` renders a
-    src of `figures/thermal%20curve.png` and the lookup misses. Rather than
-    hand the author a reference the save would refuse, the picker reports the
-    file and says why it is not offerable.
+    URL-safe, and the build decodes only the HTML attribute entities
+    markdown-it's escaper emitted (`build.image_src_from_html`), never a
+    percent-escape, so a file whose name carries a space or a non-ASCII
+    character cannot be referenced by any spelling: `![a](<figures/thermal
+    curve.png>)` renders a src of `figures/thermal%20curve.png` and the
+    lookup misses. Rather than hand the author a reference the save would
+    refuse, the picker reports the file and says why it is not offerable.
 
-    `quote(src) == src` is the conservative direction: the renderer's encoder
-    is narrower than `quote`, so a name refused here can still work when typed
-    by hand (`a(b).png`, `a#b.png`), while a name accepted here is one no
-    encoder rewrites."""
-    return urllib.parse.quote(src, safe="/") == src
+    `&` is the one rewrite the build undoes: the renderer escapes it to
+    `&amp;` in the attribute, `image_src_from_html` decodes exactly that, so
+    a name like `a&b.png` resolves and is offerable.
+
+    `quote(src, safe="/&") == src` is the conservative direction: the
+    renderer's encoder is narrower than `quote`, so a name refused here can
+    still work when typed by hand (`a(b).png`, `a#b.png`), while a name
+    accepted here is one no encoder rewrites beyond the `&amp;` the build
+    decodes back."""
+    return urllib.parse.quote(src, safe="/&") == src
 
 
 def _image_row(project: Project, item: Item, full_path: str) -> dict | None:

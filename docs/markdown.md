@@ -109,6 +109,13 @@ an ordinary `[text](file.pdf)` link to a local file, or a `site.assets:`
 directory linked to by hand, is not rewritten; see [`[text](file.pdf)` and
 other local links](#text-file-pdf-and-other-local-links) below.
 
+A src is matched by its **authored spelling**: the build decodes the HTML
+entities the renderer puts in the attribute (so a name carrying `&` —
+`a&b.png` — resolves, is copied under its real name, and the rewritten page
+spells it `a&amp;b.<hash>.png`, which a browser decodes back to the file),
+but never a percent-escape (a file named `thermal curve.png` renders
+`thermal%20curve.png` and stays unreferenceable by any spelling).
+
 An image's bytes are content, not just cache material: since hash format 5 the
 file behind every local image an **item body** references contributes its path
 and content digest to that item's [content hash](change-tracking.md). Swapping

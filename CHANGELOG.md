@@ -376,6 +376,21 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- An image whose filename carries an `&` (`![board](a&b.png)` beside a real
+  `a&b.png`) resolved two ways at once: the content-hash pass read the
+  markdown-it token src -- the authored spelling the file is named in --
+  while the render pass resolved the *HTML-escaped* src from the rendered
+  page (`a&amp;b.png`), named no file, and reported a build error for an
+  image its own hash had already recorded, publishing no copy. The render
+  pass now decodes exactly the attribute entities markdown-it's escaper
+  emits (`build.image_src_from_html`, the exact inverse of its `escapeHtml`,
+  re-escaping on the rewrite), so both passes -- and the editor's preview
+  provenance and upload-capture checks, which compare the same recorded src
+  -- resolve one canonical spelling. Percent-escapes are not decoded:
+  `figures/thermal%20curve.png` misses the filesystem exactly as documented,
+  and the image picker now offers `&` names because the build can now honor
+  them. Content hashes are unchanged (the hash pass always read the
+  canonical spelling).
 - `calc` build diagnostics (errors and warnings) always pointed at the
   item's front-matter line, never at the assignment that actually caused
   them -- unhelpful the moment an item had more than one `calc` block or
