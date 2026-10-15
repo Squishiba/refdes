@@ -1,5 +1,9 @@
 followups-sweep-c — backlog sweep (ITEMS.md, 2026-10-10..14 follow-ups)
 Started on HEAD 885e9e6 (main). Tree was clean; nothing stashed.
+FIX ROUND (PR #246 review): rebased onto 9bc1304 (main past e1d7bdb/#243,
+#238, #245); every file:line below is refreshed against 9bc1304, and
+#243/#238 shifted several of them (cli-reference.md, cli.py). The fix-round
+notes are the "## Fix round" section at the end.
 
 Method: for each bullet, grep -n / read the cited lines on this tree, then
 run the tool where behavior was claimed. No bullet survived as STILL TRUE,
@@ -26,12 +30,15 @@ so the branch ships with zero code changes; the log is the work product.
    generalized in #209 to cover the object store too (docstring at :306-321
    records #191/#207/#209).
 5. "five of these" / "Fifteen commands" / THERMAL_DONE / "froze" / seal.py
-   "it" — ALREADY FIXED, all five verified by absence on this tree: no
-   "five of these" in docs/README, no "Fifteen commands" anywhere,
-   THERMAL_DONE exists nowhere outside .scratch/task/ITEMS.md, docs use
-   "frozen" (never bare "froze"; grep of docs/*.md + seal.py), and
-   seal.py:3-4 now reads "yesterday's page still says what it said
-   yesterday" — the pronoun has a named antecedent.
+   "it" — ALREADY FIXED, all five verified by absence FROM THE SHIPPED
+   SURFACE (`docs/`, `src/`, `README.md`; scope per review finding 3 — the
+   strings survive in in-prog-logs history, which records the old flagged
+   text and is not a live claim): grep -rn over docs/ + README.md finds no
+   "five of these" and no "Fifteen commands"; grep -rn over docs/ + src/ +
+   README.md finds no THERMAL_DONE (count 0); docs use "frozen" (never
+   bare "froze"; grep of docs/*.md + seal.py), and seal.py:3-4 now reads
+   "yesterday's page still says what it said yesterday" — the pronoun has
+   a named antecedent.
 6. #206 final review, two lows — ALREADY FIXED (both by 374a4aa, #213).
    (a) the duplicated "## D6" heading: `grep -c '## D6'` on
    in-prog-logs/sweep3-schema-vocab-nits.txt is 1 (it was 2 at 1a4f46f;
@@ -43,7 +50,7 @@ so the branch ships with zero code changes; the log is the work product.
    about the wrong thing" (scalar on_change, type:, scalar id:, key:,
    former_ids:). "silently dropped" is gone (grep).
 7. #210 macOS/BSD SO_REUSEADDR docs — ALREADY FIXED; no decision needed.
-   docs/cli-reference.md:2022 (the --port row) states the BSD exception
+   docs/cli-reference.md:2045 (the --port row, 2022 pre-rebase) states the BSD exception
    verbatim: "on macOS/BSD a listener on the wildcard address does not
    block a loopback bind (standard BSD SO_REUSEADDR semantics, the same as
    Python's own HTTPServer default)". The doc-narrowing option was taken
@@ -66,18 +73,27 @@ so the branch ships with zero code changes; the log is the work product.
    replaced by "Deliberately not enumerated here... See threads.py's own
    public names".
 10. c4 nits — ALREADY FIXED. (a) task_pane.py:101-105 panes_by_entry
-    docstring keys by entry id and says so; (b) test_task_pane.py:920-927
-    the glyph test asserts `is not`/`is` for tabs, panels, and
-    task_lists (the :930 twin included); (c) test_task_pane.py:464-470 the
-    brittle `"day" not in body` is replaced by the composer's OWN text for
-    the row, with a comment naming the round-6 nit. (d) "PR body says
-    33 + 8 tests" — the PR body of merged #197 is a GitHub artifact, not a
-    repo file; OUT OF SCOPE (rules: never touch merged PRs).
+    docstring keys by entry id and says so; (b) the glyph test is
+    test_task_pane.py:947-952 `test_the_shared_glyph_mapping_is_read_only`
+    — its docstring records the round-6 nit ("the docstring claims the
+    aliasing, so the test asserts it"), :952 asserts
+    `cli_mod._THREAD_GLYPHS is threads.TASK_GLYPHS` (plus the TypeError
+    guard on mutation), and the K2 twin
+    `test_the_shared_derived_heading_mapping_is_read_only` asserts its
+    alias at :961. Both landed in 7c72311 (#197). (Re-verified from
+    scratch on 9bc1304 per review finding 1; the first pass of this sweep
+    cited :920-927, which is the two-panes equality test — the verdict
+    was right, the citation was not.) (c) the brittle
+    `"day" not in body` is gone: test_task_pane.py:464-470 carries the
+    comment naming the round-6 nit and :485-486 pin the composer's OWN
+    text for the row instead. (d) "PR body says 33 + 8 tests" — the PR
+    body of merged #197 is a GitHub artifact, not a repo file; OUT OF
+    SCOPE (rules: never touch merged PRs).
 11. c3 nits — ALREADY FIXED. (a) the 87px pointer: bar.css:32-36 comments
     the derivation and points at taskpane.css, taskpane.css:13 points back
     ("its comment points back" is true in both directions); the offset test
     (test_serve_preview_task_pane.py:247+) reads every number out of the
-    fetched bar.css, no literals. (b) cli.py:2858 uses
+    fetched bar.css, no literals. (b) cli.py:3054 uses
     `threads_mod.DERIVED_HEADING` in the `refdes work` help — the
     re-spelling is gone; sweep G has nothing to do.
 12. c5 F1 (list-style) — ALREADY FIXED. taskpane.css:117-122
@@ -102,28 +118,32 @@ so the branch ships with zero code changes; the log is the work product.
 17. c1 doc nits — ALREADY FIXED, all three. (a) The "Every line is refdes
     thread's own wording" claim is narrowed in both places:
     changelog.d/thread-workbench-task-pane.added.md:8-9 and
-    docs/cli-reference.md:2126-2128 both carve out the `viewing ...` note
-    as the pane's own text. (b) docs/cli-reference.md:2119 reads "as tabs
+    docs/cli-reference.md:2149-2151 (2126-2128 pre-rebase) both carve out
+    the `viewing ...` note as the pane's own text. (b)
+    docs/cli-reference.md:2142 (2119 pre-rebase) reads "as tabs
     when a fork is open". (c) docs/design/thread-workbench.md:225-227
     narrows the rule to "The two bullets above that follow or [switch]...
     are the rule for that multi-anchor page shape" (file lives under
     docs/design/, not docs/).
 18. #210 re-review lows — (a) ALREADY FIXED: free_port guards the collapsed
-    band (serve_support.py:466-476, `len(band) < 512` falls back to the OS
+    band (serve_support.py:466-471, `len(band) < 512` falls back to the OS
     pick), tested by test_serve_cli.py:194-200 with ephemeral_start
     patched to 2048 and 1500. (b) ALREADY FIXED: _wait_for_file's docstring
     now says "stderr when it has any, stdout otherwise"
-    (test_serve_cli.py:146-148), matching `err or out`. (c) The macOS/BSD
+    (test_serve_cli.py:146-147), matching `err or out`. (c) The macOS/BSD
     caveat being doc-sourced and untested on a Mac is INFORMATIONAL, no
     action (no Mac here).
     All of 18 landed in 374a4aa (#213), whose commit message names M1/M2.
 
 ## Verdict tally
 
-STILL TRUE: 0. ALREADY FIXED: 18 bullets' worth of sub-claims (all).
-INFORMATIONAL: 1 (macOS/BSD untested-on-Mac note). OUT OF SCOPE: 1
-(#197's merged PR body). NEEDS A DECISION: 0 (the #210 BSD item resolved
-itself via 8b6a52e; #184 is CLOSED). NOT REACHED: 0.
+(One outcome per bullet, 18 total — reconciled with the PR body, per
+review finding 2.)
+STILL TRUE: 0. ALREADY FIXED: 17 of the 18 bullets. INFORMATIONAL: 1
+(bullet 18's macOS/BSD-untested-on-a-Mac sub-note; its code sub-claims
+are ALREADY FIXED). OUT OF SCOPE: 1 SUB-CLAIM inside bullet 10 (#197's
+merged PR body — a GitHub artifact). NEEDS A DECISION: 0 (the #210 BSD
+docs item resolved itself via 8b6a52e; #184 is CLOSED). NOT REACHED: 0.
 
 Nothing to fix means: no behaviour fix, so no new test (rule: "every
 behaviour fix gets a test" — there are none), and no sabotage run (nothing
@@ -143,3 +163,40 @@ log-only tree).
 - `python docs-site/gen_examples.py --check` -> schema-reference.md and
   vocabulary.md up to date (exit 0).
 Task finished: all 18 bullets verified, 0 fixes needed, PR opened.
+
+## Fix round (PR #246 review, CHANGES REQUESTED; rebased 885e9e6 -> 9bc1304)
+
+- Finding 1 (10(b) evidence pointed at the wrong test): RE-VERIFIED 10(b)
+  from scratch on 9bc1304. Verdict unchanged — ALREADY FIXED, no test
+  change needed: the glyph test is tests/test_task_pane.py:947-952
+  (`test_the_shared_glyph_mapping_is_read_only`), docstring :948-951
+  records the round-6 nit, `is` asserted at :952; K2 twin asserts its
+  alias at :961; both added by 7c72311 (#197) (`git log -S "is
+  threads.TASK_GLYPHS" -- tests/test_task_pane.py`). The old citation
+  (:920-927, "tabs/panels/task_lists identity") named
+  `test_two_threads_in_one_project_get_their_own_panes`, which asserts
+  `ref` equality — a confident-but-wrong cite of exactly the kind
+  AGENTS.md warns about; lesson: re-grep the assertion text, not the
+  remembered line range. No code/test file changed in this round.
+- Finding 2 (tally): log tally above is now 17/1/0 over 18 bullets,
+  matching the PR body.
+- Finding 3 (overbroad absolutes): bullet 5 re-worded to scope the
+  absence claims to docs/ + src/ + README.md; the flagged strings
+  survive in in-prog-logs history (review-followups-2026-10-10.txt:45,
+  vocab-p12-rename-p13-index-help.txt:311), which records the old text
+  and is not a live claim. Verified both files contain them on 9bc1304.
+- Finding 4 (citation refresh vs 9bc1304): cli-reference.md 2022 -> 2045
+  (BSD --port row), 2119 -> 2142, 2126-2128 -> 2149-2151; cli.py 2858 ->
+  3054 (DERIVED_HEADING in `refdes work` help); serve_support.py
+  466-476 -> 466-471; test_serve_cli.py docstring 146-148 -> 146-147;
+  taskpane.js 131-132 confirmed unchanged. Unchanged citations
+  re-grepped and stand (links.py:462, schema.py:202/818/820,
+  history.py:306/448, rename-alias 141-142/162-163, package_data 17-19/37,
+  taskpane.css 117-122/149-152, taskpane.js 65-74/168-172/184-193,
+  item.html.j2:377, thread-workbench.md 225-227, D6 count 1, "37 tests"
+  count 0).
+- Suite: NOT re-run this round — the round changed only this log file,
+  no code and no tests ("full suite once if you changed any code or
+  tests"). First-round counts stand (3829 passed, 2 skipped, exit 0);
+  ruff E9,F and gen_examples --check were also unaffected by a
+  in-prog-logs-only change and were not re-run.
