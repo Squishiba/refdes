@@ -1,0 +1,209 @@
+F10 — the sealing opt-back-in note prints once, not on every load
+(branch: sealing-note-once)
+
+Task: from in-prog-logs/user-sim-release-gate-run6a.md §F10 — `check`/`build`
+of a project whose refdes-schema.yaml opts a type back into build sealing
+printed the `note: ... back into build sealing ...` line on EVERY run.
+
+Reproduced on this branch first (verified, not assumed): scratch project in
+.scratch/f10-proj with `types: {log: {sealing: build}}`; two `check` runs,
+grep -c of the note = 1 then 1. (Note: `python -m refdes` doesn't work —
+package has no __main__; probes ran via `-c "from refdes.cli import main;
+main([...])"` with PYTHONPATH=this worktree's src.)
+
+Mechanism chosen (task: "same mechanism or the same state" as the
+`.refdes/schema.json ... refreshed` note): refreshed achieves once via state
+in a gitignored file under `.refdes/` (schema.json's mtime) that a writable
+run refreshes, with `write=False` (--no-write/--dry-run) skipping the write
+while keeping the verdict (schema_json.write_schema, src/refdes/schema_json.py:404).
+The set (not mtimes) is the right state here, because the config can be
+edited back to a set the note already announced. So:
+- `.refdes/sealing-optin.json` records `{"opted_in": [sorted set]}`.
+- `_announce_sealing_optin(project, write=, verbose=)` prints when the set
+  differs from the record (or under --verbose), and a writable run records
+  the current set. Removal of the overlay is recorded (silently, as []), so
+  re-adding prints again. Corrupt/missing record reads as "never announced"
+  (self-heals, mirrors keys.is_adopted's read-None pattern).
+- `--no-write`/`--dry-run` print by the same rule, record nothing.
+- `--verbose` (decided, stated in PR): always prints; records as usual, so
+  a verbose run on an unannounced set IS that set's announcement.
+- Refused marker write mirrors write_schema: append to load_writes.blocked +
+  project.warn(read_only_refusal, file=...).
+- Small refactor: `_writes_allowed(args)` factored out of `_load`'s
+  `not (args.no_write or args.dry_run)` expression, shared by the load and
+  both announce call sites.
+
+Verified by hand in .scratch/f10-proj: first check prints, second is silent;
+--no-write on a fresh tree prints and leaves no marker; writable run after
+still prints, then quiet; -v always prints; removal → re-add prints once.
+One probe surprise: adding `decision: {sealing: build}` to the overlay did
+NOT change the announced set — correct per standards.build_sealing_optins
+(only a type the standard had MOVED off build counts; hardware@3 moves only
+`log`, base.yaml:290). The bundle can therefore only produce [] / ["log"];
+the set-change test exercises []↔["log"] via removal/re-add.
+
+Files:
+- src/refdes/cli.py: SEALING_OPTIN_STATE_REL + 3 helpers, rewrites
+  _announce_sealing_optin (docstring now describes the once-behaviour,
+  per the task), _writes_allowed, two call sites.
+- tests/test_sealing_optin_note.py: 8 new tests (two-checks-once,
+  set-change-once, --no-write doesn't consume, --dry-run doesn't consume,
+  verbose-always, no-overlay-no-state-file, corrupt-record, settled-project
+  keeps counts/exit codes). Two existing tests updated WITH REASONS in their
+  docstrings (they looped check+build on ONE tree, which the cadence fix
+  makes one-note-per-tree; the summary/exit-code test now measures fresh
+  first runs instead of settled ones).
+- tests/test_thread_cli.py: test_the_command_itself_never_seals's tree
+  filter matched "seal" as a substring and now also sees
+  sealing-optin.json — excluded with a comment. Fixture updated with reason.
+- docs/design-log.md: the "both say so, on every run" paragraph rewritten to
+  the once cadence (only place docs describe the note; grep -rn
+  "back into build sealing" docs/ hits design-log.md:260 only).
+- changelog.d/sealing-optin-note-once.changed.md — CHANGELOG-README rule
+  applied: category `changed` (existing behaviour changed, non-breaking),
+  fragment per change, committed with the change; user-visible, so a
+  fragment is owed.
+
+Sabotage: replaced the gating condition with `if names and True:` (print
+every run) → 6 failures in tests/test_sealing_optin_note.py (two-checks-once,
+set-change, no-write-consume, verbose, corrupt-record, settled-counts).
+Restored the condition; 19/19 green in the file.
+
+Sweep-3 items checked: none encountered on this task (no stale tooling
+behavior found; ruff scoped as instructed, suite command as COMMON.txt).
+
+--- FIX ROUND (PR #238 review, agent a4ba023) ---
+
+Finding 1 (MEDIUM, state file not gitignored) — true on arrival:
+`git check-ignore -v .refdes/sealing-optin.json` exit 1; .gitignore carried
+only **/.refdes/schema.json, .refdes/copies/, **/.refdes-write.lock;
+scaffold._REFDES_GITIGNORE had no entry. Fixed:
+- .gitignore: `**/.refdes/sealing-optin.json` (same **/ posture as schema.json).
+- scaffold.py: _SEALING_OPTIN_GITIGNORE (_GitignoreEntry, covers=_covers(…,
+  ".refdes")) added to _REFDES_GITIGNORE after the schema entry, so init
+  writes it into every new project's .gitignore and announces it.
+- tests/test_scaffold.py: entry added to every exact-list assertion
+  (ignores-by-git git probe, nested-repo probe, exact pattern list,
+  adds-once count, read-only-covers-everything 4→5 lines, covering parametrize
+  +3 rows, untouched "all five", no-vscode list, both cli announcement lines).
+- New end-to-end test test_sealing_optin_note.py::
+  test_the_state_file_is_gitignored_the_way_schema_json_is: real init + real
+  writable check + `git check-ignore` on the file the writer produces.
+- Wording corrected where the claim lives: cli.py constant comment (names
+  scaffold._SEALING_OPTIN_GITIGNORE), design-log.md, changelog fragment,
+  PR body (gh pr edit).
+Finding 2 (LOW, non-atomic record write) — textio.write_text →
+textio.atomic_write_text in _record_sealing_optins (same posture as
+ids.py/revise.py; the except OSError still covers atomic_write_text's
+PermissionError guards). Note: the review's premise "the way the schema.json
+record does" is off — schema_json.write_schema uses textio.write_text
+(src/refdes/schema_json.py:439); verified before writing the docstring, which
+cites ids.py/revise.py, not schema.json, for the atomic posture.
+Finding 3 (trailers) — IGNORED per task: COMMON.txt's deliberate convention.
+Finding 4 — informational, behaviour left as is per task.
+
+Docs sync (AGENTS.md: don't ship stale claims): the init-gitignore enumerations
+in cli-reference.md (list, file table row, "three gitignored paths"→four),
+getting-started.md ("four paths"→five), standard-library.md all updated.
+
+--- FIX ROUND 2 (PR #238 review, agent f8f789e) ---
+
+Finding (P2): repeated `--no-write` runs kept printing the note (the
+first-round rule: read-only prints when the set differs, records nothing --
+so a read-only CI log gets the one-liner on every run, the F10 noise by the
+read-only door). Orchestrator changed the rule: a run that cannot record
+prints NOTHING (unless --verbose), and consumes nothing.
+
+New gate: `names and (verbose or (write and recorded != names))`.
+--no-write/--dry-run: silent, record nothing, next writable run prints once.
+--verbose: always prints, read-only runs included (records as usual when
+writable).
+- cli.py: gate + docstring paragraph for write=False rewritten.
+- tests: test_a_no_write_run_prints_the_note_without_consuming_it REPLACED
+  by test_a_no_write_run_is_silent_and_consumes_nothing (silent twice, no
+  state file, next writable run prints once then quiet) + new
+  test_no_write_with_verbose_prints_the_note; test_a_dry_run_build_does_not_
+  consume_the_note updated to the silent rule; module docstring updated.
+- docs/design-log.md and changelog fragment: the --no-write sentence.
+- PR body: rule restated + note that a CI job running plain `check` on a
+  fresh clone still prints each time (the record is gitignored), flagged
+  for Jared.
+Sabotage round 2: gate reverted to `verbose or recorded != names` (round-1
+rule) -> test_a_no_write_run_is_silent_and_consumes_nothing and
+test_a_dry_run_build_does_not_consume_the_note fail (2 failed, 19 passed);
+restored, 21/21 green.
+
+--- FIX ROUND 3 (PR #238 review, agent daaf141) ---
+
+Finding 1 (MEDIUM, FIX, per orchestrator): a refused record write fired a
+counted WARNING on read-only .refdes/ dirs (atomic_write_text needs the
+DIRECTORY writable; write_schema's write_text needs only the FILE's) —
+regression against the note's own "changes no count" contract, untested.
+Fix: _record_sealing_optins now uses textio.write_text (same writer as
+schema_json.write_schema, succeeds wherever schema.json does) and the
+OSError handler is `pass` — best-effort, zero diagnostics, note just
+prints again next run. New test
+test_a_refused_record_write_costs_no_diagnostic: writable run lands the
+record, hand-desync it, chmod record 444 + .refdes 555, run check -> exit
+0, note prints, "sealing-optin.json" appears nowhere in output, summary
+"1 items, 0 errors, 0 warnings" identical to the no-overlay control run.
+skipif nt. Sabotage: restored the warn handler -> exactly that test
+fails; reverted, 22/22 green.
+Finding 2 (MEDIUM, NO BEHAVIOUR CHANGE): round-2 rule kept; design-log
+now tells read-only workflows to pass -v; PR body carries "reviewers were
+split, orchestrator chose, Jared can override".
+Finding 3: deleted changelog.d/sealing-optin-note-once.changed.md (the
+note never shipped — a 'changed' fragment described behaviour no release
+ever had); cadence folded into sealing-optin-overlay-note.added.md.
+Finding 4: cmd_check comment (check itself writes the record) and
+cli-reference.md row ("when the note prints" -> "whenever the set
+changes, incl. the removal run"; refused write silent).
+Finding 5: main's lock gate now uses _writes_allowed(args) (was verbatim
+duplicate).
+Finding 6: design-log "A project with no overlay" -> "A project that
+never had an overlay" (a removal leaves {"opted_in": []} behind).
+
+--- FIX ROUND 4 (PR #238 review, agent cac6226, docs only) ---
+
+Finding 1 (MEDIUM): cli-reference.md record row said the refused write is
+"silent (best-effort, like schema.json's)" -- FALSE comparison:
+schema_json.write_schema's refusal IS a counted warning
+(schema_json.py:454-459). Now says plainly: unlike schema.json's, this
+record's refusal adds no warning (the note's no-count contract). Checked
+the cli.py docstring: it compared only the WRITER and where it succeeds
+(both true, no silence claim), but added the explicit
+writer-shared/refusal-posture-not sentence so it can't be misread.
+Finding 2 (LOW): standard-library.md init-gitignore list omitted
+.refdes-write.lock -- now "the four gitignored paths" matching
+getting-started.md ("five paths") and cli-reference.md ("four gitignored
+paths ... with .vscode/settings.json"). Grepped docs/ for other copies:
+cli-reference.md:1133 (complete), getting-started.md:75-83 (complete),
+markdown.md/standard-library.md single-path mentions (fine), and found
+one stale count: cli-reference.md:2136 "the other two generated files"
+-> "the other generated files" (three gitignored generated files now
+besides the lock).
+No code changes (docstring prose only).
+Docs tests: test_docs_anchors/examples/standard_docs_complete/scaffold
+90 passed. gen_examples --check clean.
+
+--- FIX ROUND 5 (PR #238 reviews f1f1057 + eb9c2dc, minimal diff) ---
+
+(a) eb9c2dc #1: chmod test skip guard now also skips root, matching
+test_scaffold.py's shape (os.name == "nt" or geteuid() == 0) -- under
+root the 0o444/0o555 bits do nothing and the test silently stops
+pinning the round-3 regression.
+(b) eb9c2dc #2: refusal-test docstring rewritten to describe the setup
+(it produces the refusal on the FILE's bit inside a read-only dir --
+the file-bit path, refused by the old atomic writer too; the
+directory-bit difference is the success side, exercised by the
+writable tests). eb9c2dc #3: settled-counts docstring now says the
+overlay side is fresh-per-command (that is where freshness matters)
+and the plain control shares one tree, its build being a second run.
+(c) f1f1057 #1: fresh-clone sentence added to the cli-reference record
+row and design-log: record is gitignored, so a fresh clone (CI
+included) starts unannounced and prints on its first writable run.
+(d) f1f1057 #4: em-dash line starts fixed in the two named paragraphs
+of cli-reference.md (init-gitignore wrap reflowed so the dash ends a
+line; the serve-lock sentence's dash-chain closed with a period).
+Left: f1f1057 #2 (flagged for Jared), #3 (docs say add by hand), #5
+(historical log).

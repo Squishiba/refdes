@@ -1153,7 +1153,8 @@ Write a minimal `refdes-project.yaml` in the current directory, plus
 library](standard-library.md#refdes-init).
 
 The `.gitignore` covers `.vscode/settings.json`, `.refdes/copies/`,
-`.refdes/schema.json` and `.refdes-write.lock` — appended to whatever
+`.refdes/schema.json`, `.refdes/sealing-optin.json` and
+`.refdes-write.lock` — appended to whatever
 was already there, never rewritten, and skipped for a path an existing
 pattern already covers.
 
@@ -2167,9 +2168,9 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
   file that has since moved comes back as a conflict instead of overwriting
   it. The file is empty, holds no state worth keeping, and is per-machine:
   deleting it costs nothing while no refdes process is running, and the next
-  write makes it again. It appears on the first *write* — a writing command or
-  a save — not at `init` and not for reads — `refdes init` puts it in the
-  project's `.gitignore` along with the other two generated files (see [files
+  write makes it again. It appears on the first *write* — a writing command
+  or a save — not at `init` and not for reads. `refdes init` puts it in the
+  project's `.gitignore` along with the other generated files (see [files
   the tool writes](#files-the-tool-writes)).
 
 The editor is served from `/edit/` as plain JavaScript and CSS packaged with
@@ -2220,6 +2221,10 @@ python -m http.server -d _site 8000
 | `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes rename`, `refdes calc-rewrite` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename or a spelling-only rewrite |
 | `.refdes/keys-adopted.yaml` | **yes** | Adoption marker written once by `refdes keys adopt`; its presence is what makes future stamps, seals and membership manifests use key-keyed storage |
 | `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project. `refdes init` puts it in the project's `.gitignore` |
+| `.refdes/sealing-optin.json` | **no, gitignored** | The set of opt-back-in types the `check`/`build` sealing note has already announced (run-6a F10); rewritten on writable runs whenever the announced set changes — including the run that removes the overlay, which prints no note. A refused write is silent and best-effort: unlike `schema.json`'s, whose refusal is a counted warning, this record's adds no warning (the note's no-count contract) — the note just prints again next run. Per-checkout state, like
+`schema.json`: the record is gitignored, so a fresh clone — CI included — starts
+unannounced and prints the note on its first writable run. `refdes init` puts it
+in the project's `.gitignore` |
 | `.refdes/copies/` | **no, gitignored** | Kept local copies of datasheet bytes, content-addressed by sha256; written only by `refdes fetch --path ...` for a remote citation with `keep_copy: true`. `refdes init` puts it in the project's `.gitignore` |
 | `.refdes-write.lock` | **no, gitignored** | The project's cross-process write lock — at the project root, not inside `.refdes/`. `write_lock.project_write_lock` is taken around any command that writes item or state files, and around each save by `refdes serve`, so neither a CLI writer nor the editor can interleave another's read-modify-write and two serves cannot save over each other. Outside `cli.main`'s hold: `serve` (it takes the lock per save instead), `init` (it writes the project marker before there is a project to lock), `new` and `schema`, and any `--no-write`/`--dry-run` run. Always empty; created by the first writer that takes it, not at startup. `refdes init` puts it in the project's `.gitignore` |
 | `.refdes/history/` | **yes** | Captured-history store: content-addressed snapshot objects and derived-id events; written by the `follows:` capture and by `refdes history capture`/`redact`/`migrate-seals` |
@@ -2230,8 +2235,9 @@ place. `.refdes/citations.yaml` and `.refdes/copies/` are the only things
 `refdes fetch` writes — `build` and `check` (without `--refresh`) never touch
 either.
 
-`refdes init` is what puts the three gitignored paths above into a project's
+`refdes init` is what puts the four gitignored paths above into a project's
 `.gitignore` (with `.vscode/settings.json`), and it is the only thing that does.
 A project created before that was the case keeps whatever `.gitignore` it had, so
-add the three lines by hand: `.refdes/copies/`, `.refdes/schema.json` and
+add the four lines by hand: `.refdes/copies/`, `.refdes/schema.json`,
+`.refdes/sealing-optin.json` and
 `.refdes-write.lock`, one per line.
