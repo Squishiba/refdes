@@ -574,12 +574,55 @@ def test_a_zero_page_document_still_validates_clean(tmp_path):
     finds no pages in is recorded as `page_count: 0`. A validator that demanded a
     positive count would report `refdes fetch`'s own output as malformed, which
     is the one thing this change must not be able to do. (`_apply_page` reads a
-    count below 1 as no count; that is its business and is not contradicted.)"""
+    count of 0 as no count; that is its business and is not contradicted. The
+    count it refuses outright is the negative one -- see the test below.)"""
     root = _page_cited_project(tmp_path, _pdf(pages=0))
     record = _fetch_locally(root)["docs/manual.pdf"]
     assert record["page_count"] == 0
 
     assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
+
+
+def test_a_negative_page_count_is_refused_by_every_reader(tmp_path, capsys):
+    """CITE-LOCK-012: `page_count: -3` was the one recorded count the commands
+    disagreed about. `refdes fetch` warned `it has -3 page(s)` straight off the
+    record, while `_apply_page` read any count below 1 as *no count* and
+    `check`/`build` published the citation quietly -- a warning on one command
+    and silence on the next, with `check`'s silence the louder half because
+    that is the command a release gate runs. It is refused at load instead:
+    `len(reader.pages)` is never negative, so this is not `fetch`'s own output
+    the way a `0` is (the test above), and one refusal at the reader is what
+    makes every command say the same thing -- the named lockfile error, exit
+    `1`, and `fetch` leaving the file byte-identical because a file it cannot
+    read is one it must not overwrite.
+    """
+    root = _page_cited_project(tmp_path, _pdf(pages=8))
+    _fetch_locally(root)
+    with open(_lockfile(root), encoding="utf-8") as fh:
+        records = yaml.safe_load(fh)["citations"]
+    assert records["docs/manual.pdf"]["page_count"] == 8
+    records["docs/manual.pdf"]["page_count"] = -3
+    with open(_lockfile(root), "w", encoding="utf-8") as fh:
+        fh.write(citations_mod.lockfile_text(records))
+
+    config = str(root / "refdes-project.yaml")
+    assert cli_mod.main(["-c", config, "check"]) == 1
+    err = capsys.readouterr().err
+    assert f"ERROR   {citations_mod.LOCKFILE}:" in err, err
+    assert "no document has a negative number of pages" in err, err
+    assert "-3 page(s)" not in err, err
+    assert "Traceback" not in err
+
+    assert cli_mod.main(["-c", config, "build"]) == 1
+    err = capsys.readouterr().err
+    assert f"ERROR   {citations_mod.LOCKFILE}:" in err, err
+
+    before = Path(_lockfile(root)).read_bytes()
+    assert cli_mod.main(["-c", config, "fetch"]) == 1
+    out = capsys.readouterr()
+    assert Path(_lockfile(root)).read_bytes() == before, out
+    assert "-3 page(s)" not in out.out + out.err, out
+    assert "Traceback" not in out.err
 
 
 def test_a_freshly_fetched_page_count_error_validates_clean(tmp_path, monkeypatch):
@@ -605,6 +648,7 @@ def test_a_freshly_fetched_page_count_error_validates_clean(tmp_path, monkeypatc
         pytest.param({"page_count": 8, "page_count_error": "no extra"}, id="both"),
         pytest.param({"page_count": "eight"}, id="count-not-a-number"),
         pytest.param({"page_count": True}, id="count-is-a-bool"),
+        pytest.param({"page_count": -3}, id="count-is-negative"),
         pytest.param({"page_count_error": ""}, id="error-empty"),
         pytest.param({"page_count_error": 4}, id="error-not-a-string"),
     ],
@@ -614,7 +658,9 @@ def test_a_malformed_page_count_pair_is_a_diagnostic(project, capsys, extra):
     saying. A count that is not a number reads as *no count* to `_apply_page`, so
     it silently drops the very check the count exists for -- and a record with
     both carries a reason that no reader will ever reach again, because the count
-    is preferred."""
+    is preferred. A negative count is the one count below 1 that is not
+    `fetch`'s own output: `page_count(data)` is `len(reader.pages)`, never
+    negative, so it is refused here too (CITE-LOCK-012)."""
     record = {
         "sha256": SHA,
         "fetched": "2026-01-01T00:00:00Z",
@@ -634,6 +680,7 @@ def test_a_malformed_page_count_pair_is_a_diagnostic(project, capsys, extra):
         for word in (
             "has both page_count and page_count_error",
             "which is not a whole number of pages",
+            "no document has a negative number of pages",
             "which is not the reason the pages could not be counted",
         )
     ), err
