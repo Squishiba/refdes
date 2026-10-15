@@ -127,3 +127,31 @@ which holds regardless of whether the platform honors 0444).
 Targeted suites 170 passed (was 168); probe.sh all PASS + normal init
 and existing-gitignore announce paths re-checked.
 
+
+PR PREP (2026-10-14): rebase onto moved main, changelog fragment
+
+- origin/main moved 8b6a52e -> 9f83092 while this branch sat (includes
+  #219 WRITE-ATOMIC-003 scaffold.py changes and #197 cli.py changes).
+  Inspected before rebasing: #219 touches only the add/remove-preset
+  write functions (_config_write_target/atomic_write_text, scaffold.py
+  ~528-690) -- disjoint from the init/gitignore region (~204-490).
+  #197's cli.py hunks are the thread/work/printing region (lines
+  801-1207, 2880) -- cmd_init untouched. Pending G2 PR #224 (OPEN,
+  not merged) touches cli.py at 639/1143-1173/2834/3081 (release,
+  work, main-parser) -- no overlap with cmd_init ~1860.
+- Rebased 3 commits onto 9f83092: clean, zero conflicts.
+- Added changelog.d/init-gitignore-refusal.fixed.md (repo convention:
+  one fragment per change, folded at release; my fix commits had
+  none -- that was an omission, caught against #212/#219's file lists
+  in this pass).
+- Post-rebase verification: refdes.__file__ = worktree src under
+  forced PYTHONPATH; probe.sh all shapes PASS (binary/unreadable/dir
+  refusal, normal init, existing-gitignore announcement, --no-write);
+  read-only-needs-append refuses named exit 2 with .gitignore the
+  only survivor; read-only-covering-everything inits exit 0.
+  Targeted suites incl. #219's new test_preset_write_atomicity.py:
+  183 passed. Scoped ruff: same 9 pre-existing findings, none mine.
+- No unrelated survivors checked by `ls -A` on every probe project:
+  refusals leave only the .gitignore obstacle; successes add only
+  refdes-project.yaml/.vscode/.gitignore; no .refdes/, temp litter.
+- Task finished. PR opened against main (no merge).
