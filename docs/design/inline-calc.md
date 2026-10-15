@@ -58,10 +58,11 @@ says so explicitly; otherwise it builds on them.
   The same evaluator, units, and tolerance propagation apply to inline
   expressions.
 - **Cross-item value references.** `docs/math.md:95-128`:
-  `DEC-PWR-001.V_in` is a real dependency, evaluated in dependency order, stored
-  expanded as `DISPLAY-ID@key`, and hashed into the referring item under the
-  current `HASH_FORMAT` (`src/refdes/build.py:1855`). These references can
-  appear inside inline expressions.
+  `DEC-PWR-001.V_in` is a real dependency evaluated in dependency order and
+  stored expanded as `DISPLAY-ID@key`. The resolved values are hashed into the
+  referring item via `calc_reference_snapshot` (`src/refdes/build.py:2085`) and
+  the content-hash payload (`src/refdes/build.py:1858-1907`). These references
+  can appear inside inline expressions.
 - **`source()` lockfile semantics.** `docs/design/calc-sources.md:1-34, §5`:
   `source(path, key)` is item-local, citation-owned, pinned by `refdes fetch`,
   and resolved from the lockfile at build time. Nothing here changes that.
@@ -105,43 +106,46 @@ A single backtick span is one of:
 
 ```text
 basic       = [ name " := " ] expression [ " = " result ]
-solve       = name " := " [ result ] " where " expression " = " target
+solve       = name " := " solve-result " where " expression " = " target
               [ " from " quantity " to " quantity ]
 multi-out   = name-list " := " call " = " result-list
 
-name        = calc assignment name  ([A-Za-z_][A-Za-z0-9_]*)
-name-list   = name *(", " name)
-expression  = any existing calc expression
-call        = equation-name "(" [ expression *(", " expression) ] ")"
-result      = quantity with unit, e.g. 4.436 V
-result-list = result *(", " result)
-target      = quantity with unit
-quantity    = calc quantity literal
+name          = calc assignment name  ([A-Za-z_][A-Za-z0-9_]*)
+name-list     = name *(", " name)
+expression    = any existing calc expression
+call          = equation-name "(" [ expression *(", " expression) ] ")"
+result        = quantity with unit, e.g. 4.436 V
+result-list   = result *(", " result)
+solve-result  = "?" | quantity
+target        = quantity with unit
+quantity      = calc quantity literal
 ```
 
 Rules:
 
 - `:=` **defines** one or more names in the item's calc scope. Without it, the
   span is an anonymous evaluation.
-- The **stored result** is the value after the **last** ` = ` in the span. In a
-  solve form, the constraint's `expression = target` is not the stored result;
-  the stored result is the value assigned to the name on the left of `:=`.
+- In **basic** and **multi-out** spans, the **stored result** is the value after
+  the **last** ` = `.
+- In a **solve** span, the stored result is the `solve-result` before `where`.
+  It is `?` before solving and a quantity after the fill command writes the root.
 - A span without a stored result is either a plain code span or a definition/
   solve with no stored value yet; the build warns and the fill command can add
   the result.
 - Any code span whose content does **not** match this grammar is treated as an
   ordinary inline code span.
 
-Examples:
+Examples (every one parses under the grammar above):
 
 ```markdown
-`Vout := 0.8 V * (1 + Rtop/Rbot) = 4.436 V`      # basic, defines Vout
-`0.8 V * (1 + Rtop/Rbot) = 4.436 V`               # basic, anonymous
-`I_load := 1.2 A`                                 # basic, no stored result
-`Rbot := ? where Vout = 3.3 V from 1 kohm to 1 Mohm`  # solve, no stored result
+`Vout := 0.8 V * (1 + Rtop/Rbot) = 4.436 V`       # basic, defines Vout
+`0.8 V * (1 + Rtop/Rbot) = 4.436 V`                # basic, anonymous
+`I_load := 1.2 A`                                  # basic, no stored result
+`Rbot := ? where Vout = 3.3 V from 1 kohm to 1 Mohm`   # solve, unsolved
+`Rbot := 3.2 kohm where Vout = 3.3 V from 1 kohm to 1 Mohm`  # solve, solved
 `Vout, ratio := divider(0.8 V, 10 kohm, 2.2 kohm) = 4.436 V, 4.545`  # multi-out
-`Rtop/Rbot`                                       # ordinary code span
-`foo()`                                           # ordinary code span
+`Rtop/Rbot`                                        # ordinary code span
+`foo()`                                            # ordinary code span
 ```
 
 Why a code span works:
@@ -169,8 +173,10 @@ file text, is visually distinct from prose, and needs no new Markdown construct.
 
 ### 4.1 What is stored
 
-The `= result` text is literal source. It is not a comment, not hover-only, not
-auto-updated. Example:
+The `= result` text is literal source. It is not a comment, not hover-only, and
+it is **never silently rewritten by `check` or `build`**. The editor and the fill
+command rewrite it explicitly when the author asks; the build only verifies it.
+Example:
 
 ```markdown
 `Vout := 0.8 V * (1 + Rtop/Rbot) = 4.436 V`
@@ -211,9 +217,11 @@ item's source line, just like a calc block error.
 
 ### 4.3 Interaction with hashes, seals, and upstream changes
 
-- **Content hash.** The inline span is body text, so it is part of the item's
-  `content_hash` the same way a sentence is
-  (`docs/design/stale-arithmetic-signal.md:76-85`). Changing the result text
+- **Content hash.** The inline span is body text, and the content-hash payload
+  includes the body text of items whose body has `on_change: invalidate`
+  (`src/refdes/build.py:1858-1907`). A block rename moves `content_hash` while
+  leaving `calc_hash` untouched (`docs/design/stale-arithmetic-signal.md:82-84`);
+  the same applies to renaming an inline result. Changing the result text
   therefore marks the item changed.
 - **`calc_hash` / stale-arithmetic signal.** The existing `calc_hash_for()`
   hashes only ```` ```calc ```` block contents
@@ -222,9 +230,9 @@ item's source line, just like a calc block error.
   as well, excluding the stored result. This keeps the signal's meaning: `the
   verdict moved, the arithmetic didn't`.
 - **Upstream changes.** A cross-item reference inside an inline span is captured
-  by the existing `calc_reference_snapshot` (`docs/math.md:149-159`). When an
-  upstream value moves, the dependent item is marked changed; on the next build,
-  the stored inline result is also checked and may be reported stale.
+  by `calc_reference_snapshot` (`src/refdes/build.py:2085`). When an upstream
+  value moves, the dependent item is marked changed; on the next build, the
+  stored inline result is also checked and may be reported stale.
 - **Sealed entries.** A sealed/append-only entry keeps the stored number that was
   true when it was written. If upstream inputs make that number stale, the build
   reports it as a warning; the fill command refuses to rewrite a sealed entry.
@@ -241,17 +249,21 @@ By default the stale result is a **warning**, not an error. Append-only logs are
 the point of D1. Ordinary `refdes check`/`refdes build` therefore keep running.
 
 The warning is promoted to a **gate failure** for non-sealed items when
-`release_gate.stale_inline_results` is enabled. Sealed items are excluded from
-this gate: a sealed append-only entry cannot be edited without resealing, and
-history-backed resealing has not yet landed (`src/refdes/build.py:1505-1510`).
+`release_gate.inline_calc_results` is enabled. This rule covers **both stale
+results and missing stored results** -- a span that defines an evaluable inline
+calculation but has no `= result` is unverified and fails the gate the same way a
+stale result does. Sealed items are excluded from this gate: a sealed append-only
+entry cannot be edited without resealing, and history-backed resealing has not
+yet landed (`src/refdes/build.py:1505-1510`).
+
 The release gate is the existing mechanism that `refdes revision` /
 `refdes release` use to decide whether a baseline can be stamped
 (`src/refdes/model.py:101-113` for defaults;
 `src/refdes/lifecycle.py:783-794` for evaluation;
 `refdes-project.yaml:109-120` for the configuration shape). The proposed default
-for the new rule is `{release: true, revision: false}`, so a stale inline result
-on an editable item blocks a release but not an ordinary build or a revision
-stamp. Projects can opt in to the stricter `{release: true, revision: true}` if
+for the new rule is `{release: true, revision: false}`, so an unverified inline
+result on an editable item blocks a release but not an ordinary build or a
+revision stamp. Projects can opt in to the stricter `{release: true, revision: true}` if
 they want.
 
 Messages reuse existing calc phrasing where possible:
@@ -271,7 +283,7 @@ Proposed command shape (name is open -- Q6):
 
 ```bash
 refdes inline-calc fill          # write missing/stale results
-refdes inline-calc fill --check  # report stale results, do not write; non-zero if any
+refdes inline-calc fill --check  # report stale/missing results, do not write; non-zero if any
 refdes inline-calc fill --path items/decisions/dec-pwr-001.md
 ```
 
@@ -351,12 +363,21 @@ just like any other inline result.
 
 ### 7.3 E-series suggestion
 
-After a successful solve, the editor or CLI can suggest the nearest standard
-values:
+Using the divider from §8.1 (`Vref = 0.8 V`, `Rtop = 10 kohm`) and the solve
+target `Vout = 3.3 V`:
 
 ```
-Rbot = 2.20 kohm  ->  Vout = 3.296 V  (nearest E24)
-Rbot = 2.21 kohm  ->  Vout = 3.303 V  (nearest E96)
+Rbot = Rtop / (Vout/Vref - 1)
+     = 10 kohm / (3.3 V / 0.8 V - 1)
+     = 10 kohm / 3.125
+     = 3.200 kohm
+```
+
+Nearest standard values and the resulting Vout:
+
+```
+Rbot = 3.30 kohm  ->  Vout = 0.8 V * (1 + 10 kohm / 3.30 kohm) = 3.224 V  (nearest E24)
+Rbot = 3.16 kohm  ->  Vout = 0.8 V * (1 + 10 kohm / 3.16 kohm) = 3.332 V  (nearest E96)
 ```
 
 These are suggestions; accepting one replaces the solved value in the source
@@ -400,10 +421,10 @@ The `valid_if:` list contains **comparison constraints**, not general boolean
 expressions. Each entry has the form `expression op quantity`, where `op` is one
 of `< <= > >= ==` and `quantity` is a calc quantity. The calculator evaluates the
 left-hand expression and checks it against the limit using the same worst-case
-logic that `checks:` already use (`src/refdes/calc.py:732-759` via
-`parse_limit` and `Limit.check`). A violation produces a warning, not an error,
-because a calculator can describe a design intent that the author knowingly
-pushes outside the recommended region.
+logic that `checks:` already use (`src/refdes/calc.py:732-759` for `Limit.check`;
+`src/refdes/calc.py:834-859` for `parse_limit`). A violation produces a warning,
+not an error, because a calculator can describe a design intent that the author
+knowingly pushes outside the recommended region.
 
 This deliberately does **not** add general comparison operators to calc
 expressions. There are no `and`/`or`, no conditional evaluation, and no
@@ -436,10 +457,13 @@ The same citation ownership and lockfile rules apply
 ### 8.5 Outputs feeding checks/bounds
 
 A calculator call in an inline span can define one or more names. Calls are
-positional, in the order declared by the calculator's `inputs:`:
+positional, in the order declared by the calculator's `inputs:`. Inputs with a
+`default:` may be omitted only from the end; you cannot skip a positional
+argument in the middle:
 
 ```markdown
 `Vout, ratio := divider(0.8 V, 10 kohm, 2.2 kohm) = 4.436 V, 4.545`
+`Vout, ratio := divider(10 kohm, 2.2 kohm) = 4.436 V, 4.545`   # Vref uses default
 ```
 
 Each output name is available to later lines, `{{name}}` references, and
@@ -449,10 +473,11 @@ calls is open (Q11).
 ### 8.6 Version pinning per call
 
 To keep an old log's result from changing when a calculator is fixed, a call can
-be pinned:
+be pinned. The separator is `::` rather than `@`, because `@` is already the
+repo-wide `DISPLAY-ID@key` composite separator:
 
 ```markdown
-`Vout, ratio := divider@1(0.8 V, 10 kohm, 2.2 kohm) = 4.436 V, 4.545`
+`Vout, ratio := divider::1(0.8 V, 10 kohm, 2.2 kohm) = 4.436 V, 4.545`
 ```
 
 Unpinned calls use the current calculator definition. Pinned calls use the named
@@ -545,10 +570,11 @@ calc expression text as well as ```` ```calc ```` block contents?
 - *Recommended default: (a).* Inline math is arithmetic; the signal should see
   it.
 
-**Q5 -- Severity for stale stored results.** A stale stored result is expected
-for append-only log entries whose inputs moved. How should it be reported?
+**Q5 -- Severity for unverified inline results.** A stale stored result is
+expected for append-only log entries whose inputs moved. How should unverified
+results (stale or missing) be reported?
 - (a) Warning by default; promoted to a release-gate failure for non-sealed
-  items when `release_gate.stale_inline_results` is enabled
+  items when `release_gate.inline_calc_results` is enabled
   (orchestrator recommendation). Sealed items are excluded from the gate because
   they cannot be rewritten without resealing
   (`src/refdes/build.py:1505-1510`).
@@ -556,7 +582,8 @@ for append-only log entries whose inputs moved. How should it be reported?
 - *Recommended default: (a).* Old log entries are *supposed* to keep the number
   that was true when written; failing every ordinary build would punish that
   design intent. Blocking a release is the right place to enforce freshness.
-  The proposed default gate rule is `{release: true, revision: false}`
+  The gate covers both stale results and missing stored results. The proposed
+  default gate rule is `{release: true, revision: false}`
   (`src/refdes/model.py:101-113`; `src/refdes/lifecycle.py:783-794`).
 
 **Q6 -- Fill command name.** What should the CLI command be called?

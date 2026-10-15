@@ -96,5 +96,52 @@ Tests run
 - `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest tests/test_docs_anchors.py -q -p no:cacheprovider` -> 2 passed
 - `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python docs-site/gen_examples.py --check` -> up to date
 
+Fix round 3 (chunk 1 review, addressed in commit ff23782)
+----------------------------------------------------------
+Findings addressed:
+1. Recomputed the E-series solve example from the divider's own numbers
+   (Vref = 0.8 V, Rtop = 10 kohm, target Vout = 3.3 V) and showed the arithmetic:
+   Rbot = 10 kohm / (3.3 V / 0.8 V - 1) = 3.200 kohm.
+   Nearest E24 = 3.3 kohm -> Vout = 3.224 V.
+   Nearest E96 = 3.16 kohm -> Vout = 3.332 V.
+   Verified the numbers with src/refdes/calc.py.
+2. Extended the §3.2 grammar so the solve form with `?` parses and the constraint
+   `=` is not mistaken for a stored result. solve-result is now `? | quantity`.
+3. Reconciled §4.1 with live update: stored results are rewritten explicitly by
+   the editor or the fill command; check/build only verify and never silently
+   rewrite them.
+4. Renamed the release gate rule concept from `stale_inline_results` to
+   `inline_calc_results` and made it cover both stale results and missing stored
+   results. Default stays `{release: true, revision: false}` for non-sealed
+   items.
+5. Fixed citations: calc_reference_snapshot is src/refdes/build.py:2085; the
+   content-hash payload that includes body text is src/refdes/build.py:1858-1907;
+   the block-rename content_hash behavior is cited from
+   docs/design/stale-arithmetic-signal.md:82-84.
+6. Resolved defaults vs positional-only calculator calls: calculator inputs use
+   positional arguments; trailing inputs with a default may be omitted, but you
+   cannot skip a positional argument in the middle. This keeps the DSL
+   keyword-free while allowing practical defaults.
+7. Changed calculator version pinning from `@1` to `::1` because `@` is already
+   the repo-wide DISPLAY-ID@key composite separator.
+8. Re-read the whole doc after edits: every inline math example matches the
+   §3.2 grammar and every number was checked against src/refdes/calc.py.
+
+Difficulties / choices (updated)
+--------------------------------
+- Deciding whether to allow defaults in positional-only calls required balancing
+  the existing DSL keyword prohibition against practical calculators. The chosen
+  rule (trailing defaults only) keeps the evaluator unchanged while still useful.
+- The `?` solve form had to be added to the grammar without making the constraint
+  `=` look like a stored result. Placing solve-result before `where` solves that.
+- Version-pin separator: `@` was rejected because of composite link expansion;
+  `::` was chosen as a visually distinct alternative with no current meaning in
+  the calc syntax.
+
+Tests run
+---------
+- `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest tests/test_docs_anchors.py -q -p no:cacheprovider` -> 2 passed
+- `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python docs-site/gen_examples.py --check` -> up to date
+
 No src/ or tests/ changes were made; this is a design-only PR.
 No changelog.d fragment is needed because the change is not user-visible yet.
