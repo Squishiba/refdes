@@ -85,4 +85,34 @@ claim — a search for "power" does find it).
 
 ## Status
 
-Finished. Committed on this branch only: no push, no PR, main untouched.
+Original fix finished at e06d5a8 (pre-rebase). PR prep below.
+
+## PR prep, 2026-10-14
+
+- Verified cwd/HEAD/status before work: clean tree at e06d5a8 on
+  fix/list-default-validation-20261013.
+- `git fetch origin main` once: origin/main = 374a4aa (the assignment point,
+  unchanged; two commits above my base 8b6a52e: #197 W5a task pane, #213
+  sweep3 nits).
+- Rebased onto origin/main -- clean, no conflicts; src/refdes/schema.py
+  untouched upstream, so nothing to resolve. New head 1bf4365.
+- Scope check vs upstream: the two upstream commits add no `default:` to any
+  bundled-standard src yaml and no fixture schema default in tests (grep of
+  the 8b6a52e..origin/main diff), so the task-pane feature cannot trip the
+  new validation -- verified, not assumed.
+- Re-verified the runtime claims on the rebased tree with this worktree's
+  code (refdes.__file__ =
+  /home/jorb/.paseo/worktrees/16msma8v/fix-list-default-validation-20261013/
+  src/refdes/__init__.py, printed): bad default -> exit 2 with the
+  types.decision.fields.tags.default message; list default -> check exit 0
+  and `ls --tag analog` correct. Schema claim via `refdes schema`: tags
+  exports as {"type": "array", "items": {"type": "string"}}.
+- Targeted tests: 158 passed (my file, sibling test_scalar_for_list_field,
+  schema_json, config_split, extends, cli_load_errors, plus the upstream
+  task-pane suites). Scoped ruff: 3 findings in schema.py, all pre-existing
+  (same 3 as HEAD, line-shifted); new test file clean. Broader full suite
+  not re-run: the only concrete rebase risk (task pane x collection-field
+  defaults) was checked and found empty; the suite ran green on this exact
+  code at 3613-passed full-suite before.
+- Pushed branch, opened PR to main; NOT merged.
+
