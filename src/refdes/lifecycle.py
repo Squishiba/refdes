@@ -173,6 +173,7 @@ def _same_baseline_items(stored: dict[str, dict], current: dict[str, dict]) -> b
         left = dict(stored_entry)
         right = dict(current_entry)
         left.pop("id", None)
+        right.pop("id", None)
         stored_identity = keys_mod.baseline_identity(record_id, stored_entry)
         if stored_identity is not None:
             left.pop("key", None)

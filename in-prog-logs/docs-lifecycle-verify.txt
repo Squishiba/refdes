@@ -1,5 +1,6 @@
 Task: verify docs/lifecycle.md against actual refdes behavior; fix the page
-where claims are wrong or missing. Docs-only; no code/YAML changes.
+where claims are wrong or missing. First pass was docs-only; review round added
+one code fix.
 Branch: docs-lifecycle-verify. Date: 2026-10-15.
 
 Method
@@ -44,10 +45,10 @@ Fixes applied to docs/lifecycle.md
    "— removed". Matches the audit example already in the page.
 9. standard: block is absent for a project on standard: none (verified with
    lv8: standard: none baseline has no standard: key).
-10. hash format 4 also covers source() calc-line values (build.py HASH_FORMAT
-    history: "Finding 26's source() values joined this same format number");
-    the "no cross-item calc reference ... hashes exactly as format 3"
-    sentence now says "and no source() line".
+10. hash format 4 also covers source() calc-line values. The verbatim code
+    note (build.py:1927-1930) is "finding 26 joined finding 35's bump rather
+    than taking a fifth"; the "no cross-item calc reference ... hashes
+    exactly as format 3" sentence now says "and no source() line".
 11. audit changed sub-lines: moved calc references
     (lifecycle.py _moved_refs: "referenced X.name: old -> new") and stale
     arithmetic (cli.py:1598) print under the changed count -- the
@@ -74,5 +75,37 @@ Checks run
 - full suite: .scratch/suite.txt -> 3930 passed, 2 skipped, exit 0
   (first run; the serve-cli stale-token flake did not fire)
 
-Status: complete. No code changes; no changelog fragment (docs-only page
-fixes, no product behavior changed).
+Status at first commit: complete for docs-only page fixes. Review round below
+added one code fix, regression test, and changelog fragment, so the PR is no
+longer docs-only.
+
+Review round (PR #277, review e8746d71)
+- Accepted F1-F4. No findings rejected.
+- F1 was a real pre-existing product bug surfaced by the docs verification:
+  in a project that has run `refdes keys adopt`, byte-identical re-stamps of
+  an existing revision/release name falsely reported "different content".
+  Root cause: lifecycle._same_baseline_items popped `id` from the stored
+  baseline entry but not from the current adopted entry, so the two
+  key-keyed entries could never compare equal.
+- Code fix: added `right.pop("id", None)` in
+  src/refdes/lifecycle.py::_same_baseline_items.
+- Regression test:
+  tests/test_lifecycle.py::test_rerun_same_name_identical_content_after_keys_adopt_is_a_noop.
+- Sabotage check: with the one-line fix temporarily reverted, the new test
+  failed at `assert second.status == "unchanged"` with
+  `assert 'conflict' == 'unchanged'`; after restoring the fix it passes.
+- F2 docs fix: name rule now says bare `.` and `..` are refused, matching
+  lifecycle.validate_name's special case.
+- F3 docs fix: `hash_format` is always written; `key`/`id` is written only for
+  keyed items, including adopted-project keyless/pre-keys cases.
+- F4 docs/log fix: the build.py `source()` quote is now verbatim.
+- Added changelog fragment:
+  changelog.d/baseline-adopted-rerun-conflict.fixed.md.
+- Review-round checks:
+  - focused sabotage run: failed as expected with the fix removed
+  - focused fixed run: 1 passed
+  - docs/lifecycle focused suite: 44 passed
+  - gen_examples --check: exit 0
+  - full suite: .scratch/suite.txt -> 3931 passed, 2 skipped, exit 0
+
+Status: complete with one docs-surfaced code fix. PR is no longer docs-only.

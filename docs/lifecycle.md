@@ -16,8 +16,8 @@ is honored by both — see the end of this page).
 
 Both take a name (`rev-b`, `rev-c`, `sent-to-fab-2026-08`), so repeating a
 stamp under the same label is the point, not an afterthought. A name is
-letters, digits, `-`, `_`, and `.`; anything else is refused at startup
-(exit 2).
+letters, digits, `-`, `_`, and `.` (bare `.` and `..` are refused); anything
+else is refused at startup (exit 2).
 
 ## The readiness gate
 
@@ -230,10 +230,11 @@ time `build()` returns (`item.content_hash`, `item.type`, `item.title`, the
 gate results, the resolved standard pin).
 
 `hash_format`, `key`, `verdict`, `calc_hash`, and `calc_refs` are the per-item
-additions. The first two are always written — as `hash_format` + `key:`
-beside a display-id map key in a legacy project, as `hash_format` + `id:`
-under a surrogate map key once `refdes keys adopt` has run (the key *is*
-the map key there). The rest only when they apply —
+additions. `hash_format` is always written; `key`/`id` is written only for an
+item that has a key — as `key:` beside a display-id map key in a legacy
+project, as `id:` under a surrogate map key once `refdes keys adopt` has run
+(the key *is* the map key there). A pre-keys baseline entry, or a keyless
+item, carries neither. The rest only when they apply —
 `verdict` for a type with a verdict-bearing status field,
 `calc_hash`/`calc_refs` for an item with calc blocks or cross-item calc
 references.
