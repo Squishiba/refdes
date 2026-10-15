@@ -1,0 +1,73 @@
+# docs-broken-anchors — fix broken docs anchors + CI check
+
+Task (.scratch/task/TASK.txt): fix broken in-page anchors in docs/*.md, add a
+check so CI catches new ones. Original list of 16:
+in-prog-logs/workbench-w5a-task-pane.txt round 2 (A1). Base: main @ 885e9e6.
+
+## Verification (as instructed: verify each item still applies before changing)
+
+1. The anchor walk ALREADY EXISTS as tests/test_docs_anchors.py on main:
+   it renders every docs/**/*.md + README.md with the site's own pipeline
+   (build._markdown_parser + pages.add_heading_anchors, i.e. pages._slugify,
+   h2/h3 only, dup suffixes -2/-3), then checks every [text](target) fragment
+   link (same-page and cross-page) against the target page's ids. Fenced
+   blocks and inline code spans are blanked. It is in CI: .github/workflows/
+   tests.yml runs ruff + pytest.
+   Run: PYTHONPATH=$PWD/src <venv python> -m pytest tests/test_docs_anchors.py -q
+   -> 2 passed.
+2. Independent walk (not trusting the test): built the real site
+   (cd docs-site && python -m refdes.cli build -> _docs/, what
+   .github/workflows/docs.yml runs) and wrote .scratch/anchor-walk/walk.py,
+   which extracts every fragment link from docs/**/*.md + README.md the same
+   way and checks each fragment against the real id="..." set in the built
+   _docs/*.html (README checked against rendered ids; README is not a site
+   page). Result: checked 197 fragment links across 51 files — no broken
+   anchors. Grep confirmed there are no <a href="#..."> links and no
+   reference-style [x]: ...#frag definitions in docs/README, so the
+   [text](...) regex is the complete link syntax set.
+3. The 16 pre-existing broken anchors are already fixed on main:
+   - docs/coverage.md:113, docs/links.md:114, docs/troubleshooting.md:341
+     all use links.md#governed-by-vs-refines-vs-constrained-by (the old
+     broken form was #governed_by-...; grep finds no governed_by- fragments).
+   - the refdes-revise-mapping-file case: no fragment link to that heading
+     exists any more (grep -rn "refdes-revise" docs/*.md | grep '#': none).
+
+So: 0 anchors fixed by me — everything from the item list is already fixed
+and the walk is already a CI-run test. Per COMMON rule 3 ("don't fix what
+isn't broken") the work here is verification + sabotage record + this log.
+
+## Sabotage (task step 3: the check must fail on a deliberately broken anchor)
+
+Changed docs/coverage.md:113 fragment
+links.md#governed-by-vs-refines-vs-constrained-by ->
+links.md#governed_by-vs-refines-vs-constrained-by (the exact historical
+breakage class from the W5a list). Ran
+`pytest tests/test_docs_anchors.py -q`: FAILED —
+`test_no_broken_anchor_links_in_docs` reported
+`docs/coverage.md:113: links.md#governed_by-vs-refines-vs-constrained-by`
+with file:line, 1 failed, 1 passed. Restored with
+`git checkout -- docs/coverage.md`; git status clean apart from this log.
+
+## Changelog decision
+
+No fragment. Rule applied (changelog.d/README.md + COMMON rule 6): a fragment
+describes a user-visible change ("added/changed/fixed/...") for a reader of
+the project; this branch changes no behaviour and no shipped docs — the
+anchors and the test were already on main — so there is nothing to fold into
+[Unreleased].
+
+## Gates
+
+- Full suite, foreground, once: 3829 passed, 2 skipped (311s), exit=0
+  (.scratch/suite.txt). No load flake to re-run.
+- ruff check --select E9,F src tests: All checks passed!
+- docs-site/gen_examples.py --check: schema-reference.md and vocabulary.md
+  up to date.
+
+## Outcome
+
+0 anchors needed fixing (all 16 + everything newer already resolve; verified
+twice — once against the site's own slug code via the existing
+tests/test_docs_anchors.py, once against ids in a real `refdes build` of
+docs-site/). No test added (the walk already exists and CI runs it); its
+sabotage result is recorded above. Branch therefore carries only this log.
