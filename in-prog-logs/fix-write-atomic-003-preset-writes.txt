@@ -211,3 +211,60 @@ Limits (this pass)
     consistently.
   - Still only the add/remove-preset writes; the broader PERM-OWNER-* findings
     and other write_text sites remain out of scope as before.
+
+========================================================================
+PR prep (2026-10-14) — rebase onto main, re-verification, changelog fragment
+========================================================================
+Status: FINISHED — rebased, verified, pushed, PR opened (not merged).
+
+What this pass did
+------------------
+  - Verified cwd/HEAD/status before touching anything: this worktree,
+    fd543d4, clean tree (AGENTS.md respected: no stash, explicit-path
+    staging only).
+  - Fetched origin/main once: 374a4aa — the same head as when assigned.
+    Main had advanced by 2 commits since 8b6a52e, this branch's base
+    (7c72311 workbench W5a task pane, 374a4aa sweep3 serve/changelog
+    lows). Neither touches scaffold.py, this branch's tests, the
+    atomic_write_text consumers (ids.py/revise.py), or any file the
+    branch adds.
+  - Rebased the 2 branch commits onto 374a4aa: clean, zero conflicts.
+    New head fb361e5 (was fd543d4); 3e2876f (was 1a9ca20).
+  - Re-ran the targeted set post-rebase, forcing this worktree's src
+    (PYTHONPATH=<worktree>/src, refdes.__file__ and refdes.scaffold.__file__
+    confirmed under the worktree): test_preset_write_atomicity.py +
+    test_readonly_explicit_writes.py, test_scaffold.py,
+    test_eol_fidelity.py, test_no_write.py, test_exit_codes.py,
+    test_config_duplicate_keys.py -> 229 passed. Concrete-risk guard for
+    the shared helper (other atomic_write_text consumers): test_ids.py,
+    test_revise.py, test_revise_migrations.py, test_revise_cli.py -> 153
+    passed. Scoped ruff (`ruff check src/refdes/scaffold.py
+    tests/test_preset_write_atomicity.py`) -> All checks passed.
+  - Re-ran the CLI symlink probe against the rebased tree
+    (.scratch/prprep-20261014/probe.py): add-preset/remove-preset exit 0,
+    the symlink is still a symlink, the presets line updates in
+    actual-project.yaml, no .scratch/.refdes-tmp litter; probe prints
+    refdes.cli.__file__ under this worktree's src. PASS.
+  - Added the changelog fragment the branch was missing:
+    changelog.d/preset-writes-atomic-symlink-safe.fixed.md. The two
+    commits are a user-facing fix and changelog.d/README.md says to
+    commit the fragment with the change; CI has no fragment check, so
+    this slipped through the first two passes. Covers both halves
+    (ENOSPC atomicity + symlinked config).
+
+Difficulties
+------------
+  - None new. The rebase applied cleanly on the first try; nothing in
+    the 2 new main commits overlaps this branch's files.
+
+Limits
+------
+  - No full-suite run in this pass: the 2 new main commits (workbench
+    task pane, serve test-helper/changelog) share no files with this
+    branch's three (scaffold.py, its new test, the in-prog-log), and the
+    consumer guard above covers the only shared code path
+    (atomic_write_text). No concrete integration risk was found that a
+    full run would answer (AGENTS.md: broader tests only for a concrete
+    risk; the pre-rebase full-suite number is recorded above).
+  - The rebase rewrote the 2 unpushed commits' hashes; the branch was
+    never pushed, so nothing external references the old hashes.
