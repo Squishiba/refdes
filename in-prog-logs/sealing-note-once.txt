@@ -105,3 +105,30 @@ Finding 4 — informational, behaviour left as is per task.
 Docs sync (AGENTS.md: don't ship stale claims): the init-gitignore enumerations
 in cli-reference.md (list, file table row, "three gitignored paths"→four),
 getting-started.md ("four paths"→five), standard-library.md all updated.
+
+--- FIX ROUND 2 (PR #238 review, agent f8f789e) ---
+
+Finding (P2): repeated `--no-write` runs kept printing the note (the
+first-round rule: read-only prints when the set differs, records nothing --
+so a read-only CI log gets the one-liner on every run, the F10 noise by the
+read-only door). Orchestrator changed the rule: a run that cannot record
+prints NOTHING (unless --verbose), and consumes nothing.
+
+New gate: `names and (verbose or (write and recorded != names))`.
+--no-write/--dry-run: silent, record nothing, next writable run prints once.
+--verbose: always prints, read-only runs included (records as usual when
+writable).
+- cli.py: gate + docstring paragraph for write=False rewritten.
+- tests: test_a_no_write_run_prints_the_note_without_consuming_it REPLACED
+  by test_a_no_write_run_is_silent_and_consumes_nothing (silent twice, no
+  state file, next writable run prints once then quiet) + new
+  test_no_write_with_verbose_prints_the_note; test_a_dry_run_build_does_not_
+  consume_the_note updated to the silent rule; module docstring updated.
+- docs/design-log.md and changelog fragment: the --no-write sentence.
+- PR body: rule restated + note that a CI job running plain `check` on a
+  fresh clone still prints each time (the record is gitignored), flagged
+  for Jared.
+Sabotage round 2: gate reverted to `verbose or recorded != names` (round-1
+rule) -> test_a_no_write_run_is_silent_and_consumes_nothing and
+test_a_dry_run_build_does_not_consume_the_note fail (2 failed, 19 passed);
+restored, 21/21 green.

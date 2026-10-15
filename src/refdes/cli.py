@@ -286,17 +286,20 @@ def _announce_sealing_optin(
     `.refdes/schema.json ... refreshed` note, with the set (not the mtimes)
     as the state, because the config can be edited back to a set the note
     already announced. Removing the overlay is recorded too (silently):
-    re-adding it is a decision again, and prints again. `--verbose` always
-    prints: a reader who asked for everything should see the confirmation on
-    the run they asked for it.
+    re-adding it is a decision again, and prints again.
 
     `write=False` (`--no-write`, and `build --dry-run`, the same promise made
-    by a different name) prints by the same rule but records nothing, so the
-    next writable run -- the one that owns the tree -- still prints it.
+    by a different name) is silent (PR #238 review round 2): a run that
+    cannot record the announcement can only re-print it on every invocation,
+    which is the F10 noise this command exists not to make -- so it says
+    nothing and consumes nothing, and the next writable run -- the one that
+    owns the tree -- prints it once. `--verbose` always prints: a reader who
+    asked for everything sees the confirmation on the run they asked for it,
+    read-only runs included.
     """
     names = sorted(project.sealing_optins)
     recorded = _announced_sealing_optins(project)
-    if names and (verbose or recorded != names):
+    if names and (verbose or (write and recorded != names)):
         print(_sealing_optin_note(project), file=sys.stderr)
     if not write:
         return

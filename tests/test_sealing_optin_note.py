@@ -29,8 +29,9 @@ in every CI check log [that] trains people to skim notes". The note now prints
 when the decision is news — the first run after the opt-in appears, and again
 when the set of opted-in types changes — with the set recorded under
 `.refdes/`, the same posture as the `.refdes/schema.json ... refreshed` note.
-A `--no-write`/`--dry-run` run prints by the same rule and records nothing;
-`--verbose` always prints.
+A `--no-write`/`--dry-run` run is silent and consumes nothing (it cannot
+record, so it only re-prints — the noise F10 exists to stop); `--verbose`
+always prints.
 
 Nothing here may change an exit code — that is the whole of the contract, and
 each test below asserts it.
@@ -227,28 +228,44 @@ def test_the_note_returns_once_when_the_set_of_opted_in_types_changes(
     assert _notes(_run(capsys, cfg, "check")[1]) == []  # and quiet again
 
 
-def test_a_no_write_run_prints_the_note_without_consuming_it(tmp_path, capsys):
-    """`--no-write` promises the tree is untouched, and recording "already
-    announced" *is* touching it (docs/design/keys.md §2). So a read-only run
-    prints by the same rule — set differs from what is recorded — but records
-    nothing: the next writable run, the one that owns the tree, still prints
-    it, and only that run goes quiet afterwards."""
+def test_a_no_write_run_is_silent_and_consumes_nothing(tmp_path, capsys):
+    """A read-only run cannot record "already announced" — recording *is*
+    touching the tree, and `--no-write` promises it is untouched (docs/
+    design/keys.md §2) — so it can only re-print the note on every
+    invocation, which is the F10 noise itself, back in the CI log by the
+    read-only door (PR #238 review round 2). Silent it is, and silent
+    twice: it also consumes nothing, so the next writable run — the one
+    that owns the tree — prints the note once, then goes quiet."""
     cfg = _setup(tmp_path, BASE + OPT_IN)
-    assert len(_notes(_run(capsys, cfg, "--no-write", "check")[1])) == 1
+    assert _notes(_run(capsys, cfg, "--no-write", "check")[1]) == []
+    assert _notes(_run(capsys, cfg, "--no-write", "check")[1]) == []
     assert not _state_file(tmp_path).exists(), "--no-write recorded a state file"
-    assert len(_notes(_run(capsys, cfg, "--no-write", "check")[1])) == 1
     assert len(_notes(_run(capsys, cfg, "check")[1])) == 1  # not consumed
     assert _notes(_run(capsys, cfg, "check")[1]) == []
 
 
-def test_a_dry_run_build_does_not_consume_the_note(tmp_path, capsys):
-    """`build --dry-run` is `--no-write`'s promise made under its own name
-    (cli._load says so); its load writes nothing, and its announcement
-    records nothing for the same reason."""
+def test_no_write_with_verbose_prints_the_note(tmp_path, capsys):
+    """`--verbose` is the escape hatch of the silence: a reader who asked
+    for everything on a read-only run sees the confirmation on that run.
+    It is read-only, so it still records nothing — the next plain writable
+    run prints the announcement for real."""
     cfg = _setup(tmp_path, BASE + OPT_IN)
-    assert len(_notes(_run(capsys, cfg, "build", "--dry-run")[1])) == 1
+    assert len(_notes(_run(capsys, cfg, "--no-write", "check", "-v")[1])) == 1
+    assert len(_notes(_run(capsys, cfg, "--no-write", "check", "-v")[1])) == 1
     assert not _state_file(tmp_path).exists()
     assert len(_notes(_run(capsys, cfg, "check")[1])) == 1
+
+
+def test_a_dry_run_build_does_not_consume_the_note(tmp_path, capsys):
+    """`build --dry-run` is `--no-write`'s promise made under its own name
+    (cli._load says so); it is read-only, so the round-2 rule applies:
+    silent, records nothing, and the next writable run prints the note
+    once."""
+    cfg = _setup(tmp_path, BASE + OPT_IN)
+    assert _notes(_run(capsys, cfg, "build", "--dry-run")[1]) == []
+    assert not _state_file(tmp_path).exists()
+    assert len(_notes(_run(capsys, cfg, "check")[1])) == 1
+    assert _notes(_run(capsys, cfg, "check")[1]) == []
 
 
 def test_verbose_always_prints_the_note(tmp_path, capsys):
