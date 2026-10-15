@@ -6,6 +6,8 @@ uncaught `TypeError` at `schema.py:880`.
 Worktree: /home/jorb/.paseo/worktrees/16msma8v/fix-yaml-surrogate-duplicate-20261013
 Branch:   fix/yaml-surrogate-duplicate-20261013 (from main @ 8b6a52e)
 Status:   FINISHED — one commit, parser fix + two tests + changelog fragment.
+          PR prep (rebase onto origin/main 374a4aa, push, PR open, not
+          merged): see §7.
 
 ==========================================================================
 ## 0. Inputs
@@ -169,3 +171,45 @@ The probe project (`refdes-project.yaml`, `refdes-schema.yaml`,
 `items/r.yaml`), `backup/parse.py.fixed` (the fixed file, used for the
 main-code run in §3), `backup/head/` (HEAD's two files, for the ruff
 baseline diff).
+
+==========================================================================
+## 7. PR prep, 2026-10-14 (Jared authorised continuing the queue)
+
+Assigned base was 374a4aa; the branch was built on 8b6a52e and was unpushed,
+so it had to move.
+
+- cwd/branch/HEAD/status verified first: this worktree,
+  `fix/yaml-surrogate-duplicate-20261013` @ 5820a1c, clean.
+- `git fetch origin main` (once): origin/main == 374a4aa == local `main`,
+  i.e. nothing newer than the assigned base. Remote reachable, so the
+  rebase is onto the real tip and the "local main only" limitation does
+  not apply.
+- `git rebase origin/main` → 5820a1c rebased onto 374a4aa as **f878f8d**,
+  **no conflicts**: main's two commits (7c72311 task pane, 374a4aa sweep3
+  lows) touch cli.py/render.py/threads.py/task_pane/templates/docs/tests
+  and two *other* changelog fragments, and none of them touch
+  `src/refdes/parse.py`, `tests/test_keys.py` or my fragment's filename, so
+  nothing had to be resolved and no intent needed preserving under a
+  conflict. `git diff origin/main..HEAD --stat` is the same four files as
+  before the rebase.
+- Re-verified at the new base with this worktree's src forced
+  (`PYTHONPATH=$PWD/src`, `refdes.parse.__file__` printed as
+  `.../fix-yaml-surrogate-duplicate-20261013/src/refdes/parse.py`):
+  targeted 241 passed (tests/test_keys.py, test_config_duplicate_keys.py,
+  test_parse.py, test_config_unknown_keys.py, test_config_split.py,
+  test_revise_flow_style.py, test_load_time_writes.py); `ruff check` on the
+  two touched files clean.
+- Full suite NOT re-run: main's diff is a new read-only task-pane surface
+  plus serve/test-helper and changelog chores, with nothing on the
+  `yaml_safe_load_checked` / mapping-constructor path, so no concrete
+  integration risk for this change. The §4 full-suite count was taken at
+  8b6a52e + this change.
+- CLI behaviour re-checked on a fresh probe
+  (`.scratch/yaml-edge-001-prcheck/`, rebuilt because the §1 probe had been
+  through a writable `ls` run and carries a minted `key:` line):
+  `refdes --no-write check` → `1 items, 0 errors, 0 warnings`, exit 0, no
+  traceback.
+- Claude's open PR #211/#212 worktrees and the shared main checkout were
+  not read from or written to; no push to main, no merge.
+- Pushed `fix/yaml-surrogate-duplicate-20261013` and opened the PR against
+  main (number recorded in the next section). Not merged.
