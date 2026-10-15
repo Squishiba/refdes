@@ -95,7 +95,8 @@ exactly.
   test_citation_sections + test_citation_ids +
   test_citations_lockfile_locking + test_serve_sources_accept +
   test_serve_sources + test_audit_hash_only_wording` = 409 passed, 1
-  skipped. Full suite: see below.
+  skipped. Full suite at head `292ae41`: 3866 passed, 2 skipped
+  (318s, exit 0).
 - Probe (real CLI, pinned src): -3 → fetch/check/build all exit 1 with one
   sentence at `.refdes/citations.yaml:11`, file byte-identical after the
   refused fetch; 0-page fetch/check/build unchanged (exit 0, 0 warnings);
