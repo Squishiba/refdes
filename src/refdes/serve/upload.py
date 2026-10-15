@@ -165,7 +165,17 @@ class Refused:
     name or another directory) and "capture" (§9.2, fixable by changing the
     reference in the other item) are the two checks against other documents.
     `details` carries the same facts the reason spells out, as rows, for a
-    dialog that wants to list them."""
+    dialog that wants to list them.
+
+    Rows of a `kind="sealed"` refusal are one stable shape (the three §10
+    refusals share the kind, so they must share the readable contract): every
+    row carries the core keys -- `item` (the display id), `source_file`
+    (project-relative), `srcs` (the references naming the file in question,
+    empty for an upload *for* the entry, which references nothing yet),
+    `sealed` (why this row is in the refusal), and `why` (the branch's reason,
+    as prose) -- and a branch may add its own keys on top of the core, never
+    instead of it: the capture refusal adds `src` and `resolves_to`. A reader
+    can count on the core in every sealed row."""
 
     reason: str
     status: int = 422
@@ -382,6 +392,7 @@ def _capture_refusal(project: Project, rel: str, sources: dict[str, str]) -> Ref
                     "item": item_id,
                     "source_file": source_file,
                     "src": leaf,
+                    "srcs": [leaf],
                     "resolves_to": resolved,
                     "why": (
                         "that image currently resolves elsewhere, and a path that "
@@ -500,7 +511,14 @@ def _sealed_target_refusal(project: Project, item: Item | None) -> Refused | Non
             {
                 "item": ref,
                 "source_file": (item.source_file or "").replace("\\", "/"),
+                "srcs": [],
                 "sealed": True,
+                "why": (
+                    "the upload is for this sealed entry: the body edit that "
+                    "would reference the image is itself refused, so any bytes "
+                    "written here could only ever be an orphan on an entry "
+                    "that can never take the reference"
+                ),
             },
         ),
     )
@@ -517,9 +535,25 @@ def _sealed_replace_refusal(rel: str, rows: list[dict], sealed: list[dict]) -> R
     second computation of them. The message names the sealed ones, because they
     are the reason; `details` carries every referrer, because the blast radius is
     still worth seeing -- a dialog can say "this one is why, and this other one
-    would have changed too"."""
+    would have changed too". The disclosed rows carry the sealed core keys (the
+    shared row already brings `item`, `source_file`, `srcs`, `sealed`); this
+    fills in each row's `why`, so a dialog renders reason and blast radius from
+    one shape."""
     if not sealed:
         return None
+    for row in rows:
+        row["why"] = (
+            "this sealed entry references the file, and a seal hashes the "
+            "entry's body text -- the path in `![alt](path)`, not the bytes "
+            "behind it -- so replacing this file would change what the sealed "
+            "record displays while its hash still verifies"
+            if row["sealed"]
+            else (
+                "this entry also references the file: replacing it would change "
+                "what its page shows too, and it is disclosed here for that "
+                "reason, not as the cause of the refusal"
+            )
+        )
     named = "; ".join(
         f"{row['item']} ({row['source_file']}) references it as "
         f"{', '.join(row['srcs']) or 'an image'}"
@@ -552,7 +586,9 @@ def _sealed_capture_refusal(
     "would silently re-point a document" understates "this would silently "
     "re-point a record that is supposed to be unchangeable". As in
     `_sealed_replace_refusal`, the message names the sealed entries and `details`
-    keeps every captured referrer."""
+    keeps every captured referrer. The rows already carry the sealed core --
+    `item`, `source_file`, `srcs`, `sealed`, `why` -- and this branch's keys sit
+    on top of it: `src` and `resolves_to`."""
     named = "; ".join(
         f"{row['item']} ({row['source_file']}) writes {leaf!r}, which "
         + (
