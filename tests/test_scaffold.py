@@ -557,6 +557,7 @@ def _git_check_ignore(proj, *paths):
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
 
 
@@ -590,6 +591,7 @@ def test_init_does_not_outrank_a_negated_glob_that_tracks_the_settings_file(tmp_
         [git, "-C", str(proj), "add", "--dry-run", "--", ".vscode/settings.json"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert staged.returncode == 0, staged.stderr
     # what the negation says nothing about is still wanted: the `.refdes/`

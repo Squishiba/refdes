@@ -250,6 +250,7 @@ def _git_ignore_verdict(target_dir: str, entry: _GitignoreEntry) -> bool | None:
             capture_output=True,
             text=True,
             timeout=15,
+            check=False,
         )
         if top.returncode != 0:
             return None
@@ -258,6 +259,7 @@ def _git_ignore_verdict(target_dir: str, entry: _GitignoreEntry) -> bool | None:
             capture_output=True,
             text=True,
             timeout=15,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
