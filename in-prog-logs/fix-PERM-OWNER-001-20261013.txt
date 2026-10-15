@@ -110,3 +110,46 @@ future re-introduction of the umask *window* mid-call beyond the spy test,
 which catches any call itself -- the spy is that tripwire.
 
 Follow-up finished: yes, committed locally on the same branch. Not pushed.
+
+----------------------------------------------------------------- PR prep 20261014
+Prepared branch for PR to main. Pre-checks: pwd = this Paseo worktree, HEAD
+was 4407da5, tree clean. Fetched origin/main once: 8b6a52e..f7df34d, nine
+commits. Intervening seal.py change = PR #212 (1a1c960): _load_seal_data
+wraps decode/YAML errors in SchemaError (+ the mapping/reseal-history
+ValueErrors -> SchemaError) and appends a corrupt-seal CLI test to
+tests/test_seal.py -- the reader half; my two commits are the writer half,
+regions disjoint in seal.py, both import blocks and the file-end of
+test_seal.py collide.
+
+Rebase onto f7df34d: seal.py auto-merged clean (SchemaError import/raises +
+secrets/_create_temp all present in the result). tests/test_seal.py
+conflicted twice, both resolved by keeping both sides: the import block now
+carries contextmanager+Path+pytest+cli_mod together, and the corrupt-seal
+CLI test from #212 sits before my file-modes section. cc2e5be re-applied as
+c760bd7 (git rebase --continue needed GIT_EDITOR=true in this dumb
+terminal); 4407da5 re-applied cleanly as 385c1a7. Both commits keep the
+Co-authored-by trailer (verified with git log --format trailers).
+
+Verification after rebase (PYTHONPATH pinned to this worktree src;
+refdes.seal.__file__ printed from it):
+- test_seal + history-seal + revise + checks-keys + calc-rewrite +
+  sealing-optin: 165 passed (164 + #212's new test).
+- #212 adjacency suite (reseal-audit, yaml-loaders, history, keys-adopt):
+  64 passed.
+- CLI probe, fresh project, umask 002: new log-seal.yaml 664; chmod 600 +
+  rebuild stays 600; then \xff into the seal file -> `check` prints
+  "configuration error: ... seal file is not valid UTF-8 ..." exit 2, no
+  traceback. Both behaviors coexist end to end.
+- ruff --select I,F,E9 on both touched files: clean. The repo-wide ruff
+  baseline (AGENTS.md) is not a gate; the single remaining finding in
+  seal.py is the pre-existing UP017 at :335 on an untouched line.
+
+Pushed branch, PR opened against main (no merge). Not done here: merge,
+shared-main edits.
+
+Main advanced during prep (f7df34d -> 9f83092: #223 checks diagnostic, #222
+docs; neither touches seal.py/test_seal.py -- diff --stat empty). Rebased
+once more onto 9f83092, no conflicts; final heads 94bab70/57d9c86/c61eed6.
+Re-ran test_seal + reseal-audit + yaml-loaders on the new base (52 passed)
+and the fresh-build CLI probe (new seal file 664 under umask 002, matching
+schema.json).
