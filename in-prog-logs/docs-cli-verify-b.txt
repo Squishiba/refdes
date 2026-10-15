@@ -1,0 +1,130 @@
+Task: verify docs/cli-reference.md against the real CLI for: audit, init, new,
+schema, standard, keys, rename, calc-rewrite, stub-tests, former-ids, history.
+Docs-only fixes. Branch docs-cli-verify-b. Every claim below checked by running
+the CLI (PYTHONPATH=$PWD/src <venv py> -m refdes.cli) in synthetic projects
+under .scratch/verify-b/ (proj1..proj48).
+
+VERIFIED (claim matches real behavior)
+- init: writes refdes-project.yaml/.vscode/settings.json/.gitignore; gitignore
+  covers .vscode/settings.json, .refdes/copies/, .refdes/schema.json,
+  .refdes/sealing-optin.json, .refdes-write.lock; appends to existing, skips
+  covered paths; ignores -c; refuses existing config (exit 2); unknown
+  --standard/--preset and preset+--standard-none are exit 2 with nothing
+  written.
+- new: front matter + one-line body stub; --list skeleton; works outside a
+  project (bundled-standard fallback); unknown type exits 1 with did-you-mean;
+  writes no schema.json.
+- schema: bare == --json; byte-for-byte equals .refdes/schema.json written by
+  loads; schema/--graph read-only; --graph one SVG/type + coverage spine, no
+  script, type filter, unknown type exit 1 naming types.
+- standard add/remove-preset: add validates; already-selected/not-selected/
+  unknown-name exit 2; remove-preset prints diagnostics before writing, writes
+  removal even with errors, exit 1 with the closing
+  "N error(s) above -- fix these, or add the preset back..." line; clean
+  removal exit 0.
+- standard upgrade: v2/v3 migration descriptions match migration.yaml files;
+  chain v1->v3 applies (CON->BND, constraint->bound, title->text, prose->body,
+  decision->log, records->follows); --dry-run and --no-write write nothing;
+  --to at/past current exits 2; non-int --to exit 2; --to 99 exit 1 after
+  reaching v3, config left at reached version; baseline carry-forward line and
+  the "baselines skipped (no recorded standard to migrate from)" line.
+- rename: dry-run/revise alias+deprecation note; missing/broken mapping exit 2
+  messages; non-applicable mapping exit 0; unknown-section refusal lists
+  merge_types (doc sample already correct); citation_links refusal; link verb
+  unknown/collision/inverse messages; prose left-behind message; real rename
+  rewrites structured refs to composite form; type-rename refusal rolls back
+  ("rewritten project has parse errors -- rolled back"); build-error refusal
+  text; "baselines carried forward: rel-b" on hash-changing field rename;
+  prefix rename on keyed project leaves baseline alone (audit relabels by key);
+  "seals carried forward: power" on sealed-entry field rename.
+- calc-rewrite: dry-run/real output shapes; preserves alignment/comments;
+  "nothing to rewrite -- no old-spelling calc lines found"; tolerance form
+  rewrite; transactional refusal on build-breaking rewrite; retired spelling
+  is a build error naming the exact fix.
+- audit: clean exit 0; unparseable items file -> stderr ERROR + exit 1, report
+  unchanged; unreadable .refdes/citations.yaml -> stderr + exit 1.
+- keys adopt: dry-run would-mint/would-expand/would-anchor + "baselines would
+  be rebased:" + "files that would change:"; real report prints all four count
+  lines incl. zero, sections only for existing storage files; marker
+  .refdes/keys-adopted.yaml written; rerun "nothing to do -- project already
+  adopted" exit 0; keys written as key: <11-char> in source.
+- keys restore: dry-run/real restore report; repeat -> "nothing to do --
+  original keys already declared"; malformed key refused exit 1; baseline
+  content/title mismatch refusal names both sides (doc sample shape); --force
+  restores (exit 0).
+- stub-tests: dry-run "would write N stub(s) to items/power/stub-tests.md:
+  <sorted ids>" + "across N file(s)"; real run appends to the prior file,
+  never overwrites; "Run 'refdes id' to allocate ids for the new items.";
+  stubs get type default prefix TST (refdes id allocated TST-001..003, not
+  board-derived); dedup: rerun reports "no coverable item is missing a
+  verifying test"; build error -> exit 1 refuses.
+- former-ids propose: legacy (key-stripped) baseline -> scored
+  "confidence 100%" line + closing "Nothing written. Re-run with --confirm...";
+  keyed baseline -> "exact match (surrogate key)"; --confirm writes
+  "wrote former_ids: [REQ-CAN-001] to REQ-CAN-007 (items/can/requirements.yaml)";
+  --confirm non-candidate -> candidates printed + "error: not a currently
+  proposed candidate: NOPE-999 ..." exit 1; no baseline / --baseline NAME
+  missing exit 1 messages; load-error path "no candidate former-id mappings
+  found -- 1 load error(s); files that failed to load were not searched" exit 1.
+- history: every subcommand refuses under --no-write exit 2; capture
+  "captured LOG-PWR-001: manual capture", idempotent second run "is already
+  captured; nothing was written", unknown item exit 2 message; redact without
+  --confirm exit 2 + Git warning; successful redact "redacted 1 object(s) and
+  1 event(s)" + redaction-event line + Git warning; nothing-matched exit 0
+  without Git warning; unknown target exit 2 message; migrate-seals marker +
+  idempotent rerun ("already migrated", "0 written, 1 already present") +
+  --capture-current "captured current content ... migrated-current event"; no
+  seal files -> "no legacy seal files found; nothing to migrate" exit 0.
+
+WRONG (doc fixed in this pass)
+1. init: example "refdes init --preset design-debate" fails on this branch --
+   hardware@3 bundles no presets ("preset 'design-debate' does not exist for
+   hardware@3 (available: [])", exit 2). Replaced with a note (presets ship
+   with hardware@1/@2; add via standard add-preset).
+2. new: doc said "refdes new decision" answers "configuration error: unknown
+   type 'decision'." -- real: stderr "unknown type 'decision'.", exit 1. Fixed.
+3. schema: writer list incomplete (omitted thread, work, history capture,
+   serve); the "every command that loads the project refreshes
+   .refdes/schema.json" claims (new section + .refdes file table) are
+   over-broad -- a real `refdes rename` run loads the project in a writable
+   tree and writes no schema.json. Lists/wording fixed.
+4. standard add/remove-preset: undocumented refusal -- presets written in
+   block-list style exit 2 with "configuration error: could not find a
+   'presets: [...]' list to edit ...". Paragraph added.
+
+NOT CHECKED
+- calc-rewrite "sealed entries with old-spelling calc lines are listed and
+  left as written": on this branch a sealed entry cannot carry the retired
+  spelling -- the seal stamps at the first clean build, and the retired
+  spelling is a build error in unsealed content (and editing a sealed entry
+  fails the build), so no synthetic repro; code path exists
+  (calc_rewrite sealed_entries list; calc.py retired->warning for sealed).
+  Doc claim left as-is, flagged in PR body.
+- stub-tests multi-workspace file splitting (needs workspace setup).
+- audit sample report data (unpinned citations / imports / parts / former-ids
+  rows) not reproduced -- section headers verified, example content is from
+  the full power11 example project.
+
+schema.json writer facts (fresh healthy project, rm .refdes/schema.json before
+each command; [WRITE]/[no] is whether the command regenerated it):
+- WRITE: check, ls, index, id, audit, stub-tests, former-ids propose (even on
+  its no-baseline exit 1), thread (exit-2 refusal path), work, revision,
+  release, build, history capture, history migrate-seals.
+- no: schema, new, init, rename (dry-run and applied), calc-rewrite (incl. a
+  successful real rewrite), keys adopt (real), keys restore (refused),
+  standard upgrade --dry-run.
+  => doc claims "every command that loads the project refreshes
+  .refdes/schema.json" were over-broad; softened to "most" and the list gained
+  thread/work/history capture. serve's writable loads not directly probed
+  (long-running); left out of the list.
+
+Gates:
+- full suite first run: 1 failed, 3915 passed, 2 skipped --
+  tests/test_docs_anchors.py flagged my own new cross-link slug
+  (#refdes-standard-add-preset--refdes-standard-remove-preset); the site slug
+  is #refdes-standard-add-preset-remove-preset (heading is
+  "add-preset / remove-preset"). Fixed, re-ran: 2 passed.
+- tests/test_docs_anchors.py: 2 passed.
+- python docs-site/gen_examples.py --check: up to date.
+- ruff check --select E9,F src tests: clean.
+
