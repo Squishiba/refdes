@@ -151,6 +151,20 @@ def load_tree(
         + len(expanded_calc_refs)
         + len(anchored_follows)
     )
+    # Run-4 F3: a repoint that followed an `id:` collision's surviving key
+    # lands in files OTHER than the one with the duplicate, so the count
+    # above cannot point anyone at them. Every list fed to this is empty
+    # under --no-write, so the naming (and its "already on disk") is true
+    # whenever it prints.
+    links_mod.warn_repointed_by_duplicate_key(
+        project,
+        [
+            *expanded_links,
+            *expanded_checks,
+            *expanded_calc_refs,
+            *anchored_follows,
+        ],
+    )
     if anchored_follows:
         # The follows-anchor writer is the one later source rewrite that still
         # needs a reparse. Rebuild the imported portion of the resolution

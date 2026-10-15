@@ -992,6 +992,15 @@ class Project:
     # Empty for every project whose sources parse cleanly, which is every
     # ordinary one.
     duplicate_key_files: set[str] = field(default_factory=set)
+    # Ids lost to an `id:` duplicate key, for whoever has to report what the
+    # rest of the load then did with them: `parse._report_duplicate_keys`
+    # records `{lost id: (surviving id, file of the duplicate)}` (only where
+    # the two lines' values differ -- a repeat that agrees loses nothing), and
+    # `links.warn_repointed_by_duplicate_key` uses it to name every file
+    # whose composite references this load repointed at the surviving item
+    # because of a collision. Empty for every project whose sources parse
+    # cleanly.
+    duplicate_id_losses: dict[str, tuple[str, str]] = field(default_factory=dict)
     coverage: dict[str, Coverage] = field(default_factory=dict)
     # Per-(item, board) coverage for the members of the groups named in a
     # board's `conforms_to:` -- {(item_id, board_name): Coverage}. Stays empty

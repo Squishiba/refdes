@@ -1180,3 +1180,71 @@ def test_history_capture_refuses_a_read_only_tree_instead_of_crashing(
     assert "captured REQ-001" not in out
     assert code == 1
     assert not (tmp_path / ".refdes" / "history").exists()
+
+
+# ----------- run-4 F3: a duplicate-key repoint names the file it repointed
+#
+# In-prog-logs/user-sim-release-gate-run6a.md §run-4 F3: an entry whose `id:`
+# is written twice keeps the last id in the model, and a composite reference
+# in a DIFFERENT (clean) file resolves through the surviving item's key, so
+# the plain `check` load repoints its stale display half on disk. The
+# duplicate-key error names only the file with the collision; the repointed
+# file was named nowhere, only counted. `links.warn_repointed_by_duplicate_key`
+# names it and says the rewrite already happened; under `--no-write` nothing
+# is rewritten, so it must claim nothing.
+
+DUPKEY_ID_ITEMS = (
+    "defaults: { type: requirement }\n"
+    "items:\n"
+    "  - id: REQ-001\n"
+    "    key: q432vshabxe\n"
+    "    id: REQ-009\n"
+    "    text: The entry that swallows REQ-001.\n"
+)
+
+DUPKEY_REFINER = (
+    "defaults: { type: requirement }\n"
+    "items:\n"
+    "  - id: REQ-002\n"
+    "    text: Points at REQ-001 through its key, from a clean file.\n"
+    "    refines: [REQ-001@q432vshabxe]\n"
+)
+
+
+def _dupkey_project(tmp_path):
+    cfg = _id_project(tmp_path, DUPKEY_ID_ITEMS)
+    (tmp_path / "items" / "s.yaml").write_text(DUPKEY_REFINER, encoding="utf-8")
+    return cfg
+
+
+def test_the_duplicate_key_repoint_names_the_file_it_repointed(tmp_path, capsys):
+    cfg = _dupkey_project(tmp_path)
+    assert cli_mod.main(["-c", cfg, "check"]) == 1
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "duplicate key 'id' in one mapping" in out, out
+    # The file whose reference this load repointed is named, with the old and
+    # new target text, and the run says the rewrite is already on disk.
+    assert "items/s.yaml" in out, out
+    assert "'REQ-001@q432vshabxe'" in out, out
+    assert "'REQ-009@q432vshabxe'" in out, out
+    assert "The rewrite has already happened" in out, out
+    # And it is not a lie: the clean file on disk carries the new target.
+    assert (
+        "refines: [REQ-009@q432vshabxe]"
+        in (tmp_path / "items" / "s.yaml").read_text(encoding="utf-8")
+    )
+
+
+def test_the_no_write_duplicate_key_run_makes_no_repoint_claim(tmp_path, capsys):
+    cfg = _dupkey_project(tmp_path)
+    assert cli_mod.main(["--no-write", "-c", cfg, "check"]) == 1
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "duplicate key 'id'" in out, out
+    assert "repointed" not in out, out
+    assert "rewrote" not in out, out
+    assert (
+        (tmp_path / "items" / "s.yaml").read_text(encoding="utf-8")
+        == DUPKEY_REFINER
+    )

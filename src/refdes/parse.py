@@ -687,6 +687,23 @@ def _report_duplicate_keys(
         )
     if records:
         project.duplicate_key_files.add(rel)
+    id_records = [
+        record
+        for record in records
+        if record.key == "id"
+        and record.first_value is not None
+        and record.second_value is not None
+    ]
+    if id_records:
+        # YAML keeps the last, so with `id:` written three times every earlier
+        # value is lost to the mapping's FINAL one, not to the value on its
+        # own record's second line (records pair consecutive occurrences).
+        survivor = id_records[-1].second_value
+        for record in id_records:
+            if record.first_value != survivor:
+                project.duplicate_id_losses.setdefault(
+                    record.first_value, (survivor, rel)
+                )
 
 
 def _shift_duplicates(

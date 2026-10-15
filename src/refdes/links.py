@@ -475,6 +475,57 @@ def _drop_refused(plan, refused: set[str]) -> None:
         ]
 
 
+def warn_repointed_by_duplicate_key(
+    project: Project, rewrites: list[tuple[Item, str, str, str]]
+) -> None:
+    """Name every file whose references THIS load repointed because of a
+    duplicate-key collision, and say the rewrite is already on disk (run-4
+    F3: a composite reference in a clean file silently followed the key of
+    the item that won an `id:` collision in another file; the only trace was
+    the count-only "(rewrote N reference(s) while loading)" line).
+
+    `rewrites` is the concatenation of what the load's expansion steps
+    actually rewrote -- every entry ``(item, link_name, old, new)``, and all
+    five sources return [] under `--no-write`/`--dry-run` (loader.load_tree),
+    so this stays silent exactly when nothing was written and can claim the
+    disk change only when it is true. A repoint is attributed to a collision
+    only when the old label was a lost `id:` value and the new label is that
+    collision's surviving id -- an ordinary rename refresh matches nothing
+    here and keeps its silence.
+    """
+    if not project.duplicate_id_losses:
+        return
+    grouped: dict[tuple[str, str, str], list[Item]] = defaultdict(list)
+    for item, _link_name, old, new in rewrites:
+        if "@" not in old:
+            continue
+        lost = old.partition("@")[0]
+        collision = project.duplicate_id_losses.get(lost)
+        if collision is None:
+            continue
+        survivor, _dup_rel = collision
+        if new.partition("@")[0] != survivor:
+            continue
+        grouped[(item.source_file, old, new)].append(item)
+    for (rel, old, new), items in grouped.items():
+        survivor, dup_rel = project.duplicate_id_losses[old.partition("@")[0]]
+        count = len(items)
+        noun = "reference" if count == 1 else "references"
+        verb = "was" if count == 1 else "were"
+        project.warn(
+            f"{count} {noun} naming {old!r} in {rel} {verb} repointed to "
+            f"{new!r} on disk by this load: the duplicate key 'id' in "
+            f"{dup_rel} drops {old.partition('@')[0]!r} for {survivor!r}, "
+            "and the lost id's key resolves to the surviving item, so the "
+            "label follows it. The rewrite has already happened -- fix the "
+            f"duplicate 'id' line in {dup_rel}, then restore the reference "
+            f"text (back to {old}) if the lost item was the one meant.",
+            file=rel,
+            line=items[0].source_line,
+            item_id=items[0].id,
+        )
+
+
 def expand_missing(
     project: Project, write: bool = True, on_error=None
 ) -> list[tuple[Item, str, str, str]]:
