@@ -75,10 +75,16 @@ Findings worth recording (all re-read at the cited lines, not from memory):
 5. The serve-only seam for anything that writes is the response decoration, not
    a template flag: serve/server.py:_decorate (:738-776) injects the toolbar and
    _reload_probe into the HTTP response only. Note `draft_build`
-   (src/refdes/render.py:976) is NOT that discriminator -- it means
-   `build --dry-run`/seal-skipping, and the preview render passes draft=True for
-   every preview page, so a template test on it would not keep a control out of
-   a plain `refdes build`.
+   (src/refdes/render.py:976) is NOT that discriminator: it is
+   `draft=args.dry_run` (cli.py:409), so it is true for `build --dry-run`
+   -- whose site output is still written to disk (cli.py:430, "dry run, not
+   sealed") -- and true for every serve preview page (serve/preview.py:86
+   passes draft=True). A template gate on it would put a control into
+   `build --dry-run` output on disk, and it does not track serve-vs-build
+   either. (Round 4 fix: an earlier draft of this sentence said a template
+   test on it "would not keep a control out of a plain `refdes build`" --
+   backwards under the plain reading: the sealing build renders it False, so
+   the gate keeps the control out of THAT; the leak is the --dry-run one.)
 
 6. Vocabulary drift worth flagging: living-notes.md §5 proposed
    `on_change: log` for `tasks:`; the shipped standard says
@@ -155,7 +161,7 @@ Fixes, numbered as on the PR:
 6. links.composite_for is called in _link_target (:1455) and _amends_line
    (:1427), not in the _link_lines span; page cites the call sites.
 7. "never written back" is living-notes.md §5 binding rule 1 (461-464),
-   not rule 2 (self-closing, 465-469); the §7 bullet now cites each clause
+   not rule 2 (self-closing, 465-468); the §7 bullet now cites each clause
    to its own rule.
 8. Q1/R4: "a serve restart means a new port, so a new origin, so the draft
    dies" predates #210. With a pinned --port a relaunch reclaims its own
@@ -195,4 +201,19 @@ entry names its own tip", id/key on the split. (3) drafts.js shape:
 emptyDraft (:10-14) is scalar fields, body, pins and pending link
 adds/removes per item handle -- not "scalars only"; the no-task-rows /
 not-keyed-by-tip point stands. Checks: pytest docs/linkify tests -> 15
+passed; gen_examples --check -> up to date. Pushed normally.
+
+Round 4 (PR #211 chunk 2 re-review, 2026-10-14): two findings, both in
+this log, both verified against the code before changing anything.
+(1) Item 5's draft_build sentence: "a template test on it would not keep
+a control out of a plain `refdes build`" is backwards under the plain
+reading -- draft_build is draft=args.dry_run (cli.py:409), so the sealing
+`refdes build` renders it False and a template gate keeps the control out
+of THAT; the real leaks are `build --dry-run`, whose site is still written
+to disk (cli.py:430), and the serve preview pages (serve/preview.py:86,
+draft=True), so the flag tracks neither serve-vs-build nor sealed-vs-not
+as wanted. Sentence rewritten to say that, with the old wording flagged.
+(2) Item 7's rule-2 cite: living-notes.md rule 2 runs 465-468 (rule 3
+starts at 469), not 465-469. Fixed. The page itself cites rule 2 without
+a range, so no doc change. Checks: pytest docs/linkify tests -> 15
 passed; gen_examples --check -> up to date. Pushed normally.
