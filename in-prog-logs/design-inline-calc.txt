@@ -1,56 +1,58 @@
 TASK: design doc -- evaluate-in-place math for engineering notes (inline-calc)
 Branch: design-inline-calc
+PR: #250
 Date: 2026-10-15
 
-What was done
--------------
-- Read AGENTS.md, .scratch/task/COMMON.txt, and .scratch/task/TASK.txt.
-- Read the required source docs narrowly:
-  - docs/math.md (whole)
-  - docs/design/stale-arithmetic-signal.md
-  - docs/design/named-calc-blocks.md
-  - docs/design/form-ingestion.md
-  - docs/design/calc-sources.md (§1 and decisions table)
-  - docs/concepts.md "What is deliberately not here" (lines 144-150)
-  - docs/design/browser-editor.md 417-431, 785-822, 955-1017
-  - docs/design/thread-workbench.md and thread-workbench-w5b-plan.md
-  - docs/design/editor-source-picker.md (overview and accept flow)
-  - src/refdes/calc.py structure (top-level classes/functions listed)
-  - src/refdes/build.py INLINE_VALUE_RE and render_bodies (lines 70-77, 3095-3159)
-  - src/refdes/serve/static/editor.js body textarea (lines 190-211)
-  - src/refdes/model.py CalcLine (lines 494-533)
-- Verified by running:
-  - `refdes serve --help` to confirm preview/editor and ephemeral-port behavior.
-  - `refdes schema --json` to confirm the bundled standard ships no equations.
-- Wrote docs/design/inline-calc.md:
-  - Decision recap (D1-D3 from TASK.txt)
-  - Problem statement
-  - Precedents that are not changed, with file:line citations
-  - Recommended inline syntax (code span with `:=` and trailing `=`)
-  - Rejected alternatives
-  - Stored-result verification, hash interactions, diagnostics
-  - CLI fill command modeled on calc-rewrite
-  - Live editor updates (caret, undo, error handling)
-  - One-unknown solve with E-series suggestions
-  - Reusable calculators extending project equations
-  - Editor form panel
-  - Interaction matrix with existing pieces
-  - Phasing (P1-P4)
-  - Open questions Q1-Q13 with recommended defaults
-  - Alternatives considered
-- Confirmed docs/index.md does not list design/ docs, so no nav entry was added.
+Owner decisions (verbatim from the task brief, recorded here for durable citation)
+---------------------------------------------------------------------------------
+D1. Results are stored in the file text and verified by check/build.
+    Vout = 0.8 V*(1+Rtop/Rbot) = 4.436 V: the "= 4.436 V" is real text the
+    editor (or a fill command) writes. If inputs change later, check/build report
+    the stale number ("says 4.436 V, now computes 4.52 V") instead of silently
+    changing it.
+D2. The preview pane stays, as an optional "as published" view.
+D3. No code execution. The existing restricted calc evaluator (src/refdes/calc.py)
+    is the only evaluator. The editor gets live results from refdes serve (which
+    already runs calc for the preview), never from a JavaScript copy of the
+    evaluator.
 
-Difficulties / choices
-----------------------
-- The write tool failed on a large JSON payload because the design doc contains
-  triple backticks, quotes, and newlines. I wrote the file via a Python script
-  in bash instead. This is a one-time tooling workaround; the content is the
-  same.
-- Had to decide how many open questions to surface. The task asks for every
-  real choice to become a Q1..Qn. I ended with 13 questions covering syntax,
-  verification tolerance, scope, hashing, severity, CLI naming, live-editor
-  undo, solve bounds, E-series, multi-output syntax, version pinning, and the
-  shipped library.
+What was done (initial round)
+-----------------------------
+- Read AGENTS.md, .scratch/task/COMMON.txt, and .scratch/task/TASK.txt.
+- Read the required source docs and code narrowly, and verified behavior by
+  running `refdes serve --help` and `refdes schema --json`.
+- Wrote docs/design/inline-calc.md and in-prog-logs/design-inline-calc.txt.
+- Confirmed docs/index.md does not list design/ docs, so no nav entry was added.
+- Ran docs tests: tests/test_docs_anchors.py (2 passed) and
+  docs-site/gen_examples.py --check (up to date).
+
+Fix round (chunk 1 review, 84f391c)
+-----------------------------------
+Findings addressed:
+1. Added an explicit trigger rule in §3.1: a code span is inline math only if
+   its content matches the §3.2 grammar (contains `:=` or trailing `= <quantity>`);
+   ordinary spans like `Rtop/Rbot` and `foo()` are untouched. Q1 is now about
+   the trigger rule, with a mandatory-prefix alternative.
+2. Fixed the D1 example to use `:=` and noted that D1's wording was the owner's
+   sketch, now expressed in the grammar.
+3. Changed `valid_if` from general boolean expressions to comparison
+   constraints (`expression op quantity`) using the existing `Limit.check` /
+   `parse_limit` logic. No general comparison operators are added to calc; no
+   control flow.
+4. Made §7.1/§7.2 consistent with Q9's default: explicit `from .. to ..`
+   bracket is required.
+5. Gave P1 an honest dependency list: Q1, Q2, Q4-Q7.
+6. Cited owner decisions durably in this log (above) and in PR #250; removed
+   the `.scratch/task/TASK.txt` citation from the design doc.
+
+Orchestrator recommendation changes applied:
+- Q5 / §4.4: stale stored results are warnings by default; they become a
+  release-gate failure via a new `stale_inline_results` rule (default
+  `{release: true, revision: false}`).
+- Q8 / §6.3: default is live auto-update while typing using a native
+  text-insertion path (`document.execCommand('insertText')` or `setRangeText`)
+  to preserve browser undo; a browser test is required before P2 ships. The
+  explicit Fill button remains the fallback.
 
 Tests run
 ---------

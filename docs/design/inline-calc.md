@@ -4,11 +4,14 @@ Status: **Proposed -- design only.** No code is scoped or written.
 
 ## Decision recap (Jared, 2026-10-15)
 
-Three constraints that govern everything below, recorded exactly as decided in
-`.scratch/task/TASK.txt`:
+The three decisions below are recorded verbatim in
+`in-prog-logs/design-inline-calc.txt` and in PR #250. They govern everything in
+this doc.
 
 - **D1. Results are stored in the file text and verified by check/build.**
-  `Vout = 0.8 V*(1+Rtop/Rbot) = 4.436 V`: the `= 4.436 V` is real text the
+  The owner sketched this as `Vout = 0.8 V*(1+Rtop/Rbot) = 4.436 V`; the
+  concrete grammar in §3.2 expresses it as
+  `Vout := 0.8 V*(1+Rtop/Rbot) = 4.436 V`. The `= 4.436 V` is real text the
   editor (or a fill command) writes. If inputs change later, check/build report
   the stale number (`says 4.436 V, now computes 4.52 V`) instead of silently
   changing it.
@@ -78,8 +81,19 @@ says so explicitly; otherwise it builds on them.
 ### 3.1 The ambiguity we have to solve
 
 Prose already contains `=` (`x = 5 in the datasheet`). The design must say how
-an evaluable expression is told apart from ordinary text. The answer used here
-is an **inline code span** plus a small grammar inside it.
+an evaluable expression is told apart from ordinary text, and it must leave
+ordinary code spans such as `Rtop/Rbot` or `foo()` completely untouched.
+
+**Trigger rule (recommended).** A single backtick code span is interpreted as
+inline math only when its content matches the grammar in §3.2. In particular the
+content must contain either `:=` (a definition) or a trailing `= <quantity>` (a
+stored result). A code span like `Rtop/Rbot` or `foo()` does not match, so it is
+rendered as plain code and never evaluated.
+
+**Alternative trigger rule.** Require an explicit marker at the start of the
+span, such as `` `= 0.8 V * (1 + Rtop/Rbot) = 4.436 V` `` or
+`` `:= Vout = 0.8 V * (1 + Rtop/Rbot) = 4.436 V` ``. This makes the trigger even
+more visible, at the cost of extra noise in every span. See Q1.
 
 ### 3.2 Recommended shape: code span with `:=` and a trailing `=`
 
@@ -107,6 +121,8 @@ result         = quantity with unit, e.g. 4.436 V
 - A code span without a trailing `= result` is either a plain code span or a
   definition with no stored value yet; the build warns and the fill command can
   add the result.
+- Any code span whose content does **not** match this grammar is treated as an
+  ordinary inline code span.
 
 Examples:
 
@@ -114,6 +130,8 @@ Examples:
 `Vout := 0.8 V * (1 + Rtop/Rbot) = 4.436 V`   # defines Vout, stored result
 `0.8 V * (1 + Rtop/Rbot) = 4.436 V`            # anonymous, stored result
 `I_load := 1.2 A`                              # defines I_load, no stored result
+`Rtop/Rbot`                                    # ordinary code span, not math
+`foo()`                                        # ordinary code span, not math
 ```
 
 Why a code span works:
@@ -152,7 +170,7 @@ If `Rtop` later changes and the same expression now computes `4.52 V`, the build
 says:
 
 ```
-ERROR inline-calc Vout: stored result says 4.436 V, but the expression now computes 4.52 V
+WARNING inline-calc Vout: stored result says 4.436 V, but the expression now computes 4.52 V
 ```
 
 The check compares:
@@ -176,9 +194,10 @@ to its last significant digit.
 Inline calc spans are evaluated during the existing calc pass. They are parsed
 from the item body outside of ```` ```calc ```` blocks, in source order, and fed
 into the same per-item `env` that the blocks use
-(`src/refdes/calc.py:1301-1319`). An assignment (`:=`) adds a name; a trailing
-`= result` is verified. The outcome produces a diagnostic at the item's source
-line, just like a calc block error.
+(`src/refdes/calc.py:1301-1319`). Only spans that match the §3.2 grammar are
+evaluated; all other code spans are left alone. An assignment (`:=`) adds a name;
+a trailing `= result` is verified. The outcome produces a diagnostic at the
+item's source line, just like a calc block error.
 
 ### 4.3 Interaction with hashes, seals, and upstream changes
 
@@ -198,17 +217,28 @@ line, just like a calc block error.
   the stored inline result is also checked and may be reported stale.
 - **Sealed entries.** A sealed/append-only entry keeps the stored number that was
   true when it was written. If upstream inputs make that number stale, the build
-  reports it; the fill command refuses to rewrite a sealed entry. The author
-  appends a new entry or reseals after review.
+  reports it as a warning; the fill command refuses to rewrite a sealed entry.
+  The author appends a new entry or reseals after review.
 
 ### 4.4 Diagnostic wording and severity
 
 ```
-ERROR inline-calc Vout at DEC-PWR-001.md:23: stored result says 4.436 V, but the expression now computes 4.52 V
+WARNING inline-calc Vout at DEC-PWR-001.md:23: stored result says 4.436 V, but the expression now computes 4.52 V
 ```
 
-Severity is **error** by default (the build fails). Whether a stale result in a
-sealed entry should downgrade to a warning is left open (Q5).
+By default the stale result is a **warning**, not an error. Append-only logs are
+*expected* to keep old numbers that no longer match current inputs -- that is
+the point of D1. Ordinary `refdes check`/`refdes build` therefore keep running.
+
+The warning is promoted to a **gate failure** when `release_gate.stale_inline_results`
+is enabled. The release gate is the existing mechanism that `refdes revision` /
+`refdes release` use to decide whether a baseline can be stamped
+(`src/refdes/model.py:101-113` for defaults;
+`src/refdes/lifecycle.py:783-794` for evaluation;
+`refdes-project.yaml:109-120` for the configuration shape). The proposed default
+for the new rule is `{release: true, revision: false}`, so a stale inline result
+blocks a release but not an ordinary build or a revision stamp. Projects can opt
+in to the stricter `{release: true, revision: true}` if they want.
 
 Other messages reuse existing calc phrasing:
 
@@ -233,7 +263,7 @@ refdes inline-calc fill --path items/decisions/dec-pwr-001.md
 
 Behavior:
 
-- Walks every local item body for inline calc spans.
+- Walks every local item body for inline calc spans that match the §3.2 grammar.
 - Evaluates them in source order, using the same per-item env as blocks.
 - For spans with no stored result or a stale stored result, rewrites the source
   text with the formatted result.
@@ -254,15 +284,12 @@ reused; no JavaScript evaluator is added (D3).
 
 ### 6.2 What P2 adds
 
-After a debounced round-trip, the server returns either:
-
-- a list of replacement ranges for stale/missing inline results, or
-- a fully rewritten candidate body with results filled in.
-
-The client applies the smallest safe change: it replaces only the `= result`
-text of each inline span, working from the end of the body backward so offsets
-stay valid. It preserves the caret by recording `selectionStart`/`selectionEnd`
-before the update and adjusting them by the net length change before the cursor.
+After a debounced round-trip, the server returns a list of replacement ranges
+for stale/missing inline results. The client applies the smallest safe change:
+it selects the `= result` text inside the code span and replaces only that text,
+working from the end of the body backward so offsets stay valid. It preserves
+the caret by recording `selectionStart`/`selectionEnd` before the update and
+adjusting them by the net length change before the cursor.
 
 ### 6.3 Caret, selection, undo, and erroring states
 
@@ -274,37 +301,36 @@ before the update and adjusting them by the net length change before the cursor.
   The client leaves the text alone and shows the diagnostic via the existing W2
   squiggle overlay (`docs/design/thread-workbench.md:271-275`). It never injects
   error text into the body.
-- **Undo.** Native `<textarea>` undo is lost when JavaScript replaces the whole
-  `value`. Two honest options are listed in Q8. The conservative default is to
-  defer live auto-update and instead provide an explicit `Fill inline results`
-  button in the editor for P2, with a managed undo stack if auto-update is
-  desired later.
+- **Undo.** The default is live auto-update while typing, but the replacement
+  must use a browser-native text-insertion path (`document.execCommand('insertText')`
+  after selecting the result range, or `setRangeText`) so that Chromium and
+  Firefox keep native undo working. This needs a browser test before P2 ships.
+  The explicit `Fill inline results` button remains the fallback if the native
+  path does not preserve undo in the supported browsers. See Q8.
 
 ## 7. Solve in place for one unknown
 
 ### 7.1 Syntax
 
 ```markdown
-`Rbot := ? where Vout = 3.3 V`
-```
-
-Meaning: define `Rbot` as the value that makes `Vout` evaluate to `3.3 V`, using
-the rest of the item's calc scope. The unknown is the name on the left-hand
-side; the `where` clause is the constraint expression and target value.
-
-Optional explicit bracket:
-
-```markdown
 `Rbot := ? where Vout = 3.3 V from 1 kohm to 1 Mohm`
 ```
 
+Meaning: define `Rbot` as the value in the range `1 kohm .. 1 Mohm` that makes
+`Vout` evaluate to `3.3 V`, using the rest of the item's calc scope. The unknown
+is the name on the left-hand side; the `where` clause is the constraint
+expression and target value; the `from .. to ..` clause gives the explicit
+bracket the solver needs.
+
 ### 7.2 Evaluation
 
-The build evaluates the constraint expression as a function of the unknown,
-using the existing calc evaluator with the unknown substituted by a trial
-`Value`. It finds a root with a standard 1-D bracketing/Brent method. Domain
-errors (`sqrt()` of negative, division by zero, etc.) are treated as `no root in
-this interval` rather than crashing the solver.
+The build evaluates the constraint expression as a function of the unknown over
+the supplied interval, using the existing calc evaluator with the unknown
+substituted by a trial `Value`. It finds a root with a standard 1-D
+bracketing/Brent method. Domain errors (`sqrt()` of negative, division by zero,
+etc.) inside the interval are treated as `no root in this interval` rather than
+crashing the solver. If no root is found, or if the author omits the `from ..
+to ..` clause, the build reports an error naming the missing bracket.
 
 After solving, the stored result is the root value. The fill command writes it
 just like any other inline result.
@@ -354,7 +380,22 @@ equations:
     note: simple resistive divider
 ```
 
-### 8.2 Variable-length inputs
+### 8.2 Validity conditions
+
+The `valid_if:` list contains **comparison constraints**, not general boolean
+expressions. Each entry has the form `expression op quantity`, where `op` is one
+of `< <= > >= ==` and `quantity` is a calc quantity. The calculator evaluates the
+left-hand expression and checks it against the limit using the same worst-case
+logic that `checks:` already use (`src/refdes/calc.py:732-759` via
+`parse_limit` and `Limit.check`). A violation produces a warning, not an error,
+because a calculator can describe a design intent that the author knowingly
+pushes outside the recommended region.
+
+This deliberately does **not** add general comparison operators to calc
+expressions. There are no `and`/`or`, no conditional evaluation, and no
+control flow; only a small, safe constraint check on each calculator call.
+
+### 8.3 Variable-length inputs
 
 ```yaml
 equations:
@@ -368,7 +409,7 @@ equations:
 This requires a small, safe aggregation builtin (`sum`) that operates on a list
 of `Value`s. No loops, no conditionals, no user-defined functions.
 
-### 8.3 Inputs from items or sources
+### 8.4 Inputs from items or sources
 
 Calculator inputs are ordinary calc expressions, so they can already contain:
 
@@ -378,7 +419,7 @@ Calculator inputs are ordinary calc expressions, so they can already contain:
 The same citation ownership and lockfile rules apply
 (`docs/design/calc-sources.md:1-34`).
 
-### 8.4 Outputs feeding checks/bounds
+### 8.5 Outputs feeding checks/bounds
 
 A calculator call in an inline span can define one or more names:
 
@@ -390,7 +431,7 @@ Each output name is available to later lines, `{{name}}` references, and
 `checks:` the same way any calc assignment is. The exact syntax for multi-output
 calls is open (Q11).
 
-### 8.5 Version pinning per call
+### 8.6 Version pinning per call
 
 To keep an old log's result from changing when a calculator is fixed, a call can
 be pinned:
@@ -403,7 +444,7 @@ Unpinned calls use the current calculator definition. Pinned calls use the named
 version. The project keeps a history of calculator versions in project config or
 a lockfile. How versions are named and stored is open (Q12).
 
-### 8.6 Shipped library
+### 8.7 Shipped library
 
 No equations ship in the bundled standard today
 (`src/refdes/standards/hardware/v3/base.yaml` contains none; verified by
@@ -446,30 +487,30 @@ line before saving.
 
 | Phase | Deliverables | Dependencies |
 |---|---|---|
-| **P1** | Inline syntax, stored-result verification, `calc_hash` extension, CLI fill command | None. Can start now. |
-| **P2** | Live editor fill button, then debounced auto-update with caret/undo handling | P1, plus decision on Q8. |
-| **P3** | One-unknown solve (`:= ? where ...`), E-series suggestions | P1, plus decisions on Q9-Q10. |
+| **P1** | Inline syntax, stored-result verification, `calc_hash` extension, CLI fill command | Q1 (trigger rule), Q2 (tolerance), Q4 (calc_hash extension), Q5 (severity/gate), Q6 (command name), Q7 (sealed behavior) |
+| **P2** | Live editor fill button, then debounced auto-update with caret/undo handling | P1, plus Q8. |
+| **P3** | One-unknown solve (`:= ? where ... from ... to ...`), E-series suggestions | P1, plus decisions on Q9-Q10. |
 | **P4** | Multi-input/output calculators, version pinning, editor form panel, shipped-library preset | P1, plus decisions on Q11-Q13. |
 
-Each phase is independently shippable and independently testable.
+Each phase is independently shippable and independently testable once its
+dependencies are answered.
 
 ## 12. Open questions
 
-**Q1 -- Inline syntax marker.** Is the recommended code-span shape with `:=` and
-a trailing `=` acceptable, or do you prefer a different envelope?
-- (a) Code span with `:=` / trailing `=` (recommended in §3.2).
-- (b) A new `{{= ...}}` directive, accepting that the result must be embedded in
-  the directive text.
-- (c) A mini-fence inside a paragraph.
-- *Recommended default: (a).* It stores the result visibly, uses existing
-  Markdown, and keeps `{{...}}` for value references.
+**Q1 -- Trigger rule for inline math.** What tells the build to treat a code
+span as inline math rather than an ordinary code span?
+- (a) Content matches the `:=` / trailing `= <quantity>` grammar (recommended).
+- (b) Mandatory prefix token at the start of the span, e.g. `` `= ...` `` or
+  `` `:= ...` ``.
+- *Recommended default: (a).* It keeps ordinary spans like `Rtop/Rbot` and
+  `foo()` untouched while avoiding extra ceremony on every inline calculation.
 
 **Q2 -- Verification tolerance.** How tightly must the stored result match the
 computed value?
-- (a) Exact formatted text as produced by the tool (recommended as the safe
-  default).
+- (a) Exact formatted text as produced by the tool (safe, but rejects intentional
+  rounding).
 - (b) Match within the stored result's own significant digits, so a hand-rounded
-  `= 4.4 V` still passes if the computed value is `4.436 V`.
+  `= 4.4 V` still passes if the computed value is `4.436 V` (recommended).
 - (c) Match within project `sigfigs` always.
 - *Recommended default: (b).* It lets authors intentionally round while still
   catching real input changes.
@@ -489,13 +530,16 @@ calc expression text as well as ```` ```calc ```` block contents?
 - *Recommended default: (a).* Inline math is arithmetic; the signal should see
   it.
 
-**Q5 -- Severity for stale results in sealed entries.** A sealed entry cannot be
-rewritten. Should its stale inline result be an error or a warning?
-- (a) Error (default outside sealed context).
-- (b) Warning for sealed entries only, because the author cannot fix it without
-  resealing.
-- *Recommended default: (a).* A wrong number is a wrong number; the author can
-  append a correction or reseal.
+**Q5 -- Severity for stale stored results.** A stale stored result is expected
+for append-only log entries whose inputs moved. How should it be reported?
+- (a) Warning by default; promoted to a release-gate failure when
+  `release_gate.stale_inline_results` is enabled (orchestrator recommendation).
+- (b) Error by default.
+- *Recommended default: (a).* Old log entries are *supposed* to keep the number
+  that was true when written; failing every ordinary build would punish that
+  design intent. Blocking a release is the right place to enforce freshness.
+  The proposed default gate rule is `{release: true, revision: false}`
+  (`src/refdes/model.py:101-113`; `src/refdes/lifecycle.py:783-794`).
 
 **Q6 -- Fill command name.** What should the CLI command be called?
 - (a) `refdes inline-calc fill` (recommended).
@@ -513,20 +557,22 @@ rewrite sealed entries, or should it offer to append a corrected continuation?
   W5b continuation work.
 
 **Q8 -- Live editor undo.** Native `<textarea>` undo is lost when JavaScript
-rewrites the value. Which approach do you want?
-- (a) Explicit `Fill inline results` button only for P2; no auto-update
-  (recommended).
-- (b) Debounced auto-update plus a managed JS undo stack.
-- (c) Auto-update using `document.execCommand('insertText')` and accept browser
-  undo behavior.
-- *Recommended default: (a).* It ships the useful feature without inventing an
-  undo model.
+replaces the whole `value`. Which approach do you want?
+- (a) Live auto-update while typing, using a native text-insertion path
+  (`document.execCommand('insertText')` after selecting the result range, or
+  `setRangeText`) so Chromium and Firefox keep undo working; a browser test is
+  required before P2 ships (orchestrator recommendation).
+- (b) Explicit `Fill inline results` button only; no auto-update.
+- (c) Auto-update plus a managed JS undo stack.
+- *Recommended default: (a).* It preserves the live authoring feel while keeping
+  native undo. The explicit Fill button stays as the fallback if the browser
+  test shows undo is not preserved.
 
 **Q9 -- Solve bracket syntax.** Should the author provide explicit bounds?
 - (a) Required `from ... to ...` (recommended).
 - (b) Optional bounds, with a heuristic positive bracket as fallback.
 - *Recommended default: (a).* Bracketing is the only honest way to know the
-  search space.
+  search space, and it avoids hidden heuristic failures.
 
 **Q10 -- E-series interaction.** Where do E24/E96 suggestions appear?
 - (a) In the editor form panel and CLI output only (recommended).
