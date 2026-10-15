@@ -110,11 +110,13 @@ STEP TABLE -- docs/authoring.md (continued in fresh5 = the same project)
     no v3 type declares a board:/prefix: field).
 18. Folder layout -- OK (recursive scan; folders meaningless).
 
-POSSIBLE BUG (not touched, docs kept truthful): `refdes init`'s own stdout line
-"wrote .gitignore (.vscode/settings.jsoncommended-layout" -- the parenthetical path list and the
-following "candidate parts live in ... #candidate-parts-the-recommended-layout" hint appear to
-overwrite each other on one stdout line (seen in two runs; the file itself is correct). Listed in
-the PR body, not "fixed" in docs.
+NOT A BUG (retracted -- review P3): my earlier note claimed `refdes init` printed the
+"wrote .gitignore (...)" path list and the "candidate parts live in ..." hint on one
+overwritten stdout line ("...settings.jsoncommended-layout", seen in two runs). A fresh
+`refdes init > init.out 2> init.err` in .scratch/rawinit/ with `cat -A` shows the two
+messages on SEPARATE, complete lines (5 stdout lines, 0 stderr, each ending in `$`), and
+cli.py prints them in separate `print()` calls. The garbled single-line rendering was a
+display artifact of my read/bash-tool capture, not the CLI. No init defect; retracted.
 
 FIXES APPLIED (docs only):
  - docs/getting-started.md:91  "four" -> "five" (init's .gitignore keeps five paths)
@@ -143,3 +145,24 @@ removed/breaking). These edits correct documentation text only; no behavior chan
 user to do. No fragment.
 
 STATUS: finished. Committed (docs fixes + this log), pushed once, PR opened.
+
+=== CHANGES REQUESTED round (review on head 7334dbd, cross-model check) ===
+Reviewer ran full suite on head: 3919 passed, 2 skipped (matches mine). CI was pending at
+review time. Reproduced my sabotage claim: confirmed the "four"->"five" fix contradicts the
+parent doc (init writes 5 non-comment .gitignore lines) -- sabotage claim HOLDS. Reproduced
+the type count via clean `refdes schema` -- six hardware@3 types, so "five" (requirement + 5
+others) is right. All three doc fixes affirmed.
+
+Single finding, P3 -- AGREED:
+  in-prog-logs/docs-walkthrough-verify.txt:113-117 asserted init overlaps the `.gitignore`
+  write message with the candidate-parts hint on one stdout line ("seen in two runs"). Not
+  a real CLI defect: fresh `.scratch/rawinit/` `refdes init` -> `cat -A init.out` shows 5
+  clean stdout lines, the ".gitignore (...)" and "candidate parts live in ..." messages on
+  SEPARATE lines each ending `$`; cli.py prints them in separate `print()` calls. The garbled
+  single-line text was a display artifact of my read/bash-tool capture, not the CLI. Fixed by
+  rewriting that log entry to a retraction (NOT A BUG). No code/doc change needed; no new
+  test (no behavior fix). No finding rejected.
+
+Gates re-run on this round (docs-log-only change): docs tests 31 passed; gen_examples --check
+up to date; ruff --select E9,F clean; full suite re-run (see below).
+
