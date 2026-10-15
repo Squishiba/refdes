@@ -130,3 +130,23 @@ ruff: 9 findings, all pre-existing in tests/test_scaffold.py,
 scaffold.py clean.
 
 Status: round 2 COMPLETE on this branch.
+
+## Review round 3, chunk 2 (reviewer agent 16fa31df: one P2)
+
+P2 [REAL — reproduced]: with a deeper `.gitignore` winning, the fallback
+answered the root-file question with the finite `_covers` spellings, so
+e.g. root `.vscode/[s]ettings.json` (a character class — valid, covering,
+unknowable to the literal set) read as silence and init appended. Fix:
+new `_root_gitignore_verdict` asks git the same question of the project's
+own text ALONE — throwaway `git init` + copy of the text as the only
+pattern source, `core.excludesFile=` emptied (fresh info/exclude is
+comments-only; verified), same relative paths, same `--no-index` rule.
+Additive by construction: it can only add yeses — a root-only probe
+prints nothing for a parent-directory negation (verified rc1/empty), so
+the literal spellings stay as the weakest last source. One regression
+test (nested + `[s]` root pattern). Nothing else changed.
+
+tests/test_scaffold.py: 90 passed. Full suite: 3926 passed, 2 skipped,
+323s.
+
+Status: round 3 COMPLETE on this branch.

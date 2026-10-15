@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from typing import Any
 
@@ -340,6 +341,82 @@ def _git_ignore_verdict(
     return verdict
 
 
+def _root_gitignore_verdict(
+    text: str,
+    entry: _GitignoreEntry,
+    cache: dict[str, Any] | None = None,
+) -> bool | None:
+    """git's own answer to "does the project's own `.gitignore` -- alone, in
+    git's real pattern language -- state a position on `entry.pattern`",
+    asked when the in-repo report attributes the winning match to a deeper
+    nested file and cannot speak for this one.
+
+    `check-ignore` answers for the whole chain of files, so the question
+    about one file is put to a repo whose only pattern source is a copy of
+    that text: a throwaway `git init` (whose `info/exclude` ships
+    comments-only) with `core.excludesFile` emptied, and the same relative
+    paths, so anchored patterns sit at the same depth. rc 0 is a position
+    taken (an ignore, or a negation winning its own chain), rc 1 is the
+    text saying nothing; `None` when git cannot be asked at all. It is an
+    answer that can only add yeses -- a rc-1 report prints nothing for a
+    negated *directory* line, so this source must not veto the caller's
+    literal spellings, which know that shape.
+
+    This is the answer for `check-ignore -v`'s one-blind spot: the report
+    names the *winning* match only, so a root-file line that covers the
+    path -- in any spelling git reads, character class included, which no
+    finite literal set knows -- is invisible the moment a deeper file wins
+    over it."""
+    key = "root:" + entry.pattern
+    if cache is not None and key in cache:
+        return cache[key]
+    git = shutil.which("git")
+    if git is None:
+        return None
+    paths = [entry.pattern]
+    stem = entry.pattern.rstrip("/")
+    parent = stem.rpartition("/")[0]
+    if parent:
+        paths.append(parent)
+    verdict: bool | None
+    try:
+        with tempfile.TemporaryDirectory(prefix="refdes-gitignore-probe-") as probe_dir:
+            subprocess.run(
+                [git, "init", "-q", probe_dir],
+                capture_output=True,
+                timeout=15,
+                check=False,
+            )
+            with open(
+                os.path.join(probe_dir, ".gitignore"), "w", encoding="utf-8"
+            ) as fh:
+                fh.write(text)
+            probe = subprocess.run(
+                [
+                    git,
+                    "-c",
+                    "core.excludesFile=",
+                    "-C",
+                    probe_dir,
+                    "check-ignore",
+                    "-v",
+                    "--no-index",
+                    "--",
+                    *paths,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        verdict = probe.returncode == 0 if probe.returncode in (0, 1) else None
+    except (OSError, UnicodeError, subprocess.SubprocessError):
+        return None
+    if cache is not None:
+        cache[key] = verdict
+    return verdict
+
+
 def _gitignore_addresses(
     target_dir: str,
     text: str,
@@ -353,13 +430,18 @@ def _gitignore_addresses(
     and git takes the *last* matching pattern, so appending ours would quietly
     out-rank a deliberate choice. Comments and blank lines do not.
 
-    Inside a git repository a yes from git itself is authoritative (see
-    `_git_ignore_verdict`); git's no and git's silence both fall through to
-    the literal `_covers` spellings of the project's own text, because
+    A yes from git for the project as a whole is authoritative (see
+    `_git_ignore_verdict`); git's no and git's silence are not, because
     `check-ignore -v` names only the winning pattern and a deeper nested
     `.gitignore` out-voting one of the project's own lines is invisible in
-    that report."""
+    that report -- those cases ask git the same question of the project's
+    own text alone (`_root_gitignore_verdict`). The literal `_covers`
+    spellings are the weakest source, consulted last: they answer where
+    git cannot be asked at all, and for the parent-directory negation a
+    root-only probe reports nothing on."""
     if _git_ignore_verdict(target_dir, entry, verdict_cache):
+        return True
+    if _root_gitignore_verdict(text, entry, verdict_cache):
         return True
     for line in text.splitlines():
         stripped = line.strip()

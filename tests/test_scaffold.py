@@ -769,6 +769,43 @@ def test_init_leaves_its_own_line_alone_when_a_deeper_gitignore_outvotes_it(tmp_
     assert probe.returncode == 0, f"the file must stay ignored: {probe.stdout}"
 
 
+def test_init_takes_a_root_pattern_only_git_can_read_as_the_project_having_decided(
+    tmp_path,
+):
+    """The blind spot behind the blind spot: with `.vscode/[s]ettings.json` in
+    the project's own file and `settings.json` in the deeper `.vscode/.gitignore`
+    winning the chain, `check-ignore -v` reports only the deeper file and the
+    finite literal spelling set knows no character class -- the root's taken
+    position read as silence and init appended the duplicate. The root-file
+    question gets git's own answer, asked of a copy of that text alone."""
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not on PATH")
+    repo = tmp_path / "repo"
+    proj = repo / "proj"
+    (proj / ".vscode").mkdir(parents=True)
+    subprocess.run([git, "init", "-q", str(repo)], check=True)
+    own = (
+        ".vscode/[s]ettings.json\n.refdes/copies/\n.refdes/schema.json\n"
+        ".refdes/sealing-optin.json\n.refdes-write.lock\n"
+    )
+    (proj / ".gitignore").write_text(own, encoding="utf-8")
+    (proj / ".vscode" / ".gitignore").write_text("settings.json\n", encoding="utf-8")
+
+    scaffold_mod.init(str(proj))
+
+    patterns = _gitignore_patterns(proj / ".gitignore")
+    assert ".vscode/settings.json" not in patterns, (
+        "a root pattern that only git's pattern language reads was invisible "
+        "to the literal fallback and init appended over the chain"
+    )
+    assert proj.joinpath(".gitignore").read_text(encoding="utf-8") == own
+    probe = _git_check_ignore(proj, ".vscode/settings.json")
+    # the deeper file wins the chain and it is an ignore, so the chain's
+    # answer is unchanged -- the point is that init left it alone
+    assert probe.returncode == 0, f"the file must stay ignored: {probe.stdout}"
+
+
 @pytest.mark.skipif(
     os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
     reason="needs POSIX permission bits: chmod 0o444 does not stop Windows (or root) "
