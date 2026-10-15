@@ -11,7 +11,7 @@ import yaml
 from refdes import build as build_mod
 from refdes import cli, parse, seal
 from refdes import keys as keys_mod
-from refdes.schema import load_project
+from refdes.schema import SchemaError, load_project
 
 
 def _load(root, **kwargs):
@@ -337,6 +337,6 @@ def test_malformed_history_is_never_silently_discarded(sealed_board_project):
     path = Path(seal.seal_path(project, "board-a"))
     path.write_text(path.read_text() + "reseals: corrupted\n", encoding="utf-8")
     before = path.read_bytes()
-    with pytest.raises(ValueError, match="malformed reseal history"):
+    with pytest.raises(SchemaError, match="malformed reseal history"):
         seal.save_seals(project, {}, "board-a")
     assert path.read_bytes() == before

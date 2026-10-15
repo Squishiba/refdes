@@ -8,7 +8,9 @@ other. A store that silently skips a bad record is the failure mode under test.
 
 from __future__ import annotations
 
+import ast
 import os
+from pathlib import Path
 
 import pytest
 
@@ -463,6 +465,64 @@ def test_append_event_over_an_unparseable_existing_file_is_a_history_error(root)
     assert "does not parse" in str(exc_info.value)
 
 
+def _saved_note(root):
+    """One note captured to the object store: (item, digest, path)."""
+    project = _project(
+        root,
+        {
+            "a.md": """\
+---
+id: NOTE-A-001
+type: note
+title: Hello
+owner: jared
+---
+Body text here.
+"""
+        },
+    )
+    item = _item(project, "NOTE-A-001")
+    digest, path = history.save_object(root, item)
+    return item, digest, path
+
+
+@pytest.mark.parametrize(
+    "payload,expected",
+    [(b"\xff", "not valid UTF-8"), (b"{: bad", "does not parse")],
+)
+def test_save_object_over_a_corrupt_object_file_is_a_history_error(root, payload, expected):
+    """Review #209: save_object's existing-file read was the same raw
+    open(..., encoding="utf-8") + yaml_safe_load pair that #191/#207 had
+    wrapped for event files, with no wrap at all -- one stray byte in an
+    object file escaped as a raw UnicodeDecodeError instead of the loud
+    HistoryError naming the file."""
+    item, digest, path = _saved_note(root)
+    with open(path, "wb") as fh:
+        fh.write(payload)
+    with pytest.raises(history.HistoryError) as exc_info:
+        history.save_object(root, item)
+    assert os.path.basename(path) in str(exc_info.value)
+    assert "object file" in str(exc_info.value)
+    assert expected in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "payload,expected",
+    [(b"\xff", "not valid UTF-8"), (b"{: bad", "does not parse")],
+)
+def test_load_object_of_a_corrupt_file_is_a_history_error(root, payload, expected):
+    """The other half of the #209 finding: load_object's read was raw the
+    same way, so a corrupted object crashed every reader of the store."""
+    item, digest, path = _saved_note(root)
+    with open(path, "wb") as fh:
+        fh.write(payload)
+    with pytest.raises(history.HistoryError) as exc_info:
+        history.load_object(root, digest)
+    assert os.path.basename(path) in str(exc_info.value)
+    assert "object file" in str(exc_info.value)
+    assert expected in str(exc_info.value)
+
+
 def test_duplicate_edge_under_two_ids_is_loud(root):
     """Only possible if ids were ever random (the doc's original sketch): the
     same (kind, item_key, successor_key) fact recorded twice. The derived-id
@@ -529,3 +589,27 @@ def test_store_directory_is_not_created_without_a_write(root, tmp_path_factory, 
     build_mod.build(load_project(config_path=str(root / "refdes-project.yaml")))
     assert not os.path.exists(history.HISTORY_DIR)
     assert not (root / ".refdes" / "history").exists()
+
+
+def test_no_yaml_safe_load_call_lives_outside_the_shared_read_helper():
+    """The class stays closed. #191 wrapped one read, #207's leftover found
+    a second with no wrap, #209's review found the object store's pair still
+    raw -- three times the same leak was patched one instance at a time.
+    Every store read in history.py must go through _read_store_file, and
+    this test is what fails the day the module grows another raw
+    open()/yaml_safe_load pair outside it."""
+    tree = ast.parse(Path(history.__file__).read_text(encoding="utf-8"))
+    helper = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_read_store_file"
+    )
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "yaml_safe_load"
+        ):
+            assert helper.lineno <= node.lineno <= helper.end_lineno, (
+                f"history.py:{node.lineno} calls yaml_safe_load outside _read_store_file"
+            )

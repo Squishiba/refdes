@@ -63,7 +63,7 @@ from . import keys as keys_mod
 from . import model
 from . import seal as seal_mod
 from . import textio
-from .model import Item
+from .model import Item, SchemaError
 from .parse import yaml_safe_load
 
 HISTORY_FORMAT = 1
@@ -259,8 +259,7 @@ def save_object(root: str, item: Item) -> tuple[str, str]:
     path = object_path(root, digest)
     text = _format_yaml(object_payload(item), _OBJECT_HEADER)
     if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as fh:
-            existing = yaml_safe_load(fh)
+        existing = _read_store_file(path, "object file")
         _check_format(existing, path)
         if existing.get("key"):
             _require_history_key(existing["key"], root, path)
@@ -304,26 +303,29 @@ def _write_store_file(root: str, path: str, text: str) -> None:
         ) from exc
 
 
-def _read_event_file(path: str) -> object:
-    """Read one event file; a stray byte or an unparseable record is a
-    HistoryError naming the path, never a raw codec/YAML exception.
+def _read_store_file(path: str, kind: str) -> object:
+    """Read one history-store YAML file; a stray byte or an unparseable
+    record is a HistoryError naming the path and the kind of file, never a
+    raw codec/YAML exception.
 
     Decoding happens on the first read, inside yaml_safe_load, not at
     open(); and UnicodeDecodeError is not a YAMLError, so left unwrapped
     one stray byte escaped as a raw exception and crashed every reader of
-    the store -- review #191 wrapped ``load_events`` this way, and review
+    the store -- review #191 wrapped ``load_events`` this way, review
     #207's leftover found ``append_event``'s existing-file read holding
-    the same record under the same failure with no wrap at all. One
-    helper, both readers. Each caller keeps its own posture for what a
-    parsed record must look like.
+    the same record under the same failure with no wrap at all, and review
+    #209 found the object store's ``save_object``/``load_object`` pair
+    still raw. One helper, every reader; ``kind`` keeps each message
+    truthful ("event file", "object file"). Each caller keeps its own
+    posture for what a parsed record must look like.
     """
     try:
         with open(path, "r", encoding="utf-8") as fh:
             return yaml_safe_load(fh)
     except UnicodeDecodeError as exc:
-        raise HistoryError(f"{path}: event file is not valid UTF-8 ({exc})") from exc
+        raise HistoryError(f"{path}: {kind} is not valid UTF-8 ({exc})") from exc
     except yaml.YAMLError as exc:
-        raise HistoryError(f"{path}: event file does not parse ({exc})") from exc
+        raise HistoryError(f"{path}: {kind} does not parse ({exc})") from exc
 
 
 def _check_format(data: object, where: str) -> None:
@@ -351,8 +353,7 @@ def load_object(root: str, digest: str) -> dict[str, object]:
     path = object_path(root, digest)
     if not os.path.isfile(path):
         raise HistoryError(f"no history object {digest} at {path}")
-    with open(path, "r", encoding="utf-8") as fh:
-        data = yaml_safe_load(fh)
+    data = _read_store_file(path, "object file")
     _check_format(data, path)
     if data.get("key"):
         _require_history_key(data["key"], root, path)
@@ -444,7 +445,7 @@ def append_event(
     if occurred_at is not None:
         payload["occurred_at"] = occurred_at
     if os.path.exists(path):
-        existing = _read_event_file(path)
+        existing = _read_store_file(path, "event file")
         if not isinstance(existing, dict):
             raise HistoryError(f"{path}: existing event is not a YAML mapping")
         _check_format(existing, path)
@@ -479,7 +480,7 @@ def load_events(root: str) -> list[dict[str, object]]:
         if not name.endswith(".yaml"):
             continue
         path = os.path.join(directory, name)
-        data = _read_event_file(path)
+        data = _read_store_file(path, "event file")
         _check_format(data, path)
         for field in ("item_key", "successor_key"):
             if data.get(field):
@@ -791,7 +792,7 @@ def uncaptured_edits(project) -> list:
         seal_files = [("", seal_mod.load_seals(project, ""))] + [
             (board, seal_mod.load_seals(project, board)) for board in sorted(project.boards)
         ]
-    except ValueError:
+    except (ValueError, SchemaError):
         # A seal file that cannot be parsed is `seal.verify`'s to report, and
         # it runs one step later in the same build; declining here keeps this
         # diagnostic source from being the thing that changes that.

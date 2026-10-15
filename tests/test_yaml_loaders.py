@@ -11,7 +11,7 @@ from helpers import COVERAGE_SCHEMA
 
 from refdes import boards, citations, ids, keys, lifecycle, parse, seal, standards
 from refdes.parse import _PurePythonLineLoader, _yaml_error_report
-from refdes.schema import SCHEMA_NAME, load_project
+from refdes.schema import SCHEMA_NAME, SchemaError, load_project
 
 MALFORMED = [
     ("tab indentation", "items:\n  - id: REQ-001\n\ttext: tabbed\n"),
@@ -60,29 +60,32 @@ def _write_malformed(path: Path) -> None:
 
 
 def test_real_loaders_keep_main_malformed_yaml_behavior(tmp_path):
-    """Clean-main probe: every loader raised YAMLError, except is_adopted=False.
+    """Clean-main probe: the item/config loaders still raise YAMLError; the
+    .refdes store loaders wrap it in their own error class naming the file.
 
-    One exception, and it is the point rather than an accident: the citation
-    lockfile now raises `citations.LockfileError`, which wraps the YAMLError in
-    a message naming the file and the line. A raw YAMLError out of
-    `load_lockfile` was finding F5 in
-    `in-prog-logs/remote-fetch-exercise.md` -- a traceback out of `fetch` and
-    `check` for a committed, hand-mergeable file. See
-    `tests/test_lockfile_corruption.py` for what each shape says now.
-    """
+    The store half of this pin changed with review #209's class fix (the
+    history object store's raw reads were the trigger): an unparseable store
+    file is now a SchemaError naming the path -- manifest, ledger, baseline
+    and, since review #212, the seal file too, so `check`/`build` print
+    `configuration error: …` and exit 2 instead of a traceback. A raw
+    YAMLError -- let alone a UnicodeDecodeError, which is not even a
+    YAMLError -- escaped as a traceback out of every command that read the
+    file. The lockfile's LockfileError was the earlier instance of the same
+    fix (see `tests/test_lockfile_corruption.py`); the adoption marker stays
+    the deliberate swallow: unreadable means not adopted."""
     write_project_config(tmp_path, COVERAGE_SCHEMA)
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
     _write_malformed(Path(boards.manifest_path(project)))
-    with pytest.raises(yaml.YAMLError):
+    with pytest.raises(SchemaError, match="membership manifest file does not parse"):
         boards.load_manifest(project)
 
     _write_malformed(Path(seal.seal_path(project)))
-    with pytest.raises(yaml.YAMLError):
+    with pytest.raises(SchemaError, match="seal file does not parse"):
         seal.load_seals(project)
 
     _write_malformed(Path(ids.ledger_path(project)))
-    with pytest.raises(yaml.YAMLError):
+    with pytest.raises(SchemaError, match="id ledger file does not parse"):
         ids.load_ledger(project)
 
     _write_malformed(Path(citations.lockfile_path(project)))
@@ -92,7 +95,7 @@ def test_real_loaders_keep_main_malformed_yaml_behavior(tmp_path):
     assert "is not valid YAML" in str(lockfile_error.value)
 
     _write_malformed(Path(lifecycle.baseline_path(project, "probe")))
-    with pytest.raises(yaml.YAMLError):
+    with pytest.raises(SchemaError, match="baseline file does not parse"):
         lifecycle.load_baseline(project, "probe")
 
     _write_malformed(Path(keys.adoption_marker_path(project)))
@@ -111,3 +114,47 @@ def test_real_loaders_keep_main_malformed_yaml_behavior(tmp_path):
     _write_malformed(standard)
     with pytest.raises(yaml.YAMLError):
         standards._read_yaml(str(standard))
+
+
+def test_store_files_name_a_non_utf8_file_instead_of_a_traceback(tmp_path):
+    """Review #209's class beyond history.py: one stray byte in a store file
+    escaped as a raw UnicodeDecodeError -- not a YAMLError (so the lockfile's
+    existing wrap missed it too) and not an OSError -- and crashed every
+    command that read the file with a traceback naming nothing. Each store
+    loader now raises its own error class with the path and the kind of file;
+    the adoption marker keeps its deliberate swallow (is_adopted False),
+    which is also why adopt's own marker read has its own refusal."""
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+
+    def _corrupt(path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\xff")
+
+    _corrupt(Path(boards.manifest_path(project)))
+    with pytest.raises(SchemaError, match="membership manifest file is not valid UTF-8") as exc_info:
+        boards.load_manifest(project)
+    assert "boards.yaml" in str(exc_info.value)
+
+    _corrupt(Path(seal.seal_path(project)))
+    with pytest.raises(SchemaError, match="seal file is not valid UTF-8") as exc_info:
+        seal.load_seals(project)
+    assert "log-seal.yaml" in str(exc_info.value)
+
+    _corrupt(Path(ids.ledger_path(project)))
+    with pytest.raises(SchemaError, match="id ledger file is not valid UTF-8") as exc_info:
+        ids.load_ledger(project)
+    assert "ids.yaml" in str(exc_info.value)
+
+    _corrupt(Path(citations.lockfile_path(project)))
+    with pytest.raises(citations.LockfileError, match="is not valid UTF-8") as exc_info:
+        citations.load_lockfile(project)
+    assert citations.LOCKFILE in str(exc_info.value)
+
+    _corrupt(Path(lifecycle.baseline_path(project, "probe")))
+    with pytest.raises(SchemaError, match="baseline file is not valid UTF-8") as exc_info:
+        lifecycle.load_baseline(project, "probe")
+    assert "probe.yaml" in str(exc_info.value)
+
+    _corrupt(Path(keys.adoption_marker_path(project)))
+    assert keys.is_adopted(project) is False

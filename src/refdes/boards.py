@@ -27,7 +27,7 @@ import yaml
 from . import keys as keys_mod
 from . import model, textio
 from .ids import split_id
-from .model import Item, Project
+from .model import Item, Project, SchemaError
 from .parse import yaml_safe_load
 
 MANIFEST_FILE = ".refdes/boards.yaml"
@@ -234,8 +234,13 @@ def load_manifest(project: Project) -> Manifest:
     path = manifest_path(project)
     if not os.path.isfile(path):
         return {"boards": {}, "workspaces": {}}
-    with open(path, "r", encoding="utf-8") as fh:
-        data = yaml_safe_load(fh) or {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = yaml_safe_load(fh) or {}
+    except UnicodeDecodeError as exc:
+        raise SchemaError(f"{path}: membership manifest file is not valid UTF-8 ({exc})") from exc
+    except yaml.YAMLError as exc:
+        raise SchemaError(f"{path}: membership manifest file does not parse ({exc})") from exc
     return {
         "boards": _load_memberships(data.get("boards"), path, project),
         "workspaces": _load_memberships(data.get("workspaces"), path, project),

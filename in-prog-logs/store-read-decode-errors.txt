@@ -1,0 +1,161 @@
+Task L — store-read-decode-errors
+==================================
+
+L1 (history.py object store) — DONE
+- Verified the finding on this branch: save_object (history.py:262-263) and
+  load_object (:354-355) did raw open(..., encoding="utf-8") + yaml_safe_load,
+  while event files went through _read_event_file (~:307-326, #207/#209).
+- Wrote tests FIRST in tests/test_history.py:
+  test_save_object_over_a_corrupt_object_file_is_a_history_error and
+  test_load_object_of_a_corrupt_file_is_a_history_error, each parametrized
+  with b"\xff" ("not valid UTF-8") and b"{: bad" ("does not parse").
+  Watched all 4 fail with raw UnicodeDecodeError / yaml ParserError.
+- Fix: generalized _read_event_file -> _read_store_file(path, kind); the
+  message names the kind ("event file"/"object file"), so the three existing
+  event-file message assertions still hold. All four store reads now go
+  through the one helper.
+- Closed-class test:
+  test_no_yaml_safe_load_call_lives_outside_the_shared_read_helper parses
+  history.py with ast and asserts every yaml_safe_load call lies inside
+  _read_store_file. (Note: appended via heredoc before I re-read the
+  "file write/edit tools for edits" rule — later edits used the edit tool.)
+- Sabotage: reverted load_object's read to the raw pair -> both its
+  corrupt-file params AND the ast closed-class test failed; restored, 29
+  passed in tests/test_history.py.
+
+L2 (audit of other .refdes/ store readers) — table (probed on a scratch
+project in .scratch/l2probe/proj; b"\xff" written over each store file, then
+the reading CLI command run; the traceback tail pasted as observed):
+
+file:line | reads | b"\xff" today | action
+seal.py:154 _load_seal_data | .refdes/log-seal*.yaml | raw UnicodeDecodeError traceback from `refdes check` (also yaml ParserError for `{: bad`) | FIX (ValueError naming file — module's existing corrupt-seal-file class, cf. :157 "seal file must be a mapping")
+boards.py:237 load_manifest | .refdes/boards.yaml | raw UnicodeDecodeError traceback from `refdes build` (needs a boards: section in config) | FIX (SchemaError — module has no own class; SchemaError is what cli main() prints clean as "configuration error", exit 2)
+citations.py:1073 load_lockfile | .refdes/citations.yaml | raw UnicodeDecodeError traceback from `refdes check` (YAMLError already wrapped as LockfileError) | FIX (LockfileError — module class, str() already names .refdes/citations.yaml; cmd_fetch/build paths catch it)
+lifecycle.py:188 _load_baseline_file | .refdes/baselines/*.yaml | raw UnicodeDecodeError traceback from `refdes audit` | FIX (SchemaError — lifecycle.py already raises it at :60)
+ids.py:121 load_ledger | .refdes/ids.yaml | raw UnicodeDecodeError traceback from `refdes audit` | FIX (SchemaError) — NOT in the task's grep list; found as the same class on another .refdes file
+keys.py:646 is_adopted | .refdes/keys-adopted.yaml | raw UnicodeDecodeError traceback from `refdes keys adopt` (via adopt.py:299); YAMLError is already swallowed -> False | FIX: add UnicodeDecodeError to the existing except tuple (same "unreadable = not adopted" contract)
+adopt.py:302 apply marker read | .refdes/keys-adopted.yaml | raw UnicodeDecodeError traceback from `refdes keys adopt` (is_adopted swallows, then the raw fh.read() crashes) | FIX: return AdoptionResult(ok=False, errors=[names the file]) — module's own error channel
+adopt.py:225 baseline text read | .refdes/baselines/*.yaml | already fine: lifecycle.list_baselines (:221) fully parses every baseline first; any undecodable byte crashes there (now a SchemaError) before this read
+adopt.py:252 seal text read | .refdes/log-seal*.yaml | already fine: seal_mod.load_seals (:251) fully parses first
+adopt.py:273 manifest text read | .refdes/boards.yaml | already fine: boards_mod.load_manifest (:272) fully parses first
+former_ids.py | — | ALREADY FINE: no store reads of its own; baseline loads go through lifecycle (covered)
+build.py:2191,2783 | item/asset files hashed with open(...,"rb") | out of scope: not store files; binary read, no decode class
+links.py | — | ALREADY FINE: zero matches (no store reads)
+revise.py:224 | hand-written rename mapping file | out of scope: not under .refdes/ (task says store files only)
+revise.py:838,1006 | in-memory text of item files (FileRewrite candidates) | out of scope: not store reads
+revise.py:1074,1090,1177,1192,1209,1258,1555,1625,1684,1824 | item/config files (rewrite targets, grep pass) | out of scope: item files, per task
+key_restore.py:196,233 | item source files being restored | out of scope: item files; :196's read is already caught as ValueError by the surrounding except (UnicodeDecodeError subclasses ValueError)
+render.py:863 _load_manifest | _site output manifest, not a .refdes store file | N/A (and render.py is owned by PR #197)
+
+L2 implementation — fixes applied (each verified by re-running the probe):
+- seal.py _load_seal_data: b"\xff"/`{: bad` -> ValueError naming path
+  ("seal file is not valid UTF-8 (…)" / "… does not parse (…)"). Surfaced
+  exactly like the module's pre-existing corrupt-seal ValueError (probe
+  with a `42` seal file before this PR's change showed
+  `ValueError: …: seal file must be a mapping` reaching the terminal as a
+  traceback too; making check/build PRINT any seal ValueError cleanly
+  would need cli.py, which PR #197 owns — deferred that half explicitly).
+- boards.py load_manifest: -> SchemaError ("membership manifest file
+  …"), cli main() prints "configuration error: <path>: … " exit 2 (probe
+  confirmed, no traceback).
+- citations.py load_lockfile: fh.read() wrapped -> LockfileError
+  "is not valid UTF-8: …"; `refdes check` now reports
+  `ERROR .refdes/citations.yaml — is not valid UTF-8: …` as a build
+  diagnostic (probe confirmed).
+- lifecycle.py _load_baseline_file: -> SchemaError ("baseline file …");
+  `refdes audit` prints "configuration error: …" exit 2 (probe).
+- ids.py load_ledger: -> SchemaError ("id ledger file …"); same clean
+  exit-2 surface (probe).
+- keys.py is_adopted: UnicodeDecodeError added to the existing
+  (OSError, yaml.YAMLError) swallow — unreadable marker = not adopted,
+  the function's existing contract, now including decode errors.
+- adopt.py apply: marker text read wrapped -> AdoptionResult(ok=False,
+  errors=[names .refdes/keys-adopted.yaml, says repair-or-delete]);
+  `refdes keys adopt --dry-run` prints "would refuse: …" exit 1 (probe).
+- Tests: tests/test_yaml_loaders.py — the clean-main pin
+  test_real_loaders_keep_main_malformed_yaml_behavior asserted the RAW
+  YAMLError leaks for manifest/seal/ledger/baseline; updated to the new
+  named classes (its own docstring already recorded the lockfile as the
+  precedent for exactly this change), and added
+  test_store_files_name_a_non_utf8_file_instead_of_a_traceback covering
+  b"\xff" across all five loaders + the marker swallow.
+  tests/test_keys_adopt.py::test_adopt_refuses_a_corrupt_adoption_marker
+  drives the CLI refusal.
+- L2 sabotage: reverted the boards.py wrap -> BOTH
+  test_real_loaders_keep_main_malformed_yaml_behavior and
+  test_store_files_name_a_non_utf8_file… fail (raw YAMLError/
+  UnicodeDecodeError escape); restored, green again.
+- Note: my first insertion of the adopt test anchored mid-file and
+  briefly mangled test_adopt_refuses_an_item_whose_key_was_hand_deleted;
+  repaired, `git diff tests/test_keys_adopt.py` is a pure append (verified).
+- Mishap logged: one probe round ran in the worktree ROOT (bash cwd did
+  not persist as I assumed) — it created a stray items/logs.yaml (removed
+  immediately) and a gitignored _site/ + schema.json refresh in the repo
+  root store (left in place; recursive delete is not allowed here and
+  _site is gitignored). `git status` afterward showed only my intended
+  changes; no tracked file was touched.
+
+L3 — changelog.d/store-read-decode-errors.fixed.md, one "fixed" fragment
+(README.md rule applied: category `fixed` — "a bug fix"; corrupt-store
+tracebacks are the bug, one fragment per change, committed with it).
+
+Verification: full suite 3606 passed, 2 skipped, exit 0
+(.scratch/suite.txt); ruff check --select E9,F src tests clean;
+docs-site/gen_examples.py --check clean. Task finished.
+
+========================================================================
+PR #212 fix round 1 (review), against head f62a1d1. Tree: MERGEABLE +
+`git merge-tree --write-tree origin/main HEAD` clean -> normal push, no
+rebase (main moved: #197, #213 merged).
+
+F1 (MEDIUM, tests): the F2-round companion test had been inserted into
+the middle of test_real_loaders_keep_main_malformed_yaml_behavior, so
+the three config-loader pins (bad-settings / SCHEMA_NAME / standard
+file) ran inside it and its docstring described cases it no longer
+held. Moved the three pins back into the original test; the companion
+is now a pure append. Verified with `git diff origin/main --
+tests/test_yaml_loaders.py`: the original test's body is untouched
+except the five deliberate class updates; new test appended whole.
+
+F2: reproduced first on a copy of the probe project
+(.scratch/f2probe: proj + refdes-schema.yaml opting `log` into
+`sealing: build` so a seal file exists); corrupted
+.refdes/log-seal-board-a.yaml with b"\xff" -> `refdes check` and
+`refdes build` both ended in
+`ValueError: …/log-seal-board-a.yaml: seal file is not valid UTF-8 (…)`
+as a traceback, exit 1. Full traceback recorded in
+.scratch/f2-traceback.txt.
+Fix: all four corrupt-file raises in seal.py _load_seal_data (UTF-8,
+YAMLError, must-be-a-mapping, malformed reseal history) now raise the
+project's SchemaError (from .model, imported) -- the exact path
+boards/ids/lifecycle use for their store files: cli main()'s existing
+`except SchemaError` (~3309) prints "configuration error: <path>: …"
+exit 2. No cli.py change, no new class, no new except clause (the
+HistoryError path needs per-command clauses, so the SchemaError path
+won). One supporting catch update: history.py's uncaptured-edit
+diagnostic deliberately declines an unparseable seal file so
+seal.verify reports it -- its `except ValueError` became
+`except (ValueError, SchemaError)` (SchemaError is not a ValueError
+subclass; verified model.py:121 `class SchemaError(Exception)`),
+comment untouched, behavior preserved.
+Probe after fix: check and build both print one
+`configuration error: …/log-seal-board-a.yaml: seal file is not valid
+UTF-8 (…)` line, exit 2; the `a: [unterminated` shape likewise exit 2.
+CLI test: tests/test_seal.py::
+test_a_corrupt_seal_file_is_a_clean_cli_error_not_a_traceback (exit
+code 2, stderr names log-seal-board-a.yaml, no "Traceback"). Pins
+that followed the class: test_yaml_loaders.py (seal do-parse + UTF-8
+raises, docstring) and test_reseal_audit.py
+test_malformed_history_is_never_silently_discarded (same class it
+already imports pattern: SchemaError). Sabotage: reverted the UTF-8
+raise to ValueError -> the CLI test and
+test_store_files_name_a_non_utf8_file… both fail; restored, green.
+Total well under the 30-line budget; nothing deferred.
+PR body L2 table: the seal.py row updated (ValueError/deferred ->
+SchemaError/exit-2, #212 round 1).
+
+F4 (nit): history.py _read_store_file docstring "review #209's found
+the object store's …" -> "review #209 found the object store's …".
+
+F3 (nit): changelog.d/store-read-decode-errors.fixed.md now ends with
+a newline.

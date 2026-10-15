@@ -17,7 +17,7 @@ from collections import defaultdict
 import yaml
 
 from . import textio
-from .model import Item, Project, destination_refusal, provisional_handle
+from .model import Item, Project, SchemaError, destination_refusal, provisional_handle
 from .parse import FENCE_RE, yaml_safe_load
 from .write_lock import project_write_lock
 
@@ -118,8 +118,13 @@ def load_ledger(project: Project) -> dict:
     path = ledger_path(project)
     if not os.path.isfile(path):
         return {"burned": {}, "allocated": []}
-    with open(path, "r", encoding="utf-8") as fh:
-        data = yaml_safe_load(fh) or {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = yaml_safe_load(fh) or {}
+    except UnicodeDecodeError as exc:
+        raise SchemaError(f"{path}: id ledger file is not valid UTF-8 ({exc})") from exc
+    except yaml.YAMLError as exc:
+        raise SchemaError(f"{path}: id ledger file does not parse ({exc})") from exc
     data.setdefault("burned", {})
     data.setdefault("allocated", [])
     return data
