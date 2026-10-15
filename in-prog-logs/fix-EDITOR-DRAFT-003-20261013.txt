@@ -1,0 +1,165 @@
+Fix EDITOR-DRAFT-003 — corrupt draft mirror silently read as clean
+
+Branch: fix/draft-corruption-recovery-20261013, off main 8b6a52e.
+
+Finding (in-prog-logs/current-main-resweep-editor-drafts.tsv):
+drafts.js load() wrapped sessionStorage.getItem and JSON.parse in one try;
+a truncated/corrupt mirror fell into the same catch as a private-mode
+storage failure and silently returned emptyDraft(): isDirty false, no
+prompt on close, zero console output -- unsaved work indistinguishable
+from no work. Reproduced against HEAD with a node probe
+(.scratch/fix-editor-draft-003/probe.mjs): empty draft, prompted false.
+
+Fix (src/refdes/serve/static/drafts.js only):
+- Split the one try in load() into three: a blocked storage read (still
+  the silent persistence-cost path -- nothing can be read OR preserved),
+  a JSON.parse failure, and a mirror that parses but is not a draft
+  object (null / array / scalar). The last two are corrupt mirrors.
+- New reportCorruptMirror(): keeps the raw bytes + reason in a module
+  Map, copies the bytes to sessionStorage key refdes.draft.corrupt.v1.<handle>
+  (a key nothing else ever writes, so a reload or an edit never destroys
+  it), logs a console.warn, and appends a visible 'banner bad' notice
+  naming the recovery key with an explicit Discard button.
+- hasAnyDraft() is true while any mirror is corrupt, so beforeunload
+  keeps asking: preserved evidence counts as unsaved work.
+- New exports corruptDraft(handle) / discardCorruptDraft(handle);
+  discarding is the only release.
+- If even the recovery copy fails (storage throws), the bytes stay in
+  the page and the warn/banner/prompt still fire: persistence may be
+  lost, silence never is.
+
+Tests: tests/test_serve_drafts_corruption.py -- node imports the real ES
+module with stubbed window/sessionStorage and a small fake document,
+driven from pytest (skips when node is absent, like the VS Code
+extension's node --check test; node 22.23.3 here). Covers: truncated
+mirror preserved+bannered+prompted; still corrupt after a reload (fresh
+process, same storage bytes); discard releases everything; valid-draft
+control (restores, dirty, no banner, mirror untouched); empty-storage
+control; parse-but-not-a-draft values (null/array/string/number);
+blocked-storage stays the documented silent path. The corrupt cases were
+run against the HEAD module first: TypeError, no corruptDraft -- they
+bite on the old code.
+
+Verification: python -m pytest -q tests/ -> 3612 passed, 2 skipped;
+ruff check on the new test file clean (followed the repo's explicit
+check=False convention). Static checks (test_serve_static.py, 49) still
+pass: the banner is built with createElement/textContent only, no inline
+handlers, no new dynamic code.
+
+Not touched: editor.js (EDITOR-API-002 lives there per coordination
+note). No push/PR/merge.
+
+FOLLOW-UP (review of 1254e9c): two lifecycle gaps in the recovery flow
+- Reproduced first, through the real module (new harness scenarios):
+  (1) discardCorruptDraft removed the recovery key/map but left the
+      corrupt bytes in refdes.draft.v1.<handle>; a reload over the
+      post-discard storage re-detected and rebuilt banner + recovery key
+      -- Discard did not stick. Test test_discard_survives_a_reload.
+  (2) after an edit, persist replaces the draft slot with a valid
+      draft; load() only inspected the draft slot, so the recovery
+      copy under refdes.draft.corrupt.v1. became invisible on reload:
+      no banner, no hasAnyDraft guard, backup doomed with the tab.
+      Test test_editing_after_corruption_keeps_recovery_discoverable.
+- Fixes in drafts.js:
+  * load() now reads the recovery key first and re-arms the mirror
+    (warn + banner + prompt) from it on every page load, then parses
+    the draft slot as usual -- so a newer valid draft loads AND the
+    backup stays discoverable until discarded.
+  * reportCorruptMirror dedupes per handle per page (entry.warned):
+    the corrupt-slot reload (recovery copy + unreadable slot both
+    present) warns and banners once, not twice.
+  * discardCorruptDraft also clears the draft slot, so a reload finds
+    nothing to re-report -- only when the slot still holds exactly the
+    discarded bytes (string compare), so it never deletes a newer
+    valid draft that took the slot over; test_discard_after_editing_
+    keeps_the_newer_draft pins that.
+- Tests: 13 in tests/test_serve_drafts_corruption.py (3 new, driven
+  through the same node harness; discard-survives uses a 3-process
+  reload chain). Both gap tests fail against 1254e9c, pass now.
+  Full suite 3615 passed, 2 skipped; test_serve_static 49 green.
+
+PR PREP: rebased onto origin/main f7df34d (PR #221, EDITOR-API-002, is
+merged). #221 replaced setDraftRevision with dropAppliedOp in drafts.js
+adjacent to this branch's export-region additions -- rebase was clean,
+no textual conflict. Semantics checked on the merged file:
+dropAppliedOp (getDraft -> drop -> revision -> one persist) composes
+with load()'s recovery re-arm (dropAppliedOp's getDraft hits the same
+load that re-arms a corrupt mirror); setDraftRevision is gone from
+drafts.js and editor.js imports dropAppliedOp. Added a combined test
+test_applied_op_drop_and_corrupt_recovery_coexist: after corruption is
+detected, an edit + dropAppliedOp leaves only the refused op in the
+mirror at the new revision, and the recovery copy stays discoverable
+(banner + prompt) across a reload. Static-source paths checked: both
+test files resolve drafts.js from tests/../src (worktree src), not the
+sibling editable install (python -c "import refdes" points at
+/home/jorb/work/refdes -- only server-driven tests are affected, these
+are file/node-driven). Tests: 14+2+49 = 64 green on the JS/serve-static
+set; full suite 3700 passed, 2 skipped. Branch commits 4110fa2/05128d3
+(+ this prep commit) carry the Qwen Co-authored-by trailer.
+
+REVIEW ROUND 2 (PR #227, reviewer agent 505cd734, CHANGES REQUESTED):
+- Rebased onto origin/main cc868e0 (main had advanced past 1d8efad
+  named in the task; #221 f7df34d is in main's history; clean rebase,
+  no conflicts).
+- Added changelog.d/editor-draft-corrupt-recovery.fixed.md (the
+  reviewer's required fragment; the branch shipped code behavior with
+  no changelog entry -- repo convention is one fragment per user-visible
+  change, slug.fixed.md, style followed from
+  editor-draft-mirror-applied-op.fixed.md).
+- Reviewer reproduced a same-class gap: the object mirror
+  {"title":"x"} parses, passes the old not-null/not-array check, and
+  load() defaults every missing key -> empty draft, isDirty false, no
+  warning: corruption read as clean. Fixed with draftShapeProblem():
+  an object with none of the draft keys (revision/fields/body/pins/
+  links) is damage; every recognized key present must hold the type
+  the draft accessors rely on (fields/links plain objects, pins a
+  list, links.add/remove verb values lists of targets, revision a
+  string, body a string). Permissive by design: keys added after a
+  mirror was written (links, pins) may be absent and load() defaults
+  them, and unknown extra keys are left alone -- so current and legacy
+  drafts (pre-links, pre-pins) stay readable (test_legacy_drafts_
+  stay_readable). Pins entry shape is not checked (a damaged entry
+  degrades a pin label, not the draft; noted in the code).
+- Concrete reason across reload: the recovery key now stores an
+  envelope JSON {raw, reason} (decodeMirror falls back to the bare-
+  bytes form for copies written earlier in the same tab, generic
+  reason then; an envelope is accepted only as a whole pair of
+  strings). Chosen because nothing else ever reads this key, it is
+  tab-scoped (sessionStorage), and the feature is unreleased -- a
+  schema-compatible low-risk change. test_concrete_parse_reason_
+  survives_the_reload pins it.
+- PR body: reworded to cite in-branch evidence (the repro tests that
+  run red against the pre-fix sources, recorded above) instead of the
+  untracked resweep TSV; the sweep files stay untracked, not committed.
+- Roundtable plugin is unavailable from this session (plugin.rpc
+  handler_error), so the reviewer room CLI cannot be driven; the
+  reviewer is a Paseo agent (505cd734, title "Review PR #227") --
+  asked for a fresh review of the new head via its agent session
+  after the push.
+- Verification: 27 corruption tests + 1 draft-mirror + 49 static = 77
+  green; e2e/edit suites 117 green; served static path confirmed to
+  resolve into THIS worktree's src (conftest.py:13 sys.path insert;
+  refdes.__file__ + served drafts.js carry the corrupt prefix).
+
+## Round 3 — PR head push (2026-10-15)
+
+- Full suite on the rebased (cc868e0) tree with the round-2 changes:
+  exit 0, 3800 passed, 2 skipped in 294.73s. Committed as the
+  round-2 follow-up commit with the Co-authored-by trailer, staging
+  drafts.js, the corruption test file, the changelog fragment, and
+  this log by explicit path.
+- main advanced again (780ca94 #225, b3fa8ff #229); rebased the four
+  branch commits onto b3fa8ff cleanly (no conflicts; #221 integration
+  preserved — dropAppliedOp and the combined test intact). Focused
+  gates on the rebased head: corruption+mirror+static 77 green;
+  serve editor e2e green. Full suite on the rebased head re-running
+  (pty pytest-full-3).
+- Pushed with --force-with-lease: PR #227 head c2a755b (base
+  b3fa8ff, mergeable). PR body reworded per review round 2: the
+  finding now cites the in-branch repro posture and this log, not the
+  untracked resweep TSV (verified: body no longer contains
+  "resweep-editor-drafts.tsv").
+- gh pr edit 227 --body-file fails on the projects-classic GraphQL
+  deprecation; PATCH via gh api repos/.../pulls/227 works.
+- Status at write time: CI watching (pty gh-pr-checks-227), fresh
+  review from 505cd734 to be requested after CI green.
