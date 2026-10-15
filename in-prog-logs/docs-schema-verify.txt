@@ -131,3 +131,14 @@ exit 0; bare hardware@3 probe project (.scratch/schema-verify/proj) ->
 `decision` scaffolds like any project-defined type. No rejections.
 Docs-only round -> no new tests; gates rerun (gen_examples --check, docs
 tests, ruff E9,F, full suite).
+
+## Round 4 (review on 2eea072, CHANGES REQUESTED)
+Finding (P3, accepted): the PR description was stale -- it still said the
+`tasks` scaffold line and the `refdes new decision` output were "observed,
+not changed" after rounds 2-3 had changed them. No rejections; no content
+defect found in the diff itself (reviewer confirmed the docs edits against
+`refdes schema` for a bare hardware@3 project). Fixed by rewriting the PR
+body (gh api PATCH; gh pr edit hits the known projects-classic GraphQL
+deprecation error): the two items are now Fixes 5 with the overlay caveat,
+and the MISSING=12 reconciliation is in the body. No file changes this
+round; gates rerun over the unchanged tree for the record.
