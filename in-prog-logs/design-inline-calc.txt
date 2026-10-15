@@ -4,8 +4,13 @@ PR: #250
 Date: 2026-10-15
 Status: finished -- design doc written and four review rounds addressed.
 
-Owner decisions (verbatim from the task brief, recorded here for durable citation)
----------------------------------------------------------------------------------
+Owner decisions (as relayed by the orchestrator from the task brief)
+--------------------------------------------------------------------
+The three decisions below are the owner's constraints for this design. They were
+relayed in the task brief (`.scratch/task/TASK.txt`) and are reproduced here and
+in PR #250's description as the durable record; `TASK.txt` itself is gitignored
+and not part of the repo.
+
 D1. Results are stored in the file text and verified by check/build.
     Vout = 0.8 V*(1+Rtop/Rbot) = 4.436 V: the "= 4.436 V" is real text the
     editor (or a fill command) writes. If inputs change later, check/build report
@@ -26,8 +31,7 @@ What was done (initial round)
   running `refdes serve --help` and `refdes schema --json`.
 - Wrote docs/design/inline-calc.md and in-prog-logs/design-inline-calc.txt.
 - Confirmed docs/index.md does not list design/ docs, so no nav entry was added.
-- Ran docs tests: tests/test_docs_anchors.py (2 passed) and
-  docs-site/gen_examples.py --check (up to date).
+- Ran docs tests (see "Tests run" below).
 
 Fix round 1 (chunk 1 review, addressed in commit 50028d0)
 ---------------------------------------------------------
@@ -88,7 +92,33 @@ Findings addressed:
    Rbot = 10 kohm / (3.3 V / 0.8 V - 1) = 3.200 kohm.
    Nearest E24 = 3.3 kohm -> Vout = 3.224 V.
    Nearest E96 = 3.16 kohm -> Vout = 3.332 V.
-   Verified the numbers with src/refdes/calc.py.
+   Verified the numbers with src/refdes/calc.py using this command (run in the
+   project venv):
+
+   ```bash
+   PYTHONPATH=$PWD/src python - <<'PY'
+   from src.refdes.calc import parse_quantity, _binary
+   vref = parse_quantity('0.8 V')
+   rtop = parse_quantity('10 kohm')
+   target = parse_quantity('3.3 V')
+   rbot = _binary('/', rtop,
+       _binary('-', _binary('/', target, vref), parse_quantity('1 dimensionless')))
+   print('Rbot exact:', rbot.nom.to('kohm'))
+   for val in [3.16, 3.24, 3.30]:
+       r = parse_quantity(f'{val} kohm')
+       v = _binary('*', vref,
+           _binary('+', parse_quantity('1 dimensionless'), _binary('/', rtop, r)))
+       print(f'Rbot={val}k -> Vout={v.nom.to("V")}')
+   PY
+   ```
+
+   Output:
+   ```
+   Rbot exact: 3.200000000000001 kiloohm
+   Rbot=3.16k -> Vout=3.331645569620253 volt
+   Rbot=3.24k -> Vout=3.2691358024691355 volt
+   Rbot=3.3k -> Vout=3.2242424242424246 volt
+   ```
 2. Extended the §3.2 grammar so the solve form with `?` parses and the constraint
    `=` is not mistaken for a stored result. solve-result is now `? | quantity`.
 3. Reconciled §4.1 with live update: stored results are rewritten explicitly by
@@ -111,8 +141,8 @@ Findings addressed:
 8. Re-read the whole doc after edits: every inline math example matches the
    §3.2 grammar and every number was checked against src/refdes/calc.py.
 
-Fix round 4 (chunk 1 doc review and chunk 2 log review, addressed in commit 11ce4dc)
--------------------------------------------------------------------------------------
+Fix round 4 (chunk 1 doc review and chunk 2 log review, addressed in commit f738e7b)
+------------------------------------------------------------------------------------
 Chunk 1 findings addressed in docs/design/inline-calc.md:
 1. Trigger rule. A grep of every single-backtick span in `docs/` and `tests/`
    found 57 existing `NAME = value` spans (e.g. `docs/math.md`: `V_in = LOG-PWR-001.V_in | mV`,
@@ -147,6 +177,21 @@ Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
    round 3 = chunk 1, round 4 = chunk 1 doc + chunk 2 log.
 4. Removed the duplicate "Tests run" block; tests are recorded once at the end.
 
+Fix round 5 (chunk 2 log review only, addressed in commit <pending>)
+--------------------------------------------------------------------
+Findings addressed in in-prog-logs/design-inline-calc.txt:
+1. Fixed the round-4 commit citation from the orphaned pre-amend `11ce4dc` to
+   `f738e7b` (the actual round-4 commit on the branch). This commit and all
+   future commits are added without amending, per reviewer instruction.
+2. Updated the owner-decisions header to state that D1-D3 are the owner's
+   decisions as relayed by the orchestrator from the task brief, and pointed at
+   PR #250's description as the durable record (the decisions are also now in
+   the PR body).
+3. Made the test commands generic: "Run in the project venv" rather than naming
+   a machine-specific interpreter path.
+4. Added the exact command and output used to verify the E-series numbers with
+   src/refdes/calc.py (round 3, item 1).
+
 Difficulties / choices
 ----------------------
 - The write tool failed on large JSON payloads containing triple backticks and
@@ -163,11 +208,15 @@ Difficulties / choices
 - The E-series tie-break could have gone either way depending on whether the
   application cares more about overshoot or undershoot; the doc picks the common
   "do not undershoot a supply rail" rule and still shows both candidates.
+- This log is now committed without amending so that its commit citations remain
+  stable.
 
 Tests run
 ---------
-- `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest tests/test_docs_anchors.py -q -p no:cacheprovider` -> 2 passed
-- `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python docs-site/gen_examples.py --check` -> up to date
+Run in the project venv (any recent CPython with the project's installed
+requirements):
+- `PYTHONPATH=$PWD/src python -m pytest tests/test_docs_anchors.py -q -p no:cacheprovider` -> 2 passed
+- `PYTHONPATH=$PWD/src python docs-site/gen_examples.py --check` -> up to date
 
 No src/ or tests/ changes were made; this is a design-only PR.
 No changelog.d fragment is needed because the change is not user-visible yet.
