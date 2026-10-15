@@ -611,6 +611,7 @@ def test_a_destination_that_keeps_moving_is_refused_with_nothing_burned(
     leaves the disk to whoever is writing it. Nothing is reserved: the id
     this create planned is still free, and the outside bytes stand alone."""
     path = project_root / "items" / "reqs.yaml"
+    before = tree(project_root, "items", ".refdes")
     first = "  - id: REQ-005\n    text: First outside write.\n"
     second = "  - id: REQ-006\n    text: Second outside write.\n"
     # exactly two landings: one per attempt of this create, so the create
@@ -629,7 +630,14 @@ def test_a_destination_that_keeps_moving_is_refused_with_nothing_burned(
     assert isinstance(result, Refused) and not result.ok, result.message
     assert "kept changing" in result.message and "retry" in result.message
     after = read(path)
-    assert "id: REQ-005" in after and "id: REQ-006" in after
+    # the destination is exactly the fixture plus the two outside blocks:
+    # the refused create added no bytes of its own, wrote no second file,
+    # and left everything else in the tree byte-identical
+    assert after == REQS + first + second
+    after_tree = tree(project_root, "items", ".refdes")
+    assert {k: v for k, v in after_tree.items() if k != "items/reqs.yaml"} == {
+        k: v for k, v in before.items() if k != "items/reqs.yaml"
+    }, "the refused create touched a file outside the destination"
     assert "Raced." not in after, "the refused create still wrote its item"
     # The id this create planned is not burned by the refusal: the id the
     # Refused result names is free, and the next honest create gets it.
@@ -680,7 +688,7 @@ def test_the_gap_between_the_last_check_and_the_replace_is_the_residual_loss(
     lands strictly between the create's final destination read and its
     `os.replace` is still lost, and the create reports `Created` -- on a
     plain file no check-and-replace closes that gap, and this branch does
-    not claim it does. The test pins the exposure to exactly this window:
+    not claim it does. The test pins that at least this window is exposed:
     the same bytes, written one notch earlier (the `external_writer` seam,
     inside the plan window), are caught and retried by
     `test_a_destination_written_between_read_and_replace_is_not_eaten`.
@@ -708,59 +716,6 @@ def test_the_gap_between_the_last_check_and_the_replace_is_the_residual_loss(
     )
     # the create's own bytes are intact: only the outside block is lost
     assert "Raced at the last moment." in after
-
-
-def test_a_failed_id_reservation_restores_the_destination_bytes(project_root, monkeypatch):
-    """The rollback after a failed reservation writes *bytes*, not the
-    decoded text: `_restore` opens the file `"wb"`, which truncates it
-    first, then `write(str)` raises `TypeError` -- a zero-byte destination
-    and an exception out of `create_item` where the contract says it
-    returns a result. A failed creation burns nothing; it also destroys
-    nothing."""
-    path = project_root / "items" / "reqs.yaml"
-    before = read(path)
-
-    def boom(*_args, **_kwargs):
-        raise OSError(28, "No space left on device")
-
-    monkeypatch.setattr(edit_mod.ids, "reserve_id", boom)
-    result = create_item(
-        str(project_root),
-        edit_mod.CreateRequest(
-            who="t", type="requirement", fields={"text": "Unreservable."},
-            destination="items/reqs.yaml",
-        ),
-    )
-
-    assert isinstance(result, Refused), result
-    assert "rolled back" in result.reason
-    after = read(path)
-    assert after == before, "the rollback did not restore the original bytes"
-    assert after != ""
-    ledger = project_root / ".refdes" / "ids.yaml"
-    assert not ledger.exists() or "REQ-012" not in ledger.read_text(encoding="utf-8")
-
-
-def test_a_failed_id_reservation_restores_a_markdown_destination(project_root, monkeypatch):
-    """The same rollback on the multi-item Markdown shape -- the append
-    shapes share the decoded-text bug."""
-    path = project_root / "items" / "notes.md"
-    before = read(path)
-
-    def boom(*_args, **_kwargs):
-        raise OSError(28, "No space left on device")
-
-    monkeypatch.setattr(edit_mod.ids, "reserve_id", boom)
-    result = create_item(
-        str(project_root),
-        edit_mod.CreateRequest(
-            who="t", type="requirement", fields={"text": "Unreservable."},
-            destination="items/notes.md",
-        ),
-    )
-
-    assert isinstance(result, Refused), result
-    assert read(path) == before, "the rollback did not restore the original bytes"
 
 
 def test_explicit_id_override_is_honoured_or_refused_not_renumbered(project_root):
@@ -1491,6 +1446,8 @@ def test_http_a_persistent_race_refuses_with_a_retry_reason(served, monkeypatch)
     assert "kept changing" in refused["reason"] and "retry" in refused["reason"]
     after = read(path)
     assert "id: REQ-005" in after and "Via HTTP, raced." not in after
+    ledger = root / ".refdes" / "ids.yaml"
+    assert not ledger.exists() or "REQ-012" not in ledger.read_text(encoding="utf-8")
 
 
 def test_http_create_with_links_writes_resolved_composites(served):

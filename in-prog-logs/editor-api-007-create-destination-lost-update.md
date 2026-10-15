@@ -1,8 +1,11 @@
 # EDITOR-API-007 — the create path silently ate a concurrent destination write
 
 Task: fix EDITOR-API-007 (`in-prog-logs/current-main-resweep-editor-revision.tsv`)
-at the pinned origin/main HEAD `8b6a52e`. Status: **finished**, committed on
-this worktree's branch (hash at the end of this log), not pushed.
+at the pinned origin/main HEAD `8b6a52e`. Status: **pushed as PR #241**
+(branch `fix/editor-create-lost-update-20261013`), on HOLD — the plugin
+review's P1 (the read-to-`os.replace` gap, section 2 of the follow-up below)
+is an accepted open design question, not merged. The commits on this branch
+are `git log` of this branch.
 
 ## What was wrong
 
@@ -26,6 +29,11 @@ One seam, in `create_item`/`_create_locked` only. No request field was added
 to `CreateRequest`: the browser never reads the destination file, so a
 client-supplied revision would be a field the server could not meaningfully
 check — the honest baseline is the bytes **this create itself read**.
+
+Steps 1 and 2 below describe commit `997f6f7` (the pre-fold shape). The
+branch tip folds the check into `_atomic_replace` as an `expected` argument
+(see the 2026-10-15 follow-up, section 1); read them as the design's first
+form, not the shipped code.
 
 1. `_create_locked` hashes the destination bytes at the moment it reads them
    (`planned_revision = sha256(raw)`, computed from the read itself, not a
@@ -57,7 +65,8 @@ plain file there is no atomic compare-and-swap: the final `file_revision`
 re-read and the `os.replace` inside `_atomic_replace` are two syscalls, and a
 writer that does not take the project lock can still land in the gap between
 them — same residual TOCTOU `apply_edit`'s own last-moment revision check
-(l :461-469) has always had against the same class of writer. What the fix
+(`edit.py:471-476` at this head) has always had against the same class of
+writer. What the fix
 removes is the *seconds-wide* window (read → id planning → overlay gate →
 replace), which is the window the repro actually hit; what remains is the
 microsecond gap no check-then-replace closes. The cooperating-writer story is
@@ -174,10 +183,70 @@ this branch for two things; both are addressed here.
    Sabotage: dropping the folded `expected` argument fails the two
    retry tests; restoring is green.
 
-Focused: 69 passed on the rebased tree (66 pre-existing + 3 new). Sabotage
+Focused: 69 passed on the rebased tree (61 pre-existing + 8 new). Sabotage
 of the bytes fix (`original = raw.decode("utf-8")`) fails both rollback
 tests; restoring is green. Full suite on the rebased tree (base
 `509a487`): **3833 passed, 2 skipped**. CI-scope ruff
 (`--select E9,F src tests`) clean.
+
+## Follow-up 2026-10-15 (second pass) — plugin review + the split
+
+The Paseo plugin review of PR #241 (chunk 1 space-bunny, agent 8246b42a:
+CHANGES REQUESTED; chunk 2 mimo: APPROVE) plus the coordination notes:
+
+1. **The P1, on design, not on a line.** The review's chunk 1 confirmed the
+   residual gap by tracing the seam (mkstemp/chmod/write/fsync between the
+   hashed read and `os.replace`), and the committed
+   `test_the_gap_between_the_last_check_and_the_replace_is_the_residual_loss`
+   proves it: a write landing in the replace's own read-to-swap gap is lost
+   with `Created`. Design conclusion on this branch: **portable atomic CAS
+   is not achievable in this architecture.** POSIX offers no
+   content-conditional atomic replace (renameat2's `RENAME_NOREPLACE` is
+   create-if-absent, not a compare; Windows `ReplaceFile` is
+   content-unconditional too), and this codebase targets all three platforms
+   CI covers (ubuntu, windows). What *is* sound and already true: every
+   cooperating writer — the CLI (`cli.main` wraps `project_write_lock`) and
+   every serve route (`write_lock_for` + `_disk_write_lock`, held across
+   the whole plan/check/swap span) — serializes on the same lockfile, so
+   the gap admits only a writer that bypasses the lock, whose bytes no
+   check-then-replace on a plain file can promise over. That is exactly
+   what the docstrings and the changelog fragment claim, and the
+   residual-gap test is the canary that fails if a real CAS ever lands.
+   The PR stays on HOLD for a human call on accepting that scoped
+   guarantee (the plugin review's one merge ask was the changelog
+   fragment, now added).
+2. **The rollback half is split to PR #244** (rollback-only, rebuilt on
+   main): the `original`-stays-bytes fix and its two tests
+   (`test_a_failed_id_reservation_*`) left this branch; `original = text`
+   here is the main bug, pointed at #244 by the comment at the site. No
+   duplication between the PRs.
+3. **Review nits addressed:** `changelog.d/create-destination-race-refusal.fixed.md`
+   added (chunk 1 MEDIUM); the `_Moved` signal is now a private exception
+   raised by `_atomic_replace` (return type stays `str | None`), so a
+   non-`expected` caller can never receive it (chunk 1 LOW 2); the quoted
+   return annotation is gone (LOW 4); the 22-line check-site comment is
+   six lines plus pointers (LOW 5); the markdown rollback test now asserts
+   `"rolled back" in result.reason` and the refusal/rollback tests assert
+   the whole tree, not just the destination bytes (chunk 2 findings 1-2 —
+   those two tests then moved to #244 with the split; the service refusal
+   test's tree/fixture assertions and the HTTP refusal test's no-ledger
+   check stay here); the residual-loss docstring now says "at least this
+   window" (chunk 2 finding 3 — it passes with the check sabotaged away,
+   so it pinned "at least", not "exactly"); this log's header, test split
+   (the honest count is 61 pre-existing + 8 new, not 66 + 3), the
+   `apply_edit` line cite, and the superseded "The fix" steps are fixed
+   (chunk 1 findings 6-9).
+4. **Deferred, named:** `_apply_locked` has the same two-read gap
+   (file_revision at 472, `_atomic_replace` at 476); folding `expected`
+   into that call is the same one-argument change for the apply half of
+   the class, out of this ticket's scope (chunk 1 LOW 3).
+
+Focused on this pass: 67 passed (61 pre-existing + 6 new — the 5 race/HTTP
+tests + the residual-gap canary; the 2 rollback tests are #244's). Sabotage:
+dropping the `expected` argument fails all 5 race/HTTP tests; restoring is
+green. After rebasing this pass onto `7e49a20` (the #242/#247 merges, no
+change to `edit.py`): focused 67 passed again, full suite
+**3870 passed, 2 skipped**, ruff (`--select E9,F src tests`) clean.
+
 
 
