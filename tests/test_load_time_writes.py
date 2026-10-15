@@ -32,7 +32,7 @@ from conftest import write_project_config
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
-from refdes import ids, keys, links, model, parse, revise
+from refdes import ids, keys, links, loader, model, parse, revise
 from refdes.schema import load_project
 
 FLOW_SCHEMA = (
@@ -1248,3 +1248,72 @@ def test_the_no_write_duplicate_key_run_makes_no_repoint_claim(tmp_path, capsys)
         (tmp_path / "items" / "s.yaml").read_text(encoding="utf-8")
         == DUPKEY_REFINER
     )
+
+
+DUPKEY_ID_ITEMS_3WAY = (
+    "defaults: { type: requirement }\n"
+    "items:\n"
+    "  - id: REQ-001\n"
+    "    key: q432vshabxe\n"
+    "    id: REQ-002\n"
+    "    id: REQ-009\n"
+    "    text: The thrice-named entry -- YAML keeps REQ-009.\n"
+)
+
+DUPKEY_REFINER_3WAY = (
+    "defaults: { type: requirement }\n"
+    "items:\n"
+    "  - id: REQ-003\n"
+    "    text: Points at BOTH lost ids of the 3-way repeat, from a clean file.\n"
+    "    refines: [REQ-001@q432vshabxe, REQ-002@q432vshabxe]\n"
+)
+
+
+def test_the_3way_repeat_repoint_names_the_file_for_every_lost_id(tmp_path, capsys):
+    """The reviewer's probe: `id:` written THREE times on one entry. The
+    survivor is the LAST value (REQ-009), and a reference to ANY lost id
+    (REQ-001 or REQ-002) resolves through the key at the survivor, so every
+    such repointed file must be named -- chaining each record only to its
+    own record-local second value used to leave the REQ-001 reference
+    silently rewritten."""
+    cfg = _id_project(tmp_path, DUPKEY_ID_ITEMS_3WAY)
+    (tmp_path / "items" / "s.yaml").write_text(DUPKEY_REFINER_3WAY, encoding="utf-8")
+    assert cli_mod.main(["-c", cfg, "check"]) == 1
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "duplicate key 'id'" in out, out
+    assert "items/s.yaml" in out, out
+    assert "'REQ-001@q432vshabxe'" in out, out
+    assert "'REQ-002@q432vshabxe'" in out, out
+    assert "'REQ-009@q432vshabxe'" in out, out
+    assert "The rewrite has already happened" in out, out
+    disk = (tmp_path / "items" / "s.yaml").read_text(encoding="utf-8")
+    assert disk.count("REQ-009@q432vshabxe") == 2, disk
+
+
+def test_the_whole_file_report_chains_survivors_per_mapping(tmp_path):
+    """The shape-error bails hand `_report_duplicate_keys` the whole file's
+    records at once, so the survivor of a repeated `id:` is attributed per
+    mapping: two entries each duplicating `id:` must not chain entry A's
+    lost id to entry B's survivor. (Such a bailed file builds no items, so
+    no repoint can resolve from it today -- this pins the attribution that
+    the naming feature reads.)"""
+    write_project_config(tmp_path, LINK_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
+        "- id: REQ-001\n"
+        "  id: REQ-002\n"
+        "  text: A.\n"
+        "- id: REQ-003\n"
+        "  id: REQ-004\n"
+        "  text: B.\n",
+        encoding="utf-8",
+    )
+    project, _ = loader.load_tree(
+        str(tmp_path / "refdes-project.yaml"), write=False
+    )
+    assert project.duplicate_id_losses == {
+        "REQ-001": ("REQ-002", "items/r.yaml"),
+        "REQ-003": ("REQ-004", "items/r.yaml"),
+    }

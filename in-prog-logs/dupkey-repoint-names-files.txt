@@ -77,3 +77,34 @@ TASK: run-4 F3 -- the duplicate-key diagnostic names the files whose references 
   docs-site/gen_examples.py --check: up to date.
 - Task finished: YES. Committed on dupkey-repoint-names-files, pushed once,
   PR opened against main.
+
+## Fix round (PR #237 review, agent fbe31d6)
+
+- Finding 1 (MEDIUM): 3-way id: repeat silently repointed. Reproduced the
+  reviewer's probe in .scratch/dupkey-repro3 (id: REQ-PWR-001/002/003 one
+  entry, refines: [REQ-PWR-001@q432vshabxe] in items/log.yaml): output
+  named nothing, log.yaml rewritten to REQ-PWR-003@q432vshabxe. Root cause
+  confirmed: parse_list_file called _report_duplicate_keys per record
+  ([record]), so each call's survivor chain saw one record and REQ-001
+  chained to REQ-002 (itself dropped). Fix: parse_list_file groups
+  duplicates by record.mapping_line and reports each mapping's records
+  together (entry identity computed once from the group's first record --
+  _duplicate_entry_id is mapping-based, so identical per record); verified
+  probe now prints the naming WARNING for REQ-PWR-001@... -> REQ-PWR-003@...
+  Test: test_the_3way_repeat_repoint_names_the_file_for_every_lost_id
+  (both lost ids referenced, both named, disk carries survivor twice).
+- Finding 2 (minor): whole-file bail paths (parse.py 1583/1596 shape
+  errors) pass the file's duplicates at once; survivor chained across
+  mappings. Fix: _report_duplicate_keys groups id: records by mapping_line
+  before chaining. Test: test_the_whole_file_report_chains_survivors_per_
+  mapping -- top-level-list file (bails at 1583) with two entries each
+  duplicating id:, asserts duplicate_id_losses == {REQ-001:(REQ-002,...),
+  REQ-003:(REQ-004,...)} (pre-fix: REQ-001 -> REQ-004).
+- Finding 3: 'five' -> 'four' in links.py docstring (the rewrite sources)
+  and loader.py:145 comment (the four-term tally).
+- Finding 4: no action, as instructed.
+- Sabotage: per-record grouping (records_by_mapping = one record per
+  mapping_line) -> the 3-way test FAILS (AssertionError at the REQ-001
+  assertion), the other three stay green. Restored.
+- Full suite foreground, once: 3823 passed, 2 skipped, exit 0 (+2 = the
+  new tests; no flake). ruff E9,F clean; gen_examples --check up to date.

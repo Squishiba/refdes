@@ -142,7 +142,7 @@ def load_tree(
     # expansion also protects this append-only-sensitive rewrite.
     anchored_follows = links_mod.anchor_follows(project, write=write)
     # The tally of everything this load itself rewrote, for whoever reports on
-    # the run (see `Project.load_writes`). All five steps return [] when
+    # the run (see `Project.load_writes`). All four steps return [] when
     # `write` is False, so a `--no-write`/`--dry-run` load leaves this falsy
     # and its caller prints nothing about writes it did not make.
     project.load_writes.rewritten_targets = (

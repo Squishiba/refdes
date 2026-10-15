@@ -486,7 +486,7 @@ def warn_repointed_by_duplicate_key(
 
     `rewrites` is the concatenation of what the load's expansion steps
     actually rewrote -- every entry ``(item, link_name, old, new)``, and all
-    five sources return [] under `--no-write`/`--dry-run` (loader.load_tree),
+    four sources return [] under `--no-write`/`--dry-run` (loader.load_tree),
     so this stays silent exactly when nothing was written and can claim the
     disk change only when it is true. A repoint is attributed to a collision
     only when the old label was a lost `id:` value and the new label is that
