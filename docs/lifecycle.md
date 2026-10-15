@@ -1,6 +1,7 @@
 # Project lifecycle: revision and release
 
-Three states, two commands, no flags on either.
+Three states, two commands, no flags of their own (the global `--no-write`
+is honored by both — see the end of this page).
 
 - **draft** — the state a project is in when nothing has been stamped. Not a
   command; there's nothing to run to be in draft. `refdes check` and `refdes
@@ -9,12 +10,14 @@ Three states, two commands, no flags on either.
   baseline unconditionally (past the always-on error floor). No readiness
   demanded — "here's where we were," not "here's where we should be."
 - **`refdes release <name>`** — runs the full readiness gate and stamps only
-  if it passes. On failure it writes nothing and prints exactly what
-  blocked it. Running `release` when you're not ready *is* the check —
+  if it passes. On failure (exit 1) it writes nothing and prints exactly
+  what blocked it. Running `release` when you're not ready *is* the check —
   there is no `--dry-run`.
 
 Both take a name (`rev-b`, `rev-c`, `sent-to-fab-2026-08`), so repeating a
-stamp under the same label is the point, not an afterthought.
+stamp under the same label is the point, not an afterthought. A name is
+letters, digits, `-`, `_`, and `.`; anything else is refused at startup
+(exit 2).
 
 ## The readiness gate
 
@@ -22,9 +25,9 @@ Two layers.
 
 **The floor, always on, not configurable.** Any build error (a seal
 violation, a tampered kept citation copy, a broken link, anything `refdes
-check` already fails on) blocks both commands outright — nothing is
-written. This is the same posture `check` already has; `revision`/`release`
-add nothing new here.
+check` already fails on) blocks both commands outright (exit 1) —
+nothing is written. This is the same posture `check` already has;
+`revision`/`release` add nothing new here.
 
 **The configurable layer**, in `refdes-project.yaml`:
 
@@ -108,14 +111,14 @@ yet; that's a different problem (`draft_items`), not the same one twice.
 
 ```console
 $ refdes release rev-b
-2 items with no coverage — see coverage.html
+WARNING <project> — 2 item(s) with no coverage — see coverage.html
 41 items, 0 errors, 1 warnings
 
 release 'rev-b' blocked -- not stamped:
-  FAIL     draft_items            REQ-PWR-004, REQ-PWR-005
-  FAIL     uncovered_requirements BND-THM-002
+  FAIL     draft_items  REQ-PWR-004, REQ-PWR-005
   pass     unpinned_citations
   pass     missing_kept_copies
+  FAIL     uncovered_requirements  BND-THM-002
   skipped  unverified_requirements
   skipped  info_check_failures
   pass     unaccepted_board_moves
@@ -123,6 +126,9 @@ release 'rev-b' blocked -- not stamped:
   skipped  open_tasks
   skipped  captured_edits
 ```
+
+The table lists every rule in `release_gate:`'s order — passes and skips
+included — not the failures hoisted to the top.
 
 Fix what's listed and run it again. There's no flag to override or skip a
 rule for one run — adjust `release_gate:` in `refdes-project.yaml` if a rule
@@ -187,7 +193,8 @@ stamped_at: 2026-08-17T14:03:00Z
 stamped_by: "jbin"              # OS username by default -- see below
 refdes_version: "0.3.0"
 
-# The standard the project was pinned to when this baseline was stamped.
+# The standard the project was pinned to when this baseline was stamped
+# (absent for a project on `standard: none`).
 standard:
   base: hardware
   version: 3
@@ -210,17 +217,23 @@ gate:
 items:
   CMP-PWR-001: {hash: 673e6ba11269f350, type: component, title: "Buck converter",
     hash_format: 5, key: pktmysgxn8x, verdict: selected}
-  LOG-PWR-001: {hash: a1b2c3d4e5f60718, type: log, summary: "LDO vs. buck for 3V3 rail",
+  LOG-PWR-001: {hash: a1b2c3d4e5f60718, type: log, title: "LDO vs. buck for 3V3 rail",
     hash_format: 5, key: fd24s541bbt, verdict: accepted, calc_hash: d73ecea8e6f01f1e}
   # ... one entry per local item
 ```
+
+The title field is spelled `title:` for every type, log entries included —
+a log's own `summary:` field is not what's recorded here.
 
 This is assembly, not new machinery — every value already exists by the
 time `build()` returns (`item.content_hash`, `item.type`, `item.title`, the
 gate results, the resolved standard pin).
 
 `hash_format`, `key`, `verdict`, `calc_hash`, and `calc_refs` are the per-item
-additions. The first two are always written; the rest only when they apply —
+additions. The first two are always written — as `hash_format` + `key:`
+beside a display-id map key in a legacy project, as `hash_format` + `id:`
+under a surrogate map key once `refdes keys adopt` has run (the key *is*
+the map key there). The rest only when they apply —
 `verdict` for a type with a verdict-bearing status field,
 `calc_hash`/`calc_refs` for an item with calc blocks or cross-item calc
 references.
@@ -229,11 +242,13 @@ Scoped to local items only, matching every other manifest in the project
 (imports are read-only, and not this project's readiness question).
 
 **`type`/`title` per item, not just a hash**, is the one departure from the
-terser `id: hash` shape `.refdes/log-seal.yaml`/`.refdes/boards.yaml` use.
+terser one-value-per-id shape `.refdes/log-seal.yaml` (a hash) and
+`.refdes/boards.yaml` (a board name) use.
 Those compare against a *live* item that can still supply its own title.
 A baseline's whole point is to stay legible after the live item is gone —
 `REQ-OLD-002 removed` means nothing six months later; `REQ-OLD-002
-(requirement) "Legacy input protection" — removed` does.
+(requirement) 'Legacy input protection' — no longer in the project`
+does.
 
 ### Hash format versioning
 
@@ -243,12 +258,14 @@ Five definitions so far, oldest first. Format 1 hashed display-id link
 targets. Format 2 switched those to resolved keys and left `checks: against:`
 raw. Format 3 reduced `checks: against:` to keys too. Format 4 added
 cross-item calc references, hashing each one's resolved key and the value it
-resolved to. Format 5 added images: every local image an item's body
-references hashes its resolved project-relative path and content digest.
+resolved to, and joined to the same format number `source()` values: an item
+with a `source("path", "key")` calc line hashes each (canonical path, key,
+locked text) it resolved. Format 5 added images: every local image an item's
+body references hashes its resolved project-relative path and content digest.
 
-An item with no cross-item calc reference hashes exactly as it did under
-format 3, and an item with no image hashes exactly as it did under format 4,
-so those two additions cost an ordinary item nothing.
+An item with no cross-item calc reference and no `source()` line hashes
+exactly as it did under format 3, and an item with no image hashes exactly as
+it did under format 4, so those additions cost an ordinary item nothing.
 
 When the hash definition evolves, a baseline read for a diff or a stamp
 migrates itself. Each legacy-format entry's hash is recomputed under its
@@ -332,6 +349,14 @@ stamped. The key is the immutable identity, so the baseline diff recognises it
 as the same item and reports it as `relabelled` rather than `removed` + `added`.
 The surrogate key is shown in parentheses.
 
+Under `changed`, a `changed` item can print sub-lines: one per cross-item
+calc reference whose value moved since the stamp
+(`CMP-PWR-001 -- referenced REQ-PWR-001.V_in: 12 V -> 11.4 V`), and one per
+item whose verdict moved without its calc block
+(`CMP-PWR-001 -- stale arithmetic: status changed, calc block did not`) — so
+a dependent marked changed with nothing in its own text to point at says what
+moved. Baselines stamped before those facts were recorded print no sub-lines.
+
 No baselines of a given kind yet → `(no revision stamped yet)` / `(no
 release stamped yet)`, not an error — `audit` already runs with zero
 preconditions and this doesn't change that. A project that has stamped
@@ -340,9 +365,10 @@ state is actually visible, since `check`/`build` stay exactly as
 permissive as they always were.
 
 Item-scoped, not field-scoped: the diff tells you *which* items moved, not
-*what* moved within them. Field-level detail is one `git diff` away once you
-know which two commits to compare — which is exactly the scoped list this
-diff supplies.
+*what* moved within them — the `changed` sub-lines above are the narrow
+exception, and only name what the baseline itself recorded. Field-level
+detail is one `git diff` away once you know which two commits to compare —
+which is exactly the scoped list this diff supplies.
 
 See [suspect links](change-tracking.md) for the closest thing to a "what's
 worth re-reviewing" answer that exists today. A baseline's `items:` map is
@@ -375,11 +401,15 @@ exists:
 - New content is byte-identical (same items, same kind) → no-op, exit 0,
   file untouched — not even `stamped_at` rewritten. Mirrors `refdes fetch`
   skipping an already-pinned path.
-- New content differs → error, nothing written. `rev-b` is a durable
-  label; it only means "the version sent to the fab" if it keeps meaning
-  the same thing later.
-- No override flag exists for this, on purpose (no flags at all). The
-  sanctioned override is explicit deletion — next.
+- New content differs → error (exit 1), nothing written:
+  `error: 'rev-b' is already stamped as a revision (at …) with different
+  content. Baseline names are permanent once written -- delete
+  .refdes/baselines/rev-b.yaml first if that was intentional, or choose a
+  new name.` `rev-b` is a durable label; it only means "the version sent
+  to the fab" if it keeps meaning the same thing later.
+- No override flag exists for this, on purpose — the global `--no-write`
+  previews a stamp, it never overrides one. The sanctioned override is
+  explicit deletion — next.
 
 **Deleting a baseline.** No dedicated subcommand — `rm`/`git rm`
 `.refdes/baselines/<name>.yaml` like any other tracked file. Because
@@ -414,4 +444,7 @@ Nothing is written, so nothing partial is left for the next run to misread —
 re-running against a writable tree stamps for real. Every check before the
 write still ran and is still reported: a refused stamp is about the
 destination, not the project. (`--no-write` needs none of this; it never
-attempts the write.) See [keys §2](design/keys.md#a-tree-that-will-not-take-the-write).
+attempts the write — it prints
+`release 'rev-b' not stamped (--no-write): would stamp 41 items to
+.refdes/baselines/rev-b.yaml.` and exits 0.) See
+[keys §2](design/keys.md#a-tree-that-will-not-take-the-write).
