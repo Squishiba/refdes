@@ -1175,13 +1175,6 @@ refdes init --standard none
 
 Presets ship with `hardware@1` and `hardware@2`; the `hardware@3` that `init`
 pins today (bundled, unreleased — see `CHANGELOG.md`'s `[Unreleased]`) declares
-none of its own, so `refdes init --preset design-debate` is a configuration
-error there: `preset 'design-debate' does not exist for hardware@3
-(available: [])`, exit 2, nothing written. Add a preset to a project after the
-fact with `refdes standard add-preset`.
-
-Presets ship with `hardware@1` and `hardware@2`; the `hardware@3` that `init`
-pins today (bundled, unreleased — see `CHANGELOG.md`'s `[Unreleased]`) declares
 no presets of its own, so `refdes init --preset design-debate` is a
 configuration error there: `preset 'design-debate' does not exist for
 hardware@3 (available: [])`, exit 2, nothing written. Add a preset to a project
@@ -1230,7 +1223,8 @@ a bare `refdes schema` prints the same document. The same document is written,
 byte for byte, to `.refdes/schema.json` by most commands that load the
 project in a writable tree — `build`, `check`, `index`, `ls`, `id`, `fetch`,
 `audit`, `thread`, `work`, `revision`, `release`, `stub-tests`, `former-ids`,
-and `history capture`; this is the explicit, standalone form, for
+and the `history` subcommands (`capture`, `redact`, `migrate-seals`); this is
+the explicit, standalone form, for
 piping into something else or inspecting directly. See [editor
 support](standard-library.md#editor-support-json-schema-emission).
 
