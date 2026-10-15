@@ -57,16 +57,20 @@ says so explicitly; otherwise it builds on them.
   `name = expression | unit` pins the display unit and asserts dimensionality.
   The same evaluator, units, and tolerance propagation apply to inline
   expressions.
-- **Cross-item value references.** `docs/math.md:95-128`: `DEC-PWR-001.V_in` is a
-  real dependency, evaluated in dependency order, stored expanded as
-  `DISPLAY-ID@key`, and hashed into the referring item (`HASH_FORMAT` 4). These
-  references can appear inside inline expressions.
+- **Cross-item value references.** `docs/math.md:95-128`:
+  `DEC-PWR-001.V_in` is a real dependency, evaluated in dependency order, stored
+  expanded as `DISPLAY-ID@key`, and hashed into the referring item under the
+  current `HASH_FORMAT` (`src/refdes/build.py:1855`). These references can
+  appear inside inline expressions.
 - **`source()` lockfile semantics.** `docs/design/calc-sources.md:1-34, §5`:
   `source(path, key)` is item-local, citation-owned, pinned by `refdes fetch`,
   and resolved from the lockfile at build time. Nothing here changes that.
 - **Named calc blocks are labels, not scopes.**
   `docs/design/named-calc-blocks.md` §3.5, §4: block names identify a rendering,
   never a value namespace. Inline spans are not blocks and have no block name.
+- **No keyword arguments in calc calls.** `src/refdes/calc.py:436-438` rejects
+  keyword arguments for project equations. Calculator calls proposed in §8 use
+  positional arguments only; keyword arguments are not added.
 - **Preview pane is the published view.**
   `docs/design/browser-editor.md:417-431` already runs the full calc/render
   pipeline on a candidate body served by Python. Inline calc live updates would
@@ -86,52 +90,58 @@ ordinary code spans such as `Rtop/Rbot` or `foo()` completely untouched.
 
 **Trigger rule (recommended).** A single backtick code span is interpreted as
 inline math only when its content matches the grammar in §3.2. In particular the
-content must contain either `:=` (a definition) or a trailing `= <quantity>` (a
-stored result). A code span like `Rtop/Rbot` or `foo()` does not match, so it is
-rendered as plain code and never evaluated.
+content must contain either `:=` (a definition or solve) or a trailing
+`= <quantity>` (a stored result). A code span like `Rtop/Rbot` or `foo()` does
+not match, so it is rendered as plain code and never evaluated.
 
 **Alternative trigger rule.** Require an explicit marker at the start of the
 span, such as `` `= 0.8 V * (1 + Rtop/Rbot) = 4.436 V` `` or
 `` `:= Vout = 0.8 V * (1 + Rtop/Rbot) = 4.436 V` ``. This makes the trigger even
 more visible, at the cost of extra noise in every span. See Q1.
 
-### 3.2 Recommended shape: code span with `:=` and a trailing `=`
+### 3.2 Grammar
 
-````markdown
-The divider produces `Vout := 0.8 V * (1 + Rtop/Rbot) = 4.436 V` at the output.
-````
-
-Rendered as ordinary text with a `<code>` span:
-
-> The divider produces `Vout := 0.8 V * (1 + Rtop/Rbot) = 4.436 V` at the output.
-
-Grammar (inside a single code span):
+A single backtick span is one of:
 
 ```text
-inline-calc    = [ name " := " ] expression [ " = " result ]
-name           = calc assignment name  ([A-Za-z_][A-Za-z0-9_]*)
-expression     = any existing calc expression
-result         = quantity with unit, e.g. 4.436 V
+basic       = [ name " := " ] expression [ " = " result ]
+solve       = name " := " [ result ] " where " expression " = " target
+              [ " from " quantity " to " quantity ]
+multi-out   = name-list " := " call " = " result-list
+
+name        = calc assignment name  ([A-Za-z_][A-Za-z0-9_]*)
+name-list   = name *(", " name)
+expression  = any existing calc expression
+call        = equation-name "(" [ expression *(", " expression) ] ")"
+result      = quantity with unit, e.g. 4.436 V
+result-list = result *(", " result)
+target      = quantity with unit
+quantity    = calc quantity literal
 ```
 
-- `:=` **defines** a variable in the item's calc scope. Without it, the span is
-  an anonymous evaluation.
-- A **trailing `= result`** stores the evaluated value in the source text. This
-  is the stored-result marker that D1 requires.
-- A code span without a trailing `= result` is either a plain code span or a
-  definition with no stored value yet; the build warns and the fill command can
-  add the result.
+Rules:
+
+- `:=` **defines** one or more names in the item's calc scope. Without it, the
+  span is an anonymous evaluation.
+- The **stored result** is the value after the **last** ` = ` in the span. In a
+  solve form, the constraint's `expression = target` is not the stored result;
+  the stored result is the value assigned to the name on the left of `:=`.
+- A span without a stored result is either a plain code span or a definition/
+  solve with no stored value yet; the build warns and the fill command can add
+  the result.
 - Any code span whose content does **not** match this grammar is treated as an
   ordinary inline code span.
 
 Examples:
 
 ```markdown
-`Vout := 0.8 V * (1 + Rtop/Rbot) = 4.436 V`   # defines Vout, stored result
-`0.8 V * (1 + Rtop/Rbot) = 4.436 V`            # anonymous, stored result
-`I_load := 1.2 A`                              # defines I_load, no stored result
-`Rtop/Rbot`                                    # ordinary code span, not math
-`foo()`                                        # ordinary code span, not math
+`Vout := 0.8 V * (1 + Rtop/Rbot) = 4.436 V`      # basic, defines Vout
+`0.8 V * (1 + Rtop/Rbot) = 4.436 V`               # basic, anonymous
+`I_load := 1.2 A`                                 # basic, no stored result
+`Rbot := ? where Vout = 3.3 V from 1 kohm to 1 Mohm`  # solve, no stored result
+`Vout, ratio := divider(0.8 V, 10 kohm, 2.2 kohm) = 4.436 V, 4.545`  # multi-out
+`Rtop/Rbot`                                       # ordinary code span
+`foo()`                                           # ordinary code span
 ```
 
 Why a code span works:
@@ -230,21 +240,25 @@ By default the stale result is a **warning**, not an error. Append-only logs are
 *expected* to keep old numbers that no longer match current inputs -- that is
 the point of D1. Ordinary `refdes check`/`refdes build` therefore keep running.
 
-The warning is promoted to a **gate failure** when `release_gate.stale_inline_results`
-is enabled. The release gate is the existing mechanism that `refdes revision` /
+The warning is promoted to a **gate failure** for non-sealed items when
+`release_gate.stale_inline_results` is enabled. Sealed items are excluded from
+this gate: a sealed append-only entry cannot be edited without resealing, and
+history-backed resealing has not yet landed (`src/refdes/build.py:1505-1510`).
+The release gate is the existing mechanism that `refdes revision` /
 `refdes release` use to decide whether a baseline can be stamped
 (`src/refdes/model.py:101-113` for defaults;
 `src/refdes/lifecycle.py:783-794` for evaluation;
 `refdes-project.yaml:109-120` for the configuration shape). The proposed default
 for the new rule is `{release: true, revision: false}`, so a stale inline result
-blocks a release but not an ordinary build or a revision stamp. Projects can opt
-in to the stricter `{release: true, revision: true}` if they want.
+on an editable item blocks a release but not an ordinary build or a revision
+stamp. Projects can opt in to the stricter `{release: true, revision: true}` if
+they want.
 
-Other messages reuse existing calc phrasing:
+Messages reuse existing calc phrasing where possible:
 
 - Unit mismatch: `declared as V but the expression evaluates to A`.
 - Undefined name: `no calc value named 'Rtop' in this item`.
-- Missing stored result: `inline calc has no stored result; run 'refdes inline-calc fill' to add one`.
+- Missing stored result (new): `inline calc has no stored result; run 'refdes inline-calc fill' to add one`.
 
 ## 5. CLI fill/refresh command
 
@@ -421,10 +435,11 @@ The same citation ownership and lockfile rules apply
 
 ### 8.5 Outputs feeding checks/bounds
 
-A calculator call in an inline span can define one or more names:
+A calculator call in an inline span can define one or more names. Calls are
+positional, in the order declared by the calculator's `inputs:`:
 
 ```markdown
-`Vout, ratio := divider(Vref=0.8 V, Rtop=10 kohm, Rbot=2.2 kohm) = 4.436 V, 4.545`
+`Vout, ratio := divider(0.8 V, 10 kohm, 2.2 kohm) = 4.436 V, 4.545`
 ```
 
 Each output name is available to later lines, `{{name}}` references, and
@@ -437,7 +452,7 @@ To keep an old log's result from changing when a calculator is fixed, a call can
 be pinned:
 
 ```markdown
-`Vout := divider@1(Vref=0.8 V, Rtop=10 kohm, Rbot=2.2 kohm) = 4.436 V`
+`Vout, ratio := divider@1(0.8 V, 10 kohm, 2.2 kohm) = 4.436 V, 4.545`
 ```
 
 Unpinned calls use the current calculator definition. Pinned calls use the named
@@ -487,7 +502,7 @@ line before saving.
 
 | Phase | Deliverables | Dependencies |
 |---|---|---|
-| **P1** | Inline syntax, stored-result verification, `calc_hash` extension, CLI fill command | Q1 (trigger rule), Q2 (tolerance), Q4 (calc_hash extension), Q5 (severity/gate), Q6 (command name), Q7 (sealed behavior) |
+| **P1** | Inline syntax, stored-result verification, `calc_hash` extension, CLI fill command | Q1 (trigger rule), Q2 (tolerance), Q3 (scope), Q4 (calc_hash extension), Q5 (severity/gate), Q6 (command name), Q7 (sealed behavior) |
 | **P2** | Live editor fill button, then debounced auto-update with caret/undo handling | P1, plus Q8. |
 | **P3** | One-unknown solve (`:= ? where ... from ... to ...`), E-series suggestions | P1, plus decisions on Q9-Q10. |
 | **P4** | Multi-input/output calculators, version pinning, editor form panel, shipped-library preset | P1, plus decisions on Q11-Q13. |
@@ -532,8 +547,11 @@ calc expression text as well as ```` ```calc ```` block contents?
 
 **Q5 -- Severity for stale stored results.** A stale stored result is expected
 for append-only log entries whose inputs moved. How should it be reported?
-- (a) Warning by default; promoted to a release-gate failure when
-  `release_gate.stale_inline_results` is enabled (orchestrator recommendation).
+- (a) Warning by default; promoted to a release-gate failure for non-sealed
+  items when `release_gate.stale_inline_results` is enabled
+  (orchestrator recommendation). Sealed items are excluded from the gate because
+  they cannot be rewritten without resealing
+  (`src/refdes/build.py:1505-1510`).
 - (b) Error by default.
 - *Recommended default: (a).* Old log entries are *supposed* to keep the number
   that was true when written; failing every ordinary build would punish that
