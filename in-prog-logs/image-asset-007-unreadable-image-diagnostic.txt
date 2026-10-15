@@ -76,3 +76,9 @@ Verification
   test files clean at baseline and after.
 
 Status: COMPLETE. PR opened, not merged (per lane rules).
+
+FINAL: commit b3b08fc on fix/image-unreadable-diagnostic-20261015, pushed,
+PR https://github.com/Squishiba/refdes/pull/268 opened against main
+(base 3793ac9, #261 untouched). Full suite 3891 passed / 2 skipped.
+PROGRESS.md row for IMAGE-ASSET-007 updated. Not merged (no self-review by
+lane rules). Task complete.
