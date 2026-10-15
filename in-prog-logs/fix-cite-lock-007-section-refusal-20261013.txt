@@ -123,3 +123,58 @@ fix/citation-lockfile-refusal-20261013, 403ab84+cf0fd00, unmerged)
 Finish state: DONE. Committed on fix/citation-section-refusal-20261013 at
 the 8b6a52e base; not pushed, no PR. Scratch under .scratch/cite-lock-007-*/
 (HEAD copies of the touched files for the ruff comparison), retained.
+
+=============================================================================
+PR prep (2026-10-15): rebased onto origin/main fd47a56
+=============================================================================
+Status at start: tree clean at ef268df. `git fetch origin` (once): origin/main
+tip fd47a56 -- contains the dependency PDF integer guard #225 (780ca94,
+citations.MAX_PAGE_DIGITS) AND CITE-LOCK-005 #234 (abd2f8b), so the §"left
+open" note above about 403ab84 being unmerged is now superseded: the
+unreadable-lockfile 422 posture (incl. the _item_sources catch) IS on main.
+
+Rebase: clean, no conflicts (my hunks are _cited_page + its docstring, and
+test_serve_pdf_sources.py; #225 touched citations.page_number + serve
+_pdf_proposal/api page pre-check, #234 touched _lockfile/api._item_sources/
+citations/build/test_serve_sources -- all disjoint). New head: 437cacf.
+Behavior preserved: panel-state 200 + page-1 detail (as approved).
+
+#225 interaction on my call site (the point of the rebase): my fix reads the
+lockfile value with the shared `_page_number` grammar, which #225 bounded at
+MAX_PAGE_DIGITS=64 BEFORE int() is asked. So a section value with a long
+digit run is refused as panel state on my path too -- pre-#225 the alias
+target itself would have raised "Exceeds the limit (4300 digits)" out of my
+detail path.
+
+Verification on the rebased head:
+- pytest test_serve_pdf_sources / test_serve_sources / test_serve_sources_
+  accept / test_lockfile_corruption / test_serve_api / test_citation_pages
+  (the #225 grammar suite included): 381 passed.
+- Real CLI/HTTP probe from the worktree src (.scratch/cite-lock-007-pr/
+  probe.py, refdes.__file__ asserted worktree-first; venv python):
+  `refdes check` exits 0 with the `{Intro: nope}` record (loads sound -- the
+  panel is the first reader that notices); live EditorApp: page route 200 /
+  page 1 / detail names 'nope' + `refdes fetch --update --path ...`; file
+  route 200 open_page None; valid-numeric controls int 3 -> page 3 from
+  "section", string "5" -> page 5; int 0 -> page 1 detail "resolved to 0".
+- Oversized-value probe finding: a 5000-digit value as a QUOTED string (and
+  an int over 64 digits, e.g. 70 digits) reaches the panel and is panel
+  state, as designed. A 5000-digit BARE INT in the lockfile cannot reach any
+  reader: the YAML load of citations.yaml itself raises the 4300-digit
+  ValueError (verified: yaml.safe_load of 'a: <5000 sevens>') -- loader
+  side, citations.py, the same exposure family #225 fixed on the request
+  side. Out of scope for this branch (citations.py is the CITE-LOCK-004
+  worker's file); flagged for them here, NOT fixed.
+- Cosmetic limit noted: my detail echoes the bad value ({resolved!r}), so a
+  hand-edited 5000-char string value yields a 5 KB detail string (no crash,
+  panel renders it). This matches the module's existing "reported in the
+  citation's own terms" echo (the page: 'xiv' detail interpolates the
+  author's page: the same way); left as-is rather than inventing a second
+  truncation grammar in the panel's words.
+
+Changelog fragment added: changelog.d/serve-lockfile-section-page.fixed.md
+(one fragment per change, per changelog.d/README.md -- CHANGELOG.md's
+[Unreleased] is not hand-edited).
+
+Finish state (this pass): rebased, fragment + log committed, PR opened
+against main, NOT merged. Head 437cacf at PR time.
