@@ -543,6 +543,35 @@ def validate_items(project: Project) -> None:
                             )
                         else:
                             project.citation_ids[cite_id] = (item.id, item.source_file, item.source_line)
+            elif fspec.type == "list":
+                # A `list` field is a list of plain strings -- the shape the
+                # editor's own completion is built from
+                # (`schema_json._FIELD_TYPE_MAP`:
+                # `"list": {"type": "array", "items": {"type": "string"}}`)
+                # and the shape every consumer reads element by element:
+                # `refdes ls --tag` substring-matches it, the item template
+                # joins it, the search index indexes it. Run 6a's B6 was the
+                # missing branch: a mapping element in `tags:` (what an author
+                # writes when a list field gets the shape of the `options:`
+                # block beside it) passed `check` with 0 errors, rendered on
+                # the page as a Python dict repr, and `ls --tag x` matched the
+                # mapping's *value*. Same posture as `options:` above: the
+                # shape of an entry is diagnosed at the item, naming the field
+                # and the index. A non-list `tags:` (scalar or mapping) is the
+                # loader's error -- `_reject_scalar_collection` owns that
+                # keystroke -- and an empty entry is the field's own business,
+                # not this branch's.
+                if not isinstance(value, list):
+                    continue
+                for index, entry in enumerate(value):
+                    if isinstance(entry, str) or entry is None or entry == "":
+                        continue
+                    _field_error(
+                        project, item, fname,
+                        f"{fname}[{index}]: {entry!r} is not a string -- a "
+                        f"{fname} entry is a plain string, one per line, as "
+                        f"in {fname}: [first, second]",
+                    )
 
 
 def lint_own_tags(project: Project) -> None:

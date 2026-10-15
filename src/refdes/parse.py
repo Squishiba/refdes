@@ -89,6 +89,63 @@ _RENAMED_TYPES: dict[str, str] = {
     "constraint": "bound",
 }
 
+# Types *retired* by a standard-library version bump -- merged into a
+# surviving type rather than renamed into it (hardware v3's threads-4a
+# `decision` -> `log`, and the four types the retired `design-debate` preset
+# provided). A retired type needs the same class of hint as a renamed one --
+# a bare "unknown type 'decision'." names nothing, and difflib cannot get
+# from `decision` to `log` any more than from `constraint` to `bound` -- and
+# one thing a rename does not: the repair is a hand migration, because the
+# migration that carries it (`refdes standard upgrade --to 3`) refuses a
+# project already pinned at the version the type was retired in. The entry
+# says what the merge was, every key the migration moves, and the page that
+# describes it; every detail is read from
+# `standards/hardware/v3/migration.yaml` (`merge_types`, `fields.decision`,
+# `links.records`) and the threads-4a fragment, not from memory. Gated like
+# _RENAMED_TYPES: consulted only when the surviving type is real in the
+# merged schema.
+_RETIRED_TYPES: dict[str, tuple[str, str]] = {
+    "decision": (
+        "log",
+        (
+            "it merged into 'log' at hardware@3 (threads phase 4a): write "
+            "type: log, rename title: to summary:, and rewrite records: as "
+            "follows: -- status/rationale/options/checks and the "
+            "satisfies/constrained_by/selects/supersedes/blocked_by links all "
+            "live on log now, and legacy_prefixes: [DEC] keeps a migrated DEC "
+            "id warning-free. 'refdes standard upgrade --to 3' carries a "
+            "project pinned at hardware@2 across and refuses this one (it is "
+            "already at hardware@3), so these items move by hand. See "
+            f"{docs_url_mod.VERSIONING_AND_PINNING_DOCS}."
+        ),
+    ),
+}
+
+# The four types the retired `design-debate` preset provided, all merged into
+# `log` in the same breath as `decision` (the preset's grouping was built
+# around that type: `resolved_by: [decision]` had nothing left to target).
+# Only the *item text* is the problem here: listing the preset on a v3
+# project is a load error that already names it ("preset 'design-debate' does
+# not exist for hardware@3"), and standards.preset_providers() can only name
+# presets bundled at the pinned version -- v3 ships none -- so an item left
+# typed `debate` after the documented remove-preset-then-upgrade order used to
+# get a bare "unknown type 'debate'."
+_RETIRED_PRESET_TYPES: dict[str, tuple[str, str]] = {
+    name: (
+        "log",
+        (
+            "it was provided by the 'design-debate' preset, retired at "
+            "hardware@3 together with the 'decision' type its grouping was "
+            "built around. Migrate the entries to plain log items linked by "
+            "follows:/supersedes:, or declare the four types (debate, option, "
+            "claim, position) in your own refdes-schema.yaml to keep them "
+            "verbatim. See "
+            f"{docs_url_mod.PRESETS_DOCS}."
+        ),
+    )
+    for name in ("debate", "option", "claim", "position")
+}
+
 _SafeLoaderClass = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 # Always-pure-Python loader for byte-identical YAML error diagnostics.
@@ -366,6 +423,50 @@ def _strip_lines(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_strip_lines(v) for v in obj]
     return obj
+
+
+def _link_targets(
+    project: Project,
+    key: str,
+    value: Any,
+    rel: str,
+    line: int,
+    item_id: str,
+) -> list[str]:
+    """Read one link verb's authored value into the list of targets it declares.
+
+    A bare scalar is one edge (`satisfies: REQ-001` is a list of one), so a
+    non-list becomes a one-element list here -- that leniency is the model's
+    and stays. Every *entry* must then be a plain string. Run 6a's F9 was what
+    the old `str(t)` did to anything else: a mapping element -- what an author
+    writes when a link verb gets the shape of the `options:` block above it --
+    survived into `Item.links` as the repr of the loader's own line-tagged
+    dict, and the dangling-reference rule reported
+    `satisfies points at "{'name': ..., '__line__': 6}"`, quoting internal
+    bookkeeping at the person who has to fix the file. Refused here, at the
+    verb and the index that carry it, the way `options[0]` is, and dropped:
+    an entry that is not an id cannot name a target, and the dangling rule
+    must not get the dict. The preview strips `__line__` so the message shows
+    the entry as written, not as the loader stored it.
+    """
+    targets = value if isinstance(value, list) else [value]
+    resolved: list[str] = []
+    for index, target in enumerate(targets):
+        if not target:
+            continue
+        if isinstance(target, str):
+            resolved.append(target)
+            continue
+        preview = _strip_lines(target) if isinstance(target, (dict, list)) else target
+        project.error(
+            f"{key}[{index}]: {preview!r} is not a string -- a link target is "
+            f"one item id per entry, as in {key}: [ID-001, ID-002]",
+            file=rel,
+            line=line,
+            item_id=item_id,
+        )
+    return resolved
+
 
 def _relpath(project: Project, path: str) -> str:
     try:
@@ -914,31 +1015,41 @@ def _build_item(
                 file=rel, line=line,
             )
         else:
-            renamed_to = _RENAMED_TYPES.get(str(type_name))
-            if renamed_to is not None and renamed_to in project.types:
-                if project.standard_base and project.standard_version is not None:
-                    where = f"{project.standard_base}@{project.standard_version}"
-                    fix = (
-                        f"If you moved standard.version: forward by hand, put it "
-                        f"back and run 'refdes standard upgrade --to "
-                        f"{project.standard_version}' instead -- that rewrites every "
-                        f"item, and the ids too, since the prefix moved with it."
-                    )
-                else:
-                    where = "this project's schema"
-                    fix = "Rename it here, or see 'refdes rename' to rewrite the project."
+            retired = _RETIRED_TYPES.get(str(type_name)) or _RETIRED_PRESET_TYPES.get(
+                str(type_name)
+            )
+            if retired is not None and retired[0] in project.types:
                 project.error(
-                    f"unknown type {type_name!r} -- it is now {renamed_to!r} in "
-                    f"{where}. {fix}",
+                    f"unknown type {type_name!r} -- {retired[1]}",
                     file=rel,
                     line=line,
                 )
             else:
-                project.error(
-                    f"unknown type {type_name!r}.{_suggest(str(type_name), list(project.types))}",
-                    file=rel,
-                    line=line,
-                )
+                renamed_to = _RENAMED_TYPES.get(str(type_name))
+                if renamed_to is not None and renamed_to in project.types:
+                    if project.standard_base and project.standard_version is not None:
+                        where = f"{project.standard_base}@{project.standard_version}"
+                        fix = (
+                            f"If you moved standard.version: forward by hand, put it "
+                            f"back and run 'refdes standard upgrade --to "
+                            f"{project.standard_version}' instead -- that rewrites every "
+                            f"item, and the ids too, since the prefix moved with it."
+                        )
+                    else:
+                        where = "this project's schema"
+                        fix = "Rename it here, or see 'refdes rename' to rewrite the project."
+                    project.error(
+                        f"unknown type {type_name!r} -- it is now {renamed_to!r} in "
+                        f"{where}. {fix}",
+                        file=rel,
+                        line=line,
+                    )
+                else:
+                    project.error(
+                        f"unknown type {type_name!r}.{_suggest(str(type_name), list(project.types))}",
+                        file=rel,
+                        line=line,
+                    )
         return None
 
     item_id, numeric_id_hint, id_rejected = _resolve_id_value(project, raw.get("id"), rel, line)
@@ -1000,8 +1111,7 @@ def _build_item(
                 _apply_change_override(project, item, value, rel, source_line)
             continue
         if key in spec.links:
-            targets = value if isinstance(value, list) else [value]
-            item.links[key] = [str(t) for t in targets if t]
+            item.links[key] = _link_targets(project, key, value, rel, line, item.id)
         elif key in spec.fields:
             fspec = spec.fields[key]
             # A value inherited from `defaults:` is reported at the defaults
@@ -1056,7 +1166,9 @@ def _build_item(
                 file=rel, line=line, item_id=item.id or "?",
             )
             targets = value if isinstance(value, list) else [value]
-            item.links[new_key] = [str(t) for t in targets if t]
+            item.links[new_key] = _link_targets(
+                project, new_key, targets, rel, line, item.id
+            )
         else:
             # A typo'd link name (`sattisfies:` for `satisfies:`) doesn't just lose a
             # field -- it drops a traceability edge, so it must fail the build rather

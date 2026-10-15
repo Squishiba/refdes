@@ -80,6 +80,119 @@ def test_the_rename_hint_stays_quiet_where_the_new_type_does_not_exist(tmp_path)
     assert not any("it is now 'bound'" in m for m in messages), messages
 
 
+# -------------------------------------- hardware@3: the *retired* `decision`
+# (run 6a's B7) -- a merge, not a rename, and the pin cannot reach it
+
+DECISION_ITEM = (
+    "items:\n"
+    "  - id: DEC-PWR-001\n    type: decision\n    title: Regulator choice\n"
+    "    status: accepted\n"
+)
+
+
+def _v3_project_with(tmp_path, item_yaml, presets=None):
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        f"standard: {{ base: hardware, version: 3, presets: {presets or []} }}\n",
+    )
+    (tmp_path / "items").mkdir(exist_ok=True)
+    (tmp_path / "items" / "i.yaml").write_text(item_yaml, encoding="utf-8")
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    return project
+
+
+def test_an_item_still_typed_decision_at_v3_names_the_merge(tmp_path):
+    """B7 verbatim: the default `refdes init` project pins hardware@3, and
+    hardware@3 at the threads-4a commit shipped with `decision` in it, so the
+    shape this error fires on is the *default* project of that release. The
+    migration that carries it (`standard upgrade --to 3`) refuses this project
+    by definition -- it is already at v3 -- so the load error is the only
+    in-product signal, and a bare `unknown type 'decision'.` is not one a
+    person can act on. It has to name the merge, the field and link moves, and
+    the page that describes them (all read from v3's migration.yaml:
+    merge_types/fields.decision/links.records, and the threads-4a fragment)."""
+    project = _v3_project_with(tmp_path, DECISION_ITEM)
+    messages = [d.message for d in project.errors]
+    hint = [m for m in messages if "unknown type 'decision'" in m]
+    assert len(hint) == 1, messages
+    m = hint[0]
+    assert "it merged into 'log'" in m, m
+    assert "title: to summary:" in m, m
+    assert "records: as follows:" in m, m
+    assert "standard upgrade --to 3" in m, m
+    assert "standard-library.html#versioning-and-pinning" in m, m
+
+
+def test_the_retired_type_hint_stays_quiet_where_log_does_not_exist(tmp_path):
+    """The gate _RENAMED_TYPES uses, one level up: the advice names `log` as
+    the type to migrate into, so it may only fire in a schema that has one. A
+    hand-rolled schema with neither name keeps the plain unknown-type error."""
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  widget: { prefix: WID, fields: { text: { type: text, required: true } } }\n",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(DECISION_ITEM, encoding="utf-8")
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    messages = [d.message for d in project.errors]
+    assert any("unknown type 'decision'" in m for m in messages), messages
+    assert not any("merged into" in m for m in messages), messages
+
+
+def test_an_item_typed_for_the_retired_design_debate_preset_names_the_preset(tmp_path):
+    """The same class, one table over: the preset retired with the type its
+    grouping was built around. Listing the preset on a v3 project is already
+    the named `does not exist for hardware@3` load error; this is the other
+    half of the docs' own remove-preset-then-upgrade order -- items left
+    typed `debate` with the preset gone, where
+    `standards.preset_providers()` has nothing to name (it sees only presets
+    bundled at the pinned version, and v3 ships none)."""
+    for name, prefix in (
+        ("debate", "DBT"),
+        ("option", "OPT"),
+        ("claim", "CLM"),
+        ("position", "POS"),
+    ):
+        project = _v3_project_with(
+            tmp_path,
+            f"items:\n  - id: {prefix}-001\n    type: {name}\n    title: T\n",
+        )
+        messages = [d.message for d in project.errors]
+        hint = [m for m in messages if f"unknown type '{name}'" in m]
+        assert len(hint) == 1, (name, messages)
+        m = hint[0]
+        assert "design-debate" in m, (name, m)
+        assert "standard-library.html#presets" in m, (name, m)
+        assert "__line__" not in m, (name, m)
+
+
+def test_a_v2_project_keeps_the_design_debate_preset_hint(tmp_path):
+    """The v1/@2 hint (`provided by the 'design-debate' preset, which is not
+    listed under standard.presets`) is unchanged: the preset is bundled at
+    those versions, so its types are named by preset_providers and the
+    retirement table must not pre-empt it. The retired preset's types resolve
+    at v2 exactly as they always did."""
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 2, presets: [design-debate] }\n",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n  - id: DBT-001\n    type: debate\n    title: Topology\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    assert not project.errors, [str(d) for d in project.errors]
+    assert project.item_by_id("DBT-001").type == "debate"
+
+
 def _equivalence_project(tmp_path, version, target_id="REQ-001"):
     """A component declaring `equivalent:` at a target that is not a
     component, against a given pinned standard version."""

@@ -70,3 +70,34 @@ CITATION_PAGE_DOCS = f"{DOCS_URL}/troubleshooting.html#citations"
 # opening and walks its remedy branches; slug checked against
 # `pages._slugify` and against the anchors of a real build of docs-site/.
 DESIGN_LOG_DOCS = f"{DOCS_URL}/troubleshooting.html#the-design-log"
+
+# The user docs for a standard-library change a hand-forward pin strands: the
+# `decision` -> `log` merge lives in standard-library.md's own `## Versioning
+# and pinning` section (change 7, with the migration's field and link moves),
+# which is the page a project pinned to hardware@3 by hand needs -- the
+# `standard upgrade --to 3` that carries a v2-pinned project across refuses
+# this one by definition. Slug checked against `pages._slugify`.
+VERSIONING_AND_PINNING_DOCS = f"{DOCS_URL}/standard-library.html#versioning-and-pinning"
+
+# The user docs for the retired `design-debate` preset: its `## Presets`
+# section is where hardware@3 shipping no presets is written up, together with
+# the two remedies for an item left typed `debate`/`option`/`claim`/`position`
+# (plain `log` items linked by `follows:`/`supersedes:`, or the four types
+# declared in the project's own refdes-schema.yaml). Slug checked against
+# `pages._slugify`.
+PRESETS_DOCS = f"{DOCS_URL}/standard-library.html#presets"
+
+# The user docs for the `hardware@3` vocabulary changes a hand-forward pin
+# strands: `standard-library.md`'s own `## Versioning and pinning` heading,
+# whose change list is where the `decision` -> `log` merge (change 7) and the
+# `design-debate` retirement are written up, alongside the
+# `refdes standard upgrade --to 3` recipe that carries a *v2-pinned* project
+# across. Slug checked against `pages._slugify`.
+VERSIONING_AND_PINNING_DOCS = f"{DOCS_URL}/standard-library.html#versioning-and-pinning"
+
+# The user docs for presets: `standard-library.md`'s own `## Presets` heading,
+# which is where the `design-debate` retirement and the two remedies for it
+# (plain `log` items linked by `follows:`/`supersedes:`, or the four types
+# declared in the project's own `refdes-schema.yaml`) are written up. Slug
+# checked against `pages._slugify`.
+PRESETS_DOCS = f"{DOCS_URL}/standard-library.html#presets"
