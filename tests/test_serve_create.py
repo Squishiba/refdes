@@ -662,6 +662,7 @@ def test_a_failed_id_reservation_restores_the_markdown_append_bytes(project_root
     assert tree(project_root, "items", ".refdes") == before_tree
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
 def test_a_successful_rollback_keeps_the_destination_mode(project_root, monkeypatch):
     """The restore swaps the bytes in, and a swap takes the TEMP's mode --
     so the temp must carry the destination's mode before the swap lands.
