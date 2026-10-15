@@ -6,8 +6,8 @@ uncaught `TypeError` at `schema.py:880`.
 Worktree: /home/jorb/.paseo/worktrees/16msma8v/fix-yaml-surrogate-duplicate-20261013
 Branch:   fix/yaml-surrogate-duplicate-20261013 (from main @ 8b6a52e)
 Status:   FINISHED — one commit, parser fix + two tests + changelog fragment.
-          PR prep (rebase onto origin/main 374a4aa, push, PR open, not
-          merged): see §7.
+          PR prep (rebase onto origin/main 374a4aa, push, PR #217 open, not
+          merged): see §7 and §8.
 
 ==========================================================================
 ## 0. Inputs
@@ -213,3 +213,16 @@ so it had to move.
   not read from or written to; no push to main, no merge.
 - Pushed `fix/yaml-surrogate-duplicate-20261013` and opened the PR against
   main (number recorded in the next section). Not merged.
+
+## 8. PR
+
+**PR #217** — https://github.com/Squishiba/refdes/pull/217 —
+`fix/yaml-surrogate-duplicate-20261013` → `main`, opened 2026-10-14, left
+OPEN (not merged, per the brief). Branch head at push: d73d17b (the rebase
+result f878f8d plus this log's PR-prep section). PR body = summary, repro,
+cause, tests (including the fails-at-main evidence), runs and limits; the
+body text is kept at `.scratch/yaml-edge-001-pr-body.md`.
+
+Nothing on GitHub was merged, closed, labelled or reassigned. `gh` reached
+github.com as the Squishiba account, so there is no "remote unreachable"
+limitation on this prep.
