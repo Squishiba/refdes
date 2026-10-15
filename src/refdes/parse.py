@@ -833,6 +833,12 @@ def _apply_change_override(
     entry) is canonicalised to `timeline`; the old spelling errors first
     unless the project's standard pin still carries it (P2's hard-error
     posture, applied-but-named like the `history:` rename above).
+
+    Every mode value inside the mapping -- `mode:` and each `fields:`
+    entry -- is checked against ON_CHANGE_MODES like the scalar form is,
+    and unknown mapping keys are named; a bad entry is dropped (like the
+    scalar form drops its whole override) so the invalid mode never
+    reaches the change-tracking layer.
     """
     if isinstance(value, str):
         if value == ON_CHANGE_LOG_OLD:
@@ -866,9 +872,17 @@ def _apply_change_override(
                     item_id=item.id,
                 )
             override["mode"] = TIMELINE
+        elif "mode" in override and override["mode"] not in ON_CHANGE_MODES:
+            project.error(
+                f"on_change mode: {override['mode']!r} must be one of {', '.join(ON_CHANGE_MODES)}",
+                file=rel,
+                line=line,
+                item_id=item.id,
+            )
+            del override["mode"]
         fields = override.get("fields")
         if isinstance(fields, dict):
-            for fname, fmode in fields.items():
+            for fname, fmode in list(fields.items()):
                 if fmode == ON_CHANGE_LOG_OLD:
                     if not legacy_ok:
                         project.error(
@@ -878,6 +892,23 @@ def _apply_change_override(
                             item_id=item.id,
                         )
                     fields[fname] = TIMELINE
+                elif fmode not in ON_CHANGE_MODES:
+                    project.error(
+                        f"on_change fields.{fname}: {fmode!r} must be one of {', '.join(ON_CHANGE_MODES)}",
+                        file=rel,
+                        line=line,
+                        item_id=item.id,
+                    )
+                    del fields[fname]
+        for key in list(override):
+            if key not in ("fields", "mode", "reason"):
+                project.error(
+                    f"on_change: unknown key {key!r} -- must be one of fields, mode, reason",
+                    file=rel,
+                    line=line,
+                    item_id=item.id,
+                )
+                del override[key]
         if override.get("fields") and not override.get("reason"):
             project.warn(
                 "item-level on_change override has no 'reason'; suppression should be "

@@ -139,10 +139,30 @@ on_change:
 The `on_change` mode for any field that does not declare its own. One of
 `invalidate`, `timeline`, `ignore`. See [change tracking](change-tracking.md).
 
-Only `invalidate` has any effect today: it is the sole mode the content hash
-checks for. `timeline` is reserved for a future per-field history layer and
-currently behaves exactly like `ignore` -- choosing between them is not yet a meaningful
-decision.
+`invalidate` is the only mode the content hash checks for, so it is the only
+mode that drives suspect-link invalidation. A `timeline` field is excluded
+from the content hash exactly like an `ignore` field -- with one exception:
+a history-backed entry (a log entry) carries a history digest that covers
+every field, so a `timeline` change on a captured entry surfaces as
+"edited after captured". Everywhere else, choosing `timeline` over `ignore`
+is a forward-looking annotation with no observable effect.
+
+The item-level override (item front-matter) takes the mode as a scalar for
+the whole item, or as a mapping with `mode:`, per-field `fields:`, and the
+`reason:` that justifies the suppression:
+
+```yaml
+- id: REQ-A-001
+  on_change:
+    mode: ignore
+    fields:
+      status: invalidate
+    reason: "Body is re-imported from a spreadsheet each sync; a status change is real."
+```
+
+Every mode value in the override -- the scalar, `mode:`, each `fields:`
+entry -- must be one of the three modes, and the mapping accepts no keys
+beside `mode:`, `fields:` and `reason:`.
 
 This entire surface only matters to a project under version control. Without a
 VCS there is no history layer to feed, and `on_change:` reduces to nothing more

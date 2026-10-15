@@ -36,11 +36,13 @@ Without it, suspect links are unusable. If a change of owner marks fifty
 downstream links suspect, people stop reading the badges within a week and the
 feature is dead. Roughly half your fields should be `timeline`.
 
-This is design intent for the history layer, not current behavior: today `timeline`
-has no observable effect beyond being excluded from the content hash, same as
-`ignore`. Marking a field `timeline` now is a forward-looking choice, not a
-functional one -- it costs nothing and means the schema is already correct
-once the history layer exists.
+This is design intent for the history layer. Today a `timeline` field is
+excluded from the content hash exactly like an `ignore` field -- with one
+exception: a history-backed entry (a log entry) carries a history digest that
+covers every field, so a `timeline` change on a captured entry surfaces as
+"edited after captured". Marking a field `timeline` now is a forward-looking
+choice, not a functional one -- it costs nothing and means the schema is
+already correct once the history layer exists.
 
 ## Setting it
 

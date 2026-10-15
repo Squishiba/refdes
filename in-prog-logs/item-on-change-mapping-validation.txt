@@ -1,0 +1,111 @@
+# item-on-change-mapping-validation
+
+Task: an item's `on_change:` MAPPING form must be validated like its scalar
+form (run 6b finding B2, PR #222 report). Branch cut from main f7df34d.
+
+## Reproduction (BEFORE fix) — confirmed, hardware@3, `refdes init` in
+## .scratch/repro/p1, items/board-a/req.yaml with four items:
+
+`refdes check` (pre-fix): `3 items, 0 errors, 4 warnings`, exit 0 —
+`mode: timeine`, `fields: {status: timeine}` and `mdoe: ignore` all
+silently accepted. Adding the scalar spelling `on_change: timeine` to a
+fourth item: `ERROR items/board-a/req.yaml:29 [REQ-A-004] — on_change:
+'timeine' must be one of invalidate, timeline, ignore`, 1 error. Matches
+the B2 report exactly.
+
+## Fix (src/refdes/parse.py, `_apply_change_override`)
+
+- `mode:` value validated against ON_CHANGE_MODES (the legacy `log`
+  branch kept first, so its rename message is unchanged); bad mode ->
+  `on_change mode: 'x' must be one of invalidate, timeline, ignore`.
+- every `fields.<name>:` value validated the same way (legacy branch kept
+  first); `on_change fields.<name>: 'x' must be one of invalidate,
+  timeline, ignore`.
+- unknown keys inside the mapping (e.g. `mdoe:`) were NOT reported (the
+  emitted schema.json declares `additionalProperties: False` for the
+  mapping, so this is the same class); added
+  `on_change: unknown key 'x' -- must be one of fields, mode, reason`.
+  Fit inside ~20 added lines, so included per the task.
+- Drop-vs-keep decision: the scalar form DROPS the invalid value (errors
+  and returns without setting the override). The mapping drops only the
+  offending entry (`del override["mode"]` / `del fields[fname]` /
+  `del override[key]`), keeping valid siblings — entry-granular version of
+  the same "drop, don't apply" policy. Consumers (model.py:673-678,
+  cli.py:1474-1482) all read via `.get()`, so a dropped key falls back to
+  schema field mode / project default, exactly like the absent-key case.
+- After fix, the repro project: 4 errors, exit 1, one per case, scalar
+  message unchanged.
+- NOT touched (out of scope, noted only): non-dict `fields:` (e.g.
+  `fields: ignore`) is still silently ignored — the task scoped this to
+  mode values + unknown keys, and the suite/contract tests keep the
+  legacy-log precedence intact.
+
+## Tests (tests/test_change_policy_on_change_key.py, 4 added, 23 pass)
+
+- test_item_on_change_mode_key_bad_value_errors_like_the_scalar
+- test_item_on_change_field_entry_bad_value_errors_like_the_scalar
+- test_item_on_change_unknown_key_errors_and_is_dropped
+  (each asserts the exact message start + the dropped-entry override +
+  on_change_for falls back to the project default)
+- test_item_on_change_valid_mapping_override_has_no_error (regression
+  guard: mode+fields+reason loads clean and on_change_for works)
+- Sabotage: `git checkout -- src/refdes/parse.py` (fix patch saved to
+  .scratch/repro/fix.patch, restored with git apply) -> the 3 bug tests
+  FAILED (0 errors emitted), the valid-form test passed (it never
+  exercised validation — expected for a guard). Fix restored, 23 pass.
+
+## Checks against the code (task item 4, docs F3)
+
+Claim "Only `invalidate` has any effect today: it is the sole mode the
+content hash checks for": TRUE (history.py:35-36 — content_hash excludes
+timeline/ignore fields; invalidate is all the hash checks).
+Claim "`timeline` ... behaves exactly like `ignore`": INCOMPLETE.
+history.py:25-41: semantic_digest hashes {history_format, type, fields,
+links, body} — ALL declared fields, timeline/ignore included — "while a
+task tick must be visible in history even though it must not churn a
+baseline"; build.py:3259 turns a digest change on a captured entry into
+the "edited after captured" diagnostic. So on a history-backed entry
+(log) a timeline change IS observable.
+- docs/schema-reference.md on_change section: sentence corrected (the
+  one exception named), plus the item-level example showing `mode:`,
+  `fields:`, `reason:`, plus a sentence stating the validation the load
+  layer now does. Section fences are hand-written yaml, not generated
+  blocks — docs-site/gen_examples.py --check passes, so no checked fence
+  was disturbed; tests/test_docs_examples.py covers only the generated
+  per-type example blocks, untouched.
+- docs/change-tracking.md carried the same sentence ("today `timeline`
+  has no observable effect ... same as `ignore`") — fixed there too
+  (same verified-false claim, one sentence).
+
+## Changelog
+
+changelog.d/on-change-mapping-validation.fixed.md — "fixed" category per
+changelog.d/README.md (bug fix; bad mapping input loaded silently). The
+docs wording fix gets no fragment of its own (docs-only, not a behavior
+change a project reader needs in the changelog).
+
+## Gates (final, foreground)
+
+- Full suite: 3690 passed, 2 skipped, exit 0 (.scratch/suite.txt). The
+  first full run had ONE failure,
+  tests/test_docs_examples.py::test_check_mode_fails_a_hand_edited_example
+  — caused by my new docs example: the test tampers the first
+  `type: requirement\n` in schema-reference.md, and my example placed it
+  outside any generated block, so the tamper hit a hand-written fence and
+  the stale-check passed. Fix: dropped the `type:` line from the example
+  (not needed to show mode/fields/reason). Second full run: 3690 passed.
+- `ruff check --select E9,F src tests`: All checks passed.
+- `docs-site/gen_examples.py --check`: up to date (both pages).
+
+## Files
+
+- src/refdes/parse.py (_apply_change_override + docstring)
+- tests/test_change_policy_on_change_key.py (4 tests added)
+- docs/schema-reference.md (on_change section: sentence + item-level example)
+- docs/change-tracking.md (same sentence, one paragraph)
+- changelog.d/on-change-mapping-validation.fixed.md
+- in-prog-logs/item-on-change-mapping-validation.txt (this file)
+
+Status: DONE.
+
+

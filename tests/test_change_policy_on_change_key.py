@@ -122,6 +122,105 @@ def test_item_on_change_empty_value_errors_like_a_bad_mode(tmp_path):
     assert item.on_change_override == {}
 
 
+def test_item_on_change_mode_key_bad_value_errors_like_the_scalar(tmp_path):
+    _write_project(
+        tmp_path,
+        CONFIG,
+        "defaults: {type: note}\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    on_change:\n"
+        "      mode: timeine\n"
+        "      reason: Rotates during bring-up.\n",
+    )
+    project = _build_at(tmp_path)
+    item = project.item_by_id("NOTE-001")
+    errors = [d for d in project.errors if "must be one of invalidate" in d.message]
+
+    assert len(errors) == 1
+    assert errors[0].message.startswith(
+        "on_change mode: 'timeine' must be one of invalidate, timeline, ignore"
+    )
+    assert item.on_change_override == {"reason": "Rotates during bring-up."}
+    assert item.on_change_for("status", project.types["note"], "ignore") == "ignore"
+
+
+def test_item_on_change_field_entry_bad_value_errors_like_the_scalar(tmp_path):
+    _write_project(
+        tmp_path,
+        CONFIG,
+        "defaults: {type: note}\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    on_change:\n"
+        "      fields:\n"
+        "        status: timeine\n"
+        "      reason: Rotates during bring-up.\n",
+    )
+    project = _build_at(tmp_path)
+    item = project.item_by_id("NOTE-001")
+    errors = [d for d in project.errors if "must be one of invalidate" in d.message]
+
+    assert len(errors) == 1
+    assert errors[0].message.startswith(
+        "on_change fields.status: 'timeine' must be one of invalidate, timeline, ignore"
+    )
+    assert item.on_change_override == {
+        "fields": {},
+        "reason": "Rotates during bring-up.",
+    }
+    assert item.on_change_for("status", project.types["note"], "ignore") == "ignore"
+
+
+def test_item_on_change_unknown_key_errors_and_is_dropped(tmp_path):
+    _write_project(
+        tmp_path,
+        CONFIG,
+        "defaults: {type: note}\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    on_change:\n"
+        "      mdoe: ignore\n"
+        "      reason: Rotates during bring-up.\n",
+    )
+    project = _build_at(tmp_path)
+    item = project.item_by_id("NOTE-001")
+    errors = [d for d in project.errors if "unknown key" in d.message]
+
+    assert len(errors) == 1
+    assert errors[0].message.startswith(
+        "on_change: unknown key 'mdoe' -- must be one of fields, mode, reason"
+    )
+    assert item.on_change_override == {"reason": "Rotates during bring-up."}
+
+
+def test_item_on_change_valid_mapping_override_has_no_error(tmp_path):
+    _write_project(
+        tmp_path,
+        CONFIG,
+        "defaults: {type: note}\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    on_change:\n"
+        "      mode: timeline\n"
+        "      fields:\n"
+        "        status: invalidate\n"
+        "      reason: Rotates during bring-up.\n",
+    )
+    project = _build_at(tmp_path)
+    item = project.item_by_id("NOTE-001")
+    messages = [d.message for d in project.errors]
+
+    assert not [m for m in messages if "must be one of invalidate" in m]
+    assert not [m for m in messages if "unknown key" in m]
+    assert item.on_change_override == {
+        "mode": "timeline",
+        "fields": {"status": "invalidate"},
+        "reason": "Rotates during bring-up.",
+    }
+    assert item.on_change_for("status", project.types["note"], "ignore") == "invalidate"
+
+
 def test_on_change_override_inherited_from_defaults_is_reported_at_the_defaults_line(
     tmp_path,
 ):
