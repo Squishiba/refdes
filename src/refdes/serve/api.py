@@ -540,6 +540,10 @@ def _apply_edit(app, ref: str, body) -> tuple[int, dict]:
         edit_mod.EditRequest(
             who="local", ref=ref, op=op, expected_revision=expected, pins=pins
         ),
+        # The launch's own settings file, so an edit against a project served
+        # from `-c custom-project.yaml` loads the file the model was built
+        # from instead of rebuilding the default marker's path from the root.
+        config_path=app.state.config_path,
     )
 
     def shown(path):
@@ -716,6 +720,9 @@ def _create_item(app, body) -> tuple[int, dict]:
             amends=body.get("amends"),
             links=links_body,
         ),
+        # Same threading as the edit route above: the configured settings file,
+        # not a path rebuilt from the default marker name.
+        config_path=app.state.config_path,
     )
 
     def shown(path):

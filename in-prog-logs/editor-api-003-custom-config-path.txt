@@ -1,0 +1,103 @@
+EDITOR-API-003: editor honors custom project config path
+=========================================================
+Lane: fix/editor-custom-config-path-20261015 (base 7e49a20)
+Owner: Qwen3.8-Flash-Next
+Date: 2026-10-15
+Status: DONE (fix landed on branch, PR open, not merged)
+
+Finding (shared main in-prog-logs/current-main-resweep-editor-api.tsv row 003)
+--------------------------------------------------------------------------------
+`refdes -c custom-project.yaml check` succeeds; a server launched with the
+custom config serves reads, but POST edit and create rebuild
+`os.path.join(root, 'refdes-project.yaml')` and 422-refuse because the
+marker is absent.
+
+Verification on current main (real CLI + EditorApp HTTP, PYTHONPATH pinned)
+----------------------------------------------------------------------------
+Ran at base 7e49a20 (the branch base; shared main tip at claim time) with
+PYTHONPATH pinned to this worktree's src, asserting refdes.__file__:
+
+  refdes.__file__ = <worktree>/src/refdes/__init__.py
+  check -c custom-project.yaml: exit 0
+  GET /api/item/REQ-001: 200 editable=True
+  POST edit:   422 "the project did not load: FileNotFoundError:
+                .../refdes-project.yaml"
+  POST create: 422 (same)
+
+Probe: .scratch/editor-api-003/repro.py + proj-a (base src) / proj-b
+(fixed src). The finding is PRESENT on current main, not fixed.
+
+Trace
+-----
+- cli.py:2738 defines global `-c/--config`; cmd_serve (cli.py:547) passes
+  args.config to EditorApp; EditorApp (server.py:466) passes it to
+  ProjectState; ProjectState._build loads through it (state.py). Reads work.
+- api.py `_apply_edit` (:538) and `_create_item` (:706) passed only
+  `project.root`; edit.py `apply_edit` (:307) and `create_item` (:1064)
+  rebuilt `os.path.join(root, CONFIG_NAME)` with CONFIG_NAME hardcoded.
+  Every loader in the locked section (before snapshot, overlay gate, create
+  plan) then read a file that does not exist.
+- Watcher: state.project_inputs added `os.path.join(root, name)` for the two
+  hardcoded names, so a custom config file was never in the watched/revision
+  set: editing it moved no revision, and the poller could not reload on it.
+- sources/upload/preview routes write no project-config path; nothing else
+  rebuilds the marker name in serve/ (grep `refdes-project.yaml` in
+  src/refdes/serve/ hits only the two edit.py joins + a --token-file doc
+  line).
+
+Fix (threading, no cwd reliance, no default-behavior change)
+-------------------------------------------------------------
+- state.py: `ProjectState.__init__` abspaths the configured path once at
+  launch (same basis the loader uses; serve never moves cwd).
+  `project_inputs(project, config_path=None)` names the configured settings
+  file in the watched/revision set; `refdes-schema.yaml` stays a fixed name
+  beside root (that is how `_load_schema_overlay` resolves it). `_build`,
+  `pending_signature`, and `refresh` thread the path.
+- edit.py: `apply_edit(project_root, request, config_path=None)` and
+  `create_item(project_root, request, config_path=None)`; omitted -> the
+  default marker beside root, exactly the old behavior. All locked-section
+  loads already take `config`, so the one line at each entry point covers
+  before-snapshot, overlay gate, delta gate, and create plan.
+- api.py: both write routes pass `config_path=app.state.config_path`.
+- Concurrency untouched: lock keys stay `os.path.normcase(os.path.abspath
+  (project_root))` (== the config's directory), write-lock ordering,
+  accept-pin/landed-body windows, and `_atomic_replace` all unchanged --
+  no entry into the #241/#244/#253 lanes.
+
+Tests (red at base, green at head; both over real EditorApp HTTP)
+-------------------------------------------------------------------
+tests/test_serve_custom_config.py, parametrized over
+[refdes-project.yaml (default control), custom-project.yaml]:
+- edit applies + bytes on disk (comment survives) + response revision
+- edit post-save revalidation: /api/revision load_error None, stale False
+- create applies + item lands in items/decs.yaml
+- create id sequence: preview after a custom-config create plans DEC-003
+- poller watches the config the server loaded (board-c semantic edit ->
+  refresh() True, /api/create/schema shows board-c, revision clean)
+- default-marker control for the watcher test (pins that the fix threads
+  the configured path, not a swapped constant)
+
+Red at base (git archive 7e49a20 checkout, conftest bootstraps its own src):
+  5 failed (all custom-project.yaml params + poller-watch), 5 passed
+  (every default-marker control) -- the failures are the 422
+  FileNotFoundError named in the finding.
+Green at head: 10/10.
+
+Suites
+------
+- Targeted: test_serve_custom_config + serve api/state/edit_http/edit_links/
+  edit_http_links/create/cli/images + site_assets_confinement: 255 passed.
+- Full: 3874 passed, 2 skipped (326s).
+- Scoped ruff: new/changed files clean; edit.py's one DTZ011 is pre-existing
+  (base checkout scores the same 1).
+
+Live post-fix proof: repro.py against fixed src -> POST edit 200 applied,
+POST create 200 created (proj-b).
+
+Notes
+-----
+- conftest.py inserts its own `../src` at sys.path[0], so red-at-base runs
+  must use an extracted base checkout (.scratch/base-7e49a20), not a
+  PYTHONPATH swap from this worktree.
+- A `git stash` from the init-gitignore lane exists in this shared repo; not
+  touched, per AGENTS.md.

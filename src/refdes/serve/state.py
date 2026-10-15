@@ -29,7 +29,9 @@ from ..model import Project
 from ..parse import source_files
 from .preview import PreviewManager
 
-CONFIG_NAMES = ("refdes-project.yaml", "refdes-schema.yaml")
+PROJECT_CONFIG_NAME = "refdes-project.yaml"
+SCHEMA_CONFIG_NAME = "refdes-schema.yaml"
+CONFIG_NAMES = (PROJECT_CONFIG_NAME, SCHEMA_CONFIG_NAME)
 # `.refdes/` files that feed a build. schema.json is regenerated on every
 # writable load (disposable), so it is not an input; copies/ holds fetched PDFs.
 _STATE_SUFFIXES = (".yaml", ".yml", ".json")
@@ -60,15 +62,30 @@ def asset_files(project: Project) -> set[str]:
     return {full_path for full_path, _rel, contained in walk_site_assets(project) if contained}
 
 
-def project_inputs(project: Project) -> list[str]:
+def project_inputs(project: Project, config_path: str | None = None) -> list[str]:
     """Absolute paths of every file whose content is a semantic project input:
     the two config files, item sources, page sources, `.refdes/` state,
     imported artifacts, and every file under a `site.assets:` directory.
-    Sorted; may name files that no longer exist."""
+    Sorted; may name files that no longer exist.
+
+    `config_path` is the project's own settings file when it is not the
+    default marker name -- the `-c/--config` value the server was launched
+    with, threaded from `ProjectState`. The watched set must name the file
+    the model was loaded from: watching the conventional name of a project
+    that lives at a custom path watches a file that does not exist, and an
+    edit to the real config never moves the revision the writer checks
+    against. `refdes-schema.yaml` is not threaded: `_load_schema_overlay`
+    resolves it by fixed name beside the settings file, so it has no custom
+    spelling to follow."""
     root = project.root
     found: set[str] = set()
-    for name in CONFIG_NAMES:
-        found.add(os.path.join(root, name))
+    settings = (
+        os.path.abspath(config_path)
+        if config_path
+        else os.path.join(root, PROJECT_CONFIG_NAME)
+    )
+    found.add(settings)
+    found.add(os.path.join(root, SCHEMA_CONFIG_NAME))
     found.update(source_files(project))
     pages_dir = os.path.join(root, project.pages_dir)
     if os.path.isdir(pages_dir):
@@ -165,7 +182,12 @@ def git_status(root: str) -> dict:
 
 class ProjectState:
     def __init__(self, config_path: str | None, preview: PreviewManager | None = None):
-        self.config_path = config_path
+        # Resolved to an absolute path at launch, against the process's
+        # working directory -- the same basis the loader resolves a relative
+        # `-c` value against, and `serve` never moves its cwd. Every consumer
+        # (loader, watcher, write handlers) then sees one spelling of the
+        # configured path.
+        self.config_path = os.path.abspath(config_path) if config_path else None
         self.preview = preview
         self._lock = threading.RLock()
         self._serial = 0
@@ -186,12 +208,15 @@ class ProjectState:
         # against content the form never saw.
         for _attempt in range(3):
             before = (
-                content_hashes(project_inputs(self._snapshot.project), self._snapshot.project.root)
+                content_hashes(
+                    project_inputs(self._snapshot.project, self.config_path),
+                    self._snapshot.project.root,
+                )
                 if self._snapshot is not None
                 else None
             )
             project = loader.load_readonly(self.config_path)
-            paths = project_inputs(project)
+            paths = project_inputs(project, self.config_path)
             hashes = content_hashes(paths, project.root)
             if before is None or all(hashes.get(rel, "") == h for rel, h in before.items()):
                 break
@@ -233,7 +258,7 @@ class ProjectState:
         else None -- the cheap first stage of change detection."""
         with self._lock:
             snap = self.snapshot
-            paths = project_inputs(snap.project)
+            paths = project_inputs(snap.project, self.config_path)
             sig = signature(paths)
             return None if sig == self._handled_signature else sig
 
@@ -242,7 +267,7 @@ class ProjectState:
         when the model was replaced. Idempotent and safe to call at any time."""
         with self._lock:
             snap = self.snapshot
-            paths = project_inputs(snap.project)
+            paths = project_inputs(snap.project, self.config_path)
             sig = signature(paths)
             if sig == self._handled_signature:
                 return False
