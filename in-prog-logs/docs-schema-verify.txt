@@ -31,9 +31,12 @@ each preset), fix docs where WRONG/MISSING, mechanical diff script in
   owner/last_reviewed); component.check_severity={candidate:info,selected:error,
   rejected:info,obsolete:info}; log: append_only, sealing: history, legacy_prefixes [DEC],
   check_severity: error; bound extends requirement.
-- `rf new decision` at v3 prints "unknown type 'decision'." exit 0 -- standard-library.md
+- `rf new decision` at v3 prints "unknown type 'decision'." -- standard-library.md
   L343-344 claims it prints "configuration error: unknown type 'decision'." -> WRONG,
   but that text is prose, not a table (out of task scope; report in PR body).
+  Exit code: my `rf` probe wrapper called main() without sys.exit(main()), so it
+  swallowed the return code and showed exit 0; the real entry point exits 1
+  (src/refdes/cli.py:2063 `return 1`). Wrapper fixed in round 2.
 - Field types (configcheck.FIELD_TYPE_ORDER): text,person,limit,quantity,date,list,
   options,checks,citations,tasks,enum == docs list (11, order-free) VERIFIED.
 - Reserved link verbs (parse.py RESERVED∪OVERRIDABLE): id,type,body,former_ids,key,
@@ -82,10 +85,35 @@ Sabotaged the generated-block guard instead: hand-changed `status: planned`
 `gen_examples.py --check` failed ("carries a stale generated block", exit 1);
 restored, check passes.
 
-Other observations for the PR body (prose, out of the tables' scope, NOT
-changed):
+Other observations for the PR body (prose, out of the tables' scope -- both
+fixed in round 2, see below):
 - standard-library.md's hand-written `refdes new log` example omits the
   `# tasks:` line the real scaffold emits.
 - standard-library.md claims `refdes new decision` answers "configuration
   error: unknown type 'decision'."; observed output is "unknown type
-  'decision'." (exit 0) at hardware@3.
+  'decision'." on stderr, exit 1 (cli.py:2063), at hardware@3.
+
+## Round 2 (review on 475d201, CHANGES REQUESTED)
+Findings and dispositions:
+1. (accepted) exit-code claim in this log + PR body: `refdes new decision`
+   exits 1 (cli.py:2063), not 0. Root cause: probe wrapper swallowed
+   main()'s return; wrapper now sys.exit(main()). Log fixed; PR body
+   updated via gh pr edit.
+2. (accepted, reconciled) "MISSING FROM DOCS: 12, all fixed" vs the diff's
+   10 added backticked names: the 12 = 4 sets (grouped, named_title,
+   statement_title, invalidate_body -- all named by name in the diff) + 8
+   inverses, of which `constrains` is named by name and the 7 regular
+   `participle_by` names (addressed_by, amended_by, derived_by, followed_by,
+   refined_by, selected_by, superseded_by) are covered by the stated rule;
+   the diff tool counts rule coverage as naming. The diff's other added
+   names (`claims`, `governs`, `blocks`, `contains`, `follows`) resolved
+   the 2 WRONG/extra-name findings, not MISSING rows.
+3. (accepted) inverse-rule sentence now excludes the self-inverse pair
+   explicitly ("the self-inverse pair is its own inverse, and governs,
+   constrains, blocks and contains are the four that are neither").
+4. (accepted) the two disclosed out-of-scope prose items are now fixed, in
+   the same file, against facts verified by running the tool: L346-347 now
+   says `unknown type 'decision'.` on stderr, exit 1; the hand-written
+   `refdes new log` example gained the `# tasks:  # tasks` line (verified
+   position against real `refdes new log` scaffold output).
+No code changes this round -> no new tests (docs-only ticket).

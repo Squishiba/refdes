@@ -40,8 +40,9 @@ it — `refines`, `derives_from`, `governed_by`, `satisfies`, `constrained_by`,
 `verifies`, `addresses`, `follows`, `amends`, `supersedes`, `selects`,
 `blocked_by`, `part_of`, plus the self-inverse `drop_in`/`alternate` pair on
 `component`. Each has an inverse the target sees — the verb's past
-participle with `_by` (`refined_by`, `addressed_by`, …) except `governs`,
-`constrains`, `blocks` and `contains`. See
+participle with `_by` (`refined_by`, `addressed_by`, …); the self-inverse
+pair is its own inverse, and `governs`, `constrains`, `blocks` and
+`contains` are the four that are neither. See
 [links](links.md) for how declaring one end gives you the other for free.
 
 There is no `decision` type. `hardware@1` and `hardware@2` had one, and
@@ -344,7 +345,7 @@ Scaffolds a starter item's front matter for any type in the merged schema —
 standard or project-defined — so "what fields does a log entry take again"
 never means a trip back to this page. On `hardware@3` that means one of the six
 types; `decision` is not one of them, and `refdes new decision` answers
-`configuration error: unknown type 'decision'.`
+`unknown type 'decision'.` on stderr and exits 1.
 
 ```bash
 refdes new log > items/power/log-005.md
@@ -365,6 +366,7 @@ summary:  # required -- text
 # rationale:  # text; required when status is 'rejected'
 # options:  # options
 # checks:  # checks
+# tasks:  # tasks
 # satisfies: []  # target: requirement, bound
 # constrained_by: []  # target: bound
 # follows: []  # target: log
