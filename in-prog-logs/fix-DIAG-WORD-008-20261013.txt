@@ -118,3 +118,42 @@ the per-fix changelog-fragment convention (HEAD~1 did the same).
    refusals, which cli-reference documents.
 
 Finished: yes. No push/PR/merge/stash.
+
+## PR prep: rebase onto origin/main (post #212)
+
+main advanced 8b6a52e -> 89ada21 (10 commits) before PR prep. Fetched
+once, inspected the intervening changes to the files this branch touches:
+- #212 store read/decode: ids.py gained `SchemaError` in the
+  `from .model import ...` line and wrapped `load_ledger`'s open/parse
+  in UnicodeDecodeError/YAMLError handling. My branch's ids.py changes
+  are the import line + the two write-catch sites; the only overlap is
+  the import line (mine reflowed it parenthesized, #212 edited it in
+  place). Rebase conflict there, resolved by merging: the parenthesized
+  import now carries SchemaError AND could_be_read_only. #212's
+  load_ledger wrap is untouched by this branch and survived untouched
+  (verified by grep on the rebased file). No conflicts in model.py,
+  docs, tests, changelog.
+- Docs: #212's cli-reference.md additions are at line ~2066 (workbench
+  task pane), far from this section (lines 55-117) -- no interaction.
+
+Re-verified through the real CLI with PYTHONPATH pinned to this
+worktree's src (confirmed via refdes.__file__):
+- ENOSPC probe (.scratch/dw008/enospc_run.py): both refusal lines
+  "(No space left on device)" + "Fix the reported failure", exit 1.
+- chmod a-w items/ (euid 1000): "cannot write items/r.yaml (read-only
+  tree?) -- ... Make the tree writable and run it again.", exit 1.
+Tests: the #212-adjacent suites (test_yaml_loaders, test_history,
+test_keys_adopt, test_seal, test_reseal_audit) plus test_ids,
+test_readonly_explicit_writes, test_load_time_writes: 212 passed. Full
+suite: 3695 passed, 2 skipped (main added ~88 tests; no regressions).
+ruff on touched files: same 3 UP037 + 1 RUF059 as the base, none added.
+
+Docs sync check: the filter section's "do all contain" sentence is the
+one this branch fixed (rewritten with the three exceptions in 4ebd028,
+verified against probe output above); the keys row's "the one family
+that does not carry" phrasing became false the same way and is fixed in
+the prep commit -- keys adopt/restore remain the family that *never*
+carries the marker, with `id`'s refusals carrying it only when the
+failure could be one.
+
+No push of shared main, no merge, no stash, no subagents.
