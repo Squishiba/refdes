@@ -1,0 +1,109 @@
+# EDITOR-API-008: create form/preview support workspace
+
+Branch: fix/editor-create-workspace-20261015 (base 9bc1304).
+Finding: in-prog-logs/current-main-resweep-editor-api.tsv row 008 (PRESENT,
+CODE_READ at the time). Not fixed at base -- reproduced live (below).
+
+## Verified state at base (per AGENTS.md)
+
+- Scratch project `.scratch/editor-create-workspace-20261015/proj`:
+  `refdes init` (hardware@3 pinned), `boards: board-a/board-b`,
+  `workspaces: platform (shared) / product-a`, two item files.
+  Every python/CLI/serve process ran with
+  `PYTHONPATH=<this worktree>/src` and `refdes.__file__` asserted to this
+  worktree's src (the venv console script imports a *different* editable
+  checkout without it -- same trap the resweep notes).
+- `refdes schema` (JSON): item entry `$defs.requirement__entry` carries both
+  `board` and `workspace` as `{type: string}` -- workspace is a first-class
+  item field at hardware@3.
+- `refdes ls --workspace product-a` filters (CLI knows workspaces).
+- Live server (token file, X-Refdes-Token; Origin for POSTs per
+  serve/security.py):
+  - `GET /api/create/schema` published `workspaces` all along;
+  - `GET /api/create/preview?workspace=product-a` -> the *platform* file
+    (param silently ignored); `?board=board-b` narrowed correctly;
+  - `POST /api/items/create` with `fields.workspace` -> 200, `workspace:`
+    line written: the service half existed, as the finding said;
+  - `fields.workspace: "ghost"` -> 422 invalid "workspace: 'ghost' is not
+    declared in refdes-project.yaml's workspaces: registry" (the overlay
+    gate validates the value -- the form's registry-scoped select is the UX
+    guard, the gate is the promise);
+  - `fields.board: "(file default)"` -> 422 invalid. See the bug below.
+- `refdes new` has no board/workspace flags (stdout scaffold + redirect);
+  out of lane, noted only.
+
+## Bug found while wiring the control (pre-existing, same lines)
+
+`el('option', null, '(file default)')` sets no `value`, and a browser reports
+an option's value as its text. The untouched Board select therefore sent
+`fields.board = "(file default)"` -- truthy, past the `if (boardSelect.value)`
+guard -- and the registry gate refused *every* create on any project that
+declares boards. Reproduced live at base (422, above). Fixed in the same
+stroke: placeholder value `''`, registry options carry explicit values; the
+new Workspace select is built the same way from the start. The node harness
+asserts the placeholder's value and the untouched create body (red at base:
+`untouchedCreateFields == {"board": "(file default)"}`).
+
+## Change
+
+- `src/refdes/serve/edit.py`: `suggest_destination(..., workspace=None)`
+  narrows by workspace exactly as it narrowed by board (board+workspace =
+  intersection, same empty-set fallback to the most-common file -- board-only
+  calls take a byte-identical path through the new code);
+  `_resolve_destination`'s fallback suggestion passes `fields.workspace`;
+  `preview_creation` takes `workspace` and threads it to both.
+- `src/refdes/serve/api.py`: `_create_preview` parses `?workspace=` (same
+  `[""]`/`or None` shape as board).
+- `src/refdes/serve/static/create.js`: Workspace select when
+  `schema.workspaces` is non-empty (mirrors Board: "(file default)" first,
+  registry keys after, `initial.workspace` pre-select), rides the preview
+  params and lands in `fields.workspace`; placeholder fix above.
+- `src/refdes/serve/static/app.js`: `#/new?workspace=` seeds the select,
+  mirroring `?board=`.
+- `docs/design/browser-editor.md:542-544` needs no edit: it already promised
+  exactly this; the code now matches it.
+
+## Coordination
+
+Untouched: the check-vs-replace window and rollback internals
+(`_atomic_replace`/`_restore`, held PRs #241/#244) -- this change is
+destination-suggestion and parameter plumbing upstream of any write;
+`create_item`'s locked section is byte-identical. No integration risk with
+the create-race work: preview stays lock-free (unchanged posture), and the
+save re-plans under the lock exactly as before.
+
+## Tests
+
+- `tests/test_serve_create.py` (+3):
+  - workspace steers `suggest_destination` (and the board that the whole
+    project sits on must not outvote it), preview agrees, create lands there
+    with the `workspace:` line, the other workspace's file untouched;
+    board+workspace intersection and the fallback posture pinned;
+  - undeclared workspace -> `Invalid`, tree byte-identical (passes at base
+    too -- the control pinning the gate's existing posture);
+  - HTTP: schema publishes workspaces, `?workspace=` narrows, the POST whose
+    fields carry it lands exactly where the preview pointed, ghost -> 422.
+- `tests/test_editor_create_workspace.py` (new, node harness in the
+  `test_editor_draft_mirror.py` posture; FakeNode's value getter is
+  DOM-faithful so it reproduces the option-value semantics): the control
+  renders with `['', 'platform', 'product-a']` option values, the untouched
+  form sends no board/workspace anywhere, picking `product-a` puts
+  `workspace=product-a` on the next preview GET and `fields.workspace` on the
+  create POST, and a workspace-less project gets no control and no param.
+- Red/green: all three new behavior tests fail at base (detached worktree at
+  9bc1304, tests copied in, run against base src); green on the branch.
+- Live end-to-end with the fix loaded: preview matrix narrows by workspace
+  (incl. board+workspace), create lands where preview promised, ghost 422 --
+  `.scratch/editor-create-workspace-20261015/http_probe.py` (kept, with the
+  scratch project and the pre-fix probe output).
+
+## Runs
+
+- `pytest tests/test_serve_create.py -k workspace` (new tests): 3 passed.
+- `pytest tests/test_editor_create_workspace.py`: passed.
+- Full suite: 3856 passed, 2 skipped.
+- `ruff check` on the four touched python files: 6 findings, byte-identical
+  to the same files at base (3 DTZ011, 2 RUF100, 1 RUF059 -- all pre-existing,
+  lines shifted only). New test file: clean.
+
+Status: finished. PR: see .scratch/PROGRESS.md row EDITOR-API-008.
