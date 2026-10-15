@@ -875,14 +875,24 @@ def _key_end(item: _Item, name: str) -> int | None:
     return item.base + keyn.end_mark.index
 
 
-def _scalar_spans(node: yaml.Node, base: int) -> list[tuple[int, int]]:
-    """Absolute (start, end) spans of every scalar beneath `node`."""
+def _scalar_spans(node: yaml.Node, base: int, text: str) -> list[tuple[int, int]]:
+    """Absolute (start, end) spans of the literal data of every scalar beneath `node`.
+
+    A block scalar's mark span covers its header line, but the header is not
+    data: `# ...` after the `|-` is a real YAML comment. Its data starts on the
+    line below the header, so the covered span starts there too.
+    """
     spans: list[tuple[int, int]] = []
     stack = [node]
     while stack:
         n = stack.pop()
         if isinstance(n, yaml.ScalarNode):
-            spans.append((base + n.start_mark.index, base + n.end_mark.index))
+            lo = base + n.start_mark.index
+            hi = base + n.end_mark.index
+            if n.style in ("|", ">"):
+                nl = text.find("\n", lo, hi)
+                lo = hi if nl == -1 else nl + 1
+            spans.append((lo, hi))
         elif isinstance(n, yaml.SequenceNode):
             stack.extend(n.value)
         elif isinstance(n, yaml.MappingNode):
@@ -898,10 +908,10 @@ def _comment_in_value_interior(text: str, start: int, end: int, node: yaml.Node,
     its comments *between* its start and end marks, where the key-gap and
     line-tail checks cannot see them; a whole-entry delete that covers the
     value destroys them. Scan the gaps between node spans, not the raw interior:
-    a `#` inside a scalar's own span is that scalar's data (quoted text, a
-    block body), not a comment, and the patcher has no business refusing for it.
+    a `#` inside a scalar's data is that scalar's data (quoted text, a block
+    body), not a comment, and the patcher has no business refusing for it.
     """
-    covered = _scalar_spans(node, base)
+    covered = _scalar_spans(node, base, text)
     i = start
     while True:
         h = text.find("#", i, end)

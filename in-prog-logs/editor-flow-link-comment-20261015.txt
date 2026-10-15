@@ -50,3 +50,19 @@ Changelog: changelog.d/editor-remove-link-flow-comment.fixed.md (fragment
 convention per changelog.d/README.md; CHANGELOG.md itself not touched, matching
 recent fix PRs). No docs page change: docs/design/browser-editor.md states the
 fidelity/refusal principle, not the per-guard enumeration.
+
+REVIEW ROUND 1 (PR #254, codex reviewer ed0541d4): MAJOR -- a block scalar's
+header line sits inside the scalar node's mark span, so `_scalar_spans`
+masked `satisfies: |- # keep` as data and the whole-entry delete destroyed
+it (also true at the PR parent). Fix: for block-style scalars (style `|`/`>`)
+the covered data span starts on the body's line, past the header, so a
+header-line `#` refuses and a body-line `#` stays data. New tests:
+test_remove_refuses_a_comment_on_a_block_scalar_header (red on
+83d0259, green now) and test_remove_a_block_scalar_entry_whose_hash_is_
+body_text (control, applies). Probed: CRLF header comment refuses, nested
+block scalar under a block list refuses, folded `>-` header refuses,
+plain-scalar-continuation comment still refuses (pre-existing tail guard);
+block bodies with multiple lines are not single links ("does not link"),
+unrelated pre-existing behavior. Full suite 3858 passed, 2 skipped.
+Reviewer verdict: requested changes (block header) -- addressed by this
+round; flow-list fix verified green, red-probe confirmed.

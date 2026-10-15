@@ -9,4 +9,7 @@
   brackets refuses with the entry's existing message ("a comment sits on
   the 'satisfies' entry ... deleting the entry with its last link would
   destroy it"), while a `#` inside a quoted target's own text is data and
-  stays a plain apply.
+  stays a plain apply. A block scalar's marks cover its header line, where
+  `satisfies: |- # keep` is a real comment, not data: for block scalars the
+  covered data span starts on the body's line, so a header comment refuses
+  too, while a `#` inside the block body stays literal data and applies.

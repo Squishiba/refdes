@@ -244,6 +244,21 @@ def test_remove_a_multiline_flow_entry_whose_only_hash_is_inside_quotes():
     assert new == "items:\n  - id: D\n    title: T\n"
 
 
+def test_remove_refuses_a_comment_on_a_block_scalar_header():
+    # a block scalar's span covers its header line, but `# ...` after `|-`
+    # is a real YAML comment: the whole-entry delete would destroy it
+    text = "items:\n  - id: D\n    satisfies: |- # keep\n      REQ-001\n"
+    got = refuse(text, "D", RemoveLink("satisfies", "REQ-001"))
+    assert "comment" in got.reason
+
+
+def test_remove_a_block_scalar_entry_whose_hash_is_body_text():
+    # inside a block scalar's body, `#` is literal data, not a comment
+    text = "items:\n  - id: D\n    title: T\n    satisfies: |-\n      REQ#001\n"
+    new, _ = edited(text, "D", RemoveLink("satisfies", "REQ#001"))
+    assert new == "items:\n  - id: D\n    title: T\n"
+
+
 def test_link_ops_on_markdown_front_matter():
     text = "---\nid: DEC-001\nsatisfies: [REQ-001]\n---\n\nProse.\n"
     new, got = edited(text, "DEC-001", AddLink("satisfies", NEW))
