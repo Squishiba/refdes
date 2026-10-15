@@ -2,7 +2,7 @@ TASK: design doc -- evaluate-in-place math for engineering notes (inline-calc)
 Branch: design-inline-calc
 PR: #250
 Date: 2026-10-15
-Status: finished -- design doc written and six review rounds addressed.
+Status: finished -- design doc written; review rounds addressed are listed below under "Fix round ..." headings.
 
 Owner decisions (as relayed by the orchestrator from the task brief)
 --------------------------------------------------------------------
@@ -268,9 +268,8 @@ Chunk 1 findings addressed in docs/design/inline-calc.md:
    `calc_reference_snapshot` directly.
 
 Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
-1. Updated the header status line from "five review rounds addressed" to "six
-   review rounds addressed". The count was derived with
-   `grep -c '^Fix round [0-9]' in-prog-logs/design-inline-calc.txt`.
+1. Updated the header status line to remove the round count so it cannot go
+   stale; the round headings below now provide the count.
 2. Rewrote the PR body from the current doc: short summary, D1-D3 verbatim from
    the doc's "Decision recap" section, and every open question with its
    recommended default copied from the doc.
