@@ -696,10 +696,61 @@ def test_a_refused_copy_leaves_no_partial_destination(tmp_path, monkeypatch, cap
     )
 
 
+def test_the_registration_probe_survives_a_platform_without_O_NONBLOCK(tmp_path,
+                                                                        monkeypatch):
+    """Round-5 review P1 / windows-latest CI: `os.O_NONBLOCK` is Unix-only
+    and the probe's bare attribute lookup crashed every `check`/`build`
+    with a registered asset on Windows (AttributeError at the probe). The
+    flag is resolved with a `getattr` fallback, so the flags exist on
+    every platform. Sabotage: use `os.O_NONBLOCK` bare, and this dies on
+    the simulated Windows `os`."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "No image referenced here.\n")
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "shots" / "board.png").write_bytes(PNG)
+    monkeypatch.delattr(os, "O_NONBLOCK", raising=False)
+    project = _load(tmp_path)
+    assert not project.errors, project.errors
+
+
+def test_a_refused_datasheet_copy_leaves_no_partial_destination(tmp_path, monkeypatch):
+    """Round-5 review P3: unlike its sibling `_copy_project_assets`, the
+    datasheet handler left its own partial stub behind -- a truncated
+    `assets/datasheets/<sha>.pdf` sitting in the published tree while the
+    error says "this build does not publish it" (and absent from
+    `written`, so the prune never claims it). Sabotage: drop the handler's
+    `os.remove(dest)`, and the stub is back."""
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    _item(tmp_path, "No image referenced here.\n")
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    cache = tmp_path / ".refdes" / "copies"
+    cache.mkdir(parents=True)
+    (cache / "deadbeef.pdf").write_bytes(b"%PDF-1.4\n")
+    project.datasheet_assets = {"datasheets/deadbeef.pdf": str(cache / "deadbeef.pdf")}
+    real_copy2 = shutil.copy2
+
+    def partial_then_raise(src, dst, *args, **kwargs):
+        if str(src).endswith("deadbeef.pdf"):
+            with open(dst, "wb") as fh:
+                fh.write(b"%PDF-1.4\npartial")
+            raise OSError(errno.EIO, "I/O error", src)
+        return real_copy2(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "copy2", partial_then_raise)
+    render_mod._copy_datasheet_assets(project, str(tmp_path / "site"), set())
+
+    assert any("deadbeef.pdf" in d.message for d in project.errors), project.errors
+    assert not (tmp_path / "site" / "assets" / "datasheets" / "deadbeef.pdf").exists(), (
+        "a refused datasheet copy must leave no stub: it is published "
+        "nothing, not a truncated file"
+    )
+
+
 @pytest.mark.skipif(os.name == "nt", reason="mkfifo and SIGALRM are POSIX")
 def test_a_fifo_in_a_site_assets_directory_does_not_hang_the_check(tmp_path,
-                                                                     monkeypatch,
-                                                                     capsys):
+                                                                    monkeypatch,
+                                                                    capsys):
     """Review of #268: the registration walk yields every entry `os.walk`
     finds, FIFOs included, and the readability probe opened it O_RDONLY --
     which blocks until a writer appears, so `refdes check` never returned

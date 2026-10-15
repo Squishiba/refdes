@@ -188,3 +188,22 @@ Round 4 items:
   dest (not in `written`, so the prune never claims it).
 - 663e6890 F4/F5: fixed by round 3 (single error; changelog leads with the
   registration check).
+
+## Review round 5 (windows-latest RED; review 67e7116b)
+
+P1 (blocking, confirmed from the windows-latest job log, run 38800147585:
+`AttributeError: module 'os' has no attribute 'O_NONBLOCK'` at
+build.py:3445): the FIFO probe resolved `os.O_NONBLOCK` bare -- Unix-only
+constant, so every check/build with a registered asset crashed on Windows.
+Fix: `getattr(os, "O_NONBLOCK", 0)`; test simulates the Windows `os` with
+`monkeypatch.delattr` (no skipif).
+P3: `_copy_datasheet_assets` left its partial stub (truncated PDF in the
+published tree, "does not publish it", absent from `written`); now unlinks
+like its sibling, test with the partial-write raiser.
+P2 (EIO on the destination write blamed on the source): NOT changed --
+a filename-less EIO is undecidable, and the split's whole purpose is to
+stop sending users to the output directory for a project-file problem;
+the asset-side tie-break names a real file, unlinks the partial, and
+continues publishing, while a site refusal for a source-side EIO would
+reproduce exactly that bug. The docstring now says EIO is write-capable
+and names this as the documented tie-break, not a guarantee.

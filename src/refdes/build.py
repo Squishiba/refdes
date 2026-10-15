@@ -3442,7 +3442,7 @@ def check_registered_assets_readable(project: Project) -> None:
             # instantly and stay as base left them: registered, skipped
             # at publish by the copy loop's `isfile` check.
             os.close(os.open(os.path.join(project.root, *rel.split("/")),
-                             os.O_RDONLY | os.O_NONBLOCK))
+                             os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)))
         except FileNotFoundError:
             continue
         except OSError as exc:

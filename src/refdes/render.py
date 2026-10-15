@@ -848,9 +848,16 @@ def _copy_source_refused(exc: OSError, src: str, dest: str) -> bool:
     carries `src`, opening the destination and `copystat`'s chmod carry
     `dest`. The copy loop's read and write do not (the OSError comes from
     the raw fd operation), so a filename-less OSError is split by errno:
-    ENOSPC/EDQUOT/EFBIG/EROFS can only come from a write, everything that
-    can come from a read -- EIO, EBADF, EFAULT -- is treated as the source.
-    (IMAGE-ASSET-007 review, F1.)
+    ENOSPC/EDQUOT/EFBIG/EROFS can only come from a write, so they are the
+    destination; the rest -- EIO, EBADF, EFAULT -- can come from the read
+    and are resolved for the source. EIO is the honest gap: `write()` can
+    fail with EIO too (a storage fault mid-write is filename-less and
+    undecidable), and that case takes the asset sentence and exit 1, not
+    cli.py's site refusal -- the tie-break names a real file the user can
+    inspect and unlinks the partial copy, while a site refusal for a
+    source-side EIO would send the user to the output directory for an
+    unreadable project file, the bug this split exists to kill.
+    (IMAGE-ASSET-007 review, F1; round-5 review, P2.)
     """
     if exc.filename is not None:
         return exc.filename == src
@@ -973,6 +980,13 @@ def _copy_datasheet_assets(project: Project, out_dir: str, written: set[str]) ->
         except OSError as exc:
             if not _copy_source_refused(exc, src, dest):
                 raise  # destination-side: cli.py's "cannot write the site" owns it
+            try:
+                # Same partial-stub rule as `_copy_project_assets`
+                # (IMAGE-ASSET-007 review round 5): "does not publish
+                # it" must not leave a truncated PDF in the site.
+                os.remove(dest)
+            except OSError:
+                pass
             project.error(
                 f"published datasheet {rel!r} cannot be read: "
                 f"{exc.strerror or exc}. Refetch the citation, or make the "
