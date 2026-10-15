@@ -1468,8 +1468,11 @@ def cmd_id(args) -> int:
     # A numeric-hint collision (finding 8 Part 1) or a write-back refusal is
     # reported via project.error() inside allocate() itself, not raised --
     # surface it here rather than let a partial "allocated 0 id(s)" pass
-    # for success with no explanation.
-    for d in project.errors:
+    # for success with no explanation. Only what allocate() added: the load
+    # errors were already printed above, and project.errors is cumulative, so
+    # printing the whole list here printed each of them a second time
+    # (DIAG-WORD-006).
+    for d in project.errors[len(load_errors):]:
         print(str(d), file=sys.stderr)
     return 1 if project.errors else 0
 

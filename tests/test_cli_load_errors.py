@@ -84,6 +84,36 @@ def test_id_reports_load_errors_when_nothing_pending(tmp_path, capsys):
     assert "failed to load" in captured.out
 
 
+def test_id_prints_each_load_error_once_when_allocation_runs(tmp_path, capsys):
+    """`id` printed the load errors before allocating, then printed
+    `project.errors` -- the cumulative list, load errors still in it --
+    after, so a project with unparseable files and one item needing an id
+    said every load error twice (DIAG-WORD-006). Each load error exactly
+    once, the allocation-time collision (added to the same list by
+    allocate()) exactly once, and the allocation report intact. --dry-run
+    so nothing is written: the collision check runs before the dry-run
+    return, which is what puts an allocation-time error on the list."""
+    root = _project(tmp_path)
+    for n in ("bad2", "bad3", "bad4"):
+        (root / "items" / f"{n}.yaml").write_text(BROKEN, encoding="utf-8")
+    (root / "items" / "good.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n    text: Taken.\n"
+        '  - id: "001"\n    text: Collides.\n'
+        "  - text: Needs an id.\n",
+        encoding="utf-8",
+    )
+
+    code = _cli(root, "id", "--dry-run")
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.err.count("invalid YAML") == 4, captured.err
+    assert captured.err.count("would expand to 'REQ-001'") == 1, captured.err
+    assert "would allocate REQ-002  (items/good.yaml:7) Needs an id." in captured.out
+    assert "would allocate 1 id(s)" in captured.out
+
+
 def test_audit_reports_load_errors_and_exits_nonzero(tmp_path, capsys):
     root = _project(tmp_path)
     code = _cli(root, "audit")
