@@ -228,3 +228,39 @@ src`) -> both diagnostics present with `which no item declares` (grep count 2)
 and the dangling wording absent (count 0).
 
 Landed PR: see the PR URL in the final report.
+
+### Final state before push (main moved a third time)
+
+Main advanced again between the second rebase and the push (5e51157 ->
+f7df34d: #212 corrupt `.refdes` files named as errors, #221 editor draft
+mirror). Checked before rebasing, not after: neither PR touches
+`src/refdes/build.py` (`git log --oneline HEAD..origin/main --stat` -- #221 is
+serve/static JS + its test, #212 is adopt/boards/citations/history/ids/keys/
+lifecycle/seal + tests), so this third `git rebase origin/main` was again a
+clean replay of the same three commits with no manual merge.
+
+Coexistence with #220 re-checked in the pushed tree, not assumed: `grep -n` on
+`src/refdes/build.py` shows the key gate at :794 (`resolve_links`) and :1702
+(`run_checks`, this fix) and #220's sort key at :2222
+(`_image_inputs_hash_value`), and `git diff --stat origin/main..HEAD --
+src/refdes/build.py` is 26 insertions / 8 deletions -- this fix alone.
+
+Gates on the pushed tree (base f7df34d):
+- targeted, now widened over the modules #212 landed
+  (`test_checks_keys test_keys test_keys_links test_keys_restore test_keys_adopt
+  test_calc test_checks_unknown_keys test_check_severity_status
+  test_run5_friction_f1_f2_f6_f8 test_image_hash test_seal test_history
+  test_yaml_loaders`) -> 379 passed.
+- full suite -> **3690 passed, 2 skipped** in 290s.
+- scoped ruff `--select E9,F` on the two changed files -> clean.
+- real CLI on `.scratch/probe-003/proj`, `PYTHONPATH` pinned to this worktree's
+  src (import path printed to prove it): one `constrained_by points at key
+  'k7f3m2q9x4a'` and one `check against key 'k7f3m2q9x4a'`, no dangling-id
+  wording -- the pair this PR is about.
+
+Branch as pushed: 3 commits (fix + two log appends), each carrying the
+`Co-authored-by: Qwen3.8-Flash-Next <noreply@refdes.local>` trailer
+(`git log origin/main..HEAD --format=...trailers...`). Not merged; PR opened
+against main. No shared-main edit, no stash, no subagent, and Claude's #211/
+#212 worktrees and workbenches were not touched -- #212 was read only as merged
+main history.
