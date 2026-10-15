@@ -53,6 +53,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import uuid
 from datetime import datetime, timezone
 from typing import NamedTuple
@@ -913,6 +914,67 @@ def _removal_fingerprint(removed_digests: list, removed_event_ids: list) -> str:
     ).hexdigest()[:12]
 
 
+def _restore_atomically(files: list) -> list:
+    """Put back every file a rollback removed, one ``os.replace`` per file;
+    return ``(path, reason)`` for the ones that did not land.
+
+    The restore never opens the target for writing: ``open(path, "wb")``
+    truncates at open, so a write that faults mid-restore (ENOSPC, EIO) left a
+    zero-byte event where the store had a valid one, and the faulting
+    exception escaped the rollback handler and replaced the original failure
+    (PR #244's review named this exact loop). The bytes go to a
+    same-directory temp first -- the house ``.{name}.refdes-tmp-{random}``
+    shape, invisible to ``load_events`` (which reads only ``*.yaml``) -- and
+    ``os.replace`` lands them in a single rename: the target is created with
+    its full bytes or not at all, so a failed restore leaves the path exactly
+    where the removal left it (absent) instead of corrupting it. A temp that
+    faults is unlinked; a temp that cannot be unlinked is a visible, inert
+    dot-name. Callers keep holding the original failure: this only reports
+    what the rollback itself could not undo.
+    """
+    failures = []
+    for path, blob in files:
+        tmp = None
+        try:
+            fd, tmp = _create_temp(os.path.dirname(path), os.path.basename(path))
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(blob)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
+            tmp = None
+        except OSError as exc:
+            if tmp is not None:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+            failures.append((path, str(exc)))
+    return failures
+
+
+def _create_temp(directory: str, name: str) -> tuple:
+    """Create a unique temp file in ``directory``, returning ``(fd, path)``
+    with the mode a plain ``open(path, "wb")`` gives a *new* file: an
+    ``O_CREAT`` open's mode argument is filtered through the process umask by
+    the kernel, so asking for 0666 here yields exactly 0666 & ~umask without
+    this process ever mutating its own (``tempfile.mkstemp`` -- the shape this
+    replaces -- creates 0600, two notches stricter than the store file it is
+    restoring; PERM-OWNER-001/002 as recorded in ``textio._create_temp`` and
+    ``seal._create_temp``, whose naming this mirrors). The retry absorbs a
+    name collision the way ``tempfile.mkstemp`` does."""
+    for _ in range(100):
+        tmp = os.path.join(directory, f".{name}.refdes-tmp-{secrets.token_hex(8)}")
+        try:
+            return (
+                os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666),
+                tmp,
+            )
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"could not create a temporary file in {directory}")
+
+
 def redact(
     root: str, *, item_key: str = None, object_digest: str = None
 ) -> RedactionResult:
@@ -946,8 +1008,12 @@ def redact(
       a path traversal.
 
     Transactional: every removed file's bytes are held in memory and
-    restored if any step fails, so a half-redacted store is not a state
-    this function can leave behind.
+    restored -- atomically, one ``os.replace`` per file (``_restore_atomically``)
+    -- if any step fails, so a half-redacted store is not a state this
+    function can leave behind silently. A restore that itself faults cannot
+    be undone from here; it is then disclosed, not swallowed: the raised
+    ``HistoryError`` names the original failure and every file the rollback
+    could not put back, with the original as its ``__cause__``.
     """
     if (item_key is None) == (object_digest is None):
         raise HistoryError("redact takes exactly one of item_key or object_digest")
@@ -1018,10 +1084,21 @@ def redact(
             fingerprint=fingerprint,
             reason=reason,
         )
-    except Exception:
-        for path, blob in removed_files:
-            with open(path, "wb") as fh:
-                fh.write(blob)
+    except Exception as exc:
+        failures = _restore_atomically(removed_files)
+        if failures:
+            parts = []
+            for path, reason in failures:
+                rel = os.path.relpath(path, root).replace("\\", "/")
+                parts.append(f"{rel} ({reason})")
+            detail = "; ".join(parts)
+            raise HistoryError(
+                f"redact failed: {exc}. The rollback restored "
+                f"{len(removed_files) - len(failures)} of {len(removed_files)} "
+                f"removed file(s) and could not restore: {detail}. The files "
+                f"named there were removed by this redaction and are not in "
+                f"the store; the redaction did not land."
+            ) from exc
         raise
     return RedactionResult(target, removed_digests, doomed, event_path)
 
