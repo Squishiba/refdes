@@ -126,3 +126,27 @@ gen_examples --check: up to date. Suite: (below)
 SUITE (foreground, once): 3826 passed, 2 skipped in 309.27s, exit=0
 (.scratch/suite-round2.txt). Docs-only change; no sabotage needed
 (no behaviour fix).
+
+============================================================
+FIX ROUND 2 for PR #242 (review in paseo logs 8596964, P3):
+the per-subcommand list of which history commands die on a corrupt
+history file kept being incomplete -- replaced with the general rule.
+VERIFIED BEFORE WRITING (probes .scratch/probe6 + .scratch/probe7):
+- redact, corrupt event file: exit 1, "error: <events path>: event
+  file is not valid UTF-8 (...)" (redact decodes the event store).
+- capture, corrupt OBJECT file it must re-save (deleted the item's
+  captured event, corrupted its digest's object, `history capture
+  LOG-001`): exit 1, "error: <objects path>: object file is not valid
+  UTF-8 (...)" -- the reviewer's repro, reproduced.
+- capture with files it must read intact (derived-id no-op): exit 0.
+- redact with a corrupt object + intact events (probe7): exit 0 --
+  redact copies the doomed object in binary ("rb"), never decodes it.
+  That is why the sentence says "read and decode".
+- migrate-seals: no load_events in its body at all.
+check/build demotion to a warning (exit 0) re-probed round 1.
+Docs tests (anchors/examples/schema-doc/standard-docs/candidate-parts):
+31 passed. gen_examples --check: up to date. Docs only, no changelog
+fragment, no sabotage needed (no behaviour change). Suite: (below)
+
+SUITE (foreground, once): 3826 passed, 2 skipped in 303.73s, exit=0
+(.scratch/suite-round3.txt). Task finished.

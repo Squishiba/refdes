@@ -568,12 +568,10 @@ manifest, id ledger, baseline, or seal file is a configuration error (**exit 2**
 a corrupt citations lockfile — this entry's YAML failure and its non-UTF-8 twin —
 is a `check` diagnostic (**exit 1**); a corrupt `.refdes/keys-adopted.yaml` is
 a `refdes keys adopt` refusal (**exit 1**), and elsewhere simply means "not adopted";
-a corrupt file under `.refdes/history/` raises the same clean error naming it, fatal
-(**exit 1**) only to `refdes history redact` — `check` and `build` report it as a
-warning and skip the edited-after-captured check (**exit 0**), captures ride past
-it (the derived-id no-op never reads the store, and a load-time edge capture is
-silently skipped), and `history migrate-seals` never
-touches it.
+a corrupt file under `.refdes/history/` raises the same clean error naming it, and
+any `refdes history` subcommand that has to read and decode that file exits 1
+(**exit 1**) — commands that never read it ride past, and `check` and `build`
+demote it to a warning that skips the edited-after-captured check (**exit 0**).
 
 **`.refdes/citations.yaml:N — citations: is a list, not a mapping of cited path
 to that path's record`**
