@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import difflib
 import os
-import tempfile
+import secrets
 
 LF = "\n"
 CRLF = "\r\n"
@@ -276,8 +276,46 @@ def write_text(path: str, text: str) -> None:
         fh.write(text)
 
 
+def _create_temp(directory: str, name: str) -> tuple[int, str]:
+    """Create a unique temp file in `directory`, returning `(fd, path)` with
+    the mode a plain ``open(path, "w")`` gives a *new* file: an ``O_CREAT``
+    open's mode argument is filtered through the process umask by the
+    kernel, so asking for 0666 here yields exactly 0666 & ~umask without
+    this process ever mutating its own -- `os.umask` is process-wide, and
+    a set-and-restore read has a window in which another thread's file
+    creations get the wrong mode (identical to seal's `_create_temp`,
+    PERM-OWNER-001). `tempfile.mkstemp` -- what this replaced -- always
+    creates its temp 0600, so every file an atomic write created *new*
+    landed two notches stricter than its siblings, which the plain
+    `write_text` path had written at the umask default
+    (PERM-OWNER-002: `refdes id`'s new `.refdes/ids.yaml` at 0600 beside
+    a 0644 `.refdes/schema.json`). The retry absorbs a name collision the
+    way `tempfile.mkstemp` does; the name keeps the
+    ``.{name}.refdes-tmp-{random}`` shape, so a scratch-copy temp and a
+    real-config temp stay tellable apart by their prefix
+    (tests/test_preset_write_atomicity.py aims ENOSPC injection that way).
+    """
+    for _ in range(100):
+        tmp = os.path.join(directory, f".{name}.refdes-tmp-{secrets.token_hex(8)}")
+        try:
+            return (
+                os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666),
+                tmp,
+            )
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"could not create a temporary file in {directory}")
+
+
 def atomic_write_text(path: str, text: str) -> None:
-    """Replace text using a same-directory temporary file, preserving bytes."""
+    """Replace text using a same-directory temporary file, preserving bytes.
+
+    Modes follow the file, not the temp: a rewrite carries the existing
+    file's mode over, and a file created new gets the umask default a plain
+    ``open(path, "w")`` would have given it -- so a group-shared tree under
+    a 002 umask gets its new files at 0664, not at a temp's 0600
+    (PERM-OWNER-002, mirroring `seal.save_seals`, PERM-OWNER-001).
+    """
     directory = os.path.dirname(os.path.abspath(path))
     # Rename can replace a read-only file on POSIX when its parent directory
     # is writable. Keep the old write_text refusal in that case.
@@ -285,9 +323,7 @@ def atomic_write_text(path: str, text: str) -> None:
         raise PermissionError(f"file is read-only: {path}")
     if not os.stat(directory).st_mode & 0o222:
         raise PermissionError(f"directory is read-only: {directory}")
-    fd, tmp = tempfile.mkstemp(
-        prefix=f".{os.path.basename(path)}.refdes-tmp-", dir=directory
-    )
+    fd, tmp = _create_temp(directory, os.path.basename(path))
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
             fh.write(text)
