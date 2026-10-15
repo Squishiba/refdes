@@ -24,6 +24,7 @@ from helpers import _build_at
 from serve_support import Client, snapshot_tree
 
 from refdes import build as build_mod
+from refdes import citations as citations_mod
 from refdes import cli as cli_mod
 from refdes.serve.server import EditorApp
 
@@ -1051,5 +1052,150 @@ def test_a_missing_cited_file_is_named_not_silently_empty(tmp_path):
         assert payload["entries"] == []
         assert any("cannot read file" in p for p in payload["problems"])
         assert any(str(root) not in p for p in payload["problems"])
+    finally:
+        app.stop()
+
+
+# ------------------------------------------------- an unreadable lockfile (CITE-LOCK-005)
+
+
+CORRUPT_LOCKFILE = "citations:\n  analysis/budget.csv: nope\n"
+
+
+def corrupt_lockfile(root):
+    """Fetch (so the fixture really has pins), then replace the lockfile with
+    YAML that parses but is not a lockfile -- the state the reproduced bug was
+    about. `build` memoizes `read_lockfile`'s records on the project even when
+    the read failed, so the served model holds `{}` plus the reason; a picker
+    that trusted the `{}` alone would render every citation `unpinned`, which
+    is a claim about a file nobody read (serve/sources.py `_lockfile`)."""
+    fetch(root)
+    assert b"sha256" in lock_bytes(root)
+    (root / ".refdes" / "citations.yaml").write_text(
+        CORRUPT_LOCKFILE, encoding="utf-8", newline=""
+    )
+    return root
+
+
+def test_an_unreadable_lockfile_refuses_the_picker_instead_of_claiming_unpinned(tmp_path):
+    # The panel's opening request. At HEAD this returned 200 and every file
+    # came back `unpinned` with a "run 'refdes fetch' to pin it" remedy --
+    # the empty memo read as "nothing is pinned" although the file on disk
+    # does hold pins nobody could read.
+    root = corrupt_lockfile(make_root(tmp_path))
+    app = start(root)
+    try:
+        client = Client(app)
+        status, payload = client.api_get(sources_url("DEC-001"))
+        assert status == 422, payload
+        assert payload["kind"] == "refused" and payload["ok"] is False
+        # The reason is the lockfile's own sentence, file named -- the one
+        # diagnostic the panel must show rather than paraphrase.
+        assert ".refdes/citations.yaml" in payload["reason"]
+        assert "not a mapping" in payload["reason"]
+        # The false claim is what is gone: not one word about fetching to pin.
+        assert not any("no fetched record" in s for s in strings(payload))
+        assert not any(f["state"] == "unpinned" for f in payload.get("files", []))
+    finally:
+        app.stop()
+
+
+def test_an_unreadable_lockfile_refuses_the_row_and_proposal_reads_too(tmp_path):
+    # The other two routes already render a SourceRefusal as 422; this pins
+    # that the lockfile check reaches them all, each carrying the same reason.
+    root = corrupt_lockfile(make_root(tmp_path))
+    app = start(root)
+    try:
+        client = Client(app)
+        for url in (
+            sources_url("DEC-001", "/entries") + "?path=analysis/budget.csv",
+            sources_url("DEC-001", "/propose")
+            + "?path=analysis/budget.csv&key=rail_load",
+            sources_url("DEC-001", "/propose")
+            + "?path=analysis/budget.csv&key=rail_load&unit=W",
+        ):
+            status, payload = client.api_get(url)
+            assert status == 422, (url, payload)
+            assert ".refdes/citations.yaml" in payload["reason"]
+    finally:
+        app.stop()
+
+
+def test_an_unreadable_lockfile_is_one_diagnostic_and_stays_refused(tmp_path):
+    # The build reads the lockfile several times (run_calcs, verify) and the
+    # picker's requests would read it again; read_lockfile's guard must still
+    # have reported the ERROR exactly once, and later requests must be refused
+    # from the memo -- no re-read, no re-report, no regression to the lie.
+    root = corrupt_lockfile(make_root(tmp_path))
+    app = start(root)
+    try:
+        client = Client(app)
+        for _ in range(2):
+            status, payload = client.api_get(sources_url("DEC-001"))
+            assert status == 422, payload
+        project = app.state.snapshot.project
+        lockfile_errors = [
+            d for d in project.errors if d.file == ".refdes/citations.yaml"
+        ]
+        assert len(lockfile_errors) == 1
+        assert "not a mapping" in lockfile_errors[0].message
+    finally:
+        app.stop()
+
+
+def test_a_lockfile_repaired_mid_build_does_not_unpoison_the_memo(tmp_path, monkeypatch):
+    # The reverse interleaving (review of 403ab84): `run_calcs` (build.py:1544)
+    # memoizes {} + the problem from the corrupt read; `verify`
+    # (citations.py:1496) reads again without writing the memo. If the file is
+    # repaired between the two reads of one build, a success that cleared the
+    # problem beside a still-memoized `{}` would hand the picker the unpinned
+    # lie again. Deterministic, not a race: the wrapper repairs the file right
+    # after the first failing read, and the first snapshot load compares no
+    # pre/post input hashes (state.py builds with before=None), so a served
+    # model can really hold this state.
+    root = make_root(tmp_path)
+    fetch(root)
+    repaired = lock_bytes(root)
+    (root / ".refdes" / "citations.yaml").write_text(
+        CORRUPT_LOCKFILE, encoding="utf-8", newline=""
+    )
+
+    real_read = citations_mod.read_lockfile
+
+    def read_and_repair(project):
+        records, problem = real_read(project)
+        if problem is not None:
+            (root / ".refdes" / "citations.yaml").write_bytes(repaired)
+        return records, problem
+
+    monkeypatch.setattr(citations_mod, "read_lockfile", read_and_repair)
+    app = start(root)
+    try:
+        client = Client(app)
+        # The model was built against the unreadable read, so the pin state it
+        # can honestly show is the refusal -- never the empty memo's unpinned
+        # claim, however readable the file on disk went afterwards.
+        status, payload = client.api_get(sources_url("DEC-001"))
+        assert status == 422, payload
+        assert "not a mapping" in payload["reason"]
+    finally:
+        app.stop()
+
+
+def test_a_readable_empty_lockfile_is_still_ordinary_unpinned(tmp_path):
+    # The refusal is for a lockfile that could not be read, not for one that
+    # says nothing: a well-formed lockfile with no records is the ordinary
+    # unpinned state, and the picker must keep rendering it as such.
+    root = make_root(tmp_path)
+    (root / ".refdes").mkdir(exist_ok=True)
+    (root / ".refdes" / "citations.yaml").write_text(
+        "citations: {}\n", encoding="utf-8", newline=""
+    )
+    app = start(root)
+    try:
+        client = Client(app)
+        status, payload = client.api_get(sources_url("DEC-001"))
+        assert status == 200, payload
+        assert payload["files"][0]["state"] == "unpinned"
     finally:
         app.stop()
