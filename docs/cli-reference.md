@@ -412,6 +412,7 @@ it has always got.
 | `--workspace WORKSPACE` | Only items in this [workspace](workspaces.md) |
 | `--file PATH` | Only items declared in this source file |
 | `--tag TEXT` | Only items with a tag containing this text |
+| `--keys` | Add the surrogate-key column: each item's key exactly as `refdes index` reports it (`items[].key`), blank for an item with none — the key half of a composite `ID@key` pin (see [links](links.md#structured-link-targets-composite-form-and-automatic-refresh)). Opt-in: without the flag the listing is byte-identical to the one people and scripts parse |
 | `QUERY ...` (positional, optional) | Free text, matched against the item's id, its title, `tags:` and `former_ids:`, case-insensitive. Zero or more words; the whole quoted string is the query, as in `refdes ls "current limit"` or `refdes ls req-sys-0` |
 
 ```bash
@@ -422,6 +423,7 @@ refdes ls --file items/common/power.yaml
 refdes ls "current limit"
 refdes ls --tag "current limit"
 refdes ls REQ-PWR-001
+refdes ls --keys
 ```
 
 An items file that fails to parse is printed to stderr and `ls` exits 1 — the
@@ -430,6 +432,25 @@ complete answer.
 
 The board column is omitted entirely when the project has no `boards:`
 registry, matching every other place board is conditionally shown.
+
+`--keys` puts the surrogate key in its own column, between the id and the
+type — the value `index` prints as `items[].key`, read straight from the
+same field, never recomputed:
+
+```console
+$ refdes ls --keys
+REQ-PWR-001  k7f3m2q9x4a  requirement  The 3V3 rail shall supply 1.2 A continuous.
+DEC-PWR-002  t2m9w3x1r7s  decision     Run the rail from the buck, not the LDO.
+```
+
+It is the cheap way to get the key half of a composite `ID@key` pin when a
+merge needs one by hand (a bare id anchors on the tip and collides) — see
+[links](links.md#structured-link-targets-composite-form-and-automatic-refresh).
+An item whose key has not been minted (a `--no-write` load of a cold
+project) pads the column blank, the same way an item with no workspace pads
+the workspace column; a project where *no* row has a key gets no column at
+all, and the plain listing never pays for the flag — without it the bytes
+are the ones people and scripts already parse.
 
 The workspace column is the same arrangement, one level up: `workspaces:` is
 opt-in, and with no registry no item has a workspace at all
@@ -566,7 +587,8 @@ that refused prints `task reconciliation required`.
 
 | Flag | Meaning |
 | --- | --- |
-| `--json` | Print the thread's projection entry as JSON — exactly the object `index` carries in its `threads` array (plus a `diagnostics` entry, shaped like the index payload's, when the history store refused to be read and the capture lines are therefore not shown) |
+| `--json` | Print the thread's projection entry as JSON — the object `index` carries in its `threads` array (plus a `diagnostics` entry, shaped like the index payload's, when the history store refused to be read and the capture lines are therefore not shown), with one addition at this door: each entry of `entries` is an `{"entry": label, "key": …}` object carrying that entry's surrogate key (`null` when it has none), exactly as `index` reports it as `items[].key` — the key half of a composite `ID@key` pin, readable from the thread itself. The shared projection the index payload carries keeps its plain string labels |
+| `--keys` | Print the header line's labels in composite `ID@key` form — the whole thread's merge pins on one line (`Thread: LOG-001@k7f3m2q9x4a -> LOG-002@t2m9w3x1r7s  (one tip)`). An entry with no minted key prints plain, as does an id-less entry whose label already *is* its key. Text view only — under `--json` every entry carries its `key` regardless, so the flag changes nothing there |
 | `--as-of DATE` | Print open-task ages as a relative span measured against DATE. Without it the output prints the absolute declaring date and no span, so the bytes never depend on the wall clock. A task declared *after* DATE prints `declared after --as-of` in place of a span. Not combinable with `--json` (exit 2): the projection is clock-free by design. A DATE that does not parse is an argument error, **exit 2** |
 
 ```console

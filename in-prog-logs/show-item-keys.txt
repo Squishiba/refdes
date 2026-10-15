@@ -1,0 +1,82 @@
+TASK: run-6b F2 -- show an item's surrogate key in human-facing output
+Branch: show-item-keys. Started from main 509a487 (tree clean).
+
+VERIFICATION (the rules first, per AGENTS.md / COMMON.txt)
+- F2 row: in-prog-logs/user-sim-release-gate-run6b.md:37. Claim: ls has no
+  key column, `thread --json`'s per-entry projection has no key, key only in
+  `refdes index` items[].key.
+- Verified on THIS branch by running it (probe in .scratch/keys-probe,
+  PYTHONPATH=$PWD/src, venv python -m refdes.cli -- the venv's console
+  `refdes` resolves to the main checkout, so it is not used for probes):
+  `ls` printed `ID  TYPE  TITLE` only; `thread LOG-001 --json` printed
+  `"entries": ["LOG-001", "LOG-002"]` (plain strings, no key);
+  `index --compact` items[].key = the keys. Claim still applies -> not
+  skipped, all items done.
+- Key source: render.items_json prints `"key": item.key or None`
+  (render.py:733); Item.key is the minted field (model.py:554). The new
+  surfaces read `item.key` off the item -- the same field, no recomputation
+  (task item 3).
+
+DESIGN DECISIONS
+- ls --keys: opt-in column between id and type (`ID  KEY  TYPE  ...`).
+  Empty cell = blank padding, matching ls's own workspace-column style
+  (cli.py cmd_ls docstring: "" printed as blank padding, not a
+  placeholder) -- the task allows empty OR "-", blank is ls's style.
+  When NO row has a key (cold --no-write project) key_w is 0 and the column
+  vanishes: ls's zero-width rule for the board/workspace columns, so
+  `--keys` there is byte-identical to the plain listing.
+- thread --json: each entry becomes {"entry": label, "key": key-or-null} at
+  THIS door only (cmd_thread), because threads_projection is the shared
+  answer the index payload and the task pane read as string labels
+  (test_threads_projection.py pins that shape); the projection itself is
+  untouched, so `index`'s threads[].entries and the pane keep their bytes.
+- thread text view: YES, added, behind `--keys` (task item 2's "if cheap
+  and doesn't break the layout"): the header line is the only place thread
+  prints entry labels (chain for one tip, tips for a fork), so the
+  composite ID@key form drops into it -- the whole thread's merge pins on
+  one line, no layout change below it. _thread_header is shared with
+  `refdes work`, which has no flag, so it passes keys=None and keeps the
+  plain bytes (covered by test_thread_text_header_is_plain_without_the_flag).
+- ls/thread --help captured before (.scratch/keys-probe/*-help-before.txt)
+  and after: only the new --keys lines and the description sentences differ.
+
+CHANGES
+- src/refdes/cli.py: cmd_ls key column (key_w/key_col + docstring + parser
+  description/help); _thread_entry_keys + _thread_json_entries helpers;
+  cmd_thread --json payload entries + --keys header + docstring; thread
+  parser --keys + description.
+- tests/test_show_item_keys.py (new, 9 tests): ls --keys shows the index's
+  keys (compared against `index --compact`, not recomputed); default ls
+  names no key; ls --keys == ls byte-identical when nothing is minted
+  (cold --no-write); the mixed row (keyed item keeps its cell, the added
+  keyless item pads blank, columns stay aligned); thread --json entries
+  carry key; key null under --no-write on a cold project; thread --keys
+  composite header + plain lines below; default thread header plain; both
+  --help texts name the surface.
+- docs/cli-reference.md: ls --keys option row, example block, paragraph
+  (blank padding, zero-key rule, merge-pin pointer); thread flag table:
+  --json row updated (per-entry key object, shared projection unchanged),
+  --keys row added.
+- docs/links.md (the composite/merge doc, per the grep for "@key"/
+  composite): one paragraph in the composite section naming where to get a
+  key for a hand-written pin: ls --keys, thread --keys, thread --json, all
+  the same value as items[].key.
+- changelog.d/ls-thread-keys.added.md: user-visible new capability ->
+  `added` (changelog.d/README.md: added = a new feature or capability).
+  Plain bytes unchanged is said in the same bullet; it is one feature, one
+  fragment.
+
+DEFAULT-LS BYTE CHECK (task item 4)
+- Captured `ls` output on the probe project BEFORE the code change
+  (.scratch/keys-probe/ls-baseline-before.txt) and re-ran after:
+  diff clean -> "DEFAULT LS BYTE-IDENTICAL".
+
+SABOTAGE (task item 4: sabotage one, record it)
+- Sabotaged the ls --keys column: reverted `key_col` to always "" (keeping
+  key_w computed), ran tests/test_show_item_keys.py -k "ls_keys_prints or
+  pads_blank" -> 2 FAILED (test_ls_keys_prints_the_key_the_index_reports:
+  row.split()[1] 'log' != key; test_ls_keys_pads_blank_...: 'log' ==
+  'jkyyb982798' assert). Restored the line; 9/9 pass again. The tests are
+  load-bearing.
+
+STATUS: complete. Full suite run recorded below.

@@ -708,6 +708,14 @@ def cmd_ls(args) -> int:
     saw before this column existed. Without it the `--workspace` filter below
     was the only way to find out that an item belonged to a workspace at all,
     which made the flag undiscoverable from the listing it filters.
+
+    `--keys` adds the surrogate-key column (run-6b F2). A merge of items
+    files needs composite `ID@key` pins -- a bare id anchors on the tip and
+    collides -- and no human-facing output printed the key half: it was
+    reachable only by scraping `refdes index`'s JSON payload. The flag is
+    opt-in because the plain listing is something people and scripts parse,
+    and the value is `item.key` read straight off the item, the same field
+    the index prints as `items[].key` -- the listing never recomputes it.
     """
     project, _stale = _load(args, require_ids=False)
     _announce_load_writes(project)
@@ -773,11 +781,28 @@ def cmd_ls(args) -> int:
     # padding rather than a placeholder, since "" is not a name `--workspace`
     # will ever match.
     ws_w = max((len(i.workspace) for i, _ in rows), default=0) if project.workspaces else 0
+    # `--keys` is the opt-in surrogate-key column (run-6b F2): a merge needs
+    # composite `ID@key` pins, and the key was printed by no human-facing
+    # output at all, only by scraping `refdes index`'s JSON. The value is
+    # `item.key` read straight off the item -- the exact same field the index
+    # payload prints as `items[].key` (render.items_json) -- never a
+    # recomputation. With the flag off, `key_w` is 0, `key_col` is "", and the
+    # default bytes are untouched: people and scripts parse the plain listing.
+    # An item with no minted key pads blank, the workspace column's style for
+    # empties (no placeholder): the column is positional alignment, not a
+    # report. A project where *no* row has a key gets no column at all, so
+    # `--keys` there is byte-identical to the plain listing (the board/ws
+    # zero-width rule).
+    key_w = max((len(i.key) for i, _ in rows), default=0) if args.keys else 0
     for item, retired in rows:
         board_col = f"{item.board:<{board_w}}  " if board_w else ""
         ws_col = f"{item.workspace:<{ws_w}}  " if ws_w else ""
+        key_col = f"{item.key:<{key_w}}  " if key_w else ""
         mark = f" (formerly {', '.join(retired)})" if retired else ""
-        print(f"{item.id:<{id_w}}  {item.type:<{type_w}}  {ws_col}{board_col}{item.title}{mark}")
+        print(
+            f"{item.id:<{id_w}}  {key_col}{item.type:<{type_w}}  "
+            f"{ws_col}{board_col}{item.title}{mark}"
+        )
     for old_id, holders in sorted(reused.items()):
         _print_reuse_note(old_id, holders)
     return 1 if load_errors else 0
@@ -872,13 +897,25 @@ def _thread_age_suffix(row: dict, as_of, date_format: str) -> str:
     return f"  {suffix}" if suffix else ""
 
 
-def _thread_header(view: dict) -> str:
+def _thread_header(view: dict, keys: dict[str, str] | None = None) -> str:
     """The thread's own header line, spelled once for `refdes thread` and
     `refdes work`: a one-tip thread prints its chain, a forked thread names
-    every tip (and there is no thread-level status to print -- §5 rule 5)."""
+    every tip (and there is no thread-level status to print -- §5 rule 5).
+    `keys` (run-6b F2, `thread --keys`) renders each label in the composite
+    `ID@key` form -- exactly the pin a merge of items files needs, printed
+    once for the whole thread. A label with no minted key, and an id-less
+    entry whose label already *is* its key, print plain. With `keys` None
+    (`refdes work`, which has no such flag) the bytes are the plain header."""
+    def pin(label: str) -> str:
+        key = keys.get(label) if keys else None
+        return f"{label}@{key}" if key and key != label else label
+
     if view["forked"]:
-        return f"Thread: {view['ref']}  (forked: tips {', '.join(view['tips'])})"
-    return f"Thread: {' -> '.join(view['entries'])}  (one tip)"
+        return (
+            f"Thread: {pin(view['ref'])}  "
+            f"(forked: tips {', '.join(pin(t) for t in view['tips'])})"
+        )
+    return f"Thread: {' -> '.join(pin(e) for e in view['entries'])}  (one tip)"
 
 
 def _task_row_lines(rows: list[dict], as_of, date_format: str) -> list[str]:
@@ -973,6 +1010,33 @@ def _store_failure_diagnostics(subject: str, store_error: str) -> list[dict]:
     ]
 
 
+def _thread_entry_keys(project, labels: list[str]) -> dict[str, str]:
+    """Label -> surrogate key, for the labels a thread view prints. The value
+    is `item.key` read straight off the item -- the exact field the index
+    payload prints as `items[].key` (render.items_json) -- never a
+    recomputation. A label whose item has no minted key is absent, so each
+    caller renders "no key" in its own form (null in JSON, plain text in the
+    header). Labels are looked up with `item_by_ref` because an id-less
+    entry's label *is* its key (threads.entry_label)."""
+    keys: dict[str, str] = {}
+    for label in labels:
+        item = project.item_by_ref(label)
+        if item is not None and item.key:
+            keys[label] = item.key
+    return keys
+
+
+def _thread_json_entries(view: dict, keys: dict[str, str]) -> list[dict]:
+    """The --json projection's entries as objects: the label the projection
+    prints, plus that entry's `key` (null when it has none) -- run-6b F2, so
+    a merge's composite `ID@key` pins are readable from the thread itself
+    instead of by scraping the index payload. The shared projection keeps its
+    string labels: the index payload's `threads[].entries` and the task pane
+    read that one answer, and this changes no consumer's entry shape -- it is
+    `thread --json`'s own door gaining the key half."""
+    return [{"entry": label, "key": keys.get(label)} for label in view["entries"]]
+
+
 def cmd_thread(args) -> int:
     """One thread's view: tip, capture line, tasks with age, derived rows.
 
@@ -992,6 +1056,15 @@ def cmd_thread(args) -> int:
     verdict printed with its tip's tasks rather than alone (rule 4), and on
     a fork one labelled block per open tip with no single current status
     anywhere (rule 4's fork half).
+
+    Keys (run-6b F2): `--json`'s entries are objects carrying each entry's
+    `key` (null when there is none), so a merge's composite `ID@key` pins
+    are readable from the thread itself. The text view prints keys only under
+    `--keys`, on its one header line and nowhere else -- the chain/tips
+    line is already a run of labels, so the composite form drops into it
+    without touching the layout of the blocks below (and `refdes work`,
+    which shares the header composer, has no such flag and keeps the plain
+    bytes).
     """
     project, _stale = _load(args, require_ids=False)
     # The load's own writes go to stderr, not stdout: like `index`, this
@@ -1055,7 +1128,13 @@ def cmd_thread(args) -> int:
             # Same entry shape as the index payload's `diagnostics`, so a
             # consumer that reads both doors sees the same warning shape.
             view["diagnostics"] = _store_failure_diagnostics(THREAD_STORE_SUBJECT, store_error)
-        json.dump(view, sys.stdout, indent=2, ensure_ascii=False, default=str)
+        # Every entry carries its `key` (null when there is none) -- the
+        # per-entry half of run-6b F2; see `_thread_json_entries`.
+        payload = {
+            **view,
+            "entries": _thread_json_entries(view, _thread_entry_keys(project, view["entries"])),
+        }
+        json.dump(payload, sys.stdout, indent=2, ensure_ascii=False, default=str)
         sys.stdout.write("\n")
         return 1 if load_errors else 0
     if store_error is not None:
@@ -1064,7 +1143,12 @@ def cmd_thread(args) -> int:
             file=sys.stderr,
         )
 
-    print(_thread_header(view))
+    print(
+        _thread_header(
+            view,
+            _thread_entry_keys(project, view["entries"]) if args.keys else None,
+        )
+    )
     for cap in view["captured"]:
         print(_thread_capture_line(cap))
     single = not view["forked"]
@@ -2797,7 +2881,9 @@ def main(argv: list[str] | None = None) -> int:
         "answered with 'no items match' (exit 0), the way a query command "
         "answers a typo rather than with a registry error. An items file that "
         "fails to parse is printed to stderr and exits 1 with the listing "
-        "intact.",
+        "intact. --keys adds the surrogate-key column (blank for an item with "
+        "no minted key); the plain listing it opts out of is byte-identical "
+        "to the one people and scripts already parse.",
     )
     p_ls.add_argument(
         "query", nargs="*",
@@ -2809,6 +2895,14 @@ def main(argv: list[str] | None = None) -> int:
     p_ls.add_argument("--workspace", help="only items in this workspace")
     p_ls.add_argument("--file", help="only items declared in this source file")
     p_ls.add_argument("--tag", help="only items with a tag containing this text")
+    p_ls.add_argument(
+        "--keys",
+        action="store_true",
+        help="add the surrogate-key column: each item's key as `refdes index` "
+        "reports it (items[].key), blank when it has none -- the key to paste "
+        "into a composite `ID@key` pin. Without the flag the listing is "
+        "byte-identical to before this column existed.",
+    )
     p_ls.set_defaults(func=cmd_ls)
 
     p_thread = sub.add_parser(
@@ -2828,7 +2922,9 @@ def main(argv: list[str] | None = None) -> int:
         "status. Open-task ages are absolute without --as-of -- a relative "
         "span appears only when you name the date to measure against, so the "
         "bytes never depend on the wall clock. An unknown ref, or a ref with "
-        "no follows: edge either way, is an error with exit 2.",
+        "no follows: edge either way, is an error with exit 2. Under --json "
+        "every entry carries its surrogate key (null when it has none); "
+        "--keys prints the text header's labels in composite ID@key form.",
     )
     p_thread.add_argument(
         "ref", help="any entry id or surrogate key on the thread"
@@ -2843,6 +2939,13 @@ def main(argv: list[str] | None = None) -> int:
         metavar="DATE",
         help="render open-task ages relative to DATE instead of absolute "
         "dates only (not combinable with --json)",
+    )
+    p_thread.add_argument(
+        "--keys",
+        action="store_true",
+        help="print the header's labels in composite ID@key form -- the pins "
+        "a merge of items files needs (under --json, entries carry key "
+        "regardless: this flag changes the text view's header only)",
     )
     p_thread.set_defaults(func=cmd_thread)
 
