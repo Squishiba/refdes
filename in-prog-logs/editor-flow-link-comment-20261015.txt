@@ -1,0 +1,52 @@
+Task: EDITOR-API-005 -- remove_link destroys a comment inside a multi-line
+flow link entry (branch fix/editor-flow-link-comment-20261015).
+Status: finished, PR pending at time of writing.
+
+Found via in-prog-logs/current-main-resweep-editor-api.tsv row EDITOR-API-005
+(PRESENT / REPRODUCED vs main @ 8b6a52e) + companion .txt for the sweep method.
+
+Mechanism (verified by reading src/refdes/patcher.py): `_plan_key_line_removal`
+deletes the whole `verb:` entry (replacement="") when the last link target
+leaves (call sites via len(elements)==1 and via the scalar path). Its comment
+guard scans only the line tail after the value's end mark and the key-colon ->
+value-start gap. A comment inside a multi-line flow node (`satisfies: [\n
+REQ-001  # keep me\n]`) sits between the value's own start and end marks --
+invisible to both checks -- so the plan applies and the comment is destroyed.
+The trailing-comment control (`satisfies: [REQ-001]  # keep me`) hits the tail
+check and refuses 422, which is why the gap went unnoticed.
+
+Reproduction (per AGENTS.md, real EditorApp HTTP): scratch project under
+.scratch/editor-flow-link-comment-20261015/proj005 (refdes init, hardware@3,
+REQ-001 + three log items), server started with
+PYTHONPATH=<worktree>/src env-pinned (verified via /proc/<pid>/environ) and
+`python -m refdes.cli` (the venv console script imports a different editable
+checkout -- same trap the sweep hit). POST /api/item/LOG-001/edit
+(remove_link satisfies REQ-001) -> 200 applied, after-file shows the whole
+satisfies entry and `# keep me` gone. LOG-002 (trailing comment) -> 422
+refused. LOG-003 (no comment) -> 200 clean. Matches the finding exactly.
+
+Fix (narrow refusal, consistent with the patcher's standing rule "does not
+destroy comments it cannot re-home"): `_plan_key_line_removal` now also scans
+the value node's own span for a `#` that sits outside every scalar span
+beneath it (`_comment_in_value_interior` + `_scalar_spans` in patcher.py).
+A `#` inside a quoted scalar is data, not a comment, so the quoted-target
+control still applies. Reuses the existing refusal message.
+
+Tests: tests/test_patcher_links.py -- red: test_remove_refuses_a_comment_
+inside_a_multiline_flow_entry (failed pre-fix with the destroying PatchPlan,
+passes post-fix); controls (all green pre- and post-fix): closing-bracket
+trailing comment refuses, no-comment multi-line flow removes cleanly, quoted
+`#` target removes cleanly. Verified over HTTP post-fix: LOG-001 -> 422 with
+the standard "a comment sits on the 'satisfies' entry" message, file
+byte-identical.
+
+Suites: focused (test_patcher, test_patcher_links, test_serve_edit_http_links,
+test_serve_edit_links, test_serve_editor_e2e) 239 passed; full suite 3856
+passed, 2 skipped. Ruff scoped to the two touched files: 5 findings, all
+pre-existing at HEAD (line-shifted), none in touched lines; test file ruff
+format-clean, patcher.py is not format-clean at baseline (pre-existing).
+
+Changelog: changelog.d/editor-remove-link-flow-comment.fixed.md (fragment
+convention per changelog.d/README.md; CHANGELOG.md itself not touched, matching
+recent fix PRs). No docs page change: docs/design/browser-editor.md states the
+fidelity/refusal principle, not the per-guard enumeration.

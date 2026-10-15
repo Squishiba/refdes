@@ -214,6 +214,36 @@ def test_remove_refuses_a_flow_separator_a_comment_owns():
     assert "comma" in got.reason
 
 
+def test_remove_refuses_a_comment_inside_a_multiline_flow_entry():
+    # the entry spans lines, so the comment sits between the value's own
+    # start and end: the whole-entry delete covers it and must refuse
+    text = "items:\n  - id: D\n    satisfies: [\n      REQ-001  # keep me\n    ]\n"
+    got = refuse(text, "D", RemoveLink("satisfies", "REQ-001"))
+    assert "comment" in got.reason
+
+
+def test_remove_refuses_a_comment_after_a_multiline_flows_closing_bracket():
+    text = "items:\n  - id: D\n    satisfies: [\n      REQ-001\n    ]  # keep me\n"
+    got = refuse(text, "D", RemoveLink("satisfies", "REQ-001"))
+    assert "comment" in got.reason
+
+
+def test_remove_a_multiline_flow_entry_with_no_comment_anywhere():
+    text = "items:\n  - id: D\n    title: T\n    satisfies: [\n      REQ-001\n    ]\n"
+    new, _ = edited(text, "D", RemoveLink("satisfies", "REQ-001"))
+    assert new == "items:\n  - id: D\n    title: T\n"
+
+
+def test_remove_a_multiline_flow_entry_whose_only_hash_is_inside_quotes():
+    # `#` inside a quoted target is data, not a comment: no reason to refuse
+    text = (
+        "items:\n  - id: D\n    title: T\n    satisfies: [\n"
+        '      "REQ-001 # not a comment"\n    ]\n'
+    )
+    new, _ = edited(text, "D", RemoveLink("satisfies", "REQ-001 # not a comment"))
+    assert new == "items:\n  - id: D\n    title: T\n"
+
+
 def test_link_ops_on_markdown_front_matter():
     text = "---\nid: DEC-001\nsatisfies: [REQ-001]\n---\n\nProse.\n"
     new, got = edited(text, "DEC-001", AddLink("satisfies", NEW))

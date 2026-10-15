@@ -875,6 +875,43 @@ def _key_end(item: _Item, name: str) -> int | None:
     return item.base + keyn.end_mark.index
 
 
+def _scalar_spans(node: yaml.Node, base: int) -> list[tuple[int, int]]:
+    """Absolute (start, end) spans of every scalar beneath `node`."""
+    spans: list[tuple[int, int]] = []
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        if isinstance(n, yaml.ScalarNode):
+            spans.append((base + n.start_mark.index, base + n.end_mark.index))
+        elif isinstance(n, yaml.SequenceNode):
+            stack.extend(n.value)
+        elif isinstance(n, yaml.MappingNode):
+            for key, val in n.value:
+                stack.extend((key, val))
+    return spans
+
+
+def _comment_in_value_interior(text: str, start: int, end: int, node: yaml.Node, base: int) -> bool:
+    """True when a `#` comment sits inside the value's own span.
+
+    A value that spreads over lines -- a flow list broken across them -- carries
+    its comments *between* its start and end marks, where the key-gap and
+    line-tail checks cannot see them; a whole-entry delete that covers the
+    value destroys them. Scan the gaps between node spans, not the raw interior:
+    a `#` inside a scalar's own span is that scalar's data (quoted text, a
+    block body), not a comment, and the patcher has no business refusing for it.
+    """
+    covered = _scalar_spans(node, base)
+    i = start
+    while True:
+        h = text.find("#", i, end)
+        if h == -1:
+            return False
+        if not any(lo <= h < hi for lo, hi in covered):
+            return True
+        i = h + 1
+
+
 # ---------------------------------------------------------------- link plans
 
 
@@ -1114,7 +1151,11 @@ def _plan_key_line_removal(
     nl = f.text.find("\n", value_end)
     end = len(f.text) if nl == -1 else nl + 1
     tail = f.text[value_end : end]
-    if "#" in tail or "#" in f.text[keyn.end_mark.index + item.base : value_start]:
+    if (
+        "#" in tail
+        or "#" in f.text[keyn.end_mark.index + item.base : value_start]
+        or _comment_in_value_interior(f.text, value_start, value_end, value_node, item.base)
+    ):
         return Refusal(
             f"a comment sits on the '{verb}' entry of item {item.ref}; deleting the "
             "entry with its last link would destroy it",
