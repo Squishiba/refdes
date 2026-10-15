@@ -63,3 +63,21 @@ after.
 Finish status: TASK FINISHED. Commit: see git log (fix(serve): ...).
 Scope kept to the mirror/drop ordering issue; EDITOR-API-004 (undo-add
 becomes remove) and others from the same TSV untouched.
+
+## PR pass (2026-10-14)
+
+- Verified cwd (this worktree), HEAD c92baec, tracked tree clean.
+- `git fetch origin main` once: origin/main at a4c27d4 (past 21fb2c4/374a4aa).
+- Rebased the single commit onto origin/main: clean, no conflicts. Main's
+  four new commits (workbench task pane #197, sweep3 lows #213, thread test
+  #214, parse surrogate #217) touch no serve/static JS; the only serve-adjacent
+  main changes are tests/serve_support.py + tests/test_serve_cli.py.
+- Post-rebase tests (PYTHONPATH=this src): test_editor_draft_mirror.py +
+  test_serve_static.py + test_serve_editor_e2e.py = 52 passed;
+  test_serve_cli.py (broadened for the #213 serve-helper change) = 16 passed;
+  scoped ruff clean; probe_api002.mjs VERDICT: OK.
+- Integration dependency for reviewers: the separate branch
+  fix/draft-corruption-recovery-20261013 also edits drafts.js; it must rebase
+  on this one (setDraftRevision -> dropAppliedOp is a rename of a public
+  export). No changes to that worktree were made or combined here.
+Finish status: pushed, PR opened against main (not merged).
