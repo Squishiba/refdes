@@ -170,3 +170,13 @@ Checks run (all green):
   tests/test_docs_anchors.py -q  -> 23 passed
   python docs-site/gen_examples.py --check -> up to date
 Status: finished. Pushed once with --force-with-lease after the rebase.
+
+Round 2 (PR #211 chunk 1 review, feb65317): two citation fixes, nothing
+else. (1) The vocabulary-drift sentence split its attributions: P2 renamed
+only the project key history: -> on_change: (vocabulary-review.md:851);
+the value rename log -> timeline is P9 (vocabulary-review.md:951, landed
+2026-10-11 per :964). (2) item.html.j2's pane block is 309-390 (the
+{% if pane %} at 309 through its closing {% endif %} at 390), not
+311-373; row.glyph stays :360. Citation base stays 374a4aa. Checks:
+test_docs_anchors + test_linkify_anchors -> 15 passed; gen_examples
+--check -> up to date. Pushed normally (PR is MERGEABLE, no rebase).

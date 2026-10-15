@@ -63,8 +63,10 @@ state vocabulary is `TASK_STATES = ("open", "done", "dropped")`
 `build.validate_items` (`src/refdes/build.py:329-380`), not discovered by a
 consumer. Note the vocabulary drift from the design doc: `living-notes.md` §5
 proposed `on_change: log` for this field; what shipped is `on_change: timeline`
-(vocabulary review P2 renamed the project key to `on_change:` and this field's
-value to `timeline`). The shipped spelling is the one W5b must cite.
+(vocabulary review P2 renamed the project key to `on_change:`,
+`docs/design/vocabulary-review.md:851`, and P9 renamed this field's value from
+`log` to `timeline`, `:951`, landed 2026-10-11). The shipped spelling is the
+one W5b must cite.
 
 **The fold and the projection — the pane's only source of truth.**
 `chains.fold_tasks()` (`src/refdes/chains.py:811-816`) is the one walk;
@@ -85,7 +87,7 @@ client of that projection (`thread_views` `:80`, `panes_by_entry` `:100`,
 `pane_for` `:115`, `_tab` `:128`, `_task_block` `:160`, `_derived_groups`
 `:225`); `render_site` computes every pane once per render and emits the toggle
 only for projects that show one (`src/refdes/render.py:997-1023`);
-`templates/item.html.j2:311-373` renders the rows with `row.glyph` **as text**
+`templates/item.html.j2:309-390` renders the rows with `row.glyph` **as text**
 (`:360`) — "it emits no input that writes"; and
 `templates/taskpane/taskpane.js` "fetches nothing and writes nothing" (its own
 header comment, `:1-14`) — it toggles, switches tabs, and greys. §8 of
