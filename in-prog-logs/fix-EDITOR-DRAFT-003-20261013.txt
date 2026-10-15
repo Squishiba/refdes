@@ -140,3 +140,26 @@ REVIEW ROUND 2 (PR #227, reviewer agent 505cd734, CHANGES REQUESTED):
   green; e2e/edit suites 117 green; served static path confirmed to
   resolve into THIS worktree's src (conftest.py:13 sys.path insert;
   refdes.__file__ + served drafts.js carry the corrupt prefix).
+
+## Round 3 — PR head push (2026-10-15)
+
+- Full suite on the rebased (cc868e0) tree with the round-2 changes:
+  exit 0, 3800 passed, 2 skipped in 294.73s. Committed as the
+  round-2 follow-up commit with the Co-authored-by trailer, staging
+  drafts.js, the corruption test file, the changelog fragment, and
+  this log by explicit path.
+- main advanced again (780ca94 #225, b3fa8ff #229); rebased the four
+  branch commits onto b3fa8ff cleanly (no conflicts; #221 integration
+  preserved — dropAppliedOp and the combined test intact). Focused
+  gates on the rebased head: corruption+mirror+static 77 green;
+  serve editor e2e green. Full suite on the rebased head re-running
+  (pty pytest-full-3).
+- Pushed with --force-with-lease: PR #227 head c2a755b (base
+  b3fa8ff, mergeable). PR body reworded per review round 2: the
+  finding now cites the in-branch repro posture and this log, not the
+  untracked resweep TSV (verified: body no longer contains
+  "resweep-editor-drafts.tsv").
+- gh pr edit 227 --body-file fails on the projects-classic GraphQL
+  deprecation; PATCH via gh api repos/.../pulls/227 works.
+- Status at write time: CI watching (pty gh-pr-checks-227), fresh
+  review from 505cd734 to be requested after CI green.
