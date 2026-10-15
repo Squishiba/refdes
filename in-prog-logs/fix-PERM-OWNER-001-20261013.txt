@@ -191,3 +191,27 @@ preserved 600). PR body corrected and re-pushed via REST (gh pr edit hits
 the projects-classic GraphQL bug). Fresh review requested from reviewer
 agent 7b5408de at head a2c40be.
 Status: DONE pending the fresh review verdict.
+
+Fresh-review round: reviewer agent 7b5408de re-ran its full checklist on
+my request; its fresh-review run died on provider quota
+("Free usage exceeded" on longcat-2.5-preview-free) after three retry
+prompts, so no fresh verdict exists at a2c40be/46d28dc. Its completed
+review (against 83123c6, pre-skipif) is the verdict I was sent: CHANGES
+REQUESTED with exactly two findings -- (1) High: Windows CI red on the
+three mode-bit assertions, fix = the repo's own
+`skipif(os.name == "nt", reason="chmod-based: advisory mode bits on
+Windows")` idiom (cited test_citations_lockfile_locking.py:291; my
+a2c40be applies exactly that to the two mode tests, spy/collision stay
+active); (2) Low: the serve/edit.py:952 prose imprecision -- both fixed
+at a2c40be (code/tests) and in the PR body. The review's verbatim closing
+assessment of everything else: "the fix is minimal and correct, the
+umask-spy tripwire test is sound, the collision-retry test is sound, the
+fdopen failure path closes the fd, the post-replace finally doesn't
+unlink a renamed temp, ruff passes, the changelog fragment matches
+convention, and the full POSIX suite is green" -- plus its own Windows
+analysis that the production fix itself is correct there (file lands
+0666, the intended end state). All 3 CI jobs pass at 46d28dc (windows
+3686 passed, 58 skipped). Remaining work: a human/orchestrator re-runs
+the reviewer agent once its model quota recovers, for a fresh verdict on
+the current head.
+Status: DONE, pending a fresh reviewer verdict that cannot run (quota).
