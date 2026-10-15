@@ -1,0 +1,327 @@
+# followups-sweep-b — backlog sweep (ITEMS.md, 2026-10-10..14)
+
+Branch: followups-sweep-b, base main @ 885e9e6. Started 2026-10-15.
+Rules: .scratch/task/COMMON.txt. Every verdict verified by grep + running
+things on this branch (never by memory); line numbers cited are the CURRENT
+file's, which have moved from the review's.
+
+Headline: the sweep-3 PRs #205 (98c06be), #206 (1a4f46f), #207 (744cdb0) and
+the merged #197 (7c72311) + #199/#200/#201/#202 already carried almost
+everything on this list. 85 bullets: 71 ALREADY FIXED, 3 STILL TRUE (all
+fixed here), 4 SKIPPED (plugin/orchestrator/opencode.json), 4 MOOT (merged
+PR bodies), 1 OBSOLETE, 1 NOTED ("note it" asks exactly that), 1 NO ACTION.
+
+## Verdicts (ITEMS.md order)
+
+### #198 (merged cd96e61) — opencode.json deny rules
+- b1 deny-pattern gaps (rm -Rf, -f -r, --force --recursive, find -delete):
+  SKIPPED per TASK rule ("opencode.json" sections are out of lane).
+- b2 AGENTS.md note about whole-line matching: ALREADY FIXED — AGENTS.md:115
+  carries it. Verified live this session: a grep pattern spelling the denied
+  string was refused by the permission rules (the friction is real).
+- b3 PR body line-count nit: MOOT — #198 is merged; a merged PR body is not
+  editable and the task forbids touching it.
+
+### Plugin TASK-6 (cancel superseded reviewer)
+- SKIPPED: plugin repo, out of lane per TASK.
+
+### #196 r3 chunk 2 (bc65eb36) nits
+- schema.py body on_change double-if: ALREADY FIXED — 1a4f46f (#206 D3);
+  now if/elif matching the field loop (schema.py:933-943).
+- tests/test_reserved_link_verb.py:61 95-char line: ALREADY FIXED — 1a4f46f
+  (#206 D4, wrap); no line >88 chars remains in the file.
+
+### #197 r2 chunk 4 (0bad96e1) test-hygiene, tests/test_serve_preview_task_pane.py
+- :219 literal-only bar-height assert: ALREADY FIXED in merged #197 —
+  offsets are now parsed out of the fetched bar.css
+  (test_serve_preview_task_pane.py:264-280).
+- :210 vacuous find()<find(): ALREADY FIXED (#197 C4) — presence asserted
+  first (:258-259).
+- :141-147 snapshot after app.start(): ALREADY FIXED (#197 C4) — snapshot
+  taken before start (:163-170).
+
+### #197 r2 chunk 1 (7d17eea0)
+- docs/cli-reference.md broken anchor: ALREADY FIXED — the live anchor is
+  `#refdes-thread-lt-ref-gt` (docs/cli-reference.md:2130);
+  tests/test_docs_anchors.py passes (2 passed).
+- docs/output.md:85 same anchor: ALREADY FIXED (:85 uses the lt-ref-gt id).
+- in-prog-logs/workbench-w5a-task-pane.txt:146-147 "15/5 tests": OBSOLETE —
+  the merged log is append-only history; :146-147 today is round-3 sabotage
+  text. The numbers record what a round claimed at the time; rewriting them
+  post-merge falsifies the record, and the test counts live in the suites.
+- PR body "3527 passed": MOOT — merged PR body.
+- render.py capture_index read on the early no-items return: ALREADY FIXED
+  (#197 C6) — the hoist is gated on project.items (render.py:1042-1049).
+- cli.py:347 _THREAD_GLYPHS aliases a mutable dict: ALREADY FIXED —
+  threads.TASK_GLYPHS is a MappingProxyType (threads.py:92-95); the cli
+  alias is documented as a read-only view (cli.py:808).
+
+### #197 r2 chunk 2 (54790046)
+- S3 guard misses fork/verdict -> bare KeyError: ALREADY FIXED (#197 B1) —
+  widened to any unrenderable kind, raises _unrenderable_kinds_message
+  (task_pane.py RENDERED_DERIVED_KINDS guard, ~:228-235).
+- explicit null id/text renders "None": ALREADY FIXED (#197 B2) — `or`
+  spellings at task_pane.py:197-198 with the rationale comment.
+- verdict wrapper spelled twice: ALREADY FIXED (#197 B3) —
+  threads.verdict_line (threads.py:190) used by task_pane._verdict_line and
+  cli alike.
+- _age not gated on state == open: ALREADY FIXED (#197 B4) —
+  `"since": _age(row) if row.get("state") == "open" else ""`
+  (task_pane.py:204) + test.
+- Tests (tip==viewing branch / panes_by_entry across threads / panel()
+  slice / assert out no-op): ALREADY FIXED — B5a test
+  test_a_fork_tips_own_page_gives_that_tab_no_note, B5b
+  panes_by_entry keys per member (tests/test_task_pane.py:912-917), B5c
+  panel() cuts at next `<div` with the contract docstring (:297-304), B5d
+  replaces `assert out` with a real draft-render check (:636-645).
+
+### #196 (merged 052d0c3) r3 chunk 1 (31ea217c)
+- changelog.d/verb-named-reserved-key.breaking.md overgeneralization:
+  ALREADY FIXED — 1a4f46f (#206 D1); wording narrowed to the collisions
+  that actually dropped silently (verified: fragment names list-spelled
+  on_change/body/prefix/board/workspace/id-list cases explicitly).
+- parse.py "on_change mode: mode ...": ALREADY FIXED — 1a4f46f (#206 D2);
+  message now starts "on_change: mode ...", pinned by tests.
+
+### #197 r2 chunk 3 (5f4ba74e)
+- "Tasks at tip:" hard-coded in item.html.j2: ALREADY FIXED (#197 C1) —
+  threads.task_heading / TASK_HEADING_TIP constants; template renders
+  tab.heading; tests assert the constants.
+- role="tabpanel" on non-forked panels: ALREADY FIXED — item.html.j2:335
+  adds role/aria-labelledby only `{% if pane.forked %}`.
+- Escape-to-close / focus return: ALREADY FIXED — taskpane.js returns
+  focus to the toggle only when the pane owns focus
+  (`pane.contains(document.activeElement)`, taskpane.js:41).
+
+### #199 chunk 2 (feb64a5e)
+- tests/test_load_time_writes.py:18 "follows anchor": ALREADY FIXED —
+  docstring reads "follows anchoring" (:17).
+- seal.py:372-374 ambiguous "it": ALREADY FIXED — the docstring now names
+  `is_sealed` explicitly (seal.py:406-408).
+
+### Task-template fix (orchestrator)
+- SKIPPED: orchestrator repo, out of lane per TASK.
+
+### #200 chunk 2 (8595043f)
+- dry-run byte-identity on an already-renamed tree: ALREADY FIXED — #200
+  itself (4e29ff6): the dry-run half runs on its own fresh trees
+  (dry-new/dry-old), docstring explains why.
+- README "Fifteen commands in all": ALREADY FIXED — #200: README:27+ lists
+  commands with no count claim.
+
+### #199 leftover "froze"
+- tests/test_load_time_writes.py / tests/test_work.py froze->anchored:
+  ALREADY FIXED — 07666de (#199 P4) did the rename; "froze" is gone from
+  both files.
+
+### Docs: 16 pre-existing broken anchors
+- ALREADY FIXED — d276925 (#201) "docs: fix broken anchors and add an
+  anchor check". Ran the test: tests/test_docs_anchors.py 2 passed. The
+  anchor walk is now CI.
+
+### Plugin TASK-7 (chunk loss on restart)
+- SKIPPED: plugin repo, out of lane per TASK.
+
+### #200 r2 chunk 2 (0fe45273)
+- README index one-liner vs new help: ALREADY FIXED — 98c06be (#205 I4);
+  README:33 matches `refdes index --help` ("resolved project as one JSON
+  document"). Verified by running the help.
+- PR body "6 tests / 7": MOOT — merged PR body.
+- revise-help assertion without whitespace normalization: ALREADY FIXED —
+  744cdb0 (#207); test normalizes like test_index_help.py
+  (tests/test_rename_alias.py:230-236).
+- No test for revise on an unparseable mapping: ALREADY FIXED — 744cdb0
+  (#207); test_revise_unparseable_mapping_exits_2_saying_what_rename_says
+  (:242).
+
+### #200 (merged) r2 chunk 1 (dd1ca05c)
+- help=argparse.SUPPRESS on the alias subparser: ALREADY FIXED — dropped;
+  cli.py:3126-3130 documents why (SUPPRESS prints ==SUPPRESS== on 3.13.5),
+  _hide_command alone hides it.
+- cmd_index docstring: ALREADY FIXED — cli.py:642 is the help wording.
+- PR body "(6)"/3572: MOOT — merged. The task log records the post-rebase
+  gates (in-prog-logs/vocab-p12-rename-p13-index-help.txt:322-324: 3585
+  passed, 13-test gain explained), which is the "note it in the log" the
+  review asked for.
+
+### #197 r3 chunk 5 (1d227b9d) test nits
+- :218-219 unguarded `find("<details")` slice: ALREADY FIXED — guarded
+  (`if derived_at != -1`, test_serve_preview_task_pane.py:234-236).
+- :254-257 unasserted .group() calls: ALREADY FIXED — every match asserted
+  before use (:272, :275, :280).
+- :126 projection-order assumption: ALREADY FIXED — LOG-001's thread is
+  selected by key (:126-130).
+
+### #197 r3 chunk 3 (07142635)
+- unknown tasks["state"] treated as declared: ALREADY FIXED — _task_block
+  raises _unknown_state_message for any state it cannot render
+  (task_pane.py:186-187).
+- dropped `[-]` / unknown-state `[?]` rows untested: ALREADY FIXED —
+  test_the_pane_glyphs_dropped_and_unknown_row_states_as_threads_spell_them
+  (tests/test_task_pane.py:988).
+- "Derived (auto clears when fixed)" hard-coded: ALREADY FIXED — the test
+  asserts threads.DERIVED_GROUP_HEADINGS (:550) and the order/keys pin
+  (:556).
+- :329 `body[: body.find("\\n")]` unguarded: ALREADY FIXED —
+  first_line_end guarded (:349-351).
+
+### #197 r4 chunk 4 (MiMo 34f806eb, F1-F5)
+- F1 observer path can never fire: DECIDED IN MERGED #197 (K3) — the
+  observer is not set up below two thread anchors
+  (taskpane.js `if (anchors.length < 2) return;`), and
+  docs/design/thread-workbench.md:225 records the two-anchor rule. No
+  open decision left; not listed under "needs a decision".
+- F2 ul.tight overrides taskpane.css: ALREADY FIXED — pane lists no
+  longer carry `tight` (item.html.j2:349 comment records it).
+- F3 DERIVED_GROUP_HEADINGS mutable dict: ALREADY FIXED —
+  MappingProxyType (threads.py:127-131), aliasing test
+  (tests/test_task_pane.py:958-963).
+- F4 Escape steals focus / ignores defaultPrevented: ALREADY FIXED —
+  `if (event.defaultPrevented) return;` (taskpane.js:66,131) and
+  focus-return gated on pane.contains(activeElement) (:41).
+- F5 greyed pane interactive: RESOLVED IN MERGED #197 — K3 chose
+  "greyed paint + aria-disabled, not dead keys" (taskpane.js:199-205).
+- Residual node --check test: ALREADY FIXED —
+  test_task_pane.py:967 (K7, skips when node is absent).
+
+### #199 (merged) r4 chunk 1 (402acb66)
+- living-notes.md serve contradiction: ALREADY FIXED — 98c06be (#205 I2),
+  reconciled against `refdes serve --help`.
+- range overruns (build.py/lifecycle.py/extension.js): ALREADY FIXED —
+  #205 I2 corrected to 1608-1763 / 821-921 / 264-313.
+- vocabulary-review.md §1.7 present tense: ALREADY FIXED — #205 I3 adds
+  the dated note (hardware@3 declares follows, base.yaml:166).
+- history.py near-duplicate follows-key helpers / links.py narrow
+  docstring: ALREADY FIXED — 744cdb0 (#207) merged the pair into
+  _anchored_follows_key (history.py:533, docstring explains the merge).
+
+### #197 r4 chunk 2 (15aa3c30)
+- projection computed twice per render: ALREADY FIXED — one projection
+  per render_site, passed to items_json as `threads=` (render.py:1057-1068,
+  round-5 P4).
+- pane CSS/JS on every page of a threaded build: NOTED — the review says
+  "Fine for now; note it". Noted here and in the PR body: assets are
+  emitted once per build when any pane exists (`taskpane_assets =
+  bool(task_panes)`, render.py:1072); pages without a pane load the two
+  small static files and ignore them. No code change.
+
+### #197 r4 chunk 3 (0897614a)
+- pane model "viewing" key written, never read: **STILL TRUE -> FIXED**.
+  Verified: item.html.j2 reads pane.ref/forked/tabs/derived/derived_heading
+  only; no reader of pane["viewing"] exists (grep of src/ + templates).
+  Dropped the key from pane_for (task_pane.py); removed it from the test
+  fake dict; added a test pinning pane_for's key set to exactly what the
+  template consumes.
+- tests double-parse the store (`calls.append(real(p)) or real(p)`):
+  ALREADY FIXED — pattern gone; the E1/P4 test was rewritten
+  (test_one_site_render_reads_the_store_and_projects_once).
+
+### #197 r4 chunk 4 (80135ad3)
+- visible map keyed by ref, not element: ALREADY FIXED — round-6 keys it
+  by element (`visible = []` of anchor elements, taskpane.js:167-182).
+- aria-disabled pane with operable tabs: ALREADY FIXED — K3 posture
+  above.
+- z-index ties #preview-card: ALREADY FIXED — 62/63 now
+  (taskpane.css:21,36, comments cite 60).
+- threads.py comment "four postures", it's three: **STILL TRUE -> FIXED**.
+  Verified: the postures in place of a list are ambiguous, undeclared,
+  cleared = 3 (threads.py:149-157, task_pane._task_block). Comment now
+  says three. (Comment-only: no behaviour, no test needed.)
+- .mono spans render one size larger than pane body text: **STILL TRUE ->
+  FIXED**. Verified: style.css:121 sets `.mono { font-size:
+  var(--text-base); }` while the pane body is text-sm
+  (taskpane.css .refdes-taskpane) — item.html.j2's mono spans in the
+  title/tab/tip/task rows all render a step up. Added
+  `.refdes-taskpane .mono { font-size: inherit; }` (0,2,0 beats .mono's
+  0,1,0) + a published-css test in the established R2 pattern
+  (comments stripped, rule regex).
+
+### #197 r4 chunk 5 (6006dca7)
+- derived list `tight` ties the pane selector (same as K4): ALREADY FIXED
+  — no tight on pane lists (item.html.j2:377 comment).
+- tests/test_task_pane.py:899-901 garbled docstring: ALREADY FIXED —
+  rewritten (§7a sub-decision 1 note).
+- test_serve_preview_task_pane.py:221-222 data-refdes-panel slice:
+  ALREADY FIXED — guarded slice + B5c-aware cuts.
+- :436 `"day" not in body` too broad: ALREADY FIXED — narrowed (:467
+  comment: a bare "day" needle trips on unrelated words).
+- follow/grey JS path untested: RESOLVED — the path is parked below two
+  anchors (K3) and covered by the node --check static test (K7).
+
+### #197 r5 chunk 2 (2cb055c8)
+- HIGH package-data missing templates/taskpane/*: ALREADY FIXED —
+  pyproject.toml:83 includes it; tests/test_package_data.py pins that the
+  globs cover every non-.py file under src/refdes (the class-level test the
+  review asked for).
+- LOW projection twice / stale "once" claim: ALREADY FIXED — see r4 c2
+  above; code runs one projection per render.
+
+### #197 r5 chunk 3 (94e33f3d)
+- MEDIUM _derived_row/_age duplicate cli helpers: ALREADY FIXED —
+  threads.derived_detail and threads.age_suffix are the single composers,
+  aliased by cli (cli.py:865-871, 919-922) and called by the pane
+  (task_pane.py:219-222, 255).
+- LOW headings pinned as literals in tests: ALREADY FIXED (:550).
+- NIT panel() nested-div contract undocumented: ALREADY FIXED — the
+  docstring states it (tests/test_task_pane.py:297-304).
+
+### #197 r5 chunk 5 (34949d4b) test nits
+- :262-264 single-line bar.css regexes: ALREADY FIXED — `\s` patterns
+  span newlines (round-5 nit comment at the regexes).
+- :197-198 case-sensitive needle scan: ALREADY FIXED — pane lower-cased
+  first (:200-205).
+- :171 retyped malformed-row literal: ALREADY FIXED — composed from
+  threads.task_heading + task_malformed_note (:216-219).
+- :215-224 second-panel slice to end of page: ALREADY FIXED — guarded
+  (:234-236).
+
+### #201 (merged) review (72a75cd8)
+- links checked only in docs/*.md + README: ALREADY FIXED —
+  _checked_files() covers docs/**/*.md + README
+  (tests/test_docs_anchors.py:76-77; 98c06be I1).
+- _all_heading_ids missing README: ALREADY FIXED — :72 adds README ids.
+  Ran: 2 passed.
+
+### #202 (merged) review (2d2d07a6)
+- "rm --re x gap" claim in the log: ALREADY FIXED — 98c06be (#205 I5)
+  dated correction at in-prog-logs/opencode-deny-gaps.txt:61-66 (`*rm -?r*`
+  denies it).
+- "Finished: no" header: ALREADY FIXED — #205 I5 ("Finished: yes").
+- `*rm*--recursive*` friction: NO ACTION — the review itself says
+  "Friction only; revisit if workers hit it". Noted: this session hit the
+  sibling friction (a grep pattern spelling a denied string was refused,
+  as AGENTS.md:115 warns) and the documented workaround (search with a
+  pattern that doesn't spell it out) worked.
+
+## Fixes in this PR
+1. task_pane.pane_for: drop the write-only "viewing" key (+ key-set test,
+   test fake updated).
+2. threads.py posture-count comment: "four" -> "three".
+3. taskpane.css: `.refdes-taskpane .mono { font-size: inherit; }` +
+   published-css test.
+
+changelog.d: no fragment. Rule applied (changelog.d/README.md): the key-set
+and comment fixes are invisible to readers; the .mono size is a cosmetic
+rendering fix on unreleased W5a surfaces — nothing a reader of the project
+must act on, same call as #205/#206's own fragments-free diffs.
+
+## Sabotage log
+- Fix 1 (drop the "viewing" key): re-added the key verbatim ->
+  test_the_pane_model_carries_exactly_the_keys_the_template_reads FAILED
+  (1 failed); restored -> suite green (42 passed).
+- Fix 3 (the .mono css rule): flipped the declaration to
+  `font-size: var(--text-base)` ->
+  test_the_published_pane_css_keeps_mono_spans_on_the_panes_type_scale
+  FAILED (1 failed); restored -> green. (First run of this sabotage was
+  executed in parallel with the file edit and raced it; the sequential
+  re-run is the one recorded.)
+- Fix 2 is a comment-only change: no behaviour, nothing to sabotage.
+
+## Gates (final, this branch)
+- Full suite, foreground: 3831 passed, 2 skipped in 316.60s, exit 0
+  (.scratch/suite.txt). The known serve_cli stale-token flake did not fire.
+- `ruff check --select E9,F src tests` -> All checks passed!
+- `docs-site/gen_examples.py --check` -> schema-reference.md and
+  vocabulary.md both up to date.
+
+

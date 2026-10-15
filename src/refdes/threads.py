@@ -141,7 +141,7 @@ DERIVED_GROUP_HEADINGS = MappingProxyType(
 DERIVED_GROUP_ORDER = tuple(DERIVED_GROUP_HEADINGS)
 _KIND_ORDER = {kind: index for index, kind in enumerate(DERIVED_GROUP_ORDER)}
 
-#: The four postures the task block can show in place of a list, and the
+#: The three postures the task block can show in place of a list, and the
 #: full conflicting-verdict sentence — `refdes thread` prints these and the
 #: task pane renders them, from this one spelling (the pane "shows the same
 #: facts and wording as that command" by the same mechanism as the glyphs

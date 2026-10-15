@@ -117,7 +117,6 @@ def pane_for(view: dict, viewing: str) -> dict:
     single_tip = not view["forked"]
     return {
         "ref": view["ref"],
-        "viewing": viewing,
         "forked": view["forked"],
         "tabs": [_tab(branch, viewing, single_tip) for branch in view["branches"]],
         "derived": _derived_groups(view["derived"]),

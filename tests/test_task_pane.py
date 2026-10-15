@@ -667,7 +667,6 @@ def test_a_project_with_no_threads_publishes_exactly_what_it_did_before(
 
     fake = {
         "ref": "LOG-001",
-        "viewing": "LOG-001",
         "forked": False,
         "tabs": [],
         "derived": [],
@@ -794,6 +793,26 @@ def test_the_published_pane_css_resets_its_own_lists(tmp_path):
         rule = re.search(selector + r"\s*\{([^}]*)\}", css)
         assert rule, f"no {selector} rule in the published css at all"
         assert "list-style: none" in rule.group(1), f"{selector} lost its reset"
+
+
+def test_the_published_pane_css_keeps_mono_spans_on_the_panes_type_scale(
+    tmp_path,
+):
+    """PR #197 review r4c4 (80135ad3): style.css sizes `.mono` at
+    --text-base, one step above the pane body's --text-sm, so every mono
+    span inside the pane — the title's ref, each tab, the tip line, the
+    task rows' number/glyph/id — rendered one size larger than the prose
+    beside it. The published css must carry the `font-size: inherit`
+    override, pinned on the byte the reader gets (comments stripped
+    first: the rule's own comment cites the declaration, per the round-4
+    C4 lesson)."""
+    _project, out = _render(tmp_path, ONE_TIP)
+    with open(os.path.join(out, "assets", "taskpane.css"), encoding="utf-8") as fh:
+        css = fh.read()
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    rule = re.search(r"\.refdes-taskpane \.mono \{([^}]*)\}", css)
+    assert rule, "no .refdes-taskpane .mono rule in the published css"
+    assert "font-size: inherit" in rule.group(1), ".mono override lost"
 
 
 # ================= PR #197 review round 2 =================
@@ -924,6 +943,18 @@ def test_two_threads_in_one_project_get_their_own_panes(tmp_path):
     second = pane(_page(out, "log-004"))
     assert "T-first" in first and "T-second" not in first
     assert "T-second" in second and "T-first" not in second
+
+
+def test_the_pane_model_carries_exactly_the_keys_the_template_reads(tmp_path):
+    """PR #197 review r4c3: the model's key set IS the template's read set.
+    `pane_for` used to write a `viewing` key that item.html.j2 never read
+    (the note it described lives in each tab) -- a pane model carrying keys
+    no surface consumes is a contract waiting to drift. Pinned against the
+    five names the template consumes."""
+    project, _out = _render(tmp_path, ONE_TIP)
+    views = task_pane.thread_views(project)
+    model = task_pane.panes_by_entry(views)["LOG-002"]
+    assert set(model) == {"ref", "forked", "tabs", "derived", "derived_heading"}
 
 
 def test_a_single_tip_page_declares_no_tab_roles(tmp_path):

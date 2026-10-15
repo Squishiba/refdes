@@ -50,6 +50,17 @@
   display: none;
 }
 
+.refdes-taskpane .mono {
+  /* PR #197 review round 4 (80135ad3): style.css sets `.mono` to
+     --text-base, one step above the pane body's --text-sm, so every mono
+     span in the pane (title, tabs, tip line, task rows) rendered a size
+     larger than the prose around it. `inherit` puts each one back on its
+     container's step of the type scale; the two-class selector beats
+     style.css's one-class `.mono` on specificity, so load order is
+     irrelevant. */
+  font-size: inherit;
+}
+
 .refdes-taskpane.refdes-taskpane-grey {
   /* §7a sub-decision 5: no thread in view — stay put, grey out, keep
      showing the last thread's name. The pane does not move. */
