@@ -344,8 +344,10 @@ real number — never the literal word `"latest"`.
 Scaffolds a starter item's front matter for any type in the merged schema —
 standard or project-defined — so "what fields does a log entry take again"
 never means a trip back to this page. On `hardware@3` that means one of the six
-types; `decision` is not one of them, and `refdes new decision` answers
-`unknown type 'decision'.` on stderr and exits 1.
+types; `decision` is not one of them, and in a bare `hardware@3` project
+`refdes new decision` answers `unknown type 'decision'.` on stderr and
+exits 1. A project that declares its own `decision` in `refdes-schema.yaml`
+(as this repo does) scaffolds it like any other project-defined type.
 
 ```bash
 refdes new log > items/power/log-005.md

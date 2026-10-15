@@ -117,3 +117,17 @@ Findings and dispositions:
    `refdes new log` example gained the `# tasks:  # tasks` line (verified
    position against real `refdes new log` scaffold output).
 No code changes this round -> no new tests (docs-only ticket).
+
+## Round 3 (review on 194f67d, CHANGES REQUESTED)
+Finding (P2, accepted): the round-2 sentence "refdes new decision answers
+`unknown type 'decision'.` on stderr and exits 1" is context-dependent --
+the scaffolder takes any type in the MERGED schema, and this repo's own
+refdes-schema.yaml declares a project `decision` (with records/supersedes
+link targets), so from this checkout the command prints a scaffold and
+exits 0. Verified both ways with the fixed wrapper: repo root -> scaffold,
+exit 0; bare hardware@3 probe project (.scratch/schema-verify/proj) ->
+"unknown type 'decision'." on stderr, exit 1. Sentence qualified to say
+"bare hardware@3 project" for the error and that an overlay-declared
+`decision` scaffolds like any project-defined type. No rejections.
+Docs-only round -> no new tests; gates rerun (gen_examples --check, docs
+tests, ruff E9,F, full suite).
