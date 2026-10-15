@@ -563,11 +563,17 @@ refdes sends no conditional request, so re-pinning is never free.
 The file does not parse. It is written only by `refdes fetch` and its own header
 says never to hand-edit it, so `git checkout -- .refdes/citations.yaml` is
 almost always the whole fix.
-Corrupt store files take one of three exit-code postures: a corrupt membership
+Corrupt store files take one of four exit-code postures: a corrupt membership
 manifest, id ledger, baseline, or seal file is a configuration error (**exit 2**);
 a corrupt citations lockfile — this entry's YAML failure and its non-UTF-8 twin —
 is a `check` diagnostic (**exit 1**); a corrupt `.refdes/keys-adopted.yaml` is
-a `refdes keys adopt` refusal (**exit 1**), and elsewhere simply means "not adopted".
+a `refdes keys adopt` refusal (**exit 1**), and elsewhere simply means "not adopted";
+a corrupt file under `.refdes/history/` raises the same clean error naming it, fatal
+(**exit 1**) only to `refdes history redact` — `check` and `build` report it as a
+warning and skip the edited-after-captured check (**exit 0**), captures ride past
+it (the derived-id no-op never reads the store, and a load-time edge capture is
+silently skipped), and `history migrate-seals` never
+touches it.
 
 **`.refdes/citations.yaml:N — citations: is a list, not a mapping of cited path
 to that path's record`**

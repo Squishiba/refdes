@@ -89,3 +89,40 @@ SUITE (foreground, once, at the end): 3826 passed, 2 skipped in 324.31s,
 exit=0 (.scratch/suite.txt; no flakes — the known stale-token serve test
 passed in place). ruff check --select E9,F src tests: clean.
 docs-site/gen_examples.py --check: up to date. Task finished.
+
+============================================================
+FIX ROUND for PR #242 (review in paseo logs b1116fb, VERDICT
+CHANGES REQUESTED, one P3 finding)
+
+P3: docs/troubleshooting.md:566-570 "three exit-code postures" omits
+history-store errors. REPRODUCED (.scratch/probe6): corrupt
+.refdes/history/events/<id>.yaml + `refdes history redact LOG-001
+--confirm` -> "error: <path>: event file is not valid UTF-8 (...)",
+real exit 1 (first probe measured tail's exit through the pipe -- the
+reviewer's exit 1 is right).
+Other history subcommands, probed with the same corrupt event file:
+- history capture LOG-001: exit 0, "already captured; nothing was
+  written" -- capture() checks the derived-id event path (history.py:859
+  os.path.exists), never reads the store; a NEW manual capture (LOG-002)
+  also exits 0 (append_event only reads its own event path, absent).
+- history migrate-seals: exit 0, "no legacy seal files" -- migrate_seals
+  (history.py:1045-1127) has NO load_events call at all; never touches
+  the event store.
+- check/build with the corrupt event file: exit 0, WARNING
+  "edited-after-captured was not checked: the history store could not be
+  read (<path>: event file is not valid UTF-8 ...)" (lifecycle.py:739
+  swallow); index exit 0 (capture_index swallowed, render.py:682); the
+  read-only report at cli.py:1521 prints "(not checked: ...)"; a
+  load-time follows: edge capture swallows HistoryError (links.py:760)
+  and is silently skipped.
+Sentence rewritten: "one of four exit-code postures" (count fixed),
+history case added with the redact-1 / check+build-warning-0 /
+captures-ride-past / migrate-seals-never-touches breakdown, all claims
+probe-verified above.
+Docs tests: test_docs_anchors, test_docs_examples, test_schema_doc_key,
+test_standard_docs_complete, test_candidate_parts_doc: 31 passed.
+gen_examples --check: up to date. Suite: (below)
+
+SUITE (foreground, once): 3826 passed, 2 skipped in 309.27s, exit=0
+(.scratch/suite-round2.txt). Docs-only change; no sabotage needed
+(no behaviour fix).
