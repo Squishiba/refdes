@@ -17,7 +17,14 @@ from collections import defaultdict
 import yaml
 
 from . import textio
-from .model import Item, Project, SchemaError, destination_refusal, provisional_handle
+from .model import (
+    Item,
+    Project,
+    SchemaError,
+    could_be_read_only,
+    destination_refusal,
+    provisional_handle,
+)
 from .parse import FENCE_RE, yaml_safe_load
 from .write_lock import project_write_lock
 
@@ -651,20 +658,29 @@ def _allocate_locked(project: Project, dry_run: bool = False) -> list[tuple[Item
 
         try:
             textio.atomic_write_text(path, source.render(lines))
-        except OSError:
+        except OSError as exc:
             # The filesystem's refusal, not a shape this command could not
             # write: nothing in this file was touched (the whole render is one
             # write, and it raised), so every id this file was going to take
             # is refused with it -- same as the `None`-from-insert case above,
             # which refuses for the same reason and the same reason's worth:
-            # an id that is not on disk must not be allocated.
+            # an id that is not on disk must not be allocated. The OSError
+            # itself rides along so the report blames the right thing: this
+            # catch is bare, and a full disk (ENOSPC) or a failing device
+            # (EIO) is no more a read-only tree than the advice below is for
+            # them (DIAG-WORD-008).
+            remedy = (
+                "Make the tree writable and run it again."
+                if could_be_read_only(exc)
+                else "Fix the reported failure and run it again."
+            )
             for item, _new_id in entries:
                 project.error(
                     destination_refusal(
                         rel,
                         "no id in this file was written back, so none of them "
-                        "were allocated and their numbers stay free. Make the "
-                        "tree writable and run it again.",
+                        f"were allocated and their numbers stay free. {remedy}",
+                        exc,
                     ),
                     file=rel, line=item.source_line,
                 )
@@ -698,19 +714,26 @@ def _allocate_locked(project: Project, dry_run: bool = False) -> list[tuple[Item
     # all and the ledger is merely stale.
     try:
         save_ledger(project, ledger)
-    except OSError:
+    except OSError as exc:
+        # Bare OSError again (see the write-back catch): the parenthetical and
+        # the remedy both follow the reported cause, not a read-only guess.
+        remedy = (
+            "Make .refdes/ writable"
+            if could_be_read_only(exc)
+            else "Fix the reported failure"
+        )
         project.error(
             destination_refusal(
                 project.id_ledger,
                 (
                     "the id(s) above are on disk, but the ledger that stops a "
                     "deleted item's number being handed out again was not "
-                    "updated. Make .refdes/ writable and run it again."
+                    f"updated. {remedy} and run it again."
                     if written
                     else "nothing was allocated, and the ledger is unchanged "
-                    "because of it. Make .refdes/ writable before allocating "
-                    "any id."
+                    f"because of it. {remedy} before allocating any id."
                 ),
+                exc,
             )
         )
 

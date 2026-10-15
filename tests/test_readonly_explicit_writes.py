@@ -1021,6 +1021,187 @@ def test_id_on_a_whole_tree_read_only_names_both_halves(pending_id_project, caps
     assert "Traceback" not in said
 
 
+# ------------------------------------------- id: causes that are not permissions
+
+
+def _refuse_writes_like_a_full_disk(monkeypatch, basenames):
+    """Make `refdes.textio.atomic_write_text` raise `OSError(ENOSPC)` -- the
+    shape a full disk takes -- for writes to the named basenames. Injected
+    rather than produced: no safe way exists to run a filesystem out of space
+    in a test, and the condition under test is the *reporting*, not the
+    failure. Every other write passes through to the real implementation."""
+    import errno
+
+    from refdes import textio as textio_mod
+
+    real_write = textio_mod.atomic_write_text
+
+    def boom(path, text):
+        if os.path.basename(path) in basenames:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_write(path, text)
+
+    monkeypatch.setattr(textio_mod, "atomic_write_text", boom)
+
+
+def test_id_reports_a_full_disk_as_a_full_disk_not_a_read_only_hint(
+    pending_id_project, monkeypatch, capsys
+):
+    """DIAG-WORD-008: the write-back catch in `ids` is a bare `except
+    OSError`, so ENOSPC lands in it, and the refusal used to answer a full
+    disk on a fully writable tree with "(read-only tree?)" and "make the
+    tree writable" -- sending the user hunting for a permission that was
+    never the problem. The parenthetical now carries the operating system's
+    own reason and the remedy follows the cause. The refusal, the exit code
+    and the not-allocated accounting are unchanged."""
+    config = str(pending_id_project / "refdes-project.yaml")
+    _refuse_writes_like_a_full_disk(monkeypatch, {"r.yaml", "ids.yaml"})
+    status = cli_mod.main(["-c", config, "id"])
+
+    captured = capsys.readouterr()
+    said = captured.err + captured.out
+    assert status == 1, said
+    assert "cannot write items/r.yaml (No space left on device)" in said, said
+    assert "cannot write .refdes/ids.yaml (No space left on device)" in said, said
+    # The false hint, asserted absent at the destination shape (the load-time
+    # degrade of an incidental write is its own documented sentence).
+    assert "cannot write items/r.yaml (read-only tree?)" not in said, said
+    assert "cannot write .refdes/ids.yaml (read-only tree?)" not in said, said
+    assert "Make the tree writable" not in said, said
+    assert "Make .refdes/ writable" not in said, said
+    assert "Fix the reported failure" in said, said
+    assert "none of them were allocated" in said, said
+    assert "allocated 0 id(s)" in captured.out, captured.out
+    assert "Traceback" not in said, said
+
+
+def test_id_names_the_real_cause_when_only_the_ledger_refused(
+    pending_id_project, monkeypatch, capsys
+):
+    """The half where the ids land and only the ledger write hits the full
+    disk: the claim stays "the id(s) above are on disk", and only its remedy
+    stops blaming a permission."""
+    config = str(pending_id_project / "refdes-project.yaml")
+    _refuse_writes_like_a_full_disk(monkeypatch, {"ids.yaml"})
+    status = cli_mod.main(["-c", config, "id"])
+
+    captured = capsys.readouterr()
+    said = captured.err + captured.out
+    assert status == 1, said
+    assert "cannot write .refdes/ids.yaml (No space left on device)" in said, said
+    assert "the id(s) above are on disk" in said, said
+    assert "Fix the reported failure and run it again." in said, said
+    assert "Make .refdes/ writable" not in said, said
+    assert "id: REQ-001" in _read(pending_id_project / "items" / "r.yaml")
+
+
+def test_id_keeps_the_read_only_marker_for_a_permission_denial_with_no_errno(
+    pending_id_project, monkeypatch, capsys
+):
+    """The other side of the same catch, and the reason the predicate keys on
+    `PermissionError` and not only on the errno: `textio.atomic_write_text`'s
+    own read-only guards raise `PermissionError` built from a message alone,
+    with no errno at all. Those refusals must keep the `(read-only tree?)`
+    marker byte for byte -- every chmod-based test above depends on it, and
+    injection is what makes this one run identically as root and on Windows."""
+    from refdes import textio as textio_mod
+
+    real_write = textio_mod.atomic_write_text
+
+    def guard(path, text):
+        if os.path.basename(path) == "ids.yaml":
+            raise PermissionError(f"file is read-only: {path}")
+        return real_write(path, text)
+
+    monkeypatch.setattr(textio_mod, "atomic_write_text", guard)
+    config = str(pending_id_project / "refdes-project.yaml")
+    status = cli_mod.main(["-c", config, "id"])
+
+    captured = capsys.readouterr()
+    said = captured.err + captured.out
+    assert status == 1, said
+    assert "cannot write .refdes/ids.yaml (read-only tree?)" in said, said
+    assert "Make .refdes/ writable and run it again." in said, said
+    assert "No space left on device" not in said, said
+
+
+def test_id_reports_a_permission_class_carrying_a_non_permission_errno_by_errno(
+    pending_id_project, monkeypatch, capsys
+):
+    """The explicit-errno edge at the command level: `PermissionError` built
+    with a non-permission errno is a permission *class* wearing a
+    non-permission *number*, and the number is the fact. `id` must report the
+    operating system's reason for it, not the marker -- the same rule the
+    helper test asserts, pinned where a user would see it. (Real OS denials
+    carry EACCES/EPERM and are covered by the chmod tests and the test
+    above; the class-first rule is for hand-built exceptions, and it must
+    not let an explicit ENOSPC hide behind the label.)"""
+    import errno
+
+    from refdes import textio as textio_mod
+
+    real_write = textio_mod.atomic_write_text
+
+    def boom(path, text):
+        if os.path.basename(path) == "ids.yaml":
+            raise PermissionError(errno.ENOSPC, "No space left on device")
+        return real_write(path, text)
+
+    monkeypatch.setattr(textio_mod, "atomic_write_text", boom)
+    config = str(pending_id_project / "refdes-project.yaml")
+    status = cli_mod.main(["-c", config, "id"])
+
+    captured = capsys.readouterr()
+    said = captured.err + captured.out
+    assert status == 1, said
+    assert "cannot write .refdes/ids.yaml (No space left on device)" in said, said
+    assert "cannot write .refdes/ids.yaml (read-only tree?)" not in said, said
+    assert "Make .refdes/ writable" not in said, said
+
+
+def test_destination_refusal_marker_tracks_the_errno():
+    """The helper-level contract: `(read-only tree?)` stays exactly as written
+    for the errnos a read-only tree produces (EROFS) and the denial it reads
+    as (EACCES, and any `PermissionError` with no errno behind it), and is
+    replaced by the operating system's own reason where it cannot be true --
+    the errno outranking the exception class where they disagree, and an
+    OSError with neither errno nor strerror reporting its own text (or its
+    class name when built empty) rather than `OS error None`."""
+    import errno
+
+    from refdes import model as model_mod
+
+    say = model_mod.destination_refusal
+    assert say("x.yaml", "c", OSError(errno.EROFS, "Read-only file system")) == (
+        "cannot write x.yaml (read-only tree?) -- c"
+    )
+    assert say("x.yaml", "c", PermissionError(errno.EACCES, "Permission denied")) == (
+        "cannot write x.yaml (read-only tree?) -- c"
+    )
+    assert say("x.yaml", "c", OSError(errno.EPERM, "Operation not permitted")) == (
+        "cannot write x.yaml (read-only tree?) -- c"
+    )
+    assert say("x.yaml", "c", OSError(errno.EIO, "Input/output error")) == (
+        "cannot write x.yaml (Input/output error) -- c"
+    )
+    assert say("x.yaml", "c", OSError(errno.ENAMETOOLONG, "Filename too long")) == (
+        "cannot write x.yaml (Filename too long) -- c"
+    )
+    # The errno outranks the class: a full disk wearing a permission label
+    # is still a full disk.
+    assert say("x.yaml", "c", PermissionError(errno.ENOSPC, "No space left on device")) == (
+        "cannot write x.yaml (No space left on device) -- c"
+    )
+    assert say("x.yaml", "c", OSError(9999, None)) == "cannot write x.yaml (OS error 9999) -- c"
+    # Built from a message alone -- textio's guard shape -- there is no errno
+    # to name, so the exception's own text is the reason.
+    assert say("x.yaml", "c", OSError("device failed")) == (
+        "cannot write x.yaml (device failed) -- c"
+    )
+    assert say("x.yaml", "c", OSError()) == "cannot write x.yaml (OSError) -- c"
+    assert say("x.yaml", "c") == "cannot write x.yaml (read-only tree?) -- c"
+
+
 # -------------------------------------------------------- standard add/remove-preset
 
 

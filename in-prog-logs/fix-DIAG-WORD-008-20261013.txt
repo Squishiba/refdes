@@ -1,0 +1,159 @@
+# fix DIAG-WORD-008 — destination refusals must not guess "read-only tree?"
+
+Branch: fix/destination-error-wording-20261013, base main 8b6a52e.
+Task from in-prog-logs/current-main-resweep-refusal-wording.tsv (read from
+the sibling main checkout /home/jorb/work/refdes/in-prog-logs/ — the tsv is
+untracked there and does not exist in this worktree).
+
+## The finding, confirmed before touching code
+
+model.py `DESTINATION_REFUSAL` hard-codes `(read-only tree?)` and ids.py
+caught bare `except OSError` at the write-back (HEAD :649) and the ledger
+save (:696), so any filesystem failure — ENOSPC, EIO, ENAMETOOLONG — was
+reported as a probable read-only tree, on a tree that was fully writable.
+Reproduced first with fault injection (probe `.scratch/dw008/`):
+hardware@3 project + `enospc_run.py` monkeypatching
+`refdes.textio.atomic_write_text` to raise `OSError(errno.ENOSPC, ...)`
+for writes to r.yaml/ids.yaml, then `cli.main(["id"])`:
+
+    ERROR items/r.yaml:3 — cannot write items/r.yaml (read-only tree?) -- ...
+    ERROR <project> — cannot write .refdes/ids.yaml (read-only tree?) -- ...
+    STATUS 1 / TREE_WRITABLE True True
+
+`os.access` confirmed both dirs writable during the run, so the printed
+hint was false. This contradicts docs/cli-reference.md's own stated
+principle (:106-113): for writes that "can be refused for reasons that
+have nothing to do with a read-only tree ... the marker would be a claim
+refdes cannot make there" — the reason build's site refusal and keys
+adopt/restore already report the OS's own reason.
+
+## The fix
+
+- model.py: new `could_be_read_only(exc)` — True for `PermissionError`
+  (including textio's own read-only guards, which raise it with no errno —
+  that's why the predicate checks the type, not just errno 13, which would
+  also have broken root/Windows CI) and for EACCES/EPERM/EROFS
+  (`READ_ONLY_ERRNOS`). New `write_refusal_reason(exc)` follows the
+  existing `strerror`-or-bare-errno convention already used by
+  sources.py:440, citations.py:2291, cli.py:423.
+- `destination_refusal(path, consequence, cause=None)`: with `cause`, the
+  parenthetical becomes the OS's own reason when `could_be_read_only` is
+  False; byte-identical `(read-only tree?)` otherwise, including every
+  call site that passes no cause.
+- ids.py: both catches bind `exc`, pass it, and split the remedy sentence
+  — "Make the tree writable / Make .refdes/ writable" only for failures
+  that could be one; "Fix the reported failure ..." otherwise. Read-only
+  output is byte-identical to before.
+
+## Verification
+
+- `.scratch/dw008/enospc_run.py` after the fix: both refusal lines read
+  "cannot write ... (No space left on device) -- ... Fix the reported
+  failure ..."; exit code, accounting ("allocated 0 id(s)", nothing
+  burned) unchanged.
+- New tests in tests/test_readonly_explicit_writes.py (after the `id`
+  section): ENOSPC at both sites, ENOSPC at the ledger only (ids land,
+  remedy alone changes), injected no-errno `PermissionError` keeping the
+  marker byte-for-byte (runs as root/Windows, where the chmod tests skip),
+  and a helper-level test of `destination_refusal` across
+  EROFS/EACCES/EPERM/EIO/ENAMETOOLONG/unknown-errno/no-cause.
+- Targeted: test_readonly_explicit_writes.py 23 passed; then
+  test_load_time_writes/test_calc_rewrite/test_reseal_audit/test_revise
+  (the other files asserting the marker) 147 passed. Full suite:
+  3606 passed, 2 skipped (274 s). `ruff check` on the three touched
+  files shows the same 4 findings as HEAD's copies (.scratch/dw008/
+  baseline/) — all pre-existing UP037/RUF059, none introduced.
+
+## Limitations / deliberately out of scope
+
+- Scope was model.py/ids.py/tests. `history._store_refusal`, scaffold's
+  two preset refusals, `revise._refuse_item_write` and `stub_tests` all
+  catch `OSError as exc` and still call `destination_refusal` without the
+  cause, so they keep the unconditional marker — same latent mis-blame,
+  ready for a follow-up now that the helper accepts the cause.
+- The load-time degrade (`READ_ONLY_REFUSAL`/`read_only_refusal`, the
+  "(load could not write this file ...)" warning) is likewise untouched;
+  the finding named only the destination shape.
+- docs/cli-reference.md:102-105 says destination refusals "do all contain
+  `(read-only tree?)`" — true for every failure that could be one, but
+  under this fix a non-permission refusal reports the OS reason instead.
+  The docs sentence now needs a qualifier; left for the docs follow-up
+  because docs were out of the stated scope.
+
+Finished: yes. Committed on this branch; no push/PR per instructions.
+Also added `changelog.d/destination-refusal-real-cause.fixed.md`, matching
+the per-fix changelog-fragment convention (HEAD~1 did the same).
+
+## Review follow-up (same branch, on 4bddfa5)
+
+1. docs/cli-reference.md was left false by the fix: the filter section
+   claimed destination refusals "do all contain `(read-only tree?)`" with
+   two exceptions. Rewrote that passage from probe output
+   (`.scratch/dw008/enospc_run.py` re-run after the fix:
+   `cannot write .refdes/ids.yaml (No space left on device) -- ...`):
+   the marker now stands for every failure a read-only tree *could*
+   produce, `id`'s non-permission refusals are the third documented
+   exception, and the "two exceptions" count in the section intro is
+   de-counted. The `id` row of the destination table gained the
+   full-disk wording.
+2. `write_refusal_reason(OSError('device failed'))` printed
+   `OS error None` (verified by probe before touching code): an OSError
+   built from a message alone has errno None *and* strerror None, so the
+   old `strerror or f"OS error {errno}"` fallback named nothing. Fallback
+   chain is now strerror -> `OS error {errno}` -> `str(exc)` -> class
+   name (for `OSError()`, str is empty). Pinned in the helper test.
+3. `could_be_read_only(PermissionError(ENOSPC, ...))` was True — the
+   class outranked the number. Decided: the errno is the specific fact
+   and outranks the class (a hand-built PermissionError wearing ENOSPC is
+   a full-disk claim; textio's real guards set no errno, so the class
+   decides only when there is no errno). Pinned at helper level and at
+   the `id` command level (injected PermissionError(ENOSPC) -> "(No space
+   left on device)", no marker).
+4. Tests: 24 passed in test_readonly_explicit_writes.py; full suite
+   3607 passed, 2 skipped. ruff on the touched files: same 4 pre-existing
+   findings as HEAD, none added.
+5. Noted, not changed (out of the stated scope): docs/design/keys.md:466
+   calls keys adopt/restore "the one family of explicit writes" without
+   the marker — true pre-4bddfa5, now shared with `id`'s non-permission
+   refusals, which cli-reference documents.
+
+Finished: yes. No push/PR/merge/stash.
+
+## PR prep: rebase onto origin/main (post #212)
+
+main advanced 8b6a52e -> 89ada21 (10 commits) before PR prep. Fetched
+once, inspected the intervening changes to the files this branch touches:
+- #212 store read/decode: ids.py gained `SchemaError` in the
+  `from .model import ...` line and wrapped `load_ledger`'s open/parse
+  in UnicodeDecodeError/YAMLError handling. My branch's ids.py changes
+  are the import line + the two write-catch sites; the only overlap is
+  the import line (mine reflowed it parenthesized, #212 edited it in
+  place). Rebase conflict there, resolved by merging: the parenthesized
+  import now carries SchemaError AND could_be_read_only. #212's
+  load_ledger wrap is untouched by this branch and survived untouched
+  (verified by grep on the rebased file). No conflicts in model.py,
+  docs, tests, changelog.
+- Docs: #212's cli-reference.md additions are at line ~2066 (workbench
+  task pane), far from this section (lines 55-117) -- no interaction.
+
+Re-verified through the real CLI with PYTHONPATH pinned to this
+worktree's src (confirmed via refdes.__file__):
+- ENOSPC probe (.scratch/dw008/enospc_run.py): both refusal lines
+  "(No space left on device)" + "Fix the reported failure", exit 1.
+- chmod a-w items/ (euid 1000): "cannot write items/r.yaml (read-only
+  tree?) -- ... Make the tree writable and run it again.", exit 1.
+Tests: the #212-adjacent suites (test_yaml_loaders, test_history,
+test_keys_adopt, test_seal, test_reseal_audit) plus test_ids,
+test_readonly_explicit_writes, test_load_time_writes: 212 passed. Full
+suite: 3695 passed, 2 skipped (main added ~88 tests; no regressions).
+ruff on touched files: same 3 UP037 + 1 RUF059 as the base, none added.
+
+Docs sync check: the filter section's "do all contain" sentence is the
+one this branch fixed (rewritten with the three exceptions in 4ebd028,
+verified against probe output above); the keys row's "the one family
+that does not carry" phrasing became false the same way and is fixed in
+the prep commit -- keys adopt/restore remain the family that *never*
+carries the marker, with `id`'s refusals carrying it only when the
+failure could be one.
+
+No push of shared main, no merge, no stash, no subagents.
