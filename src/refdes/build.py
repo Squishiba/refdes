@@ -12,6 +12,7 @@ import threading
 from collections.abc import Iterator
 
 from markdown_it import MarkdownIt
+from markdown_it.common.utils import escapeHtml
 
 from . import blocked as blocked_mod
 from . import blocks as blocks_mod
@@ -96,6 +97,52 @@ PROTECTED_RE = re.compile(
 IMG_SRC_RE = re.compile(r'(<img\b[^>]*?\bsrc=")([^"]*)(")', re.IGNORECASE)
 # A URL (has a scheme) or protocol-relative reference: not ours to validate.
 _URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:|^//")
+
+
+# ---------------------------------------------------------------- image src canon
+#
+# One canonical spelling of an image `src`, shared by the hash pass and the
+# render pass (IMAGE-ASSET-002). The canonical form is the **markdown-it token
+# src**: the authored URL as the parser recorded it, mdurl-normalised
+# (percent-escaped), before any HTML-attribute escaping. The hash pass reads
+# exactly that (`child.attrGet("src")`), and it is the spelling the filesystem
+# is named in. The render pass cannot: `_process_images` scans *rendered*
+# HTML, where markdown-it's renderer has escaped the attribute value with
+# `escapeHtml` (`& < > "` -> `&amp; &lt; &gt; &quot;`). Resolving the escaped
+# spelling against the filesystem is the bug: `![a](a&b.png)` renders
+# `src="a&amp;b.png"`, which names no file, so the build errored on and
+# unpublished an image its own content hash had already recorded.
+#
+# The pair below is the exact inverse of markdown-it's own escaper -- decode
+# the four entities it emits, in reverse order of its escape order (the
+# `&amp;` decode last, so `&amp;lt;` round-trips to `&lt;`, never to `<`).
+# `html.unescape` is NOT this: it decodes every named and numeric entity,
+# which over-decodes srcs that literally contain `&not;` or `&#38;` and
+# breaks the round-trip. Importing `escapeHtml` from markdown-it (rather than
+# re-typing the four replacements) keeps the encode side literally the
+# function that produced the render pass's input, so the pair cannot drift
+# from it: `image_src_from_html(escapeHtml(x)) == x` for every token src `x`.
+
+_IMG_ATTR_ENTITIES = (("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"'), ("&amp;", "&"))
+
+
+def image_src_from_html(src: str) -> str:
+    """The canonical src behind an `<img src="...">` attribute value taken
+    from rendered HTML: markdown-it's attribute escaping, decoded. Feed the
+    result to the shared resolvers (`_local_image_path`, `_search_image_src`,
+    the `_URL_SCHEME_RE` skip) -- never the raw attribute text -- so the
+    render pass resolves the identical string the hash pass hashed."""
+    for entity, char in _IMG_ATTR_ENTITIES:
+        src = src.replace(entity, char)
+    return src
+
+
+def image_src_to_html(src: str) -> str:
+    """The renderable attribute value for a canonical src: markdown-it's own
+    escaper, so the rewritten page spells the src exactly the way the render
+    pass's input was spelled before the swap -- a browser decoding the
+    attribute reaches the real asset filename."""
+    return escapeHtml(src)
 # A whole paragraph that is nothing but one image immediately followed by a
 # Quarto-style attribute suffix: `![alt](src){width=60% caption="..."}`. Anything
 # else -- no suffix, other text in the paragraph -- is left completely alone.
@@ -2213,6 +2260,10 @@ def _image_inputs_hash_value(project: Project, item: Item, digest_cache: dict):
     configuration `render_bodies` uses, so the hash pass and the render pass
     see the identical set of images: code fences and escaped raw `<img>`
     (html is disabled) contribute none, link-wrapped images contribute theirs.
+    The token src *is* the canonical spelling of `image_src_from_html`'s
+    docstring -- the hash pass reads it straight, with no decode step, which
+    is what keeps every existing content hash bit-identical; the render pass
+    reaches the same string by decoding the attribute markdown-it escaped.
     """
     md = _markdown_parser()
     srcs = []
@@ -2801,9 +2852,14 @@ def _process_images(
     a content-hashed destination path, computed once per source and reused for
     every further reference to the same file) and rewritten to
     `assets/<hashed path>`, which is where `render_site` copies it. One that does
-    not resolve is a build error, not a warning: unlike a dangling cross-reference,
+    not resolve     is a build error, not a warning: unlike a dangling cross-reference,
     there is no sensible way to render a missing image, and now that a resolving
     src is actually made to work end to end, a broken one should stop the build.
+
+    The scanned attribute carries markdown-it's HTML-escaped spelling of the
+    src; it is canonicalised with `image_src_from_html` before any resolution,
+    so this pass and `_image_inputs_hash_value` act on the identical string
+    (IMAGE-ASSET-002), and the rewrite goes out through `image_src_to_html`.
     """
 
     def record(ok: bool, src: str, rel: str | None = None, dest: str | None = None) -> None:
@@ -2817,7 +2873,11 @@ def _process_images(
             )
 
     def swap(match: re.Match) -> str:
-        prefix, src, suffix = match.group(1), match.group(2), match.group(3)
+        prefix, attr, suffix = match.group(1), match.group(2), match.group(3)
+        # Canonicalise first: the attribute carries markdown-it's escaped
+        # spelling, every resolver below (and the hash pass) speak the token
+        # spelling -- see the block comment on `image_src_from_html`.
+        src = image_src_from_html(attr)
         if not src or _URL_SCHEME_RE.match(src):
             return match.group(0)
         full_path = _local_image_path(project, src, where_file)
@@ -2845,7 +2905,12 @@ def _process_images(
             dest = _hashed_leaf(rel, digest)
             project.assets[rel] = dest
         record(True, src, rel, dest)
-        return f"{prefix}assets/{dest}{suffix}"
+        # Re-escape on the way out: the published page must carry the src in
+        # the same spelling markdown-it's renderer emits, so a browser
+        # decoding the attribute reaches the real asset filename -- `a&b.<h>.png`
+        # on disk, `a&amp;b.<h>.png` in the tag. For an entity-free path --
+        # every ordinary project -- this is the identity rewrite.
+        return f"{prefix}{image_src_to_html(f'assets/{dest}')}{suffix}"
 
     return IMG_SRC_RE.sub(swap, html)
 

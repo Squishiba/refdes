@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 
 from .. import calc
-from ..build import INLINE_VALUE_RE
+from ..build import INLINE_VALUE_RE, image_src_from_html
 from . import api, security
 from .preview import PreviewManager
 from .state import Poller, ProjectState
@@ -106,7 +106,10 @@ def _decorate_images(page: str, project, item) -> str:
         src_attr = _SRC_ATTR_RE.search(tag)
         if src_attr is None:
             return tag
-        src = src_attr.group(1)
+        # The page carries the escaped spelling; `image_results` records the
+        # canonical token spelling (`build._process_images`) -- canonicalise
+        # before comparing, or an `a&b.png` src matches neither side.
+        src = image_src_from_html(src_attr.group(1))
         if src in failed:
             return tag + (
                 '<span class="refdes-squiggle bad mono small">'

@@ -29,6 +29,7 @@ import subprocess
 import sys
 
 from conftest import write_project_config
+from helpers import _build_and_render
 
 from refdes import build as build_mod
 from refdes import keys, parse, seal
@@ -369,3 +370,94 @@ def test_format4_seal_survives_bump_then_image_change_is_loud(tmp_path):
     assert any(
         "modified since it was sealed" in d.message for d in p4.errors
     ), p4.errors
+
+
+# ------------------------------------------------- one canonical src (IMAGE-ASSET-002)
+
+
+def test_src_with_ampersand_resolves_in_both_passes_and_publishes(tmp_path):
+    """One image, one spelling of its name. The hash pass reads the raw
+    markdown-it token src; the render pass scans the rendered HTML, where the
+    renderer has escaped `&` to `&amp;` inside the attribute. Resolving the
+    escaped spelling (the finding) made the build error on and fail to publish
+    an image its own content hash had already recorded. Sabotage: resolve the
+    raw attribute in the render pass (the finding returns); decode with
+    `html.unescape` (over-decodes a filename that literally carries `&amp;`
+    -- the test below); percent-decode on top (the documented
+    `figures/thermal%20curve.png` lookup miss becomes a hit the picker's
+    contract never promised)."""
+    p = _build(tmp_path, {"a.md": _item("DEC-001", "![board](a&b.png)\n")},
+               {"items/a&b.png": PNG_A})
+    assert not p.errors, p.errors
+    digest = _digest(PNG_A)
+    assert _payload(p, p.item_by_id("DEC-001"))["images"] == [
+        ["items/a&b.png", digest]
+    ]
+    # the published page spells the src the way the renderer spells it -- a
+    # browser decodes `&amp;` back to the real asset filename
+    assert (
+        f'src="assets/items/a&amp;b.{digest}.png"' in p.item_by_id("DEC-001").body_html
+    )
+    out = _build_and_render(tmp_path)
+    published = os.path.join(out, "assets", "items", f"a&b.{digest}.png")
+    assert os.path.isfile(published)
+    with open(published, "rb") as fh:
+        assert fh.read() == PNG_A
+
+
+def test_literal_amp_entity_in_a_filename_round_trips(tmp_path):
+    """`![x](a&amp;amp;b.png)` parses to the token src `a&amp;b.png` -- a file
+    whose name literally carries the four characters `&amp;` -- and the
+    attribute carries it escaped once more, as `&amp;amp;`. The render pass
+    decodes exactly one entity layer and lands on the real file; a decoder
+    that keeps decoding lands on `a&b.png`, which is not this file. The hash
+    contribution is the token spelling, so hash and published leaf agree
+    there too."""
+    p = _build(tmp_path, {"a.md": _item("DEC-001", "![x](a&amp;amp;b.png)\n")},
+               {"items/a&amp;b.png": PNG_A})
+    assert not p.errors, p.errors
+    digest = _digest(PNG_A)
+    assert _payload(p, p.item_by_id("DEC-001"))["images"] == [
+        ["items/a&amp;b.png", digest]
+    ]
+    assert (
+        f'src="assets/items/a&amp;amp;b.{digest}.png"'
+        in p.item_by_id("DEC-001").body_html
+    )
+    out = _build_and_render(tmp_path)
+    assert os.path.isfile(os.path.join(out, "assets", "items", f"a&amp;b.{digest}.png"))
+
+
+def test_url_with_ampersand_is_untouched_by_the_canonicalisation(tmp_path):
+    """Scheme srcs skip resolution in both passes -- on the canonical
+    spelling, where the scheme is visible before any escaping. Sabotage:
+    canonicalise after the scheme test, or feed a URL through the resolver
+    (an `assets/https:/...` rewrite of an external image)."""
+    p = _build(
+        tmp_path,
+        {"a.md": _item("DEC-001", "![x](https://example.com/a&b.png)\n")},
+        {},
+    )
+    assert not p.errors, p.errors
+    item = p.item_by_id("DEC-001")
+    assert 'src="https://example.com/a&amp;b.png"' in item.body_html
+    assert p.assets == {}
+    assert "images" not in _payload(p, item)
+
+
+def test_recorded_src_is_the_spelling_the_filesystem_uses(tmp_path):
+    """`Project.image_results` answers upload.py's capture check ("would
+    landing this file re-point that reference?") by comparing the recorded
+    src to a *filesystem* leaf, and serve's preview decoration by comparing
+    published attributes to recorded srcs. Both questions are about the
+    authored spelling; at the finding the record carried the HTML-escaped
+    one, and a reference to `a&b.png` answered to neither. Sabotage: record
+    the raw attribute (the escaped spelling leaks into the upload check)."""
+    p = _build(tmp_path, {"a.md": _item("DEC-001", "![board](a&b.png)\n")},
+               {"items/a&b.png": PNG_A})
+    assert not p.errors, p.errors
+    (record,) = p.image_results["DEC-001"]
+    assert record["ok"] is True
+    assert record["src"] == "a&b.png"
+    assert record["rel"] == "items/a&b.png"
+    assert record["dest"] == f"items/a&b.{_digest(PNG_A)}.png"

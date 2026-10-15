@@ -64,6 +64,17 @@ title: A different item with its own broken image
 ![Nope](other-missing.png)
 """
 
+AMP_MD = """\
+---
+id: NOTE-003
+type: note
+board: board-a
+title: An image whose name carries an ampersand
+---
+
+![Amp](a&b.png)
+"""
+
 PNG = b"\x89PNG\r\n\x1a\n"
 
 PROVENANCE = re.compile(r'data-refdes-src="([^"]+)" title="([^"]+)"')
@@ -76,6 +87,7 @@ def served(tmp_path):
     items.mkdir()
     (items / "notes.md").write_text(NOTES_MD, encoding="utf-8")
     (items / "other.md").write_text(OTHER_MD, encoding="utf-8")
+    (items / "amp.md").write_text(AMP_MD, encoding="utf-8")
     for d in ("figures-a", "figures-b"):
         (tmp_path / d).mkdir()
     # good.png resolves from one directory; two.png is ambiguous between the
@@ -85,6 +97,10 @@ def served(tmp_path):
     # resolves relative to items/notes.md itself, so the build content-hashes
     # it (only `site.assets:` bulk-copy files stay identity-mapped unhashed)
     (items / "good2.png").write_bytes(PNG + b"second")
+    # the ampersand name resolves beside items/amp.md: the render pass sees
+    # the attribute escaped to `a&amp;b.png`, the hash pass the raw token
+    # `a&b.png` -- one image, two spellings (IMAGE-ASSET-002)
+    (items / "a&b.png").write_bytes(PNG + b"amp")
     (tmp_path / "figures-b" / "two.png").write_bytes(b"\x89PNG\r\n\x1a\nother")
     app = EditorApp(str(tmp_path / "refdes-project.yaml"), poll_interval=0.05)
     app.start()
@@ -166,6 +182,25 @@ def test_only_this_items_resolutions_are_decorated(served):
     html = _body(client, app, "NOTE-001")
     assert html.count("data-refdes-src") == 2
     assert "data-refdes-src" not in _body(client, app, "NOTE-002")
+
+
+def test_an_escaped_image_name_keeps_its_provenance(served):
+    """IMAGE-ASSET-002: the build records the canonical (authored) src, the
+    published page carries the renderer's escaped spelling -- the decoration
+    meets them on the canonical side, so `a&b.png` is decorated like any
+    other resolved image. Sabotage: compare the published attribute raw (no
+    ampersand name ever matches), or record the escaped spelling (the build
+    itself then finds no file behind the image)."""
+    app, client = served
+    html = _body(client, app, "NOTE-003")
+    provenance = dict(PROVENANCE.findall(html))
+    # the decoration fires (the canonical src matches the published attr),
+    # and the attributes it injects are page-escaped like everything else
+    assert list(provenance) == ["items/a&amp;b.png"]
+    digest = provenance["items/a&amp;b.png"].split(" · ")[1]
+    assert re.fullmatch(r"[0-9a-f]{16}", digest)
+    assert f'src="assets/items/a&amp;b.{digest}.png"' in html
+    assert "did not resolve" not in html
 
 
 # ------------------------------------------------- response-only boundary
