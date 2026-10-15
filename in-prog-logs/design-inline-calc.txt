@@ -211,7 +211,7 @@ Difficulties / choices
 - This log is now committed without amending so that its commit citations remain
   stable.
 
-Fix round 6 (chunk 1 doc review and chunk 2 log review, addressed in commit <pending>)
+Fix round 6 (chunk 1 doc review and chunk 2 log review, addressed in commit fed44dc)
 ------------------------------------------------------------------------------------
 Chunk 1 findings addressed in docs/design/inline-calc.md:
 1. setRangeText undo claim (§6.3 and Q8). The doc previously listed
