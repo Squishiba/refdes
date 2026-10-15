@@ -1,0 +1,100 @@
+Fix IMAGE-ASSET-001 — build crash on mixed None/str image digests
+Branch: fix/image-inputs-hash-sort-20261013 (worktree), pinned at 8b6a52e
+Finished: yes.
+
+Finding (read from /home/jorb/work/refdes/in-prog-logs/current-main-resweep-image-digests.tsv,
+read-only, IMAGE-ASSET-001 row):
+  `refdes build` exits 1 with
+  TypeError: '<' not supported between instances of 'NoneType' and 'str'
+  raised from _image_inputs_hash_value (build.py `return sorted([list(entry)
+  for entry in entries])`), via compute_hashes, before the render pass — so
+  0 "image src" diagnostics are ever emitted.
+
+Reproduction (verified before touching anything):
+  Probe in .scratch/img001/probe.py: item items/dec-a.md referencing
+  `assets/sub/img.png` (relative-first miss against items/, separator ->
+  [src, None] sentinel) and `../assets/sub/img.png` (resolves to the same
+  project-relative path -> [rel, digest]). Same first component, None vs
+  str -> plain pair sort crashes. Reproduced both at function level and
+  through the real CLI (refdes build via `python3 -c ... refdes.cli.main`)
+  — exit 1, traceback at build.py:2196 via compute_hashes (build.py:3333),
+  no image diagnostics. Matches the TSV evidence exactly.
+
+Fix (src/refdes/build.py, in _image_inputs_hash_value):
+  Sort with a total-order key that never compares None with str:
+    sorted(([path, digest] for ...), key=(path, digest is not None, digest or ""))
+  For all-str-digest sets the key reduces to the plain (path, digest) pair
+  comparison (second component constant True), so ordinary projects hash
+  byte-identically; the None sentinel takes a deterministic slot (before
+  any digest on the same path). Output shape unchanged (list of
+  [path, digest-or-None] lists, still feeds _hash_payload["images"]).
+
+Regression test (tests/test_image_hash.py::
+test_unresolved_text_equal_to_resolved_path_sorts_and_hashes):
+  - both image states in one body; asserts the build reports the ordinary
+    "does not exist" diagnostic instead of crashing, and pins the exact
+    sorted payload (None sentinel first);
+  - body-order swap + subprocess sweep with PYTHONHASHSEED 0/1/42 asserting
+    identical content_hash, so determinism is proven against set-iteration
+    variation, not asserted within one fixed process.
+  Sabotage checks run: pre-fix code fails with the finding's TypeError;
+  `return list(entries)` (unsorted) fails the payload/determinism
+  assertions. Test is meaningful.
+
+Difficulties:
+  - First sabotage attempt "passed" the new test because tests/conftest.py
+    inserts <tests>/../src at sys.path[0], shadowing PYTHONPATH — the
+    copied pre-fix src was never imported. Fixed by building a full copy
+    tree (.scratch/img001/prefix-tree with its own src+tests) so conftest's
+    relative insert lands on the reverted code.
+  - The shared venv's `refdes` is an editable install pointing at
+    /home/jorb/work/refdes (main checkout), not this worktree — every CLI/
+    probe run below used PYTHONPATH=<worktree>/src and asserted
+    refdes.__file__ is inside the worktree.
+
+Verification (all from the worktree, PYTHONPATH=worktree/src):
+  - targeted: tests/test_image_hash.py + test_image_search.py +
+    test_serve_images.py + test_markdown_parser_cache.py +
+    test_calc_block_hash.py + test_calc_cross_ref_hash.py: 70 passed.
+  - full suite: 3603 passed, 2 skipped (4m27s).
+  - ruff: `ruff check src/refdes/build.py tests/test_image_hash.py` reports
+    one pre-existing I001 in build.py's import block, verified present at
+    HEAD (git show HEAD:src/refdes/build.py | ruff check --stdin-filename)
+    — not introduced here; test file clean. Per AGENTS.md a green
+    `ruff check .` is not a valid gate.
+  - CLI after fix on the probe project: exit 1 with
+    "ERROR items/dec-a.md:2 [DEC-001] — image src 'assets/sub/img.png'
+    does not exist" and the site written — the ordinary diagnostic, not a
+    traceback.
+
+Changelog fragment: changelog.d/image-hash-mixed-none-crash.fixed.md.
+Scope kept to IMAGE-ASSET-001 only; IMAGE-ASSET-002/006/007 untouched.
+
+--- 2026-10-14: PR prep pass (opencode) ---
+
+Task: rebase the unpushed branch onto newest main, verify, push, open PR.
+
+  - Rebased c303bdb onto origin/main 21fb2c4 (main had moved past the
+    assigned 374a4aa: #213, #197, #214 merged). Clean rebase, no
+    conflicts — none of the new main commits touch build.py
+    (git diff 8b6a52e origin/main -- src/refdes/build.py is empty).
+    New head 3d51855.
+  - Targeted tests after rebase (PYTHONPATH=worktree/src,
+    refdes.__file__ confirmed inside the worktree):
+    tests/test_image_hash.py 11 passed; tests/test_build.py 35 passed;
+    tests/test_extends.py 57 passed (oracle_dump pins content hashes —
+    the no-hash-moves guarantee under the new sort key). Full suite not
+    re-run: the new main commits are serve/workbench/changelog-only,
+    no concrete integration risk with build.py.
+  - ruff scoped: test_image_hash.py clean; build.py shows one I001,
+    verified identical on origin/main's build.py — pre-existing,
+    untouched by this diff (which adds no imports).
+  - CLI repro on a fresh probe project (.scratch/hash-sort-pr/repro,
+    split refdes-project.yaml + refdes-schema.yaml per current main):
+    origin/main code -> TypeError traceback at build.py:2196, exit 1;
+    this branch -> "ERROR items/a.md:2 [DEC-001] — image src
+    'assets/sub/img.png' does not exist", site written, exit 1.
+    Ran with PYTHONPATH=worktree/src (shared venv refdes is an
+    editable install at /home/jorb/work/refdes, not this worktree).
+
+Status: rebased, verified, pushed; PR opened against main, not merged.

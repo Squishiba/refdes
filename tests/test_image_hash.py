@@ -24,6 +24,9 @@ and everything else is a moves/does-not-move relationship.
 from __future__ import annotations
 
 import hashlib
+import os
+import subprocess
+import sys
 
 from conftest import write_project_config
 
@@ -217,6 +220,65 @@ def test_ambiguous_bare_src_contributes_sentinel_and_still_errors(tmp_path):
                config=config)
     assert any("ambiguous" in d.message for d in p.errors), p.errors
     assert _payload(p, p.item_by_id("DEC-001"))["images"] == [["x.png", None]]
+
+
+def test_unresolved_text_equal_to_resolved_path_sorts_and_hashes(tmp_path):
+    """IMAGE-ASSET-001: a raw unresolved-with-separator src whose text equals
+    another src's resolved project-relative path puts `[path, None]` and
+    `[path, digest]` in one set, so sorting the raw pairs compared the ``None``
+    sentinel with a str digest and raised TypeError -- crashing the whole hash
+    pass, and the build, before the render pass could report the missing image.
+    Sabotage: sort the pairs themselves (the crash); or sort by `str(pair)`,
+    which survives but orders the sentinel by the text `'None'`, after every
+    digest -- an order nobody chose; or return the set unsorted (the forced
+    seed sweep below then disagrees with the in-process hash)."""
+    expected = [
+        ["assets/sub/img.png", None],
+        ["assets/sub/img.png", _digest(PNG_A)],
+    ]
+    unresolved_first = (
+        "![bare-rel](assets/sub/img.png)\n\n"
+        "![resolved](../assets/sub/img.png)\n"
+    )
+    resolved_first = (
+        "![resolved](../assets/sub/img.png)\n\n"
+        "![bare-rel](assets/sub/img.png)\n"
+    )
+    for body in (unresolved_first, resolved_first):
+        p = _build(tmp_path, {"a.md": _item("DEC-001", body)},
+                   {"assets/sub/img.png": PNG_A})
+        assert any("does not exist" in d.message for d in p.errors), (
+            "the build must report the unresolved src, not crash: " + str(p.errors)
+        )
+        assert _payload(p, p.item_by_id("DEC-001"))["images"] == expected
+
+    p = _build(tmp_path, {"a.md": _item("DEC-001", unresolved_first)},
+               {"assets/sub/img.png": PNG_A})
+    expected_hash = p.item_by_id("DEC-001").content_hash
+    # The set-iteration proof proper: recompute the same item's hash in
+    # subprocesses with forced PYTHONHASHSEED values. str hashing is
+    # randomized per process, so a two-entry set can iterate in either
+    # order run to run; if the hash contribution's order came from the set
+    # rather than the sort key, different seeds would produce different
+    # hashes. Sabotage: return list(entries) unsorted -- the seeds disagree.
+    script = (
+        "import sys\n"
+        "from refdes import build as b, parse\n"
+        "from refdes.schema import load_project\n"
+        "pr = load_project(config_path=sys.argv[1])\n"
+        "parse.load_items(pr)\n"
+        "b.compute_hashes(pr)\n"
+        "print(pr.item_by_id('DEC-001').content_hash)\n"
+    )
+    src_dir = os.path.dirname(os.path.dirname(build_mod.__file__))
+    for seed in ("0", "1", "42"):
+        env = dict(os.environ, PYTHONPATH=src_dir, PYTHONHASHSEED=seed)
+        result = subprocess.run(
+            [sys.executable, "-c", script,
+             str(tmp_path / "refdes-project.yaml")],
+            capture_output=True, text=True, check=True, env=env,
+        )
+        assert result.stdout.strip() == expected_hash, f"seed {seed} diverged"
 
 
 def test_image_in_code_fence_contributes_nothing(tmp_path):
