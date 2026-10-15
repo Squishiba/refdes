@@ -265,7 +265,9 @@ questions an author actually has are "did it take effect" and "is this here on
 purpose, or did someone forget it". It is a note and not a warning: it changes
 no exit code and no `N errors, M warnings` count. It prints once and goes
 quiet (run-6a F10), the same posture as the `.refdes/schema.json ... refreshed`
-note: the announced set lives in a gitignored record under `.refdes/`, and a
+note: the announced set lives in a gitignored record under `.refdes/`
+(`.refdes/sealing-optin.json`, which `refdes init` puts in the project's
+`.gitignore` as it does the schema's own record), and a
 run that prints leaves it in step. Taking the overlay back out is recorded
 too, so re-adding it prints again. A `--no-write` (or `build --dry-run`) run
 prints by the same rule and records nothing, so the next writable run still

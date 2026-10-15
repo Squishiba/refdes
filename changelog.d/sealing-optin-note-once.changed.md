@@ -7,8 +7,10 @@
   news: the first run after the opt-in appears, and again when the set of
   opted-in types changes (removing the overlay is recorded, so re-adding it
   prints again) — the same posture as the `.refdes/schema.json ... refreshed`
-  note, with the announced set recorded in a gitignored
-  `.refdes/sealing-optin.json`. A `--no-write` (or `build --dry-run`) run
+  note, with the announced set recorded in
+  `.refdes/sealing-optin.json`, gitignored per-checkout state: `refdes init`
+  adds it to a new project's `.gitignore` beside the `.refdes/schema.json`
+  entry. A `--no-write` (or `build --dry-run`) run
   prints by the same rule and records nothing, so the next writable run
   still prints; `--verbose` always prints. The note's text, its stderr home,
   and its silence in the counts and exit codes are unchanged.

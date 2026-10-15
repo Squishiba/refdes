@@ -71,3 +71,37 @@ Restored the condition; 19/19 green in the file.
 
 Sweep-3 items checked: none encountered on this task (no stale tooling
 behavior found; ruff scoped as instructed, suite command as COMMON.txt).
+
+--- FIX ROUND (PR #238 review, agent a4ba023) ---
+
+Finding 1 (MEDIUM, state file not gitignored) — true on arrival:
+`git check-ignore -v .refdes/sealing-optin.json` exit 1; .gitignore carried
+only **/.refdes/schema.json, .refdes/copies/, **/.refdes-write.lock;
+scaffold._REFDES_GITIGNORE had no entry. Fixed:
+- .gitignore: `**/.refdes/sealing-optin.json` (same **/ posture as schema.json).
+- scaffold.py: _SEALING_OPTIN_GITIGNORE (_GitignoreEntry, covers=_covers(…,
+  ".refdes")) added to _REFDES_GITIGNORE after the schema entry, so init
+  writes it into every new project's .gitignore and announces it.
+- tests/test_scaffold.py: entry added to every exact-list assertion
+  (ignores-by-git git probe, nested-repo probe, exact pattern list,
+  adds-once count, read-only-covers-everything 4→5 lines, covering parametrize
+  +3 rows, untouched "all five", no-vscode list, both cli announcement lines).
+- New end-to-end test test_sealing_optin_note.py::
+  test_the_state_file_is_gitignored_the_way_schema_json_is: real init + real
+  writable check + `git check-ignore` on the file the writer produces.
+- Wording corrected where the claim lives: cli.py constant comment (names
+  scaffold._SEALING_OPTIN_GITIGNORE), design-log.md, changelog fragment,
+  PR body (gh pr edit).
+Finding 2 (LOW, non-atomic record write) — textio.write_text →
+textio.atomic_write_text in _record_sealing_optins (same posture as
+ids.py/revise.py; the except OSError still covers atomic_write_text's
+PermissionError guards). Note: the review's premise "the way the schema.json
+record does" is off — schema_json.write_schema uses textio.write_text
+(src/refdes/schema_json.py:439); verified before writing the docstring, which
+cites ids.py/revise.py, not schema.json, for the atomic posture.
+Finding 3 (trailers) — IGNORED per task: COMMON.txt's deliberate convention.
+Finding 4 — informational, behaviour left as is per task.
+
+Docs sync (AGENTS.md: don't ship stale claims): the init-gitignore enumerations
+in cli-reference.md (list, file table row, "three gitignored paths"→four),
+getting-started.md ("four paths"→five), standard-library.md all updated.

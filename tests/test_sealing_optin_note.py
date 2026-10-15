@@ -38,10 +38,14 @@ each test below asserts it.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+
 import pytest
 from conftest import write_project_config
 
 from refdes import cli as cli_mod
+from refdes import scaffold as scaffold_mod
 from refdes.schema import load_project
 
 BASE = (
@@ -282,6 +286,34 @@ def test_a_corrupt_state_file_prints_the_note_and_is_rewritten(tmp_path, capsys)
     _state_file(tmp_path).write_text("{not json", encoding="utf-8")
     assert len(_notes(_run(capsys, cfg, "check")[1])) == 1  # re-printed
     assert _notes(_run(capsys, cfg, "check")[1]) == []  # record repaired
+
+
+def test_the_state_file_is_gitignored_the_way_schema_json_is(tmp_path):
+    """The record's "same posture as schema.json" claim is a git claim, so
+    test it with git (the review of PR #238, finding 1: the posture was
+    claimed before it was true). A real `refdes init` project, a real
+    writable `check` of a real opt-in -- the file the writer actually
+    produces, checked with `git check-ignore`, the way
+    `test_scaffold.test_init_refdes_outputs_are_ignored_by_git` checks the
+    file `init` promises to ignore. The repo's own `.gitignore` carries the
+    same pattern, so probe projects in this checkout stay out of
+    `git status` too."""
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not on PATH")
+    scaffold_mod.init(str(tmp_path), write_vscode_settings=False)
+    cfg = _setup(tmp_path, BASE + OPT_IN)
+    subprocess.run([git, "init", "-q", str(tmp_path)], check=True)
+    assert cli_mod.main(["-c", cfg, "check"]) == 0
+    state = tmp_path / ".refdes" / "sealing-optin.json"
+    assert state.exists(), "writable check wrote no announcement record"
+    probe = subprocess.run(
+        [git, "-C", str(tmp_path), "check-ignore", "-v", ".refdes/sealing-optin.json"],
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 0, "git does not ignore the announcement record"
+    assert probe.stdout.split("\t")[1].strip() == ".refdes/sealing-optin.json"
 
 
 def test_the_note_still_changes_no_count_and_no_exit_code_after_settling(

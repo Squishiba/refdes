@@ -215,6 +215,12 @@ def test_init_refdes_outputs_are_ignored_by_git(tmp_path):
     (proj / ".refdes" / "copies").mkdir(parents=True)
     (proj / ".refdes" / "copies" / "deadbeef.pdf").write_bytes(b"%PDF-1.7\n")
     (proj / ".refdes" / "ids.yaml").write_text("next: 1\n", encoding="utf-8")
+    # The sealing note's announced-set record (run-6a F10): written by a
+    # writable `check` of an opted-in project, and per-checkout like
+    # schema.json -- it must not surface in `git status` either.
+    (proj / ".refdes" / "sealing-optin.json").write_text(
+        '{"opted_in": ["log"]}\n', encoding="utf-8"
+    )
     # The coordination file a refdes write leaves behind. It is
     # created empty, so without an entry for it a project that saved once shows
     # an untracked `.refdes-write.lock` in `git status`.
@@ -223,6 +229,7 @@ def test_init_refdes_outputs_are_ignored_by_git(tmp_path):
     for ignored in (
         ".refdes/copies/deadbeef.pdf",
         ".refdes/schema.json",
+        ".refdes/sealing-optin.json",
         ".refdes-write.lock",
     ):
         probe = subprocess.run(
@@ -268,6 +275,7 @@ def test_init_gitignore_holds_when_the_project_is_one_directory_of_a_repo(tmp_pa
     for rel in (
         "hardware/board-a/.refdes/copies/deadbeef.pdf",
         "hardware/board-a/.refdes/schema.json",
+        "hardware/board-a/.refdes/sealing-optin.json",
         "hardware/board-a/.refdes-write.lock",
     ):
         probe = subprocess.run(
@@ -291,6 +299,7 @@ def test_init_ignores_the_files_not_the_surrounding_directories(tmp_path):
         ".vscode/settings.json",
         ".refdes/copies/",
         ".refdes/schema.json",
+        ".refdes/sealing-optin.json",
         ".refdes-write.lock",
     ]
 
@@ -307,6 +316,7 @@ def test_init_keeps_an_existing_gitignore_and_adds_the_entry_once(tmp_path):
     assert ".refdes/schema.json" in text.splitlines()
     # the missing ones, each stated exactly once
     assert text.count(".refdes/schema.json") == 1
+    assert text.count(".refdes/sealing-optin.json") == 1
     assert text.count(".refdes-write.lock") == 1
 
 
@@ -431,7 +441,7 @@ def test_init_proceeds_with_a_readonly_gitignore_that_already_covers_everything(
     gitignore = tmp_path / ".gitignore"
     gitignore.write_text(
         ".vscode/settings.json\n.refdes/copies/\n.refdes/schema.json\n"
-        ".refdes-write.lock\n",
+        ".refdes/sealing-optin.json\n.refdes-write.lock\n",
         encoding="utf-8",
     )
     gitignore.chmod(0o444)
@@ -442,7 +452,7 @@ def test_init_proceeds_with_a_readonly_gitignore_that_already_covers_everything(
     finally:
         gitignore.chmod(0o644)
     assert (tmp_path / "refdes-project.yaml").exists()
-    assert gitignore.read_text(encoding="utf-8").count("\n") == 4
+    assert gitignore.read_text(encoding="utf-8").count("\n") == 5
 
 
 def test_scaffold_init_refuses_an_unusable_gitignore_before_creating_anything(
@@ -479,6 +489,9 @@ def test_scaffold_init_refuses_an_unusable_gitignore_before_creating_anything(
         (".refdes/", ".refdes/schema.json"),
         ("**/.refdes/", ".refdes/schema.json"),
         ("!.refdes/schema.json", ".refdes/schema.json"),
+        (".refdes/sealing-optin.json", ".refdes/sealing-optin.json"),
+        ("**/.refdes/", ".refdes/sealing-optin.json"),
+        ("!.refdes/sealing-optin.json", ".refdes/sealing-optin.json"),
         (".refdes-write.lock", ".refdes-write.lock"),
         ("/.refdes-write.lock", ".refdes-write.lock"),
         ("**/.refdes-write.lock", ".refdes-write.lock"),
@@ -498,10 +511,11 @@ def test_init_adds_no_block_for_a_pattern_the_project_already_addressed(
 
 
 def test_init_leaves_a_gitignore_that_addresses_everything_untouched(tmp_path):
-    """All four already stated: nothing to append, so the file is byte-for-byte
+    """All five already stated: nothing to append, so the file is byte-for-byte
     what the author had."""
     before = (
-        ".refdes/copies/\n.refdes/schema.json\n.refdes-write.lock\n.vscode/settings.json\n"
+        ".refdes/copies/\n.refdes/schema.json\n.refdes/sealing-optin.json\n"
+        ".refdes-write.lock\n.vscode/settings.json\n"
     )
     (tmp_path / ".gitignore").write_text(before, encoding="utf-8")
     scaffold_mod.init(str(tmp_path))
@@ -563,6 +577,7 @@ def test_init_writes_no_vscode_entry_when_it_wrote_no_vscode_settings(tmp_path):
     assert _gitignore_patterns(tmp_path / ".gitignore") == [
         ".refdes/copies/",
         ".refdes/schema.json",
+        ".refdes/sealing-optin.json",
         ".refdes-write.lock",
     ]
 
@@ -632,7 +647,8 @@ def test_cli_announces_the_vscode_settings_file_it_wrote(tmp_path, monkeypatch, 
         ),
         (
             "wrote .gitignore (.vscode/settings.json, .refdes/copies/, "
-            ".refdes/schema.json, .refdes-write.lock -- not yours to commit)"
+            ".refdes/schema.json, .refdes/sealing-optin.json, "
+            ".refdes-write.lock -- not yours to commit)"
         ),
     ]
     # the line says why the file is not worth committing, because that is the
@@ -653,7 +669,8 @@ def test_cli_announces_only_the_patterns_init_actually_added(tmp_path, monkeypat
     assert cli_mod.main(["init"]) == 0
     out = capsys.readouterr().out
     assert [line for line in out.splitlines() if "wrote .gitignore" in line] == [
-        "wrote .gitignore (.vscode/settings.json -- not yours to commit)"
+        "wrote .gitignore (.vscode/settings.json, .refdes/sealing-optin.json "
+        "-- not yours to commit)"
     ]
 
 

@@ -32,6 +32,11 @@ node_modules/
 # this also covers docs-site/.refdes/, a second refdes project living in
 # this same repo.
 **/.refdes/schema.json
+# The sealing opt-back-in note's record of the set it has announced
+# (run-6a F10): per-checkout state rewritten by check/build, regenerated
+# the same way as schema.json, and `refdes init` puts it in a project's
+# own .gitignore. **/ for the same nested-project reason as above.
+**/.refdes/sealing-optin.json
 # Persistent local coordination file shared by CLI and serve writers.
 **/.refdes-write.lock
 

@@ -223,7 +223,9 @@ def _sealing_optin_note(project: Project) -> str | None:
 
 #: The tool-managed record of the opt-in set the note was last printed for,
 #: the same posture as `.refdes/schema.json` (docs/design/standard-library.md
-#: §12): the state lives in a gitignored file under `.refdes/`, a writable
+#: §12): the state lives in a gitignored file under `.refdes/` --
+#: `scaffold._SEALING_OPTIN_GITIGNORE` is what puts that ignore into every
+#: new project's `.gitignore`, as it does for schema.json -- a writable
 #: run puts it back in step, and the note is the trip-wire that fires when it
 #: no longer describes the project. Run-6a F10: a note that prints on every
 #: run is a permanent one-liner in every CI check log, and it "trains people
@@ -253,13 +255,17 @@ def _announced_sealing_optins(project: Project) -> list[str] | None:
 
 
 def _record_sealing_optins(project: Project, names: list[str]) -> None:
-    """Write the announcement state. Mirrors `schema_json.write_schema`'s
-    handling of a refused write: the tree being read-only is a condition of
-    the filesystem, not of the project, so the run continues and says so."""
+    """Write the announcement state. The swap goes through
+    `textio.atomic_write_text` (a same-directory temp renamed into place, the
+    posture of every state file in this codebase that must not be caught
+    half-written -- `ids.py`, `revise.py`), so a crash mid-write cannot leave
+    a truncated record. Mirrors `schema_json.write_schema`'s handling of a
+    refused write: the tree being read-only is a condition of the filesystem,
+    not of the project, so the run continues and says so."""
     path = _sealing_optin_state_path(project)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        textio.write_text(path, json.dumps({"opted_in": names}) + "\n")
+        textio.atomic_write_text(path, json.dumps({"opted_in": names}) + "\n")
     except OSError:
         project.load_writes.blocked.append(SEALING_OPTIN_STATE_REL)
         project.warn(model.read_only_refusal(), file=SEALING_OPTIN_STATE_REL)

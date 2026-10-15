@@ -155,6 +155,18 @@ _SCHEMA_JSON_GITIGNORE = _GitignoreEntry(
     ),
 )
 
+_SEALING_OPTIN_GITIGNORE = _GitignoreEntry(
+    pattern=".refdes/sealing-optin.json",
+    covers=_covers(".refdes/sealing-optin.json", ".refdes"),
+    block=(
+        "# Written by `refdes init`. Which opt-back-in note the project has\n"
+        "# already heard is per-checkout state, rewritten by `check`/`build`;\n"
+        "# a committed copy can only disagree with the config -- silently, by\n"
+        "# swallowing the note in someone else's clone (run-6a F10).\n"
+        ".refdes/sealing-optin.json\n"
+    ),
+)
+
 _PROJECT_WRITE_LOCK_GITIGNORE = _GitignoreEntry(
     pattern=".refdes-write.lock",
     covers=_covers(".refdes-write.lock"),
@@ -172,6 +184,7 @@ _PROJECT_WRITE_LOCK_GITIGNORE = _GitignoreEntry(
 _REFDES_GITIGNORE = (
     _COPIES_GITIGNORE,
     _SCHEMA_JSON_GITIGNORE,
+    _SEALING_OPTIN_GITIGNORE,
     _PROJECT_WRITE_LOCK_GITIGNORE,
 )
 
