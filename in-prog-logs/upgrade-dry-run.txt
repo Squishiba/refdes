@@ -107,3 +107,42 @@ raises before the copy is built). Restored the copy line; 3 passed.
   vocabulary.md up to date.
 - Full suite (foreground, once): 3822 passed, 2 skipped in 299.30s, exit 0.
   (.scratch/suite.txt)
+
+== Fix round (review cd3c514, PR #239) ==
+
+Finding 1 (stale doc): docs/standard-library.md "Not yet built" said
+standard upgrade "does not yet" support --dry-run. Rewrote the section:
+the flag is built; the designed §3 report is what --dry-run prints.
+Grepped docs/ for other such claims: only cli-reference.md (fixed in
+round 1) and the design doc, whose references treat the flag as existing
+(design/standard-library.md:827,1020) -- consistent, untouched.
+
+Finding 2 (bump line for a refused step): cli.py printed the
+"standard.version: N -> M (would be bumped)" line before the step's
+outcome was known, so a step refused on a read-only item file claimed a
+bump the real run never makes (rollback precedes mutate_config). Moved
+the print after _print_revision_result, guarded on step.result.ok. New
+test test_standard_upgrade_dry_run_refused_step_does_not_claim_the_bump
+(read-only items/req.yaml: exit 1, "would refuse" on stderr, no bump
+line, tree byte-identical). Sabotage: reverting the guard to `if
+dry_run:` fails the new test (verified), restored.
+
+Finding 3 (changelog category): split the flip out of
+standard-upgrade-dry-run.added.md into new
+standard-upgrade-no-write-dry-run.changed.md per changelog.d/README.md
+("changed" = existing behaviour changed, non-breaking).
+
+Finding 4 (--no-write coverage): added
+test_standard_upgrade_under_no_write_on_pinned_project_reports_the_plan
+-- valid pinned hardware@2 project, --no-write: exit 0, plan + bump line
++ trailer on stdout, whole tree byte-identical. The existing test only
+covered the pre-flight refusal.
+
+Finding 5 (double load, optional): done -- _run_upgrade_chain now takes
+(base, current) from the pre-flight load instead of re-loading; the
+simulation copy is a byte-identical clone, so the numbers are identical
+by construction. Non-dry path loads once.
+
+Note: the finding-2 sabotage restored cli.py with `git checkout --`
+after re-applying the guard -- caught it in the same shell line,
+re-applied, tests green again.

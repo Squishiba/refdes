@@ -2162,6 +2162,8 @@ def apply_standard_upgrade(
             f"project is already at {project.standard_base}@{project.standard_version}, "
             f"not below the requested --to {to_version}"
         )
+    base = project.standard_base
+    start = project.standard_version
 
     if dry_run:
         import shutil
@@ -2173,22 +2175,24 @@ def apply_standard_upgrade(
             shutil.copytree(
                 project_root, copy, ignore=shutil.ignore_patterns("_site", ".git")
             )
-            return _run_upgrade_chain(copy, to_version)
+            return _run_upgrade_chain(copy, base, start, to_version)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    return _run_upgrade_chain(project_root, to_version)
+    return _run_upgrade_chain(project_root, base, start, to_version)
 
 
-def _run_upgrade_chain(project_root: str, to_version: int) -> list[UpgradeStepResult]:
+def _run_upgrade_chain(
+    project_root: str, base: str, current: int, to_version: int
+) -> list[UpgradeStepResult]:
     """The chain itself; apply_standard_upgrade owns the pre-flight refusals
     (they read the real tree, which is the tree they refuse on) and the
-    dry-run simulation copy, and calls this on whichever root is live."""
-    config_path = os.path.join(project_root, "refdes-project.yaml")
-    project = load_project(config_path=config_path)
-    base = project.standard_base
+    dry-run simulation copy, and calls this on whichever root is live. The
+    starting pin comes from that pre-flight load: the simulation copy is a
+    byte-identical clone of the tree that load read, so re-loading inside
+    this function to re-read the same standard base/version is the redundant
+    second load this signature keeps it from paying."""
     results: list[UpgradeStepResult] = []
-    current = project.standard_version
     while current < to_version:
         next_version = current + 1
         raw = standards_mod.load_migration_raw(base, next_version)

@@ -4,5 +4,4 @@
   be carried forward — and writes nothing, so a multi-file rewrite on a
   stamped tree no longer has to be previewed by copying the tree by hand.
   A refusal the real run would raise refuses the same way under
-  `--dry-run`. Global `--no-write` now selects the plan (like every other
-  command with a `--dry-run`) instead of refusing the command outright.
+  `--dry-run`.

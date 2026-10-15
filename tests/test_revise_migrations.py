@@ -929,3 +929,30 @@ def test_standard_upgrade_dry_run_refuses_the_way_the_real_run_refuses(tmp_path,
     assert err_real == err_dry
     assert "already at hardware@2" in err_dry
     assert _tree_hashes(root) == before
+
+
+def test_standard_upgrade_dry_run_refused_step_does_not_claim_the_bump(tmp_path, capsys):
+    """The plan promises it cannot drift from the real run, so it must not
+    print the pin bump for a step that refuses: the real run's rollback
+    restores refdes-project.yaml before the bump is ever attempted, so a
+    step refused on a read-only item file leaves standard.version at 2.
+    --dry-run reports that refusal and stays silent about the bump."""
+    root = _stamped_v2_project(tmp_path)
+    config = str(root / "refdes-project.yaml")
+    req = root / "items" / "req.yaml"
+    mode = req.stat().st_mode
+    os.chmod(str(req), mode & ~0o222)
+    try:
+        capsys.readouterr()
+        before = _tree_hashes(root)
+        status = cli.main(["-c", config, "standard", "upgrade", "--to", "3", "--dry-run"])
+        captured = capsys.readouterr()
+    finally:
+        os.chmod(str(req), mode)
+
+    assert status == 1
+    assert "v2 -> v3:" in captured.out
+    assert "would refuse" in captured.err
+    assert "would be bumped" not in captured.out
+    assert "would change" not in captured.out
+    assert _tree_hashes(root) == before

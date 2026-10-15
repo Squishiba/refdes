@@ -2074,18 +2074,22 @@ def cmd_standard_upgrade(args) -> int:
     ok = True
     for step in steps:
         print(f"v{step.from_version} -> v{step.to_version}:")
-        if dry_run:
-            # The pin bump is part of the plan, not a side effect the report
-            # should hide: name it per step, next to the files it lands with.
-            print(
-                f"  standard.version: {step.from_version} -> {step.to_version} "
-                "(would be bumped)"
-            )
         # A refused step reports on stderr; without this the two streams
         # interleave and the refusal lands above the header naming the step
         # it belongs to.
         sys.stdout.flush()
         status = _print_revision_result(step.result, dry_run=dry_run)
+        if dry_run and step.result.ok:
+            # The pin bump is part of the plan, not a side effect the report
+            # should hide -- so it is named per step, after the step's own
+            # outcome is known: a step that refuses never bumps (the real
+            # run's rollback puts refdes-project.yaml back before the
+            # mutate_config ever runs), and a plan that claimed the bump
+            # for it would be the drift this command promises it can't have.
+            print(
+                f"  standard.version: {step.from_version} -> {step.to_version} "
+                "(would be bumped)"
+            )
         if status != 0:
             ok = False
             break

@@ -349,6 +349,39 @@ def test_standard_upgrade_under_no_write_reports_the_plan_like_dry_run(tmp_path,
     assert not any(_changed(before, root).values())
 
 
+def test_standard_upgrade_under_no_write_on_pinned_project_reports_the_plan(tmp_path, capsys):
+    """The other half of the flip, on a project that actually has a plan: a
+    valid hardware@2 project under `--no-write` reports the real run's plan
+    (exit 0, the per-file rewrites, the pin bump, the trailer) and leaves
+    every file byte-identical -- the behaviour the exit-2 refusal used to
+    deny. The refusal-parity test above pins only the pre-flight path; this
+    pins the `dry_run = args.dry_run or args.no_write` branch itself."""
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 2, presets: [] }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement, prefix: REQ, status: active }\n"
+        "items:\n  - id: REQ-001\n    text: Seeded requirement.\n",
+        encoding="utf-8",
+    )
+    config = str(tmp_path / "refdes-project.yaml")
+    capsys.readouterr()
+    before = _snapshot(tmp_path)
+
+    status = _run_no_write(config, ["standard", "upgrade", "--to", "3"])
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "v2 -> v3:" in out
+    assert "standard.version: 2 -> 3 (would be bumped)" in out
+    assert "would change 1 file(s):" in out
+    assert "dry run -- nothing written" in out
+    assert not any(_changed(before, tmp_path).values())
+
+
 def test_standard_add_preset_under_no_write_refuses(tmp_path, capsys):
     root, config = _snapshot_project(tmp_path)
     capsys.readouterr()

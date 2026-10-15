@@ -733,8 +733,9 @@ The standard's own types simply use them:
 
 ## Not yet built
 
-A dry-run report of what a project's own usage would need to change ahead
-of `refdes standard upgrade`, without applying anything, is designed in
-[`docs/design/standard-library.md`](design/standard-library.md) §3 but not
-implemented — `refdes rename` supports `--dry-run`; `standard upgrade` does
-not yet. Everything else that document specs is built.
+Nothing. The last unbuilt item — a dry-run report of what a `refdes
+standard upgrade` would change in a project's own usage, without applying
+anything, designed in
+[`docs/design/standard-library.md`](design/standard-library.md) §3 — is
+now built: `refdes standard upgrade --dry-run` prints that plan and
+writes nothing.
