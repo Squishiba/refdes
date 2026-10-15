@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass
 from typing import Any
 
@@ -107,11 +109,29 @@ def _covers(pattern: str, *whole_dirs: str) -> frozenset[str]:
     them, so a project that ignores `.refdes/` has already said its piece about
     a file in there.
 
-    A small literal set on purpose rather than a walk of git's pattern
-    language: `init` runs in directories that are not git repositories at all,
-    so this cannot ask git what it thinks.
+    A literal set, deliberately not a walk of git's pattern language -- and
+    not the whole answer either. Inside a git repository git itself is asked
+    what its patterns say (see `_git_ignore_verdict`), because git is last
+    match wins and only git knows which line wins; this set is the fallback
+    for the non-repository case, where `init` runs in directories that are
+    not git repositories at all. It is over-approximative by design --
+    naming a spelling it misses appends a line that is at worst redundant,
+    while naming one it should not has `init` out-rank the project's own
+    pattern, so every form listed must genuinely cover every path in
+    `pattern`'s intent: the exact spellings, the basename spelling (git
+    matches a slashless pattern at any depth), and the one-level globs
+    (`.vscode/*` and `.vscode/**` each match the file inside the directory).
     """
     forms = {pattern, "/" + pattern, "**/" + pattern}
+    stem = pattern.rstrip("/")
+    if "/" in stem:
+        parent, _, base = stem.rpartition("/")
+        forms.add(base)
+        if pattern.endswith("/"):
+            forms.add(base + "/")
+        for spelling in (parent, parent + "/"):
+            for prefix in ("", "/", "**/"):
+                forms |= {prefix + spelling + "/*", prefix + spelling + "/**"}
     for directory in whole_dirs:
         for spelling in (directory, directory + "/"):
             forms |= {spelling, "/" + spelling, "**/" + spelling}
@@ -189,13 +209,92 @@ _REFDES_GITIGNORE = (
 )
 
 
-def _gitignore_addresses(text: str, entry: _GitignoreEntry) -> bool:
-    """Whether some pattern in `text` already states the project's position on
+_OWN_GITIGNORE_MATCH = re.compile(r"^(.*):(\d+):(.*)$")
+
+
+def _git_ignore_verdict(target_dir: str, entry: _GitignoreEntry) -> bool | None:
+    """git's own answer to "does this project's `.gitignore` already state a
+    position on `entry.pattern`" -- True for yes, False for no, `None` for
+    "git cannot be asked" (the caller then falls back to `_covers`'s literal
+    spellings).
+
+    `check-ignore -v` is the question, and it is the only tool that answers
+    git's real pattern language: globs, basename spellings, and -- the case
+    that made this necessary -- a `!.vscode/*` negation whose tracked file
+    init's appended ignore line would silently out-rank, since git takes the
+    *last* match. The pattern's parent directory is asked in the same
+    question: a `!` on the directory (`.vscode/` then `!.vscode/`) is an
+    intent about everything inside it, and the file's own path matches
+    nothing in that shape.
+
+    Only the project's own `.gitignore` counts as an answer. git resolves
+    `.git/info/exclude`, a global `core.excludesFile`, and any parent
+    directory's `.gitignore` ahead of it (and a file's negation of a
+    parent-project pattern is that project's business, not a position this
+    project's file has taken), so a winning match from anywhere else means
+    the project's own file still says nothing.
+
+    `--no-index` so the answer is the pattern chain alone, never an artifact
+    of what happens to be staged in this checkout."""
+    git = shutil.which("git")
+    if git is None:
+        return None
+    paths = [entry.pattern]
+    stem = entry.pattern.rstrip("/")
+    parent = stem.rpartition("/")[0]
+    if parent:
+        paths.append(parent)
+    try:
+        top = subprocess.run(
+            [git, "-C", target_dir, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if top.returncode != 0:
+            return None
+        probe = subprocess.run(
+            [git, "-C", target_dir, "check-ignore", "-v", "--no-index", "--", *paths],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if probe.returncode == 1:
+        return False
+    if probe.returncode != 0:
+        return None
+    top_path = top.stdout.strip()
+    own = os.path.relpath(
+        os.path.join(target_dir, ".gitignore"), top_path
+    ).replace(os.sep, "/")
+    # and the same path through realpath, for platforms whose temp dirs reach
+    # the repository through a symlink (git reports the toplevel resolved).
+    own_real = os.path.relpath(
+        os.path.realpath(os.path.join(target_dir, ".gitignore")),
+        os.path.realpath(top_path),
+    ).replace(os.sep, "/")
+    for line in probe.stdout.splitlines():
+        match = _OWN_GITIGNORE_MATCH.match(line.split("\t", 1)[0])
+        if match is not None and match.group(1) in (own, own_real):
+            return True
+    return False
+
+
+def _gitignore_addresses(target_dir: str, text: str, entry: _GitignoreEntry) -> bool:
+    """Whether the project's `.gitignore` already states its position on
     `entry.pattern` -- an ignore pattern or an explicit `!` negation.
 
     A negation counts: whoever wrote `!` + that pattern means to track the file,
     and git takes the *last* matching pattern, so appending ours would quietly
-    out-rank a deliberate choice. Comments and blank lines do not."""
+    out-rank a deliberate choice. Comments and blank lines do not.
+
+    Inside a git repository git itself decides (see `_git_ignore_verdict`);
+    the literal `_covers` spellings answer only where git cannot be asked."""
+    verdict = _git_ignore_verdict(target_dir, entry)
+    if verdict is not None:
+        return verdict
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -293,7 +392,7 @@ def _refuse_unwritable_gitignore(target_dir: str, entries: list[_GitignoreEntry]
     text = read_existing_gitignore(target_dir)
     if text is None:
         return
-    if any(not _gitignore_addresses(text, entry) for entry in entries):
+    if any(not _gitignore_addresses(target_dir, text, entry) for entry in entries):
         path = os.path.join(target_dir, ".gitignore")
         if not os.access(path, os.W_OK):
             raise SchemaError(
@@ -317,7 +416,11 @@ def _ensure_gitignore_entries(target_dir: str, entries: list[_GitignoreEntry]) -
         textio.write_text(path, _joined_blocks(entries, textio.LF))
         return
     existing = textio.read_text(path)
-    missing = [entry for entry in entries if not _gitignore_addresses(existing, entry)]
+    missing = [
+        entry
+        for entry in entries
+        if not _gitignore_addresses(target_dir, existing, entry)
+    ]
     if not missing:
         return
     ending = textio.append_ending(existing)
