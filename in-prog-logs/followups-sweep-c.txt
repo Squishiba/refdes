@@ -1,0 +1,145 @@
+followups-sweep-c — backlog sweep (ITEMS.md, 2026-10-10..14 follow-ups)
+Started on HEAD 885e9e6 (main). Tree was clean; nothing stashed.
+
+Method: for each bullet, grep -n / read the cited lines on this tree, then
+run the tool where behavior was claimed. No bullet survived as STILL TRUE,
+so the branch ships with zero code changes; the log is the work product.
+
+## Section "Status 2026-10-12 13:15Z (sweep 3 K, PR #209)"
+
+1. #179 _drop_refused docstring — ALREADY FIXED. links.py:462-469 names all
+   three non-landing kinds ("refused by the filesystem, rolled back by the
+   parse guard, or withheld for a duplicate key"). Commit 7dc4a42 (#188),
+   confirmed present: `git log -1 7dc4a42`.
+2. #200 c2 rename-alias dry-run on a renamed tree — ALREADY FIXED (never
+   true since 4e29ff6). tests/test_rename_alias.py:141-142 says the dry-run
+   half "needs its OWN trees"; :162-163 run the two --dry-run spellings on
+   separate fresh trees (dry_first/dry_second).
+3. #184 link verb named on_change — ALREADY FIXED, CLOSED. schema.py:202
+   `_reject_reserved_link_verb` raises SchemaError (load error, exit 2),
+   wired at :818/:820 for name and inverse. Commit 052d0c3 (#196/#184).
+   Guarded for the whole class by tests/test_reserved_link_verb.py.
+4. #207 append_event's unwrapped read — ALREADY FIXED. history.py:448 reads
+   the existing event file through `_read_store_file` (history.py:306),
+   which wraps UnicodeDecodeError and YAMLError. The helper is named
+   `_read_store_file`, not "_read_event_file" as the bullet said — it was
+   generalized in #209 to cover the object store too (docstring at :306-321
+   records #191/#207/#209).
+5. "five of these" / "Fifteen commands" / THERMAL_DONE / "froze" / seal.py
+   "it" — ALREADY FIXED, all five verified by absence on this tree: no
+   "five of these" in docs/README, no "Fifteen commands" anywhere,
+   THERMAL_DONE exists nowhere outside .scratch/task/ITEMS.md, docs use
+   "frozen" (never bare "froze"; grep of docs/*.md + seal.py), and
+   seal.py:3-4 now reads "yesterday's page still says what it said
+   yesterday" — the pronoun has a named antecedent.
+6. #206 final review, two lows — ALREADY FIXED (both by 374a4aa, #213).
+   (a) the duplicated "## D6" heading: `grep -c '## D6'` on
+   in-prog-logs/sweep3-schema-vocab-nits.txt is 1 (it was 2 at 1a4f46f;
+   `git show 374a4aa` removes the duplicate line).
+   (b) changelog.d/verb-named-reserved-key.breaking.md no longer says the
+   body: collision "silently dropped the link" bare — the fragment now
+   names exactly which collisions lost the link silently (on_change:, body:,
+   prefix:/board:/workspace:, list-spelling id:) and which "errored, but
+   about the wrong thing" (scalar on_change, type:, scalar id:, key:,
+   former_ids:). "silently dropped" is gone (grep).
+7. #210 macOS/BSD SO_REUSEADDR docs — ALREADY FIXED; no decision needed.
+   docs/cli-reference.md:2022 (the --port row) states the BSD exception
+   verbatim: "on macOS/BSD a listener on the wildcard address does not
+   block a loopback bind (standard BSD SO_REUSEADDR semantics, the same as
+   Python's own HTTPServer default)". The doc-narrowing option was taken
+   in 8b6a52e (#210 itself); server.py:275 keeps SO_REUSEADDR on all POSIX
+   with a comment. Nothing to raise with Jared.
+
+## Section "#197 r6 (b04fd63) -> W5a FIX-6" (folded into #197, merged)
+
+8. CI RED, `from glob import translate` on 3.11 — ALREADY FIXED.
+   tests/test_package_data.py:37 hand-rolls `_glob_to_regex`; :17-19 names
+   the ImportError as the reason, :21-22 pins the helper against
+   `glob.glob(pattern, recursive=True)` over the real file set. No
+   `from glob import` remains in tests/ (grep). 3.11 availability: only
+   python3.13 on this box (`ls /usr/bin/python3.1*` -> 3.13; venv is
+   3.13.5; no uv) — so the test was NOT run under 3.11; the bullet's
+   fallback instruction applies.
+9. c2 log-only (workbench-w5a-task-pane.txt) — ALREADY FIXED. "37 tests"
+   is gone (grep -c = 0); the file states counts ONCE with an explicit
+   drift note (~line 41); the shared-strings enumeration at :15-18 is
+   replaced by "Deliberately not enumerated here... See threads.py's own
+   public names".
+10. c4 nits — ALREADY FIXED. (a) task_pane.py:101-105 panes_by_entry
+    docstring keys by entry id and says so; (b) test_task_pane.py:920-927
+    the glyph test asserts `is not`/`is` for tabs, panels, and
+    task_lists (the :930 twin included); (c) test_task_pane.py:464-470 the
+    brittle `"day" not in body` is replaced by the composer's OWN text for
+    the row, with a comment naming the round-6 nit. (d) "PR body says
+    33 + 8 tests" — the PR body of merged #197 is a GitHub artifact, not a
+    repo file; OUT OF SCOPE (rules: never touch merged PRs).
+11. c3 nits — ALREADY FIXED. (a) the 87px pointer: bar.css:32-36 comments
+    the derivation and points at taskpane.css, taskpane.css:13 points back
+    ("its comment points back" is true in both directions); the offset test
+    (test_serve_preview_task_pane.py:247+) reads every number out of the
+    fetched bar.css, no literals. (b) cli.py:2858 uses
+    `threads_mod.DERIVED_HEADING` in the `refdes work` help — the
+    re-spelling is gone; sweep G has nothing to do.
+12. c5 F1 (list-style) — ALREADY FIXED. taskpane.css:117-122
+    (.refdes-taskpane-tasks) and :149-152 (.refdes-taskpane-derived ul)
+    carry `list-style: none` with the reason; tests/test_task_pane.py:784
+    -796 pins it by parsing taskpane.css (comments stripped, selector
+    regexes, no literals).
+13. c5 F2 (visible keyed by ref; paneFor-null returned early) — ALREADY
+    FIXED. taskpane.js:172 `visible` is an array of ELEMENTS (comment
+    :168-170 names the exact bug); :184-193 un-greys ALL panes before the
+    paneFor lookup, with the round-6 comment.
+14. c5 F3 (Escape stacking) — ALREADY FIXED. taskpane.js:65-74: returns on
+    defaultPrevented, acts only when the target is the toggle, inside a
+    pane, or unowned (body/documentElement); :59-64 names app.js's
+    preview-card Escape.
+15. c5 F4 (tab handler chords) — ALREADY FIXED. taskpane.js:131-132 guard
+    `defaultPrevented` and ctrlKey/metaKey/altKey; the comment says only
+    bare arrow/Home/End are claimed.
+16. c5 F5 (tight on the derived ul) — ALREADY FIXED. item.html.j2:377-381:
+    the derived ul is `class="small mono"`, with the round-6 comment
+    explaining why `tight` is dropped (style.css ul.tight out-specifies).
+17. c1 doc nits — ALREADY FIXED, all three. (a) The "Every line is refdes
+    thread's own wording" claim is narrowed in both places:
+    changelog.d/thread-workbench-task-pane.added.md:8-9 and
+    docs/cli-reference.md:2126-2128 both carve out the `viewing ...` note
+    as the pane's own text. (b) docs/cli-reference.md:2119 reads "as tabs
+    when a fork is open". (c) docs/design/thread-workbench.md:225-227
+    narrows the rule to "The two bullets above that follow or [switch]...
+    are the rule for that multi-anchor page shape" (file lives under
+    docs/design/, not docs/).
+18. #210 re-review lows — (a) ALREADY FIXED: free_port guards the collapsed
+    band (serve_support.py:466-476, `len(band) < 512` falls back to the OS
+    pick), tested by test_serve_cli.py:194-200 with ephemeral_start
+    patched to 2048 and 1500. (b) ALREADY FIXED: _wait_for_file's docstring
+    now says "stderr when it has any, stdout otherwise"
+    (test_serve_cli.py:146-148), matching `err or out`. (c) The macOS/BSD
+    caveat being doc-sourced and untested on a Mac is INFORMATIONAL, no
+    action (no Mac here).
+    All of 18 landed in 374a4aa (#213), whose commit message names M1/M2.
+
+## Verdict tally
+
+STILL TRUE: 0. ALREADY FIXED: 18 bullets' worth of sub-claims (all).
+INFORMATIONAL: 1 (macOS/BSD untested-on-Mac note). OUT OF SCOPE: 1
+(#197's merged PR body). NEEDS A DECISION: 0 (the #210 BSD item resolved
+itself via 8b6a52e; #184 is CLOSED). NOT REACHED: 0.
+
+Nothing to fix means: no behaviour fix, so no new test (rule: "every
+behaviour fix gets a test" — there are none), and no sabotage run (nothing
+to revert). changelog.d fragment: NOT added — per changelog.d/README.md a
+fragment is for user-visible changes; this branch changes no behavior, no
+docs, no public surface.
+
+Suite/ruff/gen_examples: see PR body (run once at the end, on the
+log-only tree).
+
+## End-of-run gates (run once, foreground, on the final log-only tree)
+
+- Full suite: `PYTHONPATH=$PWD/src ... -m pytest -q -p no:cacheprovider` ->
+  exit 0, "3829 passed, 2 skipped in 317.89s (0:05:17)" (first run, no
+  flake re-run needed; .scratch/suite.txt).
+- `ruff check --select E9,F src tests` -> All checks passed! (exit 0).
+- `python docs-site/gen_examples.py --check` -> schema-reference.md and
+  vocabulary.md up to date (exit 0).
+Task finished: all 18 bullets verified, 0 fixes needed, PR opened.
