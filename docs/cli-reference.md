@@ -56,10 +56,10 @@ what it could not write, or refuses:
 |---|---|---|
 | `.refdes/` (seal file, membership manifest, `schema.json`) | `build`, `revision`, `release` | An error naming the file and what was therefore not recorded, and **exit 1**. The site is still rendered if its own directory is writable. |
 | the `site.out` directory | `build` | Refuses: `error: cannot write the site to <dir> …`, **exit 2**. There is no partial "site written to" to print. |
-| `.refdes/baselines/<name>.yaml` | `revision`, `release` | Refuses: `error: cannot write .refdes/baselines/<name>.yaml …`, **exit 2**. A stamp that did not happen is never reported as one that did. |
+| `.refdes/baselines/<name>.yaml` | `revision`, `release` | Refuses: `error: cannot write .refdes/baselines/<name>.yaml (read-only tree?) …`, **exit 2** — with the operating system's own reason in the parenthetical when the reported failure cannot be a read-only tree, as with `id` below. A stamp that did not happen is never reported as one that did. |
 | a baseline's stored-hash format rewrite | `audit`, `former-ids propose` | Names the file and carries on, **exit 0**. A baseline already on disk holds correct content; only its format lags the current hash definition, and the diff is computed in memory either way. |
 | the `.refdes/history/` store | `history capture`, `history redact`, `history migrate-seals` | Refuses: `error: cannot write .refdes/history/… (read-only tree?) -- nothing was captured`, **exit 1**. A snapshot that was not taken is never announced as one that was. |
-| a seal hash or baseline entry carried forward, or an item file rewritten | `rename`, `calc-rewrite`, `standard upgrade` | `refused:` naming the file, **exit 1**, and the whole operation is rolled back. The carried hash is the only record that the rename was not an edit to a sealed entry or a stamped baseline, and a rename that lands in some item files and not others is not a rename. |
+| a seal hash or baseline entry carried forward, or an item file rewritten | `rename`, `calc-rewrite`, `standard upgrade` | `refused:` naming the file — a carried baseline entry's refusal naming the operating system's own reason where the failure cannot be a read-only tree, as with `id` below — **exit 1**, and the whole operation is rolled back. The carried hash is the only record that the rename was not an edit to a sealed entry or a stamped baseline, and a rename that lands in some item files and not others is not a rename. |
 | an id written back into its source file, or `.refdes/ids.yaml` | `id` | `cannot write <file> (read-only tree?) -- …`, **exit 1**; when the reported errno shows the cause is not a permission, the parenthetical is the operating system's own reason instead — `cannot write .refdes/ids.yaml (No space left on device) -- …` on a full disk. An id that never reached its source file is not allocated and its number stays free; the ledger is what stops a deleted item's number being reused, so a refusal to record it is reported too. |
 | a `stub-tests.md` | `stub-tests` | `refused:` naming the file, **exit 1**. The files are independent (one per workspace/board, holding only their own scope's stubs) and a written stub is the author's, so what landed stays and what was refused is named; re-running picks up exactly the missed ones. |
 | `refdes-project.yaml` | `standard add-preset`, `standard remove-preset` | `error: cannot write refdes-project.yaml (read-only tree?) -- …`, **exit 2** — the code these two already use for "your config is not what you asked for it to be". |
@@ -104,12 +104,15 @@ refusals in the table that name a *specific destination* the user asked for
 put the path first and so do not contain that longer string; they carry
 `(read-only tree?)` for every failure a read-only tree could produce (a
 permission denial, a read-only filesystem), which is why that is the substring
-to write against. Three exceptions. The destination refusals of `id` report
-the operating system's own reason for failures that cannot be a read-only
+to write against. Three exceptions. The destination refusals of `id`, and of
+`revision`/`release` stamping `.refdes/baselines/` (the stamp refusal and the
+revision engine's carried-baseline refusal both report the cause the operating
+system gave, not a read-only guess), report the operating system's own reason
+for failures that cannot be a read-only
 tree — a full disk is refused as `(No space left on device)`, not as a
-permission — so a filter on the marker sees the tree-write refusals of `id`
-when the tree is read-only and not when the disk is full; the rule is the
-same one this section states for the two commands named next: the marker is
+permission — so a filter on the marker sees the tree-write refusals of those
+commands when the tree is read-only and not when the disk is full; the rule is
+the same one this section states for the two commands named next: the marker is
 a claim refdes only makes where a read-only tree could be the cause. `build`'s
 refusal for the site directory reports the operating system's own reason,
 because that write can be refused for reasons that have nothing to do with a
@@ -1135,15 +1138,20 @@ what says its bytes are wrong.
 A row whose document's pages could not be counted, or whose recorded count/error
 is not trusted as belonging to the pinned bytes, **and which cites a `page:` of
 that document**, reads `pages unchecked` instead of `ok`, with the reason the
-lockfile or provenance check supplies on the line below it. The pin is fine — a
+lockfile supplies on the line below it. The pin is fine — a
 cited `page:` simply has nothing trustworthy to be compared against, and an `ok`
-that meant "recorded" was read as "checked". `refdes check` warns about the same
-fact, and about the same set of citations: a citation citing no page has no
-unchecked page number, even when the lockfile still records a failed count for
-the path from before the `page:` was deleted. `page_count_error:` and
-`page_count_sha256:` in `.refdes/citations.yaml` are where both read it, and
-`refdes fetch --update --path <path>` is what replaces a failed or untrusted
-record with a count tied to the freshly pinned bytes.
+that meant "recorded" was read as "checked". The three reasons name their own
+repair: a failed or untrusted count is replaced by
+`refdes fetch --update --path <path>`, a PDF with no count on record yet is
+counted by a plain `refdes fetch --path <path>`, and a document that is not a
+PDF has no page count for any command to record — its cited `page:` is checked
+by nothing, and the row says so. `refdes check` warns about the count failures
+among the same citations: a citation citing no page has no unchecked page
+number, even when the lockfile still records a failed count for the path from
+before the `page:` was deleted, and a document with no count on record at all
+leaves `check` silent (the audit row is where that state is named).
+`page_count:`, `page_count_error:` and `page_count_sha256:` in
+`.refdes/citations.yaml` are where both read it.
 
 An import declared with a `version:` reads `pinned to 2026.3`; one declared
 without one reads `unpinned`, and its items still count toward the

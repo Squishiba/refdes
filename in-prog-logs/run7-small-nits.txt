@@ -1,0 +1,118 @@
+run7-small-nits — F13, F14, F16 (in-prog-logs/user-sim-release-gate-run7.md)
+Branch: run7-small-nits (from main @ 35c2304). Model: Qwen3.8-Flash-Next.
+
+SCOPE (from .scratch/task/TASK.txt):
+  F13 (§2.17) audit says `ok hash-only` for a hash-only doc cited with page:
+      -> audit must say pages are not checked.
+  F14 (§2.9)  revision refusal hardcodes "(read-only tree?)" (cli.py ~587);
+      use the cause helper, grep for copies.
+  F16 (§1.1)  ls --tag substring-matches the stringified dict repr of a
+      mapping tags element (#235 made it a load error). If ls can see it,
+      match only string tags; the blocks/serve mirror: record.
+
+REPRODUCTIONS (all on main @ 35c2304, probes in .scratch/):
+  F13  .scratch/f13-repro: plain-text docs/notes.txt cited `page: "3"` on
+       CMP-PWR-001. Plain `refdes fetch` writes a record with bytes + sha256
+       + kept_copy=false, no page_count, no page_count_error (the fetcher
+       never counts pages of a non-PDF, which is honest for the record).
+       `check` exits 0 silent. `audit` printed:
+         ok              hash-only  cited by CMP-PWR-001
+       byte-identical to a row whose 8 pages were counted and page 3 is in
+       range. Reproduced.
+  F14  .scratch/f14-repro: chmod -R a-w .refdes, `revision rev-b` ->
+         error: cannot write .refdes/baselines/rev-b.yaml (read-only tree?)
+         -- revision 'rev-b' was not stamped. Make the tree writable and run
+         it again, ...
+       exit 2. For ENOSPC the marker/remedy are the false hint; reproduced
+       (the read-only case itself is correct; the hardcoded marker is the
+       bug when the cause is ENOSPC/EIO/...).
+  F16  .scratch/f16-repro: tags: [power, {name: not-a-string, verdict: x}].
+       `ls` lists the item (loads with the #235 load error, `check` exits 1
+       naming tags[1]); `ls --tag not-a-string`, `ls --tag name` and the
+       free-text `ls not-a-string` all MATCH the stringified dict repr.
+       ls CAN see it, so the fix applies.
+
+FIXES:
+  F13  src/refdes/citations.py page_count_gaps(): every record with no
+       trusted count now yields a gap, not only the records with a recorded
+       failure. Reasons (new constants + _no_count_why):
+         - not a PDF            -> "it is not a PDF, so its pages are never
+                                   counted" (no command can count it)
+         - remote hash-only PDF -> the existing HASH_ONLY_UNCOUNTED_WHY
+                                   (needs --update; unchanged)
+         - bytes on machine, no count -> "the lockfile records no page count
+                                   for these bytes -- run 'refdes fetch
+         --path <path>' to count them" (a plain fetch repairs it)
+       cmd_audit's existing gap machinery (unchecked set, cited-by split,
+       reason line, column width) does the rest unchanged; a row only flips
+       when a `page:` is cited, so audit still agrees with check's set.
+       `check`'s posture for a plain-fetch-fillable missing count is LEFT
+       (check.py `_apply_page` documents it: warn about the lockfile, not
+       the citation, for records the plain fetch fills; F13 named audit).
+       Pinned by tests/test_run7_f13_f14_f16.py.
+       Existing test updated: tests/test_citations.py
+       ::test_cli_audit_pinned_citation_keeps_its_pin_words[True-True-kept-*]
+       pinned the OLD lying row (`ok kept`) for a kept copy with no count
+       cited by page; the fix makes it `pages unchecked`, so the
+       expectation and its docstring are updated (the pin column — the
+       test's subject — is untouched; both rows flip together and the
+       reasons differ by what each record's state says about its bytes).
+
+  F14  Helper: model.destination_refusal(path, consequence, cause) +
+       model.could_be_read_only (PR #230 / DIAG-WORD-008). Sites grepped
+       (`grep -rn "read-only tree?" src/`):
+         - cli.py cmd_revision/release stamp `unwritable` branch — FIXED:
+           lifecycle.StampOutcome carries refusal_cause (the OSError inside
+           BaselineUnwritable, lifecycle.py:292 `self.cause`), the branch
+           builds through destination_refusal and picks the remedy by the
+           cause (read-only-family -> "Make the tree writable and run it
+           again"; otherwise "Fix the reported failure and run it again").
+         - revise.py _rewrite_baseline_file (the engine's carried-baseline
+           write, rename/calc-rewrite/standard upgrade) — FIXED the same
+           way from BaselineUnwritable.cause.
+         - revise.py seal-carry refusal (~2046): reported by
+           seal.save_seals() as a boolean; no OSError in hand, so the
+           marker stays (destination_refusal with cause=None keeps it — the
+           documented posture for callers with no exception). RECORD ONLY.
+         - model.py/cli constants and the serve/lock refusal paths already
+           pass causes (#230); untouched.
+       Read-only output is byte-identical (probe re-run); ENOSPC injected
+       at textio.write_text now prints
+         cannot write .refdes/baselines/rev-a.yaml (No space left on device)
+         ... Fix the reported failure and run it again
+       exit 2 (stamp) / `refused:` exit 1 (engine), no traceback, file
+       absent, rollback intact.
+
+  F16  src/refdes/cli.py _item_tags(): yields only strings — scalar string
+       stays a tag, a list element that is not a str is dropped, a non-list
+       non-string value yields no tags. Fixes both `--tag` matching and the
+       free-text haystack (both read _item_tags).
+       MIRROR RECORD: serve/filters.py:77 `item_tags` is a documented mirror
+       ("The same tag read `refdes ls` uses") with the same lenient
+       `[str(t) for t in tags]` read, feeding the serve pages' tag filter
+       and free-text search (filters.py:142/145) and the tag list block
+       (filters.py:235, used by blocks). Left as-is per task scope (fixing
+       ls only is in scope); the serve filters inherit #235's load error at
+       check/build time, and the free-text search over the stringified dict
+       is the same false-match shape there. A follow-up can point
+       item_tags at cli's (or share a helper) if the serve read is wanted
+       string-only too.
+
+VERIFICATION:
+  New tests: tests/test_run7_f13_f14_f16.py (9 tests, all listed findings).
+  Sabotage: src/{citations,cli,lifecycle,revise}.py swapped to
+  `git show main:...` (backups in .scratch/sabotage-bak/); the new file +
+  the updated test_citations param fail 7 of them on main's code (F13: 2,
+  F14: 2, F16: 2, test_citations: 1); restored, all pass. The
+  pins-of-promise tests (counted PDF keeps ok; read-only marker byte-stable;
+  check silence) pass on main too, by design.
+  Targeted: tests/test_citations.py + run7 file: 100 passed, 1 skipped.
+
+STATUS: done.
+  Full suite (command above): 3925 passed, 2 skipped in 331.99s, exit 0; the
+  known flake (test_serve_cli stale-token-file) did not fire.
+  ruff check --select E9,F on the touched src/test files: clean.
+  docs-site/gen_examples.py --check: up to date.
+  Committed as e67e1cc, pushed to origin/run7-small-nits, PR against main
+  opened (URL in the PR list; no commits after the PR).
+
