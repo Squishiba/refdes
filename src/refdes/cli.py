@@ -255,20 +255,21 @@ def _announced_sealing_optins(project: Project) -> list[str] | None:
 
 
 def _record_sealing_optins(project: Project, names: list[str]) -> None:
-    """Write the announcement state. The swap goes through
-    `textio.atomic_write_text` (a same-directory temp renamed into place, the
-    posture of every state file in this codebase that must not be caught
-    half-written -- `ids.py`, `revise.py`), so a crash mid-write cannot leave
-    a truncated record. Mirrors `schema_json.write_schema`'s handling of a
-    refused write: the tree being read-only is a condition of the filesystem,
-    not of the project, so the run continues and says so."""
+    """Write the announcement state. Best-effort, and silent about a
+    refusal: the note's own contract is that this condition changes no exit
+    code and no `N errors, M warnings` count, so a refused record adds no
+    diagnostic — the only cost is the note printing again next run. Written
+    with `textio.write_text`, the same writer `schema_json.write_schema`
+    uses for `.refdes/schema.json`, so it succeeds wherever the
+    schema.json refresh does — a read-only `.refdes/` directory with
+    writable files included, where an atomic rename into the directory
+    would not (PR #238 review round 3)."""
     path = _sealing_optin_state_path(project)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        textio.atomic_write_text(path, json.dumps({"opted_in": names}) + "\n")
+        textio.write_text(path, json.dumps({"opted_in": names}) + "\n")
     except OSError:
-        project.load_writes.blocked.append(SEALING_OPTIN_STATE_REL)
-        project.warn(model.read_only_refusal(), file=SEALING_OPTIN_STATE_REL)
+        pass
 
 
 def _announce_sealing_optin(
@@ -381,10 +382,11 @@ def _report(
 
 def cmd_check(args) -> int:
     project, schema_was_stale = _load(args)
-    # `check` writes nothing of the project's own -- but its load does, and
-    # said-so or not that is the tree the user is being asked about. The
-    # per-file warnings reach this command through `_report` below, so the
-    # notice names only what landed.
+    # `check` writes nothing of the project's sources -- but its load does,
+    # and said-so or not that is the tree the user is being asked about;
+    # the sealing note's record below is the one file `check` itself writes,
+    # and only on a writable run. The per-file warnings reach this command
+    # through `_report` below, so the notice names only what landed.
     _announce_load_writes(project, name_blocked=False)
     _announce_sealing_optin(
         project, write=_writes_allowed(args), verbose=args.verbose
@@ -3354,7 +3356,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         # Take the lock before loading: the load itself can rewrite sources,
         # and ID planning must see the ledger left by the previous process.
-        if args.no_write or getattr(args, "dry_run", False) or args.command in {
+        if not _writes_allowed(args) or args.command in {
             "serve", "init", "new", "schema"
         }:
             return args.func(args)

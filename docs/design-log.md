@@ -272,10 +272,10 @@ run that prints leaves it in step. Taking the overlay back out is recorded
 too, so re-adding it prints again. A `--no-write` (or `build --dry-run`) run
 is silent — it cannot record the announcement, so it could only repeat it on
 every invocation — and it consumes nothing, so the next writable run still
-prints it once; `--verbose` always prints, on the run you asked for it,
-read-only runs included. A project
-with no overlay prints nothing and grows no record, which is the state the
-rest of this section describes.
+prints it once; a read-only workflow that wants the confirmation passes
+`-v` (`--no-write check -v`), which always prints, on the run you asked for
+it. A project that never had an overlay prints nothing and grows no record,
+which is the state the rest of this section describes.
 
 The entries stay append-only in the authoring sense — a correction is still a
 new entry that `amends` the old one — but nothing is sealed any more:

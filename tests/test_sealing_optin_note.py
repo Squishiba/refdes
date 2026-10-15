@@ -39,6 +39,7 @@ each test below asserts it.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 
@@ -266,6 +267,38 @@ def test_a_dry_run_build_does_not_consume_the_note(tmp_path, capsys):
     assert not _state_file(tmp_path).exists()
     assert len(_notes(_run(capsys, cfg, "check")[1])) == 1
     assert _notes(_run(capsys, cfg, "check")[1]) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="chmod write-protection is POSIX")
+def test_a_refused_record_write_costs_no_diagnostic(tmp_path, capsys):
+    """The record is best-effort: a refused write of it changes no exit code
+    and no `N errors, M warnings` count — exactly the note's own contract,
+    and the regression round 3 caught: the atomic-rename version of this
+    write fired a counted WARNING on every run of a project whose `.refdes/`
+    directory is read-only, in precisely the state where the mirrored
+    `schema.json` refresh *succeeds* (an existing file only needs the file's
+    own write bit; a rename into the directory needs the directory's).
+    Silent skip, note prints, counts identical to the control project
+    without the overlay."""
+    cfg = _setup(tmp_path, BASE + OPT_IN)
+    _run(capsys, cfg, "check")  # writable run: the record lands, keys mint
+    state = _state_file(tmp_path)
+    state.write_text('{"opted_in": ["other"]}\n', encoding="utf-8")  # out of step
+    state.chmod(0o444)  # the record file itself unwritable, its dir unwritable
+    (tmp_path / ".refdes").chmod(0o555)
+    try:
+        code, output = _run(capsys, cfg, "check")
+    finally:
+        (tmp_path / ".refdes").chmod(0o755)
+        state.chmod(0o644)
+    assert code == 0
+    assert len(_notes(output)) == 1  # prints; the recording was skipped
+    assert "sealing-optin.json" not in output  # and said nothing about it
+    assert _summary(output) == "1 items, 0 errors, 0 warnings"
+    control = _setup_in(tmp_path / "control", BASE)  # no overlay, same tree
+    code, output = _run(capsys, control, "check")
+    assert code == 0
+    assert _summary(output) == "1 items, 0 errors, 0 warnings"
 
 
 def test_verbose_always_prints_the_note(tmp_path, capsys):

@@ -132,3 +132,33 @@ Sabotage round 2: gate reverted to `verbose or recorded != names` (round-1
 rule) -> test_a_no_write_run_is_silent_and_consumes_nothing and
 test_a_dry_run_build_does_not_consume_the_note fail (2 failed, 19 passed);
 restored, 21/21 green.
+
+--- FIX ROUND 3 (PR #238 review, agent daaf141) ---
+
+Finding 1 (MEDIUM, FIX, per orchestrator): a refused record write fired a
+counted WARNING on read-only .refdes/ dirs (atomic_write_text needs the
+DIRECTORY writable; write_schema's write_text needs only the FILE's) —
+regression against the note's own "changes no count" contract, untested.
+Fix: _record_sealing_optins now uses textio.write_text (same writer as
+schema_json.write_schema, succeeds wherever schema.json does) and the
+OSError handler is `pass` — best-effort, zero diagnostics, note just
+prints again next run. New test
+test_a_refused_record_write_costs_no_diagnostic: writable run lands the
+record, hand-desync it, chmod record 444 + .refdes 555, run check -> exit
+0, note prints, "sealing-optin.json" appears nowhere in output, summary
+"1 items, 0 errors, 0 warnings" identical to the no-overlay control run.
+skipif nt. Sabotage: restored the warn handler -> exactly that test
+fails; reverted, 22/22 green.
+Finding 2 (MEDIUM, NO BEHAVIOUR CHANGE): round-2 rule kept; design-log
+now tells read-only workflows to pass -v; PR body carries "reviewers were
+split, orchestrator chose, Jared can override".
+Finding 3: deleted changelog.d/sealing-optin-note-once.changed.md (the
+note never shipped — a 'changed' fragment described behaviour no release
+ever had); cadence folded into sealing-optin-overlay-note.added.md.
+Finding 4: cmd_check comment (check itself writes the record) and
+cli-reference.md row ("when the note prints" -> "whenever the set
+changes, incl. the removal run"; refused write silent).
+Finding 5: main's lock gate now uses _writes_allowed(args) (was verbatim
+duplicate).
+Finding 6: design-log "A project with no overlay" -> "A project that
+never had an overlay" (a removal leaves {"opted_in": []} behind).

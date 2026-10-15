@@ -19,6 +19,18 @@
   the file, because the two questions an author has are "did it take effect" and
   "is this here on purpose, or did someone forget it".
 
+  It prints once, not on every run (run-6a F10): the first run after the opt-in
+  appears, and again when the set of opted-in types changes (removing the
+  overlay is recorded, so re-adding it prints again) — the same posture as the
+  `.refdes/schema.json ... refreshed` note, with the announced set recorded in
+  `.refdes/sealing-optin.json`, gitignored per-checkout state: `refdes init`
+  adds it to a new project's `.gitignore` beside the `.refdes/schema.json`
+  entry. A `--no-write` (or `build --dry-run`) run is silent — it cannot record
+  the announcement, so it could only repeat it on every run — and consumes
+  nothing, so the next writable run still prints it once; a read-only workflow
+  that wants the confirmation passes `-v`, and a refused record write is
+  likewise silent: the note just prints again next run.
+
   It is printed only for a type the standard had actually moved off `build`.
   `build` is the engine default, so a project declaring it for a type of its own
   — or for a subtype, which never inherits `sealing:` — has changed nothing and
