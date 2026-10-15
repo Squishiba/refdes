@@ -64,7 +64,7 @@ from . import model
 from . import seal as seal_mod
 from . import textio
 from .model import Item, SchemaError
-from .parse import yaml_safe_load
+from .parse import read_store_text, yaml_safe_load
 
 HISTORY_FORMAT = 1
 
@@ -320,8 +320,9 @@ def _read_store_file(path: str, kind: str) -> object:
     posture for what a parsed record must look like.
     """
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            return yaml_safe_load(fh)
+        return yaml_safe_load(read_store_text(path))
+    except IsADirectoryError as exc:
+        raise HistoryError(f"{path}: {kind} is a directory, not a file") from exc
     except UnicodeDecodeError as exc:
         raise HistoryError(f"{path}: {kind} is not valid UTF-8 ({exc})") from exc
     except yaml.YAMLError as exc:
