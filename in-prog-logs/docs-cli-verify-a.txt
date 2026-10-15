@@ -1,0 +1,84 @@
+docs-cli-verify-a: verify docs/cli-reference.md CLI claims by running the tool
+================================================================================
+
+Started from main (35c2304). Scope: sections for serve, build, check, revision,
+release, index, ls, thread, work, id, fetch. Method: `--help` for every command
+(captured in .scratch/probe/help.txt), plus synthetic projects under
+.scratch/probe/proj{,2,3,4,5} and a local HTTP origin
+(.scratch/probe/www, served on 127.0.0.1). No code changes.
+
+Verdicts (command | claim | verdict | evidence)
+------------------------------------------------
+global | -V prints version, exit 0 | VERIFIED | `refdes -V` -> `refdes 0.5.0`, exit 0
+global | ls with unknown --board/--type prints "no items match", exit 0 | VERIFIED | run
+build | flags -o/--keep-going/--reseal/--accept-board-move/--require-citations/--dry-run/-v | VERIFIED | --help vs doc table
+build | "site written to <path>" + summary | VERIFIED | run
+build | --dry-run exits 0, site marked Draft build | VERIFIED | run
+build | --keep-going exits 0 with errors | VERIFIED | run
+build | --reseal on log (hardware@3) warns sealing no longer applies | VERIFIED | run; .refdes has no log seal files
+build | --reseal <undeclared board> exit 1 with named ERROR | VERIFIED | run
+check | warnings stdout / errors stderr | VERIFIED | separated streams
+check | -v summary includes "0 info" | VERIFIED | run
+check | --board <undeclared> exit 1 | VERIFIED | run
+check | --allow-unreachable without --refresh prints note, exit 0 | VERIFIED | exact note text
+revision | stamps .refdes/baselines/<name>.yaml, "stamped: N items" | VERIFIED | run
+revision | identical re-run is a no-op, exit 0, file untouched | VERIFIED | run
+revision | --no-write revision reports "would stamp", exit 0 | VERIFIED | run
+revision | bad name exit 2; conflict exit 1, baseline untouched | VERIFIED | runs
+release | stamps on pass; on fail exit 1, gate table, no baseline | VERIFIED | runs (draft_items FAIL)
+index | keys title/version/coverage/types/items/next_ids/diagnostics always; threads when follows-chained; boards/workspaces when declared | VERIFIED | index | jq keys on proj / proj2
+index | parse failure: error on stderr, JSON for loaded items on stdout, exit 0 | VERIFIED | broken.yaml probe
+index | --compact minified | VERIFIED | run
+ls | columns id/type/[workspace]/[board]/title; workspace col before board, dropped when all rows blank | VERIFIED | proj vs proj2
+ls | --keys inserts key column after id | VERIFIED | run
+ls | --file filter; unknown --file "no items match" exit 0 | VERIFIED | runs
+ls | --workspace ''/--board '' list all; unknown --workspace no match | VERIFIED | runs
+ls | query: id/title/tags/former_ids, case-insensitive substring | VERIFIED | runs (OLD-RIPPLE-9 -> "(formerly OLD-RIPPLE-9)")
+ls | parse failure -> exit 1, listing intact | VERIFIED | run
+build/check | lint_own_tags warns "entirely inherited" AND "no tags: at all" | VERIFIED then doc FIXED | proj2 run; doc named only inherited case
+thread | text structure, tasks state:open syntax, age "open since", derived block, forks | VERIFIED | log chain in proj
+thread | --as-of span "-- N days", future task note, bad date exit 2, --as-of+--json exit 2 | VERIFIED | runs
+thread | unknown ref / non-thread item exit 2 with exact messages | VERIFIED | runs
+thread/work | key-minting notice on stderr, not stdout | VERIFIED | proj3
+work | text + --json {threads, derived}, --as-of rules same as thread | VERIFIED | runs
+id | --dry-run "would allocate", files byte-identical, no .refdes writes | VERIFIED | md5 compare
+id | allocates + writes ledger; quoted bare number expands; collision ERROR names expansion+burned, exit 1 | VERIFIED | proj4 runs
+id | load parse errors exit 1 and are printed | VERIFIED | run
+fetch | --item/--path/--update; skips pinned; --update refetches | VERIFIED | proj5 runs
+fetch | refusals: --item unknown, item with no citations, --path uncited (exit 1); --no-write fetch (exit 2, exact text) | VERIFIED | runs
+fetch | corrupt lockfile: exit 1, names file:line + remedy, file byte-identical | VERIFIED | run
+fetch | local keep_copy: refused "meaningless -- a local file is already local" (docs/citations.md 2315 claims it) | VERIFIED | run
+fetch | 100 MB size warning: remote fetch warns (exact WARNING line), local 101 MB fetch no warning; doc context is "download" | VERIFIED | big.bin probes
+fetch | section: unresolvable -> FAILED, exit 1; check warns | VERIFIED | run
+fetch | check --refresh drift: full digests, "cited by", exit 1, writes nothing | VERIFIED | run
+fetch | check --refresh unreachable: per-URL ERROR + count line exit 1; --allow-unreachable warns exit 0; single-URL long remedy text | VERIFIED | runs
+fetch | source("path","key") extraction; values in lockfile; plain fetch keeps locked values on changed file; --update accepts and prints "source value changed k1: 0.93 -> 0.95"; new key on changed file FAILED with exact text, exit 1 | VERIFIED | proj5 CSV probes
+fetch | page_count for hash-only pin: plain fetch establishes count from bytes on disk (kept copies are content-addressed by sha256, so a hash-only record whose bytes exist as a kept copy IS repaired by plain fetch; --update establishes it when they don't) | VERIFIED | two.pdf/two2.pdf probe
+serve | --no-open/--port/--token-file flags; launch URL printed; token file = bare URL, one line, newline-terminated, 0600, token 43-char urlsafe base64 | VERIFIED | runs
+serve | API reads need X-Refdes-Token (403/200); /preview/ needs the cookie from opening the launch URL (403 header-only, 200 with cookie+redirect) | VERIFIED | curl/urllib
+serve | Host header must be 127.0.0.1/localhost -> 403 | VERIFIED | curl -H "Host: evil.com:8770"
+serve | --port in use: "cannot listen ... Address already in use", exit 2 | VERIFIED | run
+serve | --port 0/70000/'abc': usage error exit 2; --port 80: "Permission denied (ports below 1024 need elevated privileges)" exit 2 | VERIFIED | runs
+serve | --token-file refusals exit 2, path untouched: symlink, non-launch file, empty file, directory | VERIFIED | runs (yaml md5 unchanged)
+serve | SIGTERM removes token file, exit 0 (Popen test; a bash-job kill measures the subshell, not the child); kill -9 leaves it; relaunch rewrites its own stale file | VERIFIED | subprocess tests
+serve | preview toolbar in HTTP response only, published _site clean; --no-write serve writes the token file and changes nothing in the project/.refdes/_site | VERIFIED | snapshot-diff test
+
+NOT CHECKED (serve section details beyond the above): thread task pane in
+served item pages; editor /edit/ statics; rebuild-on-file-change polling;
+assets watching; .refdes-write.lock behavior on first write (API write flow).
+NOT CHECKED (fetch): section: resolution success path on an outlined PDF.
+
+Doc changes
+-----------
+docs/cli-reference.md: lint_own_tags paragraph now says the switch also warns
+on an item with no tags at all (build.py:650-657 emits both warnings; the
+paragraph named only the inherited case). That is the only fix the pass found.
+
+Verification gates
+------------------
+ruff check --select E9,F src tests -> All checks passed!
+docs-site/gen_examples.py --check -> both generated docs up to date
+PYTHONPATH=$PWD/src python -m pytest -q -p no:cacheprovider -> exit 0,
+3916 passed, 2 skipped in 334.09s (.scratch/suite.txt)
+
+No changelog fragment: docs-only change.
