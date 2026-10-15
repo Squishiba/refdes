@@ -153,3 +153,38 @@ Docs/changelog reworded: registration refusal semantics.
 Targeted 193 passed; full suite 3928 passed / 2 skipped; scoped ruff
 identical to baseline (5 pre-existing findings, render.py:115 = line shift
 from the errno import).
+
+## Review round 4 (tests/docstrings; reviews 00a60fd8 + 663e6890)
+
+Round 3 (uncommitted when round 4 arrived): registration refusal moved out
+of collect_static_assets into check_registered_assets_readable (post-render,
+inside build.build so check and build share it); Project.unreadable_assets
+records what the reference gate and the registration check refused, the copy
+loop skips those -- a referenced unreadable file is ONE error, the item-side
+sentence, in both commands; digest read feeds readable_probe (no second
+open). Docs/changelog reworded to match.
+
+Round 4 items:
+- 00a60fd8 F1 (blocking): the referenced-gated test was non-discriminating
+  (the registration sentence satisfies its substring asserts). Fixed: the
+  reference's own sentence pinned verbatim. Sabotage shown: swap probe ->
+  `elif False` -> 3 failed (gated-at-reference, records-failed,
+  reported-once) with the registration sentence in the report; restored.
+- 00a60fd8 F2: the site-write-refusal test's docstring claimed the copy
+  loop; it dies at the first page write. Rewritten (round 3) to pin the
+  page-write half; the copy-loop split is pinned by
+  test_an_unwritable_asset_destination_blames_the_site_not_the_asset.
+- 00a60fd8 F3: docs quote the reference sentence; test 1 now asserts the
+  full message with == (pin) -- truncation fails.
+- 00a60fd8 F4: readable_probe test: shared beside-image, os.open counted,
+  probe_opens == [] and rel in readable_probe.
+- 00a60fd8 F5 (nit): did NOT move the copy-loop/datasheet tests; kept the
+  unreadable-file story in one module. Noted in the PR comment.
+- 663e6890 F1 (FIFO hang): probe now O_RDONLY|O_NONBLOCK; test with SIGALRM
+  watchdog (status 0, no hang). Code change justified by the hang repro.
+- 663e6890 F2 (hashed hint): copy-loop remedy branches on dest_rel == rel;
+  hashed images get "point the reference at a readable file".
+- 663e6890 F3 (partial stub): source-refused handler unlinks the partial
+  dest (not in `written`, so the prune never claims it).
+- 663e6890 F4/F5: fixed by round 3 (single error; changelog leads with the
+  registration check).

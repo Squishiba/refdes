@@ -12,6 +12,7 @@ import errno
 import hashlib
 import os
 import shutil
+import signal
 
 import pytest
 from conftest import write_project_config
@@ -210,9 +211,14 @@ def test_an_unreadable_image_is_a_named_error_not_a_crash(tmp_path):
         beside.chmod(0o644)
 
     failing = next(d for d in project.errors if "board.png" in d.message)
-    assert "cannot be read" in failing.message, failing.message
-    assert "items/board.png" in failing.message
-    assert "Permission denied" in failing.message
+    # Pinned verbatim: docs/markdown.md quotes this sentence, so a
+    # rewording that leaves the docs behind must fail something here
+    # (review round 4).
+    assert failing.message == (
+        "image src 'board.png' exists at 'items/board.png' but cannot be "
+        "read: Permission denied. Make the file readable, or point the "
+        "reference at a readable file"
+    ), failing.message
     assert "does not exist" not in failing.message
     assert failing.file == "items/dec-a.md"
     assert failing.item_id == "DEC-A-001"
@@ -318,15 +324,17 @@ def test_check_reports_an_unreferenced_unreadable_site_assets_file(tmp_path,
 def test_a_referenced_unreadable_site_assets_file_is_gated_at_the_reference(tmp_path,
                                                                               monkeypatch,
                                                                               capsys):
-    """Review of #268: `collect_static_assets` registers a `site.assets:` file
-    before the render pass sees it, so the digest-path readability gate was
-    short-circuited for a *referenced* static file -- `refdes check` said
-    `0 errors`, the preview record marked the reference resolved, and the page
-    pointed at an asset publish would later refuse. The probe in
-    `_process_images` gates it at the reference like any other unreadable src
-    (which is also what makes `check` -- a command that renders, never
-    publishes -- see it). Sabotage: probe only when `dest is None`, and this
-    is the clean check again."""
+    """Review of #268: a *referenced* `site.assets:` file is registered by
+    `collect_static_assets`, which short-circuits the digest read -- without
+    the probe in `_process_images.swap` the reference records `ok: True` and
+    the page points at an asset publish will later refuse. The probe gates
+    it at the reference like any other unreadable src. Round 4: this test
+    used to assert only `"cannot be read"` and the path, which the
+    registration check's sentence also satisfies -- deleting the probe kept
+    it green. The reference's own sentence is pinned verbatim: only the
+    probe produces it. Sabotage: delete the
+    `elif rel not in project.readable_probe:` probe, and the reference is
+    recorded resolved."""
     write_project_config(tmp_path, _config("shots"))
     _item(tmp_path, "![the board](/shots/board.png)\n")
     shot = tmp_path / "shots" / "board.png"
@@ -342,8 +350,47 @@ def test_a_referenced_unreadable_site_assets_file_is_gated_at_the_reference(tmp_
     captured = capsys.readouterr()
     report = captured.out + captured.err
     assert status == 1, report
-    assert "cannot be read" in report
-    assert "shots/board.png" in report
+    assert (
+        "image src '/shots/board.png' exists at 'shots/board.png' but "
+        "cannot be read: Permission denied. Make the file readable, or "
+        "point the reference at a readable file"
+    ) in report, report
+
+
+def test_a_shared_image_is_read_once_and_later_references_use_the_probe_cache(tmp_path,
+                                                                               monkeypatch):
+    """Review round 3: the digest branch's read IS the readability probe, so
+    it now feeds `readable_probe` -- a second reference of the same image
+    takes the cached answer, and the "Read once... not a second I/O pass"
+    comment above it stays true. Sabotage: drop the digest branch's
+    `readable_probe.add`, and every later reference opens the file again
+    just to close it."""
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    _item(tmp_path, "![the board](board.png)\n")
+    (tmp_path / "items" / "dec-b.md").write_text(
+        "---\nid: DEC-B-002\ntype: decision\ntitle: Second reference.\n"
+        "status: accepted\n---\n\n![the board](board.png)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items" / "board.png").write_bytes(PNG)
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    real_open = os.open
+    probe_opens: list[str] = []
+
+    def counting_open(path, *args, **kwargs):
+        if str(path).endswith("board.png"):
+            probe_opens.append(str(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", counting_open)
+    build_mod.build(project)
+
+    assert not project.errors, project.errors
+    assert "items/board.png" in project.readable_probe
+    assert probe_opens == [], (
+        "the digest read is the probe; later references must not open again"
+    )
 
 
 @needs_chmod
@@ -374,6 +421,43 @@ def test_an_unreadable_referenced_site_assets_file_records_the_reference_failed(
     assert failing.item_id == "DEC-A-001"
     html = project.item_by_id("DEC-A-001").body_html
     assert 'src="/shots/board.png"' in html  # unrewritten, as for any failed src
+
+
+@needs_chmod
+def test_a_referenced_unreadable_asset_is_reported_once_by_check_and_build(tmp_path,
+                                                                             monkeypatch,
+                                                                             capsys):
+    """Review round 3: the referenced unreadable file drew TWO build errors
+    -- the reference's, and the bulk-copy gate's "remove it from the
+    site.assets: directory", advice whose author trades one error for a
+    dangling reference -- and `check` and `build` disagreed on the count
+    for one project state (1 vs 2). The copy gate now yields to the
+    reference (`unreadable_assets`): one error, the item-side sentence,
+    in both commands. Sabotage: drop the copy loop's
+    `unreadable_assets` skip, and the second sentence is back with its
+    self-defeating remedy."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "![the board](/shots/board.png)\n")
+    (tmp_path / "shots").mkdir()
+    shot = tmp_path / "shots" / "board.png"
+    shot.write_bytes(PNG)
+    shot.chmod(0o000)
+    monkeypatch.chdir(tmp_path)
+    try:
+        check_status = cli_mod.main(["check"])
+        check_cap = capsys.readouterr()
+        build_status = cli_mod.main(["build"])
+        build_cap = capsys.readouterr()
+    finally:
+        shot.chmod(0o644)
+
+    for status, cap in ((check_status, check_cap), (build_status, build_cap)):
+        report = cap.out + cap.err
+        assert status == 1, report
+        assert "1 items, 1 errors, 0 warnings" in report, report
+        assert "image src '/shots/board.png'" in report, report
+        assert "cannot be read" in report, report
+        assert "remove it from" not in report, report
 
 
 def test_a_file_that_vanishes_between_gate_and_open_is_a_missing_image(tmp_path,
@@ -408,13 +492,16 @@ def test_a_file_that_vanishes_between_gate_and_open_is_a_missing_image(tmp_path,
 def test_an_unwritable_site_out_is_still_builds_site_write_refusal(tmp_path,
                                                                     monkeypatch,
                                                                     capsys):
-    """Review of #268: the copy loop reads the project's own file *and* writes
-    the site, so its `except OSError` must not blame the asset for a
-    destination failure. A read-only `site.out` with all-readable sources is
+    """Review of #268: a read-only `site.out` with all-readable sources is
     `refdes build`'s own refusal -- names the site directory, exit 2, no
     partial "site written to" -- exactly as docs/cli-reference.md promises.
-    Sabotage: report every copy OSError as the asset's fault, and the user
-    gets a site missing an asset plus advice to chmod the wrong file."""
+    This test pins the *page-write* half of that path (it fails at the
+    first page, before the asset copy is reached -- the copy-loop split is
+    pinned by the test below); the split matters because the copy loop
+    reads the project's file *and* writes the site, and must never blame
+    the asset for a destination failure. Sabotage: remove `cli.py`'s
+    `except OSError` around `render_site`, and the build dies in a
+    traceback."""
     write_project_config(tmp_path, _config("shots"))
     _item(tmp_path, "No image referenced here.\n")
     (tmp_path / "shots").mkdir()
@@ -433,6 +520,41 @@ def test_an_unwritable_site_out_is_still_builds_site_write_refusal(tmp_path,
     assert "cannot write the site to" in report
     assert "cannot be read" not in report
     assert "site written to" not in report
+    assert "Traceback" not in report
+
+
+@needs_chmod
+def test_an_unwritable_asset_destination_blames_the_site_not_the_asset(tmp_path,
+                                                                        monkeypatch,
+                                                                        capsys):
+    """Review round 3: the test above refuses at the first *page* write --
+    `_copy_project_assets` is never reached -- so the copy loop's
+    destination/source split had no test that touched it, and deleting
+    `render._copy_source_refused`'s destination raise left the suite
+    green. A pre-existing read-only `_site/assets/shots` is the missing
+    shape: `makedirs(exist_ok=True)` succeeds on the directory that is
+    there, pages write fine, and the open of the *destination* fails inside
+    the try. cli.py's exit-2 "cannot write the site to <dir>" refusal owns
+    it -- the readable asset is named nowhere. Sabotage: delete the
+    split's `raise`, and the asset is blamed and the run exits 1."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "No image referenced here.\n")
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "shots" / "board.png").write_bytes(PNG)
+    (tmp_path / "_site" / "assets" / "shots").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "_site" / "assets" / "shots").chmod(0o500)
+    try:
+        status = cli_mod.main(["build"])
+    finally:
+        (tmp_path / "_site" / "assets" / "shots").chmod(0o700)
+
+    captured = capsys.readouterr()
+    report = captured.out + captured.err
+    assert status == 2, report
+    assert "cannot write the site to" in report
+    assert "cannot be read" not in report
+    assert "board.png" not in report
     assert "Traceback" not in report
 
 
@@ -511,6 +633,104 @@ def test_a_source_read_failure_in_the_copy_loop_blames_the_asset(tmp_path,
     assert "cannot be read" in report
     assert "I/O error" in report
     assert "cannot write the site" not in report
+
+
+def test_a_hashed_copy_failure_names_the_reference_not_the_site_assets_dir(tmp_path,
+                                                                             monkeypatch,
+                                                                             capsys):
+    """Review of #268: the copy loop publishes content-hashed images too,
+    and its source-refused sentence hardcoded the `site.assets:` remedy --
+    for `items/board.png` embedded in an item body, "remove it from the
+    site.assets: directory" names a place the file has never been. The
+    hashed leaf (`dest_rel != rel`) gets the reference's own remedy.
+    Sabotage: make the remedy unconditional, and the hashed asset is sent
+    to the wrong directory."""
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    _item(tmp_path, "![the board](board.png)\n")
+    (tmp_path / "items" / "board.png").write_bytes(PNG)
+    monkeypatch.setattr(
+        shutil, "copy2",
+        _copy2_raiser_for("board.png", OSError(errno.EIO, "I/O error")),
+    )
+    monkeypatch.chdir(tmp_path)
+    status = cli_mod.main(["build"])
+
+    captured = capsys.readouterr()
+    report = captured.out + captured.err
+    assert status == 1, report
+    assert "asset 'items/board.png' cannot be read: I/O error" in report, report
+    assert "point the reference at a readable file" in report, report
+    assert "site.assets" not in report, report
+
+
+def test_a_refused_copy_leaves_no_partial_destination(tmp_path, monkeypatch, capsys):
+    """Review of #268: `shutil.copy2` creates and fills the destination
+    *before* the read fails, then the handler said "this build does not
+    publish it" and left the stub on disk -- absent from `written`, so the
+    manifest prune never claims it. The handler now unlinks the partial.
+    Sabotage: drop the `os.remove(dest)`, and the stub is back."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "No image referenced here.\n")
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "shots" / "board.png").write_bytes(PNG)
+    real_copy2 = shutil.copy2
+
+    def partial_then_raise(src, dst, *args, **kwargs):
+        if str(src).endswith("board.png"):
+            with open(dst, "wb") as fh:
+                fh.write(b"partial")
+            raise OSError(errno.EIO, "I/O error", src)
+        return real_copy2(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "copy2", partial_then_raise)
+    monkeypatch.chdir(tmp_path)
+    status = cli_mod.main(["build"])
+
+    captured = capsys.readouterr()
+    report = captured.out + captured.err
+    assert status == 1, report
+    assert "cannot be read" in report
+    assert not (tmp_path / "_site" / "assets" / "shots" / "board.png").exists(), (
+        "a refused copy must leave no stub: it is published nothing, not a "
+        "truncated file"
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="mkfifo and SIGALRM are POSIX")
+def test_a_fifo_in_a_site_assets_directory_does_not_hang_the_check(tmp_path,
+                                                                     monkeypatch,
+                                                                     capsys):
+    """Review of #268: the registration walk yields every entry `os.walk`
+    finds, FIFOs included, and the readability probe opened it O_RDONLY --
+    which blocks until a writer appears, so `refdes check` never returned
+    (base silently skipped non-regular files at publish). A
+    `O_RDONLY | O_NONBLOCK` probe answers instantly, and the file stays as
+    base left it: registered, skipped at publish, reported nowhere. The
+    alarm turns a hang into a failure. Sabotage: drop `O_NONBLOCK` from
+    the probe."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "No image referenced here.\n")
+    (tmp_path / "shots").mkdir()
+    os.mkfifo(tmp_path / "shots" / "pipe")
+    (tmp_path / "shots" / "board.png").write_bytes(PNG)
+    monkeypatch.chdir(tmp_path)
+
+    def on_alarm(signum, frame):
+        raise AssertionError("refdes check blocked opening a FIFO")
+
+    previous = signal.signal(signal.SIGALRM, on_alarm)
+    signal.alarm(15)
+    try:
+        status = cli_mod.main(["check"])
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+    captured = capsys.readouterr()
+    report = captured.out + captured.err
+    assert status == 0, report
+    assert "cannot be read" not in report
+    assert "Traceback" not in report
 
 
 def test_an_unreadable_datasheet_copy_names_the_datasheet_not_the_site_out(tmp_path,

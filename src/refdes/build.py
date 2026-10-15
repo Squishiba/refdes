@@ -2900,6 +2900,7 @@ def _process_images(
                 f"or point the reference at a readable file",
                 file=where_file, line=where_line, item_id=where_id,
             )
+            project.unreadable_assets.add(rel)
         record(False, src)
         return match.group(0)
 
@@ -2946,6 +2947,10 @@ def _process_images(
                 return refused(exc, src, rel, match)
             dest = _hashed_leaf(rel, digest)
             project.assets[rel] = dest
+            # The digest read *is* the readability probe for this file:
+            # record it, so a later reference -- and the registration
+            # check -- find the answer cached instead of opening again.
+            project.readable_probe.add(rel)
         elif rel not in project.readable_probe:
             # A file registered by `collect_static_assets` (a `site.assets:`
             # directory) short-circuits the digest block above, so the
@@ -3381,12 +3386,10 @@ def collect_static_assets(project: Project) -> None:
     ship bytes the repository does not contain -- with a warning naming the
     escaped entry, since silence would read as a working asset directory.
 
-    A file that cannot be read (IMAGE-ASSET-007) is likewise refused at
-    registration, not discovered at publish: `refdes check` renders and
-    publishes nothing, so a copy-time-only refusal would leave the whole
-    `site.assets:` layout passing check clean. An unregistered file has no
-    publish attempt to fail; one that an `<img>` references falls to the
-    reference gate in `_process_images`, which gates it at the reference.
+    An unreadable file (IMAGE-ASSET-007) is *not* filtered here: the
+    registration is what a reference resolves through, and the readability
+    refusal belongs to `check_registered_assets_readable` (after the render
+    pass), which keeps a referenced file's single error at the reference.
     """
     root_real = os.path.realpath(project.root)
     for rel_dir in project.asset_dirs:
@@ -3407,24 +3410,49 @@ def collect_static_assets(project: Project) -> None:
                 file="refdes-project.yaml",
             )
             continue
-        # Open-and-close, no content read: the same probe posture
-        # `_process_images` uses at a reference. A file that vanished between
-        # the walk and here (the usual concurrent-editing race) is silently
-        # dropped -- there is nothing to publish, and a reference to it hits
-        # the reference gate's own "does not exist" sentence.
+        project.assets[rel] = rel
+
+
+def check_registered_assets_readable(project: Project) -> None:
+    """Refuse every registered asset the build cannot read (IMAGE-ASSET-007).
+
+    Runs after `render_bodies`, and that order is the whole design: the
+    render pass has already named the *referenced* unreadable files at
+    their references (their single error, in the sentence that fits an
+    author whose body links the file), and `readable_probe` /
+    `unreadable_assets` record what it saw, so this pass adds a refusal
+    only for the files no reference gates -- the `site.assets:` bulk-copy
+    layout of the resweep probe, which `refdes check` renders and publishes
+    nothing, so a copy-time-only refusal would leave `check` passing a
+    project whose build cannot publish it. The probe is open-and-close, no
+    content read. A file that vanished between the walk and here is dropped
+    silently -- there is nothing to publish, and a reference to it already
+    hit the reference gate's own "does not exist" sentence. The refused
+    file stays registered; the copy loop skips it, so the site publishes
+    the rest without it.
+    """
+    for rel in sorted(project.assets):
+        if rel in project.readable_probe or rel in project.unreadable_assets:
+            continue
         try:
-            os.close(os.open(os.path.join(project.root, *rel.split("/")), os.O_RDONLY))
+            # O_NONBLOCK: the registration walk yields every entry
+            # `os.walk` finds, FIFOs included, and a blocking O_RDONLY
+            # open would hang the whole command until a writer appears
+            # (IMAGE-ASSET-007 review round 2). Non-regular files answer
+            # instantly and stay as base left them: registered, skipped
+            # at publish by the copy loop's `isfile` check.
+            os.close(os.open(os.path.join(project.root, *rel.split("/")),
+                             os.O_RDONLY | os.O_NONBLOCK))
         except FileNotFoundError:
             continue
         except OSError as exc:
+            project.unreadable_assets.add(rel)
             project.error(
                 f"site.assets file {rel!r} cannot be read: {exc.strerror or exc}. "
                 "Make it readable, or remove it from the site.assets: "
                 "directory -- it is not published",
                 file="refdes-project.yaml",
             )
-            continue
-        project.assets[rel] = rel
 
 
 # ------------------------------------------------------------------------ entry point
@@ -3605,6 +3633,7 @@ def build(
     compute_board_coverage(project, chain_graph=chain_graph)
     citations_mod.verify(project, require=require_citations)
     render_bodies(project)
+    check_registered_assets_readable(project)
     render_pages(project)
     validate_figure_refs(project)
     return project

@@ -894,6 +894,15 @@ def _copy_project_assets(
         src = os.path.join(project.root, *rel.split("/"))
         if not os.path.isfile(src):
             continue  # already reported as a build error when the reference was resolved
+        if rel in project.unreadable_assets:
+            # Already refused this build -- at its reference, by
+            # `_process_images` (IMAGE-ASSET-007 review round 3): a
+            # second, copy-side sentence telling the author to remove
+            # the file contradicts the reference's own advice and makes
+            # `check` and `build` disagree on the count for one state.
+            # The file stays registered (it resolved); it is simply not
+            # published.
+            continue
         dest = os.path.join(asset_out, *dest_rel.split("/"))
         # Destination-side failures deliberately sit OUTSIDE the try below:
         # makedirs and every write-path OSError (ENOSPC in the copy loop
@@ -908,10 +917,26 @@ def _copy_project_assets(
         except OSError as exc:
             if not _copy_source_refused(exc, src, dest):
                 raise  # destination-side: cli.py's "cannot write the site" owns it
+            try:
+                # The failure landed mid-copy: `shutil` created `dest` and
+                # may have written into it. "This build does not publish
+                # it" must not leave the stub behind -- it is not in
+                # `written`, so the manifest prune will never claim it
+                # (IMAGE-ASSET-007 review round 2).
+                os.remove(dest)
+            except OSError:
+                pass
+            # The copy loop serves hashed images too, and those live
+            # nowhere in `site.assets:` -- the remedy names their own
+            # reference instead (review round 2).
+            remedy = (
+                "remove it from the site.assets: directory"
+                if dest_rel == rel
+                else "point the reference at a readable file"
+            )
             project.error(
                 f"asset {rel!r} cannot be read: {exc.strerror or exc}. Make "
-                f"it readable, or remove it from the site.assets: directory "
-                f"-- this build does not publish it"
+                f"it readable, or {remedy} -- this build does not publish it"
             )
             continue
         written.add(f"assets/{dest_rel}")
