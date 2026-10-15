@@ -1,0 +1,208 @@
+run6a-fixes -- B7, B6, F9 (PR #226 findings)
+================================================
+
+Started on branch run6a-fixes after `git fetch origin && git rebase
+origin/main` (clean rebase, tree at 9f83092, nothing expected to conflict).
+
+Read first: AGENTS.md, .scratch/COMMON.txt, .scratch/TASK.txt, and the
+report via `git show origin/user-sim-run6a:in-prog-logs/user-sim-release-gate-run6a.md`
+(saved to .scratch/run6a-report.md). Probes live in .scratch/{rr,b7,b7deb,b6}
+(rr is the driver: sys.path-insert of this worktree's src + refdes.cli.main).
+
+## B7 -- reproduction (before any change)
+
+Report's repro verbatim on a `refdes init` project (main writes
+`standard: {base: hardware, version: 3}` by default -- verified by reading
+the generated refdes-project.yaml in .scratch/b7):
+
+    $ printf -- '---\nid: DEC-PWR-001\ntype: decision\ntitle: Regulator choice\nstatus: accepted\n---\nBody.\n' > items/d.md
+    $ rr check
+    ERROR   items/d.md:2 — unknown type 'decision'.
+    0 items, 1 errors, 0 warnings
+    exit=1
+    $ rr standard upgrade --to 3
+    configuration error: project is already at hardware@3, not below the requested --to 3
+    exit=2
+
+Matches the report exactly (B7 confirmed on this branch).
+
+design-debate preset types, same shape. Listing the preset on a v3 project is
+already a named stop (`configuration error: preset 'design-debate' does not
+exist for hardware@3 (available: [])`, exit 2 -- NOT a bare error), but the
+*retirement path the docs tell you to take* (remove the preset, keep the
+items, per docs/standard-library.md "remove-preset first, then upgrade")
+leaves a bare error:
+
+    $ rr check   # presets: [], items/db.md has `type: debate`
+    ERROR   items/db.md:2 — unknown type 'debate'.
+    0 items, 2 errors, 0 warnings
+
+so debate/option/claim/position need the same treatment (verified for
+`debate`; the other three go through the identical code path --
+`project.types.get(type_name)` misses and no preset is bundled at v3, so
+`preset_provided_types` is empty by construction: standards.py:338
+`preset_providers` scans only the presets shipped at the *pinned* version,
+and v3 ships none: src/refdes/standards/hardware/v3/presets/ does not exist,
+`ls` shows the dir only under v1/ and v2/).
+
+## B7 -- the migration facts, all read from repo files
+
+- changelog.d/threads-4a-decision-merge.breaking.md: `decision` retired, the
+  history-backed `log` absorbs it. `title:` -> `summary:`;
+  `status`/`rationale`/`options`/`checks` and the
+  `satisfies`/`constrained_by`/`selects`/`supersedes`/`blocked_by` links,
+  `satisfying_statuses: [accepted]` and `check_severity: error` all move onto
+  `log`; `date:` optional, `status:` no default; `legacy_prefixes: [DEC]`
+  keeps migrated DEC ids warning-free; `records:` edges -> `follows:` (kept
+  structured links); `log.date` on_change moves log -> invalidate;
+  `refdes standard upgrade --to 3` carries a **v2** project across, and the
+  design-debate preset (debate/option/claim/position) retires with the type.
+- src/refdes/standards/hardware/v3/migration.yaml:
+  `merge_types: {decision: log}`, `fields: {decision: {title: summary}}`,
+  `links: {records: follows}`.
+- src/refdes/standards/hardware/v3/base.yaml: `log` has
+  `legacy_prefixes: [DEC]` (line 283).
+- docs/standard-library.md: `## Versioning and pinning` section, change 7
+  "decision is retired; the history-backed log absorbs it" + the upgrade
+  recipe; `## Presets` section for design-debate's retirement (anchor slugs
+  checked with pages._slugify: versioning-and-pinning, presets).
+
+Feasibility note for a `standard upgrade`-style automatic migration of the
+v3-pinned shape (recorded, NOT built -- scope per the task):
+revise.py's apply() is driven by a revise.Mapping built from
+migration.yaml, and the chain in cli.cmd_standard_upgrade walks
+`from_version -> --to` strictly upward, refusing when the project is already
+at `--to` (that is the exact `configuration error` reproduced above). The
+v3->v3 "migration" needed here is a non-empty mapping
+(merge_types/fields/links) applied *within* one pinned version, which is
+outside the chain's model: it would need (a) an idempotent re-apply of the
+v3 migration onto an already-v3 project (the chain has no such step and
+baselines/seals are relabelled per step), (b) the same
+refuse-and-rollback transaction (body-merge conflicts are handled by
+revise.check_body_merge_conflicts, so that part is reusable), and (c) a
+decision on the manufactured `follows:` edges, whose freeze-and-capture on
+the first writable load is the fragment's documented behaviour. Scope: one
+`standard repair --for-retired-types`-style command reusing revise.apply()
+with v3's migration.yaml and no pin bump. Not built.
+
+## B6 / F9 -- reproduction (before any change)
+
+Report's items/one.yaml shape on a v3 init project (list-file form needs the
+`items:` mapping on this branch -- a bare list is now
+`list file must be a mapping with an 'items:' key`, which is the B1-era
+hardening, not a regression).
+
+    $ rr check
+    1 items, 0 errors, 1 warnings        # the 1 warning is the unrelated
+    exit=0                              # 'selected but nothing selects it'
+    $ rr build -> exit 0, site written
+    $ rr ls --tag x
+    CMP-001  component  TPS62130        # the dict's verdict value matches as
+                                        # a tag: silent accept confirmed
+
+F9, same file with `satisfies:` in place of `tags:`:
+
+    ERROR   items/one.yaml:2 [CMP-001] — satisfies points at "{'name':
+    'not-a-string', 'verdict': 'x', '__line__': 10}", which does not exist
+    ...
+    exit=1
+
+Confirmed: caught by the dangling-reference rule with the loader dict repr,
+`__line__` included (parse.py:1004 `item.links[key] = [str(t) for t in
+targets if t]` stringifies the raw, line-tagged mapping).
+
+## Fixes
+
+(changelog rule applied: all three are user-visible diagnostics, so one
+`fixed` fragment each per changelog.d/README.md's `fixed` category --
+"fixed — a bug fix"; B7's fragment is a diagnostic-quality fix, not a
+behaviour change to the standard.)
+
+### B7 (src/refdes/parse.py, src/refdes/docs_url.py)
+
+- docs_url.py: added `VERSIONING_AND_PINNING_DOCS` and `PRESETS_DOCS`
+  (anchors `standard-library.html#versioning-and-pinning`,
+  `#presets` -- slugs checked against pages._slugify).
+- parse.py: `_RETIRED_TYPES` (decision -> log) and `_RETIRED_PRESET_TYPES`
+  (debate/option/claim/position -> log, naming the design-debate preset),
+  consulted in `_build_item`'s unknown-type branch right beside
+  `_RENAMED_TYPES`, gated the same way (`"log" in project.types`). The
+  decision text names the merge, `title:`->`summary:`,
+  `records:`->`follows:`, the moved fields/links, `legacy_prefixes: [DEC]`,
+  why `standard upgrade --to 3` refuses this project, and the docs page.
+- After:
+      ERROR   items/d.md:2 [DEC-PWR-001] — unknown type 'decision': it merged
+      into 'log' at hardware@3 (threads phase 4a): write type: log, rename
+      title: to summary:, and rewrite records: as follows: -- ... See
+      https://refdes.dev/standard-library.html#versioning-and-pinning.
+- design-debate types get the preset-named variant + `#presets`.
+- Feasibility note (NOT built, recorded above): a v3->v3 in-place repair
+  reusing revise.apply() with v3's migration.yaml, no pin bump. Out of scope.
+
+### B6 (src/refdes/build.py, validate_items)
+
+- Added the missing `elif fspec.type == "list":` element check: every entry
+  of a list-of-strings field must be a string (None/"" left to the field's
+  own emptiness rules; a non-list value stays `_reject_scalar_collection`'s
+  loader error). Names field + index + expected shape, item/file/line like
+  the neighbours.
+- Before: `1 items, 0 errors` exit 0, page rendered a dict repr,
+  `ls --tag x` matched. After:
+      ERROR   items/one.yaml:2 [CMP-001] — tags[1]: {'name': 'not-a-string',
+      'verdict': 'x'} is not a string -- a tags entry is a plain string, one
+      per line, as in tags: [first, second]
+  (refdes[1] likewise), exit 1. Class proven schema-independent with a
+  hand-declared `type: list` field.
+
+### F9 (src/refdes/parse.py, `_link_targets`)
+
+- New helper reads one link verb's authored value: bare scalar ->
+  one-element list (leniency preserved), every entry must be a plain string,
+  non-string entries are refused `{key}[{index}]: ... is not a string -- a
+  link target is one item id per entry` and DROPPED, preview shown via
+  `_strip_lines` (no `__line__`). Wired at both link sites (normal +
+  renamed-type). `Item.links` keeps raw target text semantics (AGENTS.md) --
+  non-strings never enter it.
+- Before: `satisfies points at "{'name': ..., '__line__': 10}", which does
+  not exist`. After: the `satisfies[0]:` message above, no `__line__`,
+  exit 1.
+
+### Tests
+
+- tests/test_revise_migrations.py: 4 new tests (decision hint on a v3 init
+  project; hint quiet where no `log` type exists; all four preset types get
+  the preset-named hint; v2 + design-debate preset list still resolves the
+  preset types clean -- the retirement table must not pre-empt
+  preset_providers).
+- tests/test_list_element_shapes.py (new): B6 mapping element in tags/
+  refdes, clean list green, build==check with no traceback, class on a
+  hand-rolled schema (float/bool/nested-list entries), F9 link-verb element
+  refused by verb+index with no `__line__` and no dict-quoted dangling
+  message, bad entry dropped while good entries stay edges
+  (`Item.links`/`resolved_links`), scalar link target still one edge.
+
+### Sabotage (each reverted after; verified re-passing)
+
+1. build.py list branch -> dead condition: the 4 B6 tests fail, check prints
+   the pre-fix `1 items, 0 errors, 0 warnings` exit 0. Restored.
+2. `_link_targets` string check -> `if True:`: the 2 F9 tests fail, the dict
+   reaches the backlink index and model.py:1096 raises `unhashable type:
+   'dict'`. Restored.
+3. B7 retired-hint lookup -> `None and ...`: the decision test fails on the
+   bare `unknown type 'decision'.`. Restored.
+
+### Gates
+
+- Targeted: tests/test_list_element_shapes.py + tests/test_revise_migrations.py: 36 passed.
+- Neighbour files (scalar_for_list_field, scaffold, blocks, revise,
+  standards, decision_options, tasks): 231 passed.
+- Full suite (foreground): 3702 passed, 2 skipped, exit 0
+  (.scratch/suite.txt; no flake this run).
+- `ruff check --select E9,F` on all touched files: clean. Full-project ruff
+  on the touched files reports only build.py:3:1 I001, verified pre-existing
+  at HEAD (`git show HEAD:src/refdes/build.py | ruff check --select I -`),
+  left alone per AGENTS.md.
+- `docs-site/gen_examples.py --check`: clean.
+
+STATUS: finished. Committed on run6a-fixes, pushed, PR opened.
+
