@@ -597,19 +597,34 @@ def test_no_yaml_safe_load_call_lives_outside_the_shared_read_helper():
     raw -- three times the same leak was patched one instance at a time.
     Every store read in history.py must go through _read_store_file, and
     this test is what fails the day the module grows another raw
-    open()/yaml_safe_load pair outside it."""
+    open()/yaml_safe_load pair outside it. The gate catches the call spelled
+    either way (bare and attribute, e.g. parse.yaml_safe_load, the spelling
+    the module's own test file uses), and the raw open(..., encoding=...)
+    half of the pair: a call gate alone misses the leak when the decode
+    moves to a caller that opens the file itself."""
     tree = ast.parse(Path(history.__file__).read_text(encoding="utf-8"))
     helper = next(
         node
         for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "_read_store_file"
     )
+
+    def callee(node: ast.Call) -> "str | None":
+        if isinstance(node.func, ast.Name):
+            return node.func.id
+        if isinstance(node.func, ast.Attribute):
+            return node.func.attr
+        return None
+
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "yaml_safe_load"
-        ):
+        if not isinstance(node, ast.Call):
+            continue
+        name = callee(node)
+        raw_read = name == "yaml_safe_load" or (
+            name == "open" and any(kw.arg == "encoding" for kw in node.keywords)
+        )
+        if raw_read:
             assert helper.lineno <= node.lineno <= helper.end_lineno, (
-                f"history.py:{node.lineno} calls yaml_safe_load outside _read_store_file"
+                f"history.py:{node.lineno} has a raw open()/yaml_safe_load "
+                "read outside _read_store_file"
             )

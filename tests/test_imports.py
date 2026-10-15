@@ -161,6 +161,23 @@ def test_version_pin_mismatch_refuses_the_import(importing_project):
     assert project.item_by_id("IFC-CAN-001") is None
 
 
+def test_a_non_utf8_artifact_is_a_clean_read_error_not_a_traceback(importing_project):
+    """#212 follow-up: the read caught (OSError, JSONDecodeError) only, and
+    json.load decodes lazily, so a non-UTF-8 artifact escaped as a raw
+    UnicodeDecodeError traceback. It is the same clean `could not read`
+    error as the missing file now."""
+    (importing_project / "upstream" / "items.json").write_bytes(
+        b"\xff\xfe" + json.dumps(UPSTREAM).encode("utf-16")
+    )
+    project = _build_at(importing_project)
+    assert any(
+        d.message.startswith("import 'platform': could not read")
+        and "utf-8" in d.message
+        for d in project.errors
+    ), [d.message for d in project.errors]
+    assert project.item_by_id("IFC-CAN-001") is None
+
+
 def test_id_collision_across_projects_is_an_error(importing_project):
     colliding = (importing_project / "items" / "decisions" / "dup.yaml")
     colliding.write_text(

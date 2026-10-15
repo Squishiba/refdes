@@ -616,12 +616,22 @@ def test_a_corrupt_seal_file_is_a_clean_cli_error_not_a_traceback(sealed_board_p
     recorded repro is in .scratch/f2-traceback.txt). It raises the project's
     SchemaError now, the same class boards/ids/lifecycle raise for their own
     corrupt store files, so main()'s SchemaError handler -- the path every
-    config error takes -- prints one line and exits 2."""
+    config error takes -- prints one line and exits 2. The claim covers
+    `check` and `build`; both are pinned."""
     project = _build_at(sealed_board_project)
     build_mod.build(project, seal_write=True)
     Path(seal.seal_path(project, "board-a")).write_bytes(b"\xff")
 
     code = cli_mod.main(["-c", str(sealed_board_project / "refdes-project.yaml"), "check"])
+
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "configuration error" in err
+    assert "log-seal-board-a.yaml" in err
+    assert "seal file is not valid UTF-8" in err
+    assert "Traceback" not in err
+
+    code = cli_mod.main(["-c", str(sealed_board_project / "refdes-project.yaml"), "build"])
 
     err = capsys.readouterr().err
     assert code == 2

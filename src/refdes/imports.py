@@ -41,7 +41,7 @@ def load_imports(project: Project) -> None:
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             project.error(f"import {spec.name!r}: could not read {path}: {exc}")
             continue
 

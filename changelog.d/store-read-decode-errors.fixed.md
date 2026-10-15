@@ -2,8 +2,10 @@
   YAML, is now a loud error naming the file everywhere it is read, not a
   raw `UnicodeDecodeError` or YAML parser traceback. This finishes what
   the history event files got (#207/#209) for the rest of the store:
-  history *object* files (a corrupt snapshot now fails `refdes build`,
-  `refdes history`, and every capture with a `HistoryError` naming it),
+  history *object* files (a capture that must save that exact snapshot --
+  `refdes history capture` of that content, say -- now fails with a
+  `HistoryError` naming it; a build, check, or serve with no capture
+  pending never reads the file),
   log seals, the board/workspace manifest, the id ledger, baselines, and
   the citation lockfile's non-UTF-8 half. A corrupt
   `.refdes/keys-adopted.yaml` is no different: `refdes keys adopt`
