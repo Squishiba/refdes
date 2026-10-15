@@ -126,11 +126,11 @@ so the branch ships with zero code changes; the log is the work product.
     are the rule for that multi-anchor page shape" (file lives under
     docs/design/, not docs/).
 18. #210 re-review lows — (a) ALREADY FIXED: free_port guards the collapsed
-    band (serve_support.py:466-471, `len(band) < 512` falls back to the OS
-    pick), tested by test_serve_cli.py:194-200 with ephemeral_start
-    patched to 2048 and 1500. (b) ALREADY FIXED: _wait_for_file's docstring
-    now says "stderr when it has any, stdout otherwise"
-    (test_serve_cli.py:146-147), matching `err or out`. (c) The macOS/BSD
+    band (tests/serve_support.py:466-471, `len(band) < 512` falls back to
+    the OS pick), tested by tests/test_serve_cli.py:194-200 with
+    ephemeral_start patched to 2048 and 1500. (b) ALREADY FIXED:
+    _wait_for_file's docstring now says "stderr when it has any, stdout
+    otherwise" (tests/test_serve_cli.py:146-147), matching `err or out`. (c) The macOS/BSD
     caveat being doc-sourced and untested on a Mac is INFORMATIONAL, no
     action (no Mac here).
     All of 18 landed in 374a4aa (#213), whose commit message names M1/M2.
@@ -158,7 +158,8 @@ log-only tree).
 
 - Full suite: `PYTHONPATH=$PWD/src ... -m pytest -q -p no:cacheprovider` ->
   exit 0, "3829 passed, 2 skipped in 317.89s (0:05:17)" (first run, no
-  flake re-run needed; .scratch/suite.txt).
+  flake re-run needed; .scratch/suite.txt). STALE for the head — this ran
+  on the pre-rebase 885e9e6 tree; head-tree numbers are in "Final round".
 - `ruff check --select E9,F src tests` -> All checks passed! (exit 0).
 - `python docs-site/gen_examples.py --check` -> schema-reference.md and
   vocabulary.md up to date (exit 0).
@@ -200,3 +201,112 @@ Task finished: all 18 bullets verified, 0 fixes needed, PR opened.
   tests"). First-round counts stand (3829 passed, 2 skipped, exit 0);
   ruff E9,F and gen_examples --check were also unaffected by a
   in-prog-logs-only change and were not re-run.
+
+## Backlog source (PR #246 round-2 review, low finding)
+
+The 18 bullets are not in the repo: they are the orchestrator's working
+notes at .scratch/reviews-2026-10-10/FOLLOWUPS.md lines 217-242 in the
+main checkout (outside this repo, never in git history), copied verbatim
+into .scratch/task/ITEMS.md of this worktree (uncommitted scratch, as the
+sweep harness requires). First line(s) of each numbered item as quoted
+there, so a reviewer holding only the repo can check every verdict
+against the claim it answers (c5/c1 sub-bullets quoted as the
+log-numbered items they became):
+
+ 1. `- #179 _drop_refused docstring: already fixed by 7dc4a42 (#188).`
+ 2. `- #200 c2 rename-alias dry-run on a renamed tree: not true; the test
+    uses fresh trees (since 4e29ff6).`
+ 3. `- #184 link verb named on_change: already a clear exit-2 load error
+    (schema._reject_reserved_link_verb, from 052d0c3). CLOSED, so it no
+    longer needs a decision from Jared.`
+ 4. `- #207 review, append_event's unwrapped read: fixed in #209
+    (_read_event_file helper).`
+ 5. `- Also already fixed on main: concepts "five of these", README
+    "Fifteen commands", THERMAL_DONE, "froze", seal.py "it".`
+ 6. `- #206 (merged 1a4f46f) final review (1f7028ab, APPROVE): the log
+    in-prog-logs/sweep3-schema-vocab-nits.txt:115-116 has a duplicated
+    "## D6" heading; changelog.d/verb-named-reserved-key.breaking.md:8-9
+    says the body: collision "silently dropped the link" without naming
+    which collisions errored (informational).`
+ 7. `- #210 (flake fix + SO_REUSEADDR on POSIX): on macOS/BSD,
+    SO_REUSEADDR lets a bind to 127.0.0.1:P succeed while another process
+    listens on 0.0.0.0:P (Linux refuses that). docs/cli-reference.md
+    ~1976 says "a port held by anything else is a refusal". Either note
+    the BSD exception in the docs, or use SO_REUSEADDR only on Linux.
+    Raise it with Jared if the review doesn't.`
+ 8. `- CI RED (verified by me, run 38256138855):
+    tests/test_package_data.py:22 `from glob import translate` is 3.13+,
+    but requires-python is >=3.11 and CI runs 3.11, so it's an
+    ImportError at collection on ubuntu and windows. Replace it with
+    fnmatch, or a small hand-rolled glob->regex for `*` and `**`. Run
+    that test under 3.11 if one is available (uv, or `ls
+    /usr/bin/python3.1*`); if none is, say so.`
+ 9. `- c2 (d811be7e, CHANGES REQUESTED), log only:
+    in-prog-logs/workbench-w5a-task-pane.txt:35/:39 say "37 tests";
+    it's 39 + 8 at b04fd63. :15-18 lists threads.py's shared
+    strings but leaves out TASK_HEADING_TIP and the others, plus round
+    5's derived_detail and age_suffix. Better to drop the hard counts
+    and enumerations, or say "as of <sha>".`
+10. `- c4 (d4a143bf, APPROVE) nits: the PR body says "33 + 8 tests"
+    (it's 39 + 8); task_pane.py:103 panes_by_entry docstring "One pane
+    model per thread" should be "per entry of the thread";
+    test_task_pane.py:907-911 the glyph test's docstring claims
+    identity but doesn't assert `is` (the K2 twin at :918 does);
+    test_task_pane.py:464 `"day" not in body` is brittle, so pin the
+    composer's actual markers instead.`
+11. `- c3 (279569e2, APPROVE) nits: serve/static/bar.css:30-33
+    hard-codes an 87px offset derived from taskpane.css's toggle
+    height, and nothing pins the toggle metrics (have the offset test
+    also read taskpane.css's toggle padding/font, or add a comment
+    pointing both ways); cli.py:2760 `refdes work` help re-spells
+    "Derived (auto clears when fixed)" (use the threads constant; that
+    goes in sweep G after merge if not fixed here).`
+12. (c5 parent `- c5 (8a505f3d, CHANGES REQUESTED):`) F1: `F1 MEDIUM,
+    visual: taskpane.css:111-114 `.refdes-taskpane-tasks` (and :138-141
+    for the derived ul) has no `list-style: none`, and style.css has no
+    global ul reset, so every task row shows a disc bullet AND the manual
+    `{{ loop.index }}.` (item.html.j2:356-361). Add list-style:none, plus
+    a test that pins it in taskpane.css.`
+13. `F2 low, latent: taskpane.js:152-157 `visible` is keyed by ref (two
+    anchors with the same ref clear each other); :163-172 a visible
+    anchor whose paneFor() is null returns before un-greying.`
+14. `F3 low: taskpane.js:60-65 Escape anywhere closes the pane, and it
+    stacks with app.js:122-126's preview-card Escape, so one press
+    closes two layers. Act only when the target is in the pane or on
+    body, or when nothing else claimed it.`
+15. `F4 nit: taskpane.js:112-129 the tab key handler ignores modifier
+    keys and has no defaultPrevented guard.`
+16. `F5 nit: item.html.j2:377 the derived ul's `tight` class only
+    half applies (it ties the pane rule). Drop `tight` there.`
+17. `- c1 (b21dda0a, CHANGES REQUESTED, mainly for the 3.11 CI break),
+    doc nits:` — first nit: `changelog.d/thread-workbench-task-pane.added.md:8
+    and docs/cli-reference.md:2066 say "Every line is `refdes thread`'s
+    own wording", but the `viewing LOG-007 · tasks as of tip LOG-012`
+    note is the pane's own (task_pane.py:143). Narrow the claim.`
+18. `- #210 (merged) re-review (ef65314a, APPROVE) lows:
+    tests/serve_support.py free_port's band is range(2048,
+    ephemeral_start()); if a sysctl puts ip_local_port_range's start
+    at or below 2048, the band is empty and every pinned-port test raises
+    RuntimeError. Guard it or fall back. The _wait_for_file docstring
+    says "first 3 lines of stderr", but it uses `err or out`. The
+    macOS/BSD caveat is from the docs, not tested on a Mac.`
+
+## Final round (PR #246 round-2 review, medium finding: suite numbers)
+
+- Full suite run ONCE in the foreground on the head tree (93a81db =
+  main 9bc1304 + log-only commits; src/ and tests/ are byte-identical to
+  main, the 722-line main delta is main's own):
+  `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest -q
+  -p no:cacheprovider` -> exit 0, **3852 passed, 2 skipped in 308.69s
+  (0:05:08)** (.scratch/suite-r3.txt).
+- So: the 3829/2 in "End-of-run gates" is true for the pre-rebase
+  885e9e6 tree and STALE for the head; the head's suite result is
+  3852/2, and it equals main's — this log-only PR changes no code,
+  so its suite result is main's by construction. ruff E9,F and
+  gen_examples --check: unaffected by a in-prog-logs-only change;
+  reviewer independently measured both passing on the head tree.
+- Path nit: `serve_support.py:466-471` above means
+  **tests/serve_support.py:466-471** (full path now given; the bullet-18
+  test is tests/test_serve_cli.py:194-200, docstring at
+  tests/test_serve_cli.py:146-147).
+Task finished: rounds 1-3 all landed, PR #246 open.
