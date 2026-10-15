@@ -177,3 +177,60 @@ Gates:
   `.scratch/cite-count-provenance-cli-probe-hash-only-unprovenanced` confirmed
   check warns, plain fetch skips and warns without changing the lockfile, audit
   reports pages unchecked, and build --require-citations exits nonzero.
+
+PR prep 2026-10-14
+------------------
+Started from head `fd7d377`, status clean. Verified pwd, branch, worktree root,
+and AGENTS.md. Every commit on `origin/main..HEAD` has a
+`Co-authored-by: Qwen3.8-Flash-Next <noreply@refdes.local>` trailer.
+
+- `git fetch origin main` (one fetch). Current main was `9f83092`.
+- Inspected merged #212 (`1a1c960`): its citations.py change wraps
+  `load_lockfile()`'s read in a `UnicodeDecodeError -> LockfileError` guard.
+  After rebase it is present at `src/refdes/citations.py:1152` (HEAD
+  `5355b34`).
+- Inspected open PR #225 (`aa1efa9`): its citations.py guard is
+  `MAX_PAGE_DIGITS = 64`, enforced in `page_number()` and
+  `serve/sources._pdf_proposal()`. It is not in current main and is not included
+  in this PR; our branch does not touch `page_number()` or
+  `serve/sources._pdf_proposal()`, so it preserves the open PR's guard.
+- `git rebase origin/main`: clean, 3/3 commits, zero conflicts. New head
+  `5355b34`.
+
+Verification after rebase, with `PYTHONPATH` forced to this worktree's `src` and
+`refdes.__file__` verified as
+`/home/jorb/work/refdes/.scratch/fix-cite-count-provenance/src/refdes/__init__.py`:
+
+- Page-count/fetch/audit/lockfile suites:
+  `tests/test_citation_pages.py tests/test_citations.py
+  tests/test_lockfile_corruption.py tests/test_run5_friction_f1_f2_f6_f8.py
+  tests/test_audit_hash_only_wording.py tests/test_serve_sources_accept.py`
+  -> 341 passed, 1 skipped.
+- #212 adjacent store suites:
+  `tests/test_history.py tests/test_keys_adopt.py tests/test_reseal_audit.py
+  tests/test_seal.py tests/test_yaml_loaders.py`
+  -> 85 passed.
+
+Real CLI probes:
+
+- `.scratch/pr-cite-probe-local`: a local PDF pinned with a mismatched
+  page-count provenance. `check` warns and names plain fetch; plain fetch skips
+  the re-pin, recounts to `page_count: 2`, writes the matching
+  `page_count_sha256`, and warns about cited page 5 of the 2-page PDF.
+  `build --require-citations` then reports the page error.
+- `.scratch/cite-count-provenance-cli-probe-hash-only-unprovenanced`: a remote
+  hash-only PDF pin with `page_count: 8` and no provenance. `check` warns with
+  the `--update` remedy; plain fetch warns, leaves the lockfile unchanged, and
+  downloads nothing; `audit` reports `pages unchecked`;
+  `build --require-citations` fails.
+- `.scratch/pr-cite-probe-no-extra`: fresh local fetch with pypdf hidden writes
+  `page_count_error` plus matching `page_count_sha256`, and `check` reports the
+  pages as unchecked.
+- `.scratch/pr-cite-probe-corrupt-lockfile`: non-UTF-8 lockfile. `fetch`,
+  `check`, `audit`, and `build` all name `.refdes/citations.yaml` and exit 1
+  with no traceback, preserving #212.
+
+Scoped ruff on the touched Python files:
+`E9,F,I001,SIM` reports only pre-existing findings (SIM105 at
+`src/refdes/citations.py:346`, import-sorting SIM/I001 in untouched import
+blocks). No findings were introduced on this branch's added lines.
