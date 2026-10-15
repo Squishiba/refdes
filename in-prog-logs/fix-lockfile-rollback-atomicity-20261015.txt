@@ -75,9 +75,43 @@ Verification:
 - green-after: all three probes green on the branch.
 - tests/test_serve_sources_accept.py + tests/test_citations_lockfile_
   locking.py: 39 passed.
-- full suite: 3841 passed, 2 skipped (319s), on base e1d7bdb.
+- full suite: 3867 passed, 2 skipped (~345s), on the rebased base 7e49a20
+  (the earlier 3841 was the pre-rebase base e1d7bdb; the delta is merged
+  PRs, not this change).
 - scoped ruff on the six touched files: see PR checks; pre-existing
   repo-wide findings NOT touched (AGENTS.md: ~99 baseline findings).
+
+Review round 2 (both chunks CHANGES REQUESTED on head ede1252):
+- HIGH (both chunks, same bug): `_land_lockfile`'s moved-file branch read
+  "already pins every pair" and skipped the RE-STAGE, but then fell
+  through to the unconditional write -- overwriting the moved file with
+  bytes staged BEFORE the writer landed, erasing the writer's pins for
+  keys this accept does not carry. Chunk 2 reproduced it with a probe
+  (.scratch/review253/probe/test_probe.py in the reviewer's worktree:
+  accept returns 200 applied, writer's `other` pin gone, a body naming
+  `other` makes `refdes check` exit 1 -- this PR's own clobber class).
+  Fix: the already-pinned branch now returns before the write -- the
+  file stands, only the body lands, `landed` stays False so no restore
+  is owed. The branch's comment already said "the file stands and only
+  the body lands"; the code just didn't do it.
+- New probe `test_a_writer_that_already_pinned_the_key_lands_its_own_
+  pins_too`: writer lands a body naming `other` plus a lockfile pinning
+  eff+other mid-gate; accept applies; all three keys pinned; check
+  exit 0. Verified RED at ede1252 (the pre-fix head) and green with the
+  fix.
+- LOWs: probe 1's simulated winner now writes lockfile AND body in one
+  lock section (realism); renamed
+  `test_a_rolled_back_accept_of_a_never_fetched_project...` ->
+  `test_a_refused_accept...` and re-worded the two seam docstrings that
+  still said "after the lockfile landed" (nothing lands before the gate
+  now).
+- Docs: §4's landing rule now spells the already-pinned skip (chunk 1's
+  point was doc/behavior mismatch; the code now matches the doc, and the
+  doc got the missing sub-rule explicitly). Changelog fragment updated
+  to match.
+- Full suite after the fix: 3867 passed, 2 skipped (rebased base).
+- #240 stays HOLD (its tree-check guard rejected on the P1 escape; the
+  structural fix supersedes it).
 
 Not done in this change (documented, not hidden): a writer that ignores
 project_write_lock entirely; crash between lockfile landing and body

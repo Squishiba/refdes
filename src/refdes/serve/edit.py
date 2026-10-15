@@ -598,11 +598,17 @@ def _land_lockfile(before: Project, accept: _Acceptance) -> str | None:
     * the bytes this accept staged its decision from -- nobody moved the
       file; the staged bytes land;
     * anything else -- a cooperating writer's read-modify-write landed
-      during the gate. The file is input, not an obstacle: this accept's
-      keys are re-staged over the records as they now are, under fetch's
-      own non-update policy, so the writer's pins survive in the bytes that
-      land and the pair lands with the body. A record the keys no longer
-      describe (a changed source file) is a refusal, not a clobber.
+      during the gate. The file is input, not an obstacle. If its records
+      already pin every pair this accept brings (its bytes differ from
+      ours only in pins we do not carry), the file stands: writing this
+      accept's staged bytes -- computed before the writer landed, and
+      therefore missing the writer's pins -- would erase them from under
+      the bodies that name them, which is this PR's own clobber class.
+      Otherwise this accept's keys are re-staged over the records as they
+      now are, under fetch's own non-update policy, and the merged bytes
+      land, so the writer's pins survive in the file and the pair lands
+      with the body. A record the keys no longer describe (a changed
+      source file) is a refusal, not a clobber.
 
     A refusal after this function returned None can only be the body's
     replace failing, and the section restores what its own write replaced --
@@ -629,21 +635,22 @@ def _land_lockfile(before: Project, accept: _Acceptance) -> str | None:
         except citations_mod.LockfileError as exc:
             return str(exc)
         pairs = [(plan["path"], plan["key"]) for plan in accept.plans]
-        if not all(
+        if all(
             citations_mod.locked_source_value(records.get(canon), key) is not None
             for canon, key in pairs
         ):
-            errors, pinned = citations_mod.stage_source_pins(
-                before, records, pairs,
-                anchors=accept.anchors, digests=accept.digests,
-            )
-            if errors:
-                return "; ".join(errors)
-            lock.staged = citations_mod.lockfile_text(records).encode("utf-8")
-            # The response reports the values this section's bytes pin, which
-            # is the same extraction under the same policy -- the reader's
-            # answer, not a second copy of anything.
-            accept.pinned = tuple(pinned)
+            return None
+        errors, pinned = citations_mod.stage_source_pins(
+            before, records, pairs,
+            anchors=accept.anchors, digests=accept.digests,
+        )
+        if errors:
+            return "; ".join(errors)
+        lock.staged = citations_mod.lockfile_text(records).encode("utf-8")
+        # The response reports the values this section's bytes pin, which
+        # is the same extraction under the same policy -- the reader's
+        # answer, not a second copy of anything.
+        accept.pinned = tuple(pinned)
     failure = (
         _atomic_replace(lock.path, lock.staged)
         if current is not None

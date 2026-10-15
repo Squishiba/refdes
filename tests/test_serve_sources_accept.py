@@ -351,13 +351,11 @@ def test_a_diagnostic_gate_refusal_rolls_the_lockfile_back_too(served):
     assert os.stat(item_file).st_mtime_ns == item_mtime, "the body was written anyway"
 
 
-def test_a_failure_after_the_lockfile_landed_leaves_the_body_untouched(
-    served, monkeypatch
-):
-    # The window §4 names: the lockfile is on disk and something fails before
-    # the body lands. `_restore` of bytes held in memory is the whole recovery,
-    # and this proves it happens -- the item file never moved, and the lockfile
-    # is byte-for-byte what it was.
+def test_a_failure_inside_the_gate_lands_neither_file(served, monkeypatch):
+    # §4's window, read-only: the accept's bytes are staged, and something
+    # fails inside the gate. Nothing was ever written, so the refusal leaves
+    # the tree byte-for-byte as it was -- the item file never moved (not even
+    # its mtime), and the lockfile never appeared.
     _app, client, root = served
     item_file = root / "items" / "decisions.yaml"
     before = snapshot_tree(root)
@@ -438,11 +436,11 @@ def test_a_conflicting_accept_does_not_unpin_a_save_that_already_landed(
     assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
 
 
-def test_a_rolled_back_accept_of_a_never_fetched_project_leaves_no_lockfile(
+def test_a_refused_accept_of_a_never_fetched_project_leaves_no_lockfile(
     tmp_path, monkeypatch
 ):
-    # The other half of the rollback: the file did not exist before, so undoing
-    # the write means removing it, not emptying it. A project that has never
+    # A refusal in the gate lands nothing, and the staged bytes of a project
+    # with no lockfile at all must not become one: a project that has never
     # been fetched stays a project that has never been fetched.
     root = unpinned(tmp_path)
     app = start(root)
@@ -451,7 +449,7 @@ def test_a_rolled_back_accept_of_a_never_fetched_project_leaves_no_lockfile(
 
         def load(config, overlay=None, lockfile_overlay=None):
             if overlay:
-                raise RuntimeError("simulated failure after the lockfile landed")
+                raise RuntimeError("simulated failure inside the gate")
             return real(config, overlay=overlay, lockfile_overlay=lockfile_overlay)
 
         monkeypatch.setattr(edit_mod.loader, "load_readonly", load)
@@ -748,12 +746,14 @@ def test_a_rolled_back_accept_does_not_erase_a_pin_a_same_key_accept_adopted(
     def same_key_accept_lands_midflight(before, after, item, op):
         # The winner's whole applied state, as it exists at this instant:
         # its lockfile (identical bytes to the loser's staged write, so the
-        # write is a no-op) and its body, which differs from the loser's.
+        # write is a no-op) and its body, which differs from the loser's --
+        # both inside one section of the project lock, as a real applied
+        # save lands them.
         with project_write_lock(str(root)):
             lock_file.write_bytes(
                 citations_mod.lockfile_text(pin_eff_records(root)).encode("utf-8")
             )
-        item_file.write_text(items_yaml(RAIL, EFF, EXTRA), "utf-8")
+            item_file.write_text(items_yaml(RAIL, EFF, EXTRA), "utf-8")
         return original_gate(before, after, item, op)
 
     monkeypatch.setattr(
@@ -831,4 +831,53 @@ def test_an_accept_survives_a_writer_that_moved_the_lockfile_midgate(
     assert EFF in (root / "items" / "decisions.yaml").read_text("utf-8")
     values = lock(root)["citations"][CSV_PATH]["values"]
     assert {"eff", "other", "rail_load"} <= set(values)
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
+
+
+def test_a_writer_that_already_pinned_the_key_lands_its_own_pins_too(
+    served, monkeypatch
+):
+    # The moved-file branch's other half, and the review's regression: the
+    # writer's file pins this accept's key AND a key this accept does not
+    # carry, and a body naming that other key has landed. This accept's
+    # staged bytes predate the writer and lack its pin, so writing them
+    # would erase it -- the clobber class this PR exists to close, from the
+    # other side. The file stands and only the body lands.
+    _app, client, root = served
+    lock_file = root / ".refdes" / "citations.yaml"
+    extra = root / "items" / "extra.yaml"
+    original_gate = edit_mod._blocking_diagnostics
+
+    def a_writer_lands_a_body_and_pins_both(before, after, item, op):
+        records = citations_mod.load_lockfile(_build_at(root))
+        values = records[CSV_PATH].setdefault("values", {})
+        values["eff"] = {"reader": "csv", "value": "0.93"}
+        values["other"] = {"reader": "csv", "value": "7"}
+        extra.write_text(
+            "defaults: { type: decision }\n"
+            "items:\n"
+            "  - id: DEC-500\n"
+            "    citations:\n"
+            "      - path: analysis/budget.csv\n"
+            "    body: |\n"
+            "      ```calc\n"
+            '      O = source("analysis/budget.csv", "other") | 1\n'
+            "      ```\n",
+            "utf-8",
+        )
+        with project_write_lock(str(root)):
+            lock_file.write_bytes(citations_mod.lockfile_text(records).encode("utf-8"))
+        return original_gate(before, after, item, op)
+    monkeypatch.setattr(
+        edit_mod, "_blocking_diagnostics", a_writer_lands_a_body_and_pins_both
+    )
+    status, payload = accept(
+        client, root, text=calc_body(RAIL, EFF), pins=pin("eff", name="eff")
+    )
+    assert status == 200, payload
+    assert payload["kind"] == "applied"
+    assert EFF in (root / "items" / "decisions.yaml").read_text("utf-8")
+    values = lock(root)["citations"][CSV_PATH]["values"]
+    assert {"eff", "other", "rail_load"} <= set(values), values
+    # The tree the pair lands in builds: both bodies name pinned keys.
     assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
