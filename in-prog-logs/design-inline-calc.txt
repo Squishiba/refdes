@@ -237,7 +237,7 @@ Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
    round 3 = chunk 1, round 4 = chunk 1 doc + chunk 2 log.
 4. Removed the duplicate "Tests run" block; tests are recorded once at the end.
 
-Fix round 7 (chunk 1 doc review and chunk 2 log review, addressed in commit <pending>)
+Fix round 7 (chunk 1 doc review and chunk 2 log review, addressed in commit 36c286b)
 ------------------------------------------------------------------------------------
 Chunk 1 findings addressed in docs/design/inline-calc.md:
 1. Grammar/§7.2/Q9 contradiction on solve brackets. Round 6 made the bracket
