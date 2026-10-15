@@ -1354,6 +1354,98 @@ def test_a_sealed_refusal_still_discloses_every_referrer(tmp_path):
     assert (root / "figures" / "curve.png").read_bytes() == OLD_CURVE
 
 
+def test_every_sealed_refusal_row_carries_the_same_core_keys(sealed_image):
+    """The three §10 refusals share kind="sealed", so a client cannot know
+    which of the three built the payload it is reading -- and therefore cannot
+    read a shape that differs per branch. All three are reached over the real
+    route here, and every row of each must carry the same core keys: item,
+    source_file, srcs, sealed, why. Branch keys (the capture row's `src` and
+    `resolves_to`) sit on top of the core, never instead of it."""
+    _app, client, _root = sealed_image
+    branches = {}
+    status, payload = upload(client, name="bench.png", item="LOG-001")
+    assert status == 422 and payload["refusal"] == "sealed", payload
+    branches["target"] = payload["details"]
+    status, payload = upload(client, name="curve.png", dest="figures", data=NEW_CURVE)
+    assert status == 422 and payload["refusal"] == "sealed", payload
+    branches["replace"] = payload["details"]
+    status, payload = upload(client, name="curve.png", dest="items", data=NEW_CURVE)
+    assert status == 422 and payload["refusal"] == "sealed", payload
+    branches["capture"] = payload["details"]
+    core = {"item", "source_file", "srcs", "sealed", "why"}
+    for branch, rows in branches.items():
+        assert rows, branch
+        for row in rows:
+            missing = core - set(row)
+            assert not missing, f"the {branch} row lacks {sorted(missing)}: {row}"
+            assert row["sealed"] is True, branch
+            assert isinstance(row["srcs"], list), branch
+    assert (
+        branches["target"][0]["srcs"] == []
+    ), "the upload is *for* the entry: nothing references the bytes yet"
+    assert branches["replace"][0]["srcs"] == ["curve.png"]
+    capture = branches["capture"][0]
+    assert capture["srcs"] == [capture["src"]], "the branch's single src is in the core list too"
+    assert capture["resolves_to"] == "figures/curve.png", "branch keys stay on top of the core"
+
+
+def test_a_sealed_target_row_explains_the_orphan_it_refuses(sealed_image):
+    """The target branch's own fact, on the row: the upload is for the sealed
+    entry, so its `why` names the orphan rule and its `srcs` is empty -- the
+    reference that would need the bytes can never reach disk."""
+    _app, client, _root = sealed_image
+    _status, payload = upload(client, name="bench.png", item="LOG-001")
+    row = payload["details"][0]
+    assert row["item"] == "LOG-001"
+    assert row["source_file"] == "items/log.yaml"
+    assert row["srcs"] == []
+    assert "body edit" in row["why"] and "orphan" in row["why"], row["why"]
+
+
+def test_a_sealed_replace_disclosure_explains_every_row(tmp_path):
+    """Every disclosed row of the mixed sealed/unsealed refusal answers why it
+    is there: the sealed row names the seal rule, the unsealed row names the
+    blast radius it is disclosed for -- so a dialog renders both from one
+    shape, without guessing from the `sealed` flag alone."""
+    root = make_sealed_project(tmp_path)
+    (root / "items" / "decs.yaml").write_text(DECS_WITH_IMAGE, encoding="utf-8")
+    project = built_project(root)
+    result = upload_mod.store_asset(
+        project, dest="figures", name="curve.png", data=NEW_CURVE
+    )
+    assert isinstance(result, upload_mod.Refused) and result.kind == "sealed", result
+    by_item = {row["item"]: row for row in result.details}
+    assert set(by_item) == {"DEC-001", "LOG-001"}
+    assert by_item["LOG-001"]["sealed"] is True
+    assert "seal hashes" in by_item["LOG-001"]["why"]
+    assert by_item["DEC-001"]["sealed"] is False
+    assert "disclosed" in by_item["DEC-001"]["why"]
+
+
+def test_a_plain_capture_row_keeps_its_resolution_and_gains_the_core_list(referencing):
+    """The §9.2 capture rows are disclosure, not a sealed refusal: every key
+    they carried (`item`, `source_file`, `src`, `resolves_to`, `why`, `sealed`)
+    stays exactly as it was, and `srcs` joins them as the same reference in
+    list form -- so a reader that starts from the sealed core reads capture
+    rows from either refusal without branching."""
+    _app, client, _root = referencing
+    status, payload = upload(client, name="curve.png", dest="items", data=NEW_CURVE)
+    assert status == 422 and payload["refusal"] == "capture", payload
+    assert payload["details"], payload
+    for row in payload["details"]:
+        assert {
+            "item",
+            "source_file",
+            "src",
+            "srcs",
+            "resolves_to",
+            "why",
+            "sealed",
+        } == set(row), row
+        assert row["srcs"] == [row["src"]]
+        assert row["resolves_to"] == "figures/curve.png"
+
+
 def test_an_unsealed_referrer_is_still_a_confirmable_conflict(referencing):
     """Phase 3 must not have turned every replace into a refusal: with no sealed
     entry looking at the file, §9.3's disclose-and-confirm still applies, and the

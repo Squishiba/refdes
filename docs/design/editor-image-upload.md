@@ -500,6 +500,17 @@ question with a hash-format cost attached, and §15.6 leaves it to Jared.
 **Decided (2026-09-25):** Jared approved the build side — `HASH_FORMAT` 5
 makes the silent hand-edit case loud; see §15.6.
 
+**The shape of a sealed refusal's `details`.** The three §10 refusals share
+`kind="sealed"`, so a client reading the payload cannot know which of the three
+built it, and a row shape that differs per branch is unreadable. Every sealed
+row therefore carries one core — `item`, `source_file`, `srcs` (the references
+naming the file in question; empty for an upload *for* the entry, which
+references nothing yet), `sealed`, and `why` (that row's reason, as prose) —
+and a branch adds its own keys on top of the core, never instead of it: the
+capture refusal adds `src` and `resolves_to`. Branch facts stay visible; the
+readable contract does not change per branch (`serve/upload.py`, rows built in
+`_sealed_target_refusal`, `_sealed_replace_refusal` and `_capture_refusal`).
+
 ## 11. Transport and the security surface
 
 **One new endpoint, behind the existing gate.** `POST /api/assets`, routed in
