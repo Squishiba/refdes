@@ -107,3 +107,12 @@ exactly.
 ## Finished
 
 YES — fix, red/green CLI regression, docs, changelog, gates, PR.
+
+- Commit `292ae41`, branch pushed, PR: https://github.com/Squishiba/refdes/pull/258
+  (base `7e49a20`, `Co-authored-by: Qwen3.8-Flash-Next`). Shared
+  `.scratch/PROGRESS.md` CITE-LOCK-012 row updated.
+- Extra verification: `audit` (exit 1, same sentence on stderr) and `index`
+  (diagnostics array, exit 0 by design) confirmed by hand on the `neg`
+  probe project — one sentence, one line, every reader.
+- Full suite: **3866 passed, 2 skipped** in 318s (`-p no:randomly`, venv
+  python, exit 0).
