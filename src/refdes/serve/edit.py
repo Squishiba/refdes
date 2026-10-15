@@ -973,8 +973,16 @@ def _atomic_replace(path: str, payload: bytes) -> str | None:
         with open(path, "rb") as fh:
             written = fh.read()
     except OSError as exc:
-        _restore(path, original)
-        return f"could not re-read {path} after the write: {exc}"
+        if _restore(path, original):
+            return f"could not re-read {path} after the write: {exc}; the original bytes were restored"
+        # Both failures are named: the reread, and the restore that did
+        # not land. What is ON the file is not claimed -- a failed
+        # restore left it as the restore found it, and a writer that
+        # bypasses the lock may have moved it since the write.
+        return (
+            f"could not re-read {path} after the write: {exc}, the original bytes "
+            f"could not be restored, and {path} was left as it was found"
+        )
     if written != payload:
         if _restore(path, original):
             return f"the bytes on disk after the write are not the bytes planned; {path} was restored"

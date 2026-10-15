@@ -8,9 +8,11 @@
   the items file was left empty. The rollback payload is the raw bytes
   now, and the restore stages them in a temp file and swaps them in
   atomically, so a restore that itself fails -- a full disk hits the
-  reservation and the restore alike -- leaves the file exactly as the
-  create wrote it instead of truncating it, and the refusal says the
-  bytes `could not be restored` rather than claiming a rollback that did
+  reservation and the restore alike -- leaves the destination exactly as
+  the restore found it instead of truncating it (what is on it is what
+  the last writer put there; a writer that bypasses the write lock may
+  have changed it in the interim), and the refusal says the bytes
+  `could not be restored` rather than claiming a rollback that did
   not happen. A failed creation burns nothing; it now also destroys
   nothing. The check-vs-replace window tracked by EDITOR-API-007 is
   untouched here (it remains held in PR #241).

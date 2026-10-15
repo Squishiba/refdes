@@ -1610,6 +1610,54 @@ def test_a_failed_restore_describes_only_what_the_write_observed(tmp_path, monke
     assert [n for n in os.listdir(root / "figures") if "refdes-tmp" in n] == []
 
 
+def test_a_reread_failure_that_also_breaks_the_restore_names_both(tmp_path, monkeypatch):
+    """The post-write re-read can fail -- and the restore it triggers can
+    fail too. The reason must report BOTH outcomes: a caller left with a
+    refusal and a moved destination has to learn the original bytes are
+    not back, not only that the re-read broke. Sabotage: the write's swap
+    lands, the re-read then raises, and the restore's swap hits ENOSPC."""
+    root = make_upload_project(tmp_path, {"figures/curve.png": OLD_CURVE})
+    project = built_project(root)
+    target = str(root / "figures" / "curve.png")
+    real_open, real_replace, real_abspath = open, os.replace, os.path.abspath
+    swaps, armed = [], []
+
+    def gated_open(file, mode="r", *args, **kwargs):
+        if armed and "r" in mode and real_abspath(str(file)) == target:
+            raise OSError(5, "Input/output error")
+        return real_open(file, mode, *args, **kwargs)
+
+    def gated_replace(src, dst, *args, **kwargs):
+        swaps.append(dst)
+        if len(swaps) == 1:
+            armed.append(True)  # the write landed; now the reread breaks
+            return real_replace(src, dst, *args, **kwargs)
+        raise OSError(28, "No space left on device")  # the restore's swap fails
+
+    monkeypatch.setattr("builtins.open", gated_open)
+    monkeypatch.setattr(edit_mod.os, "replace", gated_replace)
+    result = upload_mod.store_asset(
+        project,
+        dest="figures",
+        name="curve.png",
+        data=NEW_CURVE,
+        expected_hash=_hash(OLD_CURVE),
+    )
+    monkeypatch.undo()
+
+    assert isinstance(result, upload_mod.Refused), result
+    assert result.status == 500
+    assert "could not re-read" in result.reason, result.reason
+    assert "could not be restored" in result.reason, (
+        f"the reason hides the restore failure behind the reread failure: {result.reason}"
+    )
+    assert "left as it was found" in result.reason, result.reason
+    assert (root / "figures" / "curve.png").read_bytes() == NEW_CURVE, (
+        "a restore that failed must leave the destination as it found it (the write's bytes)"
+    )
+    assert [n for n in os.listdir(root / "figures") if "refdes-tmp" in n] == []
+
+
 def test_no_temp_file_survives_an_upload(served):
     """`_atomic_create` writes a same-directory temp and links it in; a leftover
     `.curve.png.refdes-tmp` is a file the author did not choose and `git status`
