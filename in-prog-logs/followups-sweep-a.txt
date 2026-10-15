@@ -1,0 +1,161 @@
+Sweep A — follow-ups from the merged PR reviews (.scratch/task/ITEMS.md)
+=========================================================================
+
+Branch: followups-sweep-a, cut from main at 885e9e6. Every item verified
+against this tree before touching anything; verdicts below are in ITEMS.md
+order.
+
+Verdicts
+--------
+
+1. docs/standard-library.md anchor #blocked-by-and-the-cascade-report —
+   ALREADY CORRECT. The docs site is the canonical published renderer
+   (.github/workflows/docs.yml builds docs-site with the refdes docs-site
+   project); its slug for the heading `## \`blocked_by:\` and the cascade
+   report` is `blocked-by-and-the-cascade-report` (verified by building the
+   docs-site in .scratch/ and grepping the generated anchor). GitHub's slug
+   differs (keeps the underscore), as the item says, and a docs link cannot
+   serve both renderers with one anchor. No change.
+2. docs/concepts.md five/six lead-in — ALREADY FIXED (905ce6b). Current
+   text: "Four of these file an item somewhere ... `section` files
+   nothing."
+3. docs/standard-library.md `retired` row — ALREADY FIXED (905ce6b). Row
+   now scoped to coverage's warnings.
+4. plugin: push-to-existing-PR re-review race — SKIP (plugin/orchestrator
+   repo, out of scope).
+5. plugin: slow/no watch after reload — SKIP (same).
+6. #190 r3 c4 test nits (html slice, _load_vocab, quoted exc) — ALREADY
+   FIXED (905ce6b): slice bounded at the next term, _load_vocab gone,
+   assertion quotes 'test'.
+7. #190 r3 c2 — ALREADY FIXED: oracle_dump writes a trailing newline and
+   the fixture ends with one; a malformed `sets:` differs_from raises
+   SchemaError (probed: .scratch/probe-sets); _anchor_map docstring
+   documents the inverse/type-name collision (7175dc8 / 905ce6b).
+8. #190 r3 c1 bare `doc:` vs bare `differs_from:` — ALREADY FIXED
+   (905ce6b). Both docs consistent now; verified a bare `doc:` loads.
+9. #191 r2 c4 thread_cli — ALREADY FIXED (1fe4a06, #224).
+10. #191 r2 c3 threads docstrings — ALREADY FIXED (1fe4a06; the
+    unterminated backtick was fixed on main, recorded in that sweep's log).
+11. #191 r2 c1 cli-reference thread exit codes — ALREADY FIXED (1fe4a06).
+12. #191 r2 c2 — ALREADY FIXED: non-UTF-8 event file -> HistoryError
+    (744cdb0); threads._label promoted to entry_label (55176b0-era,
+    1fe4a06); explicit-null id/text print `?`/empty via `or` (7c72311).
+    Slug-fallback collision for id-less same-slug entries (cli.py
+    `label in v["entries"]`): NEEDS A DECISION — the fix changes the shared
+    projection shape (entries list -> labels), which the index payload and
+    the task pane read; not an obvious sweep-level call.
+13. #194 c2 (conflicting verdict row, fail-loud unknown kind) — ALREADY
+    FIXED (#197 7c72311, tests present).
+14. #194 c3 (on_hold row test, code/comment, graph build, docstring, long
+    lines) — ALREADY FIXED (#197/#224).
+15. #194 r2 c4 — partly fixed by #224 (double _derived_problems, dead
+    graph=). The clock-pin posture (time.time only) accepted:
+    test_module_imports_no_clock pins the import-level posture. FIXED
+    HERE: unit tests for the `conflicting` and not-concluding verdict-row
+    branches (tests/test_threads_projection.py,
+    test_project_derived_lists_a_conflicting_fold_and_suppresses_a_concluding_one).
+16. #194 r2 c5 — FIXED HERE (tests/test_work.py):
+    - stderr of the unparsable-file test now names broken.yaml (the old
+      `captured.err.strip()` was vacuously true);
+    - new work-side test for the citation `cache_missing` row (kept copy
+      pinned, blob absent) beside the existing `unpinned` row;
+    - _corrupt_store no longer assumes exactly one event file;
+    - the hardcoded-indent nit NOT fixed: the exact indented layout is the
+      CLI output contract these tests exist to pin.
+17. #195 r3 c2 — SKIP: the serve/edit.py half is handed off (out of
+    scope); the citations/lockfile-header half landed in #204 (6b01ae8,
+    items E1/E2/E4).
+18. #196 c1 — test names say `timeline` (052d0c3, tests/test_reserved_*);
+    P9 work log status fixed in a prior sweep log; schema.py:835-841
+    double-condition style NOT fixed (style, no behavior). FIXED HERE: the
+    audit `log`/`timeline` mismatch — parse._apply_change_override records
+    the authored spelling under on_change_override["authored_modes"],
+    cmd_audit prints it (probe .scratch/probe-v2: `whole item -> log`),
+    tests pin both the parsed shape and the printed line, changelog
+    fragment added.
+19. #193 — lifecycle.md rule attribution, the captured_edits doc note
+    (OWNER DECIDED), the one-hop-link open_tasks test, and the model.py
+    __line__ comment all ALREADY FIXED (#203 d9c1392). FIXED HERE: the
+    parse.py `_strip_lines` comment claimed a stray `__line__` poisons the
+    content hash and the digest — true for `invalidate` fields; the
+    `tasks` field is `timeline` mode, whose values the content hash skips
+    (build.py payload_for `if mode != INVALIDATE: continue`), so the
+    comment now says so.
+20. #194 r3 c5 — FIXED HERE (tests/test_work.py):
+    - cold-run text stdout purity pinned (the mint notice is on stderr,
+      stdout starts at `Worklist:`);
+    - the brittle whole-output `[` scan replaced with the checkbox-column
+      check through threads.TASK_GLYPHS;
+    - the `"None" not in out` whole-page scan narrowed to the rendered row;
+    - the `"\n".join(lines)` re-join removed.
+    --as-of-earlier-than-declaring-date was already tested (work and
+    thread sides, #194 r3 c5 fix round).
+21. plugin TASK-6 — SKIP (plugin repo, out of scope).
+22. #195 r4 c2 — ALREADY FIXED (#204 6b01ae8: E5 cites by name, E4 header
+    pinned, E9 inert tree() filter removed from both serve-edit helpers).
+23. #195 (merged) getting-started lock sentence — ALREADY FIXED (#204 E6;
+    doc now names serve/init/new/schema exemptions). The work-log line
+    pointers are historical log records — left as written.
+24. #194 r3 c3 — ALREADY FIXED (1fe4a06: malformed-row note printed by
+    `work`, cold-run writes fully reported in p_work help and cmd_work
+    docstring). "Work numbers only open rows so task numbers differ from
+    thread's" — OBSOLETE by design: _task_row_lines' docstring (since
+    55176b0) states numbering restarts per caller's list, and the two
+    commands owe the reader different lists (worklist vs thread view).
+25. #179 — ALREADY FIXED (1fe4a06: _snapshot_item_texts gated to
+    `not dry_run or prefix_rename` at the call site; links._drop_refused
+    docstring names all three refused kinds).
+26. #183 — test name (test_ticking_a_task_moves_the_history_digest_not_the_
+    content), THERMAL_DONE (gone), documented missing-id task-row choice
+    (design-log.md) — ALREADY FIXED. fold_tasks live-alias contract —
+    ALREADY FIXED (d9c1392 docstring: "live aliases, not copies ... copy
+    first ... as threads._tasks does with dict(row)"). The sabotage
+    matrix's S8 gap is a record in #183's own merged work log; a
+    historical log is not rewritten.
+27. #181 — the design doc is fixed and pinned by tests/test_candidate_parts_doc.py
+    (all four fences load; §6.4 claim is precise; §7.2 declares its CSVs
+    in `citations:`) — ALREADY FIXED (7dc4a42 + #203). FIXED HERE: the
+    user page docs/parts.md "Candidate parts" section carried the same
+    shape problem the design doc was punished for — its winner-override
+    fence was a bare top-level sequence fragment; it now shows the whole
+    file, matching the fence above it.
+28. #180 — SKIP (cosmetic PR-body numbers on a merged PR; nothing in the
+    tree).
+29. test_serve_cli stale-token flake under load — known; recorded, not a
+    code item.
+
+Changes made in this sweep
+--------------------------
+
+- src/refdes/parse.py: _apply_change_override records the authored mode
+  spelling in item.on_change_override["authored_modes"] (scalar, `mode:`,
+  per-field); the `_strip_lines` comment's content-hash claim scoped to
+  invalidate fields.
+- src/refdes/cli.py: cmd_audit prints the authored spelling (falls back to
+  canonical when none recorded).
+- tests/test_change_policy_on_change_key.py: override-shape assertions
+  updated for authored_modes; new CLI test
+  test_audit_prints_the_authored_log_spelling_for_pre_v3_overrides; the
+  pre-v3 pin test pins the recorded authored spelling.
+- tests/test_threads_projection.py: unit tests for the conflicting-
+  fold row and the concluding-verdict suppression in project_derived.
+- tests/test_work.py: broken.yaml named in stderr; cache_missing work-row
+  test; _corrupt_store robust to multiple event files; cold-run text
+  stdout purity test; brittle bracket/None scans fixed; re-join removed.
+- docs/parts.md: winner-override fence shows a whole file.
+- changelog.d/sweep-a-audit-authored-log.fixed.md.
+
+Verification
+----------
+
+Full suite: 3833 passed, 2 skipped (312s), exit 0 (.scratch/suite.txt).
+ruff check --select E9,F src tests: clean.
+docs-site/gen_examples.py --check: up to date.
+
+Sabotage checks (both reverted after proving):
+- parse.py pre-v3 scalar canonicalisation recorded the canonical mode
+  instead of the authored spelling: 3 failures in
+  tests/test_change_policy_on_change_key.py (pre-v3 pin shape + audit
+  display). Restored: 24 passed.
+- cmd_audit dropped the authored-mode preference: the audit display test
+  fails; restored: 24 passed.

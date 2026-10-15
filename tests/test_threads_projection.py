@@ -798,6 +798,36 @@ def test_project_derived_adds_verdict_and_fork_rows_from_the_projection(tmp_path
     assert [(row["ref"], row["tips"]) for row in fork] == [("LOG-001", ["LOG-002", "LOG-003"])]
 
 
+def test_project_derived_lists_a_conflicting_fold_and_suppresses_a_concluding_one(tmp_path):
+    """#194 r2 c4: the two verdict-row branches the fixture above leaves
+    untested. A fold that *refused* (`conflicting`) must get a row even
+    though it has no status to name — a tip between an open `proposed` and an
+    open `on_hold` parent is the worklist's clearest "someone reconcile
+    this" — and an open status the type itself calls satisfying (here
+    `proposed`, by overlay) concludes the thread and must NOT get one (rule
+    4 pairs it with the tip's tasks, not the worklist)."""
+    config = CONFIG + "types:\n  log:\n    satisfying_statuses: [proposed]\n"
+    write_project_config(tmp_path, config)
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "log.yaml").write_text(
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - {id: LOG-007, summary: Proposed left., date: 2026-08-07, status: proposed}\n"
+        "  - {id: LOG-008, summary: Held right., date: 2026-08-08, status: on_hold}\n"
+        "  - {id: LOG-009, summary: Silent merge., date: 2026-08-09, follows: [LOG-007, LOG-008]}\n"
+        "  - {id: LOG-005, summary: Concluding head., date: 2026-08-05, status: proposed}\n"
+        "  - {id: LOG-006, summary: Silent continuation., date: 2026-08-06, follows: LOG-005}\n",
+        encoding="utf-8",
+    )
+    project = _load(tmp_path)
+    rows = threads.project_derived(project)
+    verdict = [(row["ref"], row["status"]) for row in rows if row["kind"] == "verdict"]
+    # LOG-009's fold refused -> listed as `conflicting`; LOG-005/LOG-006's
+    # `proposed` fold is concluding for this type -> silent.
+    assert verdict == [("LOG-009", "conflicting")]
+
+
 def test_project_derived_writes_nothing_and_reads_no_clock(tmp_path):
     """The same two reproducibility guarantees the projection carries: the
     worklist is a pure read and its bytes never move with the wall clock."""

@@ -28,7 +28,7 @@ import re
 from unittest import mock
 
 import pytest
-
+import yaml
 from conftest import write_project_config
 
 from refdes import cli as cli_mod
@@ -331,7 +331,13 @@ def test_authored_and_derived_are_separate_groups_with_separate_numbering(tmp_pa
     assert lines.index("Tasks at tip:") < lines.index(cli_mod.THREAD_DERIVED_HEADING)
     rows = _derived_rows(out)
     assert rows  # the gaps fixture really has gaps
-    assert not any("[" in row for row in rows)  # no checkbox renders a derived row
+    # #194 r3 c5: the old `not any("[" in row ...)` scanned every byte, so a
+    # row detail merely *containing* a bracket (a future path-list, say)
+    # failed it for the wrong reason. The rule is about the checkbox COLUMN
+    # (§6's checkbox column is the authored glyphs and nothing else) -- read
+    # it through the shared glyph table, not a hard-coded spelling.
+    glyphs = set(cli_mod._THREAD_GLYPHS.values())
+    assert not any(row.lstrip()[:3] in glyphs for row in rows)
     assert not any(row.lstrip()[:2].rstrip(".").isdigit() for row in rows)  # no numbers
 
 
@@ -354,9 +360,10 @@ def test_an_explicit_null_id_or_text_prints_placeholder_not_the_word_none(
     _warm(tmp_path, config, capsys)
     assert _run(config, "work") == 0
     out = capsys.readouterr().out
-    assert "None" not in out
-    row = next(line for line in out.splitlines() if line.startswith("  1. [ ]"))
+    lines = out.splitlines()
+    row = next(line for line in lines if line.startswith("  1. [ ]"))
     assert row.startswith("  1. [ ] ?  ")  # `?` for the null id, empty text
+    assert "None" not in row  # the rendering, not the whole page (#194 r3 c5)
 
 
 def test_an_explicit_empty_string_id_prints_the_placeholder_too():
@@ -571,6 +578,46 @@ def test_citation_row_self_closes_by_pinning_the_document(tmp_path, capsys):
     assert gaps_file.read_bytes() == gaps_bytes
 
 
+def test_a_kept_copy_citation_with_a_missing_blob_is_a_worklist_row(tmp_path, capsys):
+    """#194 r2 c5: the worklist's citation rows read exactly the two gate
+    states (`unpinned`/`cache_missing`) — the gaps fixture pins only the
+    first. Here the lockfile promises a kept copy whose blob is absent (the
+    gate's `_rule_missing_kept_copies` posture): the row appears, next to the
+    unpinned row, naming the same problem the gate blocks on."""
+    config = _gaps(tmp_path)
+    gaps_file = tmp_path / "items" / "gaps.yaml"
+    gaps_file.write_text(
+        gaps_file.read_text(encoding="utf-8").replace(
+            "    status: candidate\n",
+            "    status: candidate\n"
+            "    citations: [{path: https://example.com/ds.pdf, keep_copy: true}]\n",
+        ),
+        encoding="utf-8",
+    )
+    lockfile = tmp_path / ".refdes" / "citations.yaml"
+    lockfile.parent.mkdir(parents=True, exist_ok=True)
+    (lockfile).write_text(
+        yaml.safe_dump(
+            {
+                "citations": {
+                    "https://example.com/ds.pdf": {
+                        "sha256": "b" * 64,
+                        "fetched": "2026-01-01T00:00:00Z",
+                        "kept_copy": True,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    _warm(tmp_path, config, capsys)
+    assert _run(config, "work") == 0
+    assert _derived_groups(capsys.readouterr().out)["citation"] == [
+        "CMP-001  cache_missing",
+        "LOG-012  unpinned",
+    ]
+
+
 def test_verdict_row_self_closes_when_the_decision_is_made(tmp_path, capsys):
     """A proposed verdict is a derived row while it waits; concluding it (the
     author's own edit to the thread, not a worklist tick) removes the row."""
@@ -614,14 +661,15 @@ def test_a_refused_verdict_fold_prints_with_its_tip_s_open_tasks_too(tmp_path, c
     config = _setup(tmp_path, ("log.yaml", MERGE_CONFLICT_OPEN))
     _warm(tmp_path, config, capsys)
     assert _run(config, "work") == 0
-    lines = capsys.readouterr().out.splitlines()
+    out = capsys.readouterr().out
+    lines = out.splitlines()
     verdict_at = lines.index(
         "Verdict: conflicting -- entries at the same distance declare "
         "different statuses; a continuation must declare one explicitly"
     )
     task_at = next(i for i, line in enumerate(lines) if "Reconcile the two parents." in line)
     assert verdict_at < task_at  # the verdict never stands alone
-    assert _derived_groups("\n".join(lines))["verdict"] == ["LOG-009  conflicting"]
+    assert _derived_groups(out)["verdict"] == ["LOG-009  conflicting"]
 
 
 def test_an_ambiguous_task_fold_does_not_swallow_a_concluding_verdict(tmp_path, capsys):
@@ -818,12 +866,26 @@ def test_json_is_valid_on_stdout_even_on_a_first_run_that_mints_keys(tmp_path, c
     assert _run(config, "work", "--json", "--as-of", "2026-09-02") == 2
 
 
+def test_a_cold_text_run_prints_the_listing_on_stdout_alone(tmp_path, capsys):
+    """#194 r3 c5: the cold-run stdout pin covered `--json` only. The text
+    door owes the same purity -- a human pipes the listing, and the load's
+    "(minted N key(s) while loading)" notice belongs on stderr, not inside
+    what gets piped."""
+    config = _setup(tmp_path, ("thread.yaml", AUTHORED), ("gaps.yaml", GAPS))
+    assert _run(config, "work") == 0
+    captured = capsys.readouterr()
+    assert captured.out.startswith("Worklist:")
+    assert "minted" in captured.err  # the load's own write is announced...
+    assert "minted" not in captured.out  # ...where it does not pollute the answer
+
+
 def _corrupt_store(tmp_path):
     """Break the capture store's first event file, as thread's test file does
     for its B3 pin."""
     events = tmp_path / ".refdes" / "history" / "events"
-    (first,) = sorted(events.glob("*.yaml"))
-    first.write_text("kind: [\n", encoding="utf-8")
+    files = sorted(events.glob("*.yaml"))
+    assert files, "the capture store should have event files to corrupt"
+    files[0].write_text("kind: [\n", encoding="utf-8")
 
 
 def test_json_names_the_unreadable_store_in_diagnostics(tmp_path, capsys):
@@ -908,7 +970,10 @@ def test_unparsable_file_is_reported_with_the_listing_intact(tmp_path, capsys):
     assert _run(config, "work") == 1
     captured = capsys.readouterr()
     assert "Worklist:" in captured.out
-    assert captured.err.strip()
+    # #194 r2 c5: the non-empty check was vacuously true -- any other
+    # diagnostic (key-mint notes, a second load's output) satisfied it. The
+    # file that failed is the point of the message.
+    assert "broken.yaml" in captured.err
 
 
 # --------------------------------------------------------------------- writes
