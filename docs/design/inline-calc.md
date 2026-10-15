@@ -59,9 +59,10 @@ says so explicitly; otherwise it builds on them.
   expressions.
 - **Cross-item value references.** `docs/math.md:95-128`:
   `DEC-PWR-001.V_in` is a real dependency evaluated in dependency order and
-  stored expanded as `DISPLAY-ID@key`. The resolved values are hashed into the
-  referring item via `calc_reference_snapshot` (`src/refdes/build.py:2085`) and
-  the content-hash payload (`src/refdes/build.py:1858-1907`). These references
+  stored expanded as `DISPLAY-ID@key`. The resolved values are captured in the
+  baseline snapshot via `calc_reference_snapshot` (`src/refdes/build.py:2085`)
+  and contribute to the referring item's content hash via
+  `_calc_refs_hash_value` (`src/refdes/build.py:2103-2116`). These references
   can appear inside inline expressions.
 - **`source()` lockfile semantics.** `docs/design/calc-sources.md:1-34, §5`:
   `source(path, key)` is item-local, citation-owned, pinned by `refdes fetch`,
@@ -93,10 +94,11 @@ uses `` `MAX_BODY_BYTES = 1 MiB` ``. A trigger rule that fires on any `NAME = va
 code span would misclassify all of these as inline math.
 
 I checked single-backtick spans in `docs/` and `tests/` for a simple
-`NAME = value` pattern, excluding spans inside fenced code blocks and spans
-with more than one `=`. The count is **57 spans in `docs/` and 0 in `tests/`**.
-None of them contain `:=`, and none of them should be evaluated. Requiring `:=`
-is therefore the safest trigger.
+`NAME = value` pattern, excluding this design doc, spans inside fenced code
+blocks, and spans with more than one `=`. The count is **39 spans in existing
+`docs/` and 0 in `tests/`** (the exact command and its output are recorded in
+`in-prog-logs/design-inline-calc.txt`). None of them contain `:=`, and none of
+them should be evaluated. Requiring `:=` is therefore the safest trigger.
 
 **Trigger rule (recommended).** A single backtick code span is interpreted as
 inline math only when its content contains `:=` and matches the grammar in §3.2.
@@ -120,7 +122,7 @@ A single backtick span is one of:
 ```text
 basic       = name " := " expression [ " = " result ]
 solve       = name " := " solve-result " where " expression " = " target
-              " from " quantity " to " quantity
+              [ " from " quantity " to " quantity ]
 multi-out   = name-list " := " call [ " = " result-list ]
 
 name          = calc assignment name  ([A-Za-z_][A-Za-z0-9_]*)
@@ -194,8 +196,10 @@ The `:=` trigger makes it unambiguous with existing `NAME = value` code spans.
 ### 4.1 What is stored
 
 The `= result` text is literal source. It is not a comment, not hover-only, and
-it is **never silently rewritten by `check` or `build`**. The editor and the fill
-command rewrite it explicitly when the author asks; the build only verifies it.
+it is **never silently rewritten by `check` or `build`**. In the recommended Q8(a)
+live-editor mode the editor rewrites stale results automatically as the author
+types; in the explicit-button mode it rewrites only when the author asks; the
+fill command rewrites only when invoked. `check`/`build` never rewrite results.
 Example:
 
 ```markdown
@@ -250,9 +254,11 @@ item's source line, just like a calc block error.
   as well, excluding the stored result. This keeps the signal's meaning: `the
   verdict moved, the arithmetic didn't`.
 - **Upstream changes.** A cross-item reference inside an inline span is captured
-  by `calc_reference_snapshot` (`src/refdes/build.py:2085`). When an upstream
-  value moves, the dependent item is marked changed; on the next build, the
-  stored inline result is also checked and may be reported stale.
+  by `calc_reference_snapshot` (`src/refdes/build.py:2085`) for the baseline and
+  by `_calc_refs_hash_value` (`src/refdes/build.py:2103-2116`) for the content
+  hash. When an upstream value moves, the dependent item is marked changed; on
+  the next build, the stored inline result is also checked and may be reported
+  stale.
 - **Sealed entries.** A sealed/append-only entry keeps the stored number that was
   true when it was written. If upstream inputs make that number stale, the build
   reports it as a warning; the fill command refuses to rewrite a sealed entry.
@@ -289,7 +295,7 @@ they want.
 Messages reuse existing calc phrasing where possible:
 
 - Unit mismatch: `declared as V but the expression evaluates to A`.
-- Undefined name: `unknown name 'Rtop' in this item`.
+- Undefined name: `unknown name 'Rtop'`.
 - Missing stored result (new): `inline calc has no stored result; run 'refdes inline-calc fill' to add one`.
 
 ## 5. CLI fill/refresh command
@@ -455,12 +461,13 @@ equations:
 
 The `valid_if:` list contains **comparison constraints**, not general boolean
 expressions. Each entry has the form `expression op quantity`, where `op` is one
-of `< <= > >= ==` and `quantity` is a calc quantity. The calculator evaluates the
-left-hand expression and checks it against the limit using the same worst-case
-logic that `checks:` already use (`src/refdes/calc.py:732-759` for `Limit.check`;
-`src/refdes/calc.py:834-859` for `parse_limit`). A violation produces a warning,
-not an error, because a calculator can describe a design intent that the author
-knowingly pushes outside the recommended region.
+of `< <= > >= ==` and `quantity` is a calc quantity. The calculator splits the
+entry at the operator, evaluates the left-hand expression, and checks the result
+against the right-hand limit using the same worst-case logic that `checks:`
+already use (`src/refdes/calc.py:732-759` for `Limit.check`;
+`src/refdes/calc.py:834-859` parses the limit side). A violation produces a
+warning, not an error, because a calculator can describe a design intent that
+the author knowingly pushes outside the recommended region.
 
 This deliberately does **not** add general comparison operators to calc
 expressions. There are no `and`/`or`, no conditional evaluation, and no
@@ -594,8 +601,8 @@ span as inline math rather than an ordinary code span?
 - (a) **Require `:=` in the span** (recommended). A single-backtick span that
   contains `:=` and matches the §3.2 grammar is inline math; all other spans are
   ordinary code. This is safe because a grep of single-backtick spans in `docs/`
-  (excluding fenced code blocks and spans with more than one `=`) found
-  **57 existing `NAME = value` spans** (e.g.
+  (excluding this design doc, fenced code blocks, and spans with more than one
+  `=`) found **39 existing `NAME = value` spans** (e.g.
   `docs/math.md`: `` `V_in = LOG-PWR-001.V_in | mV` ``,
   `docs/design/backlog.md`: `` `V_cl = 0.8 V` ``,
   `docs/design/editor-image-upload.md`: `` `MAX_BODY_BYTES = 1 MiB` ``) and

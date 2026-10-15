@@ -2,7 +2,7 @@ TASK: design doc -- evaluate-in-place math for engineering notes (inline-calc)
 Branch: design-inline-calc
 PR: #250
 Date: 2026-10-15
-Status: finished -- design doc written and five review rounds addressed.
+Status: finished -- design doc written and six review rounds addressed.
 
 Owner decisions (as relayed by the orchestrator from the task brief)
 --------------------------------------------------------------------
@@ -144,12 +144,12 @@ Findings addressed:
 Fix round 4 (chunk 1 doc review and chunk 2 log review, addressed in commit f738e7b)
 ------------------------------------------------------------------------------------
 Chunk 1 findings addressed in docs/design/inline-calc.md:
-1. Trigger rule. A grep of every single-backtick span in `docs/` and `tests/`
-   found 57 existing `NAME = value` spans (e.g. `docs/math.md`: `V_in = LOG-PWR-001.V_in | mV`,
+1. Trigger rule. A grep of single-backtick spans in `docs/` found many existing
+   `NAME = value` spans (e.g. `docs/math.md`: `V_in = LOG-PWR-001.V_in | mV`,
    `docs/design/backlog.md`: `V_cl = 0.8 V`, `docs/design/editor-image-upload.md`:
    `MAX_BODY_BYTES = 1 MiB`) and 0 spans containing `:=` outside this design doc.
    The trigger rule was changed to require `:=`; the old "trailing = <quantity>"
-   branch would have misclassified all 57 spans. Q1 now recommends the `:=` rule,
+   branch would have misclassified them. Q1 now recommends the `:=` rule,
    with per-item opt-in and mandatory leading marker as alternatives.
 2. Grammar updated so that `result` is any calc quantity literal; dimensionless
    values such as the `ratio` output (4.545) are explicitly allowed. The
@@ -192,25 +192,6 @@ Findings addressed in in-prog-logs/design-inline-calc.txt:
 4. Added the exact command and output used to verify the E-series numbers with
    src/refdes/calc.py (round 3, item 1).
 
-Difficulties / choices
-----------------------
-- The write tool failed on large JSON payloads containing triple backticks and
-  quotes, so the design doc and this log were written via Python scripts in
-  bash. This is a tooling workaround, not a content change.
-- Deciding how to handle stale results in sealed entries required checking the
-  current reseal state; history-backed resealing is still pending, so the gate
-  excludes sealed items.
-- The grammar had to be extended carefully so that `? where Vout = 3.3 V` does
-  not treat the constraint `=` as a stored result.
-- Requiring `:=` as the trigger means anonymous inline evaluation is not
-  supported. The trade-off is justified by the 57 existing `NAME = value` spans
-  that would otherwise be misclassified.
-- The E-series tie-break could have gone either way depending on whether the
-  application cares more about overshoot or undershoot; the doc picks the common
-  "do not undershoot a supply rail" rule and still shows both candidates.
-- This log is now committed without amending so that its commit citations remain
-  stable.
-
 Fix round 6 (chunk 1 doc review and chunk 2 log review, addressed in commit fed44dc)
 ------------------------------------------------------------------------------------
 Chunk 1 findings addressed in docs/design/inline-calc.md:
@@ -223,9 +204,11 @@ Chunk 1 findings addressed in docs/design/inline-calc.md:
    ships" gate is kept, and the explicit Fill button remains the fallback. Q8's
    recommended default stays (a) but its rationale now rests on execCommand,
    not on setRangeText.
-2. Grammar agreement with §7.2/Q9 on solve brackets. The `solve` production
-   previously made `from .. to ..` optional, while §7.2 and Q9(a) said it is
-   required. The grammar now requires `from .. to ..` in `solve`.
+2. Grammar agreement with §7.2/Q9 on solve brackets. Added an explicit
+   semantic-invalidity rule: a solve span that omits the required `from .. to ..`
+   bracket produces a build error, even though the grammar allows the clause to
+   be optional for parsing. (The grammar was later simplified to keep the
+   bracket optional; see round 7.)
 3. Semantic invalidity. Added an explicit rule: a span that matches the grammar
    but is semantically invalid (e.g. a solve with no bracket, or a calculator
    call to an undefined equation) produces a build error, not an ordinary code
@@ -238,17 +221,152 @@ Chunk 1 findings addressed in docs/design/inline-calc.md:
    missing result is, closing the silent-ignore gap.
 6. Diagnostic wording. Changed "no calc value named 'Rtop'" to the evaluator's
    actual phrasing "unknown name 'Rtop'".
-7. 57-span count methodology. Clarified in §3.1 and Q1 that the count excludes
-   fenced code blocks and spans with more than one `=`; the direction of the
+7. Span count methodology. Clarified that the count excludes this design doc,
+   fenced code blocks, and spans with more than one `=`; the direction of the
    argument (many existing `NAME = value` spans, none with `:=`) is unchanged.
 8. Q1(c) wording. Removed the self-contradictory "unless the marker is required"
    clause from the mandatory-leading-marker alternative.
 
-Rejected chunk 1 findings: none; all were accepted and fixed.
+Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
+1. Fixed the round-4 commit citation from the orphaned pre-amend `11ce4dc` to
+   `f738e7b` (the actual round-4 commit on the branch). This commit and all
+   future commits are added without amending, per reviewer instruction.
+2. Updated the header status line from "four review rounds addressed" to "five
+   review rounds addressed".
+3. Standardized round/chunk labels: round 1 = chunk 1, round 2 = chunks 1 and 2,
+   round 3 = chunk 1, round 4 = chunk 1 doc + chunk 2 log.
+4. Removed the duplicate "Tests run" block; tests are recorded once at the end.
+
+Fix round 7 (chunk 1 doc review and chunk 2 log review, addressed in commit <pending>)
+------------------------------------------------------------------------------------
+Chunk 1 findings addressed in docs/design/inline-calc.md:
+1. Grammar/§7.2/Q9 contradiction on solve brackets. Round 6 made the bracket
+   required in the grammar, but that caused a missing-bracket solve to fall
+   through to "ordinary code span" instead of matching the grammar and then
+   erroring as §7.2 requires. Fixed by making the bracket optional in the grammar
+   again and relying on the semantic-invalidity rule (and §7.2) to require it.
+   Re-read §3.2, §3.3, and §7.2 together to confirm no sentence contradicts this.
+2. Undefined-name diagnostic. Completed the round-6 fix: removed the trailing
+   "in this item" suffix so the message is now exactly `unknown name 'Rtop'`,
+   matching the evaluator (`src/refdes/calc.py:615`).
+3. Span count. Replaced the unrecorded "57 spans" figure with a reproducible
+   count: 39 single-backtick spans in existing docs (excluding this design doc,
+   fenced code blocks, and spans with more than one `=`). The exact command and
+   output are recorded below under "Counted-spans methodology".
+4. valid_if vs parse_limit. The doc previously claimed `parse_limit` parses the
+   whole `expression op quantity` entry. Fixed to say the entry is split at the
+   operator; the left-hand expression is evaluated and the right-hand limit is
+   parsed by `parse_limit` (operator-first, as `src/refdes/calc.py:834-859`
+   requires).
+5. §4.1 vs Q8/§6.2 tension. Added explicit text that in Q8(a) live mode the
+   editor rewrites results automatically as the author types, while in explicit-
+   button mode it rewrites only when asked; `check`/`build` never rewrite.
+6. Cross-item reference hashing. Corrected the attribution: resolved values are
+   captured in the baseline snapshot via `calc_reference_snapshot`
+   (`src/refdes/build.py:2085`) and contribute to the content hash via
+   `_calc_refs_hash_value` (`src/refdes/build.py:2103-2116`), not via
+   `calc_reference_snapshot` directly.
 
 Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
-1. Updated the header status line from "four review rounds addressed" to "five
-   review rounds addressed".
+1. Updated the header status line from "five review rounds addressed" to "six
+   review rounds addressed". The count was derived with
+   `grep -c '^Fix round [0-9]' in-prog-logs/design-inline-calc.txt`.
+2. Rewrote the PR body from the current doc: short summary, D1-D3 verbatim from
+   the doc's "Decision recap" section, and every open question with its
+   recommended default copied from the doc.
+3. Moved "Difficulties / choices" to the end of the log so it covers all rounds.
+4. Recorded the exact counting command and output for the existing `NAME = value`
+   spans figure.
+
+Counted-spans methodology
+-------------------------
+The 39-span figure in §3.1/Q1 was produced by this command (run in the project
+venv from the repository root):
+
+```bash
+python - <<'PY'
+import re
+from pathlib import Path
+
+root = Path('.')
+
+def strip_fenced(text: str) -> str:
+    lines = text.splitlines(keepends=True)
+    out = []
+    in_fence = False
+    fence_marker = None
+    for line in lines:
+        m = re.match(r'^(```+|~~~+)', line)
+        if m:
+            if not in_fence:
+                in_fence = True
+                fence_marker = m.group(1)
+            elif line.startswith(fence_marker):
+                in_fence = False
+                fence_marker = None
+            continue
+        if not in_fence:
+            out.append(line)
+    return ''.join(out)
+
+pattern = re.compile(r'`([^`\n]*?)`')
+name_eq = re.compile(r'^[A-Za-z_][A-Za-z0-9_]* = [^=]+$')
+
+for sub, exclude_this_doc in [('docs', True), ('tests', False)]:
+    total = 0
+    examples = []
+    for p in sorted((root / sub).rglob('*.md')):
+        if exclude_this_doc and p.name == 'inline-calc.md' and 'design' in p.parts:
+            continue
+        txt = p.read_text(encoding='utf-8', errors='ignore')
+        txt = strip_fenced(txt)
+        for m in pattern.finditer(txt):
+            content = m.group(1)
+            if name_eq.match(content):
+                total += 1
+                if len(examples) < 5:
+                    examples.append((str(p.relative_to(root)), content))
+    print(f'--- {sub}: {total} ---')
+    for path, content in examples:
+        print(f'{path}: `{content}`')
+PY
+```
+
+Output:
+```
+--- docs: 39 ---
+docs/design/backlog.md: `V_cl = 0.8 V`
+docs/design/backlog.md: `CLR = 3.3 kohm`
+docs/design/backlog.md: `extensions = (".csv",)`
+docs/design/backlog.md: `name = source("cited/file.csv", "key") | unit`
+docs/design/backlog.md: `PROJECT_SETTINGS_NAME = "refdes-project.yaml"`
+--- tests: 0 ---
+```
+
+(The examples list is truncated to the first five matches per directory.)
+
+Difficulties / choices
+----------------------
+- The write tool failed on large JSON payloads containing triple backticks and
+  quotes, so the design doc and this log were written via Python scripts in
+  bash. This is a tooling workaround, not a content change.
+- Deciding how to handle stale results in sealed entries required checking the
+  current reseal state; history-backed resealing is still pending, so the gate
+  excludes sealed items.
+- The grammar had to be extended carefully so that `? where Vout = 3.3 V` does
+  not treat the constraint `=` as a stored result.
+- Requiring `:=` as the trigger means anonymous inline evaluation is not
+  supported. The trade-off is justified by the 39 existing `NAME = value` spans
+  that would otherwise be misclassified.
+- The E-series tie-break could have gone either way depending on whether the
+  application cares more about overshoot or undershoot; the doc picks the common
+  "do not undershoot a supply rail" rule and still shows both candidates.
+- Keeping the solve bracket optional in the grammar while requiring it
+  semantically is slightly unusual, but it lets the build report a clear error
+  ("missing bracket") instead of silently treating a malformed solve span as
+  ordinary code.
+- This log is now committed without amending so that its commit citations remain
+  stable.
 
 Tests run
 ---------
