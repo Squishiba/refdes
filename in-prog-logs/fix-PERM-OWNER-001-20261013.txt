@@ -181,3 +181,13 @@ Local checks on the new head: targeted set (seal + callers + #212
 adjacency: reseal-audit, yaml-loaders, history, keys-adopt) 233 passed;
 CI's exact lint command `ruff check --select E9,F src tests` clean; CLI
 probe re-run (fresh 664 under umask 002, 600 preserved).
+
+CI at new head a2c40be: all three jobs green -- ubuntu-latest (pass),
+ubuntu-latest/py3.13 (pass), windows-latest pass with "3686 passed, 58
+skipped" (the two seal mode tests among the skips). Local on this head:
+seal+callers+#212-adjacency 233 passed; CI's lint step
+`ruff check --select E9,F src tests` clean; CLI probe re-run (fresh 664 /
+preserved 600). PR body corrected and re-pushed via REST (gh pr edit hits
+the projects-classic GraphQL bug). Fresh review requested from reviewer
+agent 7b5408de at head a2c40be.
+Status: DONE pending the fresh review verdict.
