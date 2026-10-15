@@ -1576,17 +1576,23 @@ def test_a_failed_restore_describes_only_what_the_write_observed(tmp_path, monke
     is the scope."""
     root = make_upload_project(tmp_path, {"figures/curve.png": OLD_CURVE})
     project = built_project(root)
-    real_replace = os.replace
+    destination = str(root / "figures" / "curve.png")
+    real_replace, real_abspath = os.replace, os.path.abspath
     swaps = []
 
     def scribble_then_fail(src, dst, *args, **kwargs):
-        swaps.append(dst)
-        if len(swaps) == 1:
-            real_replace(src, dst, *args, **kwargs)
-            with open(dst, "wb") as fh:
-                fh.write(b"third-party bytes")
-            return
-        raise OSError(28, "No space left on device")
+        # aimed at the DESTINATION, not at call order: a swap of any
+        # other file passes through, and the latch assertion below fires
+        # if the seam ever stops seeing both swaps of THIS file
+        if real_abspath(str(dst)) == real_abspath(destination):
+            swaps.append(dst)
+            if len(swaps) == 1:
+                real_replace(src, dst, *args, **kwargs)
+                with open(dst, "wb") as fh:
+                    fh.write(b"third-party bytes")
+                return
+            raise OSError(28, "No space left on device")
+        return real_replace(src, dst, *args, **kwargs)
 
     monkeypatch.setattr(edit_mod.os, "replace", scribble_then_fail)
     result = upload_mod.store_asset(
@@ -1598,6 +1604,7 @@ def test_a_failed_restore_describes_only_what_the_write_observed(tmp_path, monke
     )
     monkeypatch.undo()
 
+    assert len(swaps) == 2, f"the seam saw {len(swaps)} swaps of the destination; expected the write's and the restore's"
     assert isinstance(result, upload_mod.Refused), result
     assert result.status == 500
     assert (root / "figures" / "curve.png").read_bytes() == b"third-party bytes", (
@@ -1608,8 +1615,11 @@ def test_a_failed_restore_describes_only_what_the_write_observed(tmp_path, monke
         f"the reason names bytes the restore never read: {result.reason}"
     )
     # the general guard, not just the one historical sentence: a reason
-    # that names the payload by digest is naming the bytes too
+    # that names the payload by digest is naming the bytes too. Both
+    # digests: the upload's payload AND the bytes a restore that thinks
+    # it knows the disk state would claim to have put back
     assert upload_mod.digest_of(NEW_CURVE) not in result.reason, result.reason
+    assert upload_mod.digest_of(OLD_CURVE) not in result.reason, result.reason
     assert [n for n in os.listdir(root / "figures") if "refdes-tmp" in n] == []
 
 
@@ -1631,11 +1641,16 @@ def test_a_reread_failure_that_also_breaks_the_restore_names_both(tmp_path, monk
         return real_open(file, mode, *args, **kwargs)
 
     def gated_replace(src, dst, *args, **kwargs):
-        swaps.append(dst)
-        if len(swaps) == 1:
-            armed.append(True)  # the write landed; now the reread breaks
-            return real_replace(src, dst, *args, **kwargs)
-        raise OSError(28, "No space left on device")  # the restore's swap fails
+        # destination-aimed, like the sibling seams: swaps of other
+        # files pass through untouched and the latch assertion below
+        # fires if this file's two swaps stop being seen
+        if real_abspath(str(dst)) == target:
+            swaps.append(dst)
+            if len(swaps) == 1:
+                armed.append(True)  # the write landed; now the reread breaks
+                return real_replace(src, dst, *args, **kwargs)
+            raise OSError(28, "No space left on device")  # the restore's swap fails
+        return real_replace(src, dst, *args, **kwargs)
 
     monkeypatch.setattr("builtins.open", gated_open)
     monkeypatch.setattr(edit_mod.os, "replace", gated_replace)
@@ -1648,6 +1663,7 @@ def test_a_reread_failure_that_also_breaks_the_restore_names_both(tmp_path, monk
     )
     monkeypatch.undo()
 
+    assert len(swaps) == 2, f"the seam saw {len(swaps)} swaps of the destination; expected the write's and the restore's"
     assert isinstance(result, upload_mod.Refused), result
     assert result.status == 500
     assert "could not re-read" in result.reason, result.reason

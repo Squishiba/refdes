@@ -630,7 +630,10 @@ def test_a_failed_id_reservation_restores_the_yaml_append_bytes(project_root, mo
     )
 
     assert isinstance(result, Refused), result
-    assert "rolled back" in result.reason
+    # the landed outcome's own words: a loose "rolled back" substring is
+    # also inside the FAILED reason's "were not rolled back", so it
+    # cannot distinguish the two
+    assert "was rolled back and" in result.reason, result.reason
     after_bytes = path.read_bytes()
     assert after_bytes == before_bytes, "the rollback did not restore the original bytes"
     assert after_bytes != b"", "the destination was left zero-byte"
@@ -673,6 +676,7 @@ def test_a_successful_rollback_keeps_the_destination_mode(project_root, monkeypa
     PERM-OWNER-001 ordering.)"""
     path = project_root / "items" / "reqs.yaml"
     path.chmod(0o640)
+    before_tree = tree(project_root, "items", ".refdes")
     before_bytes = path.read_bytes()
     reserve_id_crash(monkeypatch)
 
@@ -687,6 +691,7 @@ def test_a_successful_rollback_keeps_the_destination_mode(project_root, monkeypa
     assert isinstance(result, Refused), result
     assert path.read_bytes() == before_bytes
     assert path.stat().st_mode & 0o777 == 0o640
+    assert tree(project_root, "items", ".refdes") == before_tree
 
 
 def test_a_rollback_write_that_fails_never_leaves_a_zero_byte_file_and_says_so(
@@ -703,45 +708,32 @@ def test_a_rollback_write_that_fails_never_leaves_a_zero_byte_file_and_says_so(
     restored.
 
     Seam: the ledger reservation arms a device-full fault (ENOSPC) aimed
-    at the destination -- any write-open of it truncates and then fails,
-    and a swap onto it fails. The create's own write lands before the
-    arming, so this faults exactly the rollback."""
+    at the DESTINATION's swaps. The atomic restore never opens the
+    destination for writing, so the swap is the whole seam: the create's
+    own swap lands before the arming, the restore's swap after it fails.
+    The assertion on `swaps` below makes it loud when the seam stops
+    seeing both swaps -- a restore that no longer swaps (an in-place
+    write came back) would fault nothing and this test would pass on a
+    lie."""
     path = project_root / "items" / "reqs.yaml"
     target = os.path.abspath(str(path))
     armed = []
+    swaps = []
 
     def reserve_boom(*_args, **_kwargs):
         armed.append(True)
         raise OSError(28, "No space left on device")
 
-    real_open, real_replace, real_abspath = open, os.replace, os.path.abspath
-
-    class _FullDisk:
-        def __init__(self, fh):
-            self._fh = fh  # opened "wb": the destination is already truncated
-
-        def write(self, *_args):
-            raise OSError(28, "No space left on device")
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            self._fh.close()
-            return False
-
-    def gated_open(file, mode="r", *args, **kwargs):
-        if armed and "w" in mode and real_abspath(str(file)) == target:
-            return _FullDisk(real_open(file, mode, *args, **kwargs))
-        return real_open(file, mode, *args, **kwargs)
+    real_replace, real_abspath = os.replace, os.path.abspath
 
     def gated_replace(src, dst, *args, **kwargs):
-        if armed and real_abspath(str(dst)) == target:
-            raise OSError(28, "No space left on device")
+        if real_abspath(str(dst)) == target:
+            swaps.append(bool(armed))
+            if armed:
+                raise OSError(28, "No space left on device")
         return real_replace(src, dst, *args, **kwargs)
 
     monkeypatch.setattr(edit_mod.ids, "reserve_id", reserve_boom)
-    monkeypatch.setattr("builtins.open", gated_open)
     monkeypatch.setattr(edit_mod.os, "replace", gated_replace)
 
     result = create_item(
@@ -753,6 +745,11 @@ def test_a_rollback_write_that_fails_never_leaves_a_zero_byte_file_and_says_so(
     )
 
     assert isinstance(result, Refused), result
+    assert swaps == [False, True], (
+        f"the seam saw {swaps}; expected the create's swap (unarmed, lands) "
+        f"then the restore's swap (armed, faults) -- the rollback's write "
+        f"shape changed and this test's fault no longer fires"
+    )
     after = path.read_bytes()
     assert after != b"", "the failed rollback truncated the destination to zero bytes"
     assert b"Unreservable." in after, (
@@ -766,6 +763,125 @@ def test_a_rollback_write_that_fails_never_leaves_a_zero_byte_file_and_says_so(
     # the failed restore cleans up its own temp: the destination keeps the
     # create's bytes (a tree-identity check is not this scenario), so the
     # stray-temp half of "destroy nothing" is asserted directly
+    assert [n for n in os.listdir(path.parent) if "refdes-tmp" in n] == []
+
+
+def test_a_failed_reservation_on_a_new_file_removes_the_file_it_wrote(
+    project_root, monkeypatch
+):
+    """The new-md shape has nothing to restore -- the file did not exist
+    before -- so its rollback is an UNLINK, and this PR turned that
+    branch's silent `pass` into an honest True/False. Landed unlink:
+    the file is gone and the tree is byte-identical to the create's
+    own posture; the reason says rolled back."""
+    path = project_root / "items" / "nested" / "more.md"
+    before_tree = tree(project_root, "items", ".refdes")
+    assert not path.exists()
+    reserve_id_crash(monkeypatch)
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Unreservable."},
+            destination="items/nested/more.md",
+        ),
+    )
+
+    assert isinstance(result, Refused), result
+    assert "was rolled back and" in result.reason, result.reason
+    assert not path.exists(), "the rollback of a brand-new file must remove it"
+    assert tree(project_root, "items", ".refdes") == before_tree
+
+
+def test_a_new_file_whose_unlink_fails_says_it_was_not_rolled_back(
+    project_root, monkeypatch
+):
+    """The other half of the unlink branch: when the removal itself fails,
+    `_rollback` returns False (this PR's contract change from the silent
+    `pass`) and the create must report the failure -- not claim a
+    rollback. Seam: the reservation arms an ENOENT-style fault aimed at
+    the destination's unlink; the latch assertion makes the seam's
+    firing loud."""
+    path = project_root / "items" / "nested" / "more.md"
+    target = os.path.abspath(str(path))
+    armed = []
+    unlinks = []
+
+    def reserve_boom(*_args, **_kwargs):
+        armed.append(True)
+        raise OSError(28, "No space left on device")
+
+    real_unlink, real_abspath = os.unlink, os.path.abspath
+
+    def gated_unlink(pathname, *args, **kwargs):
+        if real_abspath(str(pathname)) == target:
+            unlinks.append(bool(armed))
+            if armed:
+                raise OSError(1, "Operation not permitted")
+        return real_unlink(pathname, *args, **kwargs)
+
+    monkeypatch.setattr(edit_mod.ids, "reserve_id", reserve_boom)
+    monkeypatch.setattr(edit_mod.os, "unlink", gated_unlink)
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Unreservable."},
+            destination="items/nested/more.md",
+        ),
+    )
+
+    assert isinstance(result, Refused), result
+    assert unlinks == [True], f"the seam saw {unlinks}; the rollback's unlink must fault"
+    assert "was rolled back and" not in result.reason, result.reason
+    assert "could not be restored" in result.reason, result.reason
+    assert path.exists(), "a failed unlink leaves the created file; the reason must say so"
+    assert b"Unreservable." in path.read_bytes()
+
+
+def test_a_destination_deleted_under_the_restore_is_left_deleted(
+    project_root, monkeypatch
+):
+    """`_restore`'s documented narrowing (its docstring): a destination
+    DELETED between the write and the restore is NOT recreated -- the
+    mode stat fails, the temp is discarded, the restore reports
+    failure, and the file stays deleted. The old in-place write would
+    have recreated it, resurrecting content a third party deliberately
+    removed; the atomic swap respects the last observed state. Only a
+    writer bypassing the write lock can do this, and the reason names
+    only known facts. Seam: the create's swap to the destination lands,
+    then the destination is removed (the third party), so the reread
+    fails and the restore finds nothing."""
+    path = project_root / "items" / "reqs.yaml"
+    target = os.path.abspath(str(path))
+    real_replace, real_abspath, real_unlink = os.replace, os.path.abspath, os.unlink
+    swaps = []
+
+    def replace_then_vanish(src, dst, *args, **kwargs):
+        real_replace(src, dst, *args, **kwargs)
+        if not swaps and real_abspath(str(dst)) == target:
+            swaps.append(True)
+            real_unlink(dst)  # a writer outside the lock deletes the file
+
+    monkeypatch.setattr(edit_mod.os, "replace", replace_then_vanish)
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Gone underfoot."},
+            destination="items/reqs.yaml",
+        ),
+    )
+
+    assert swaps == [True], "the seam must have aimed at the create's swap"
+    assert isinstance(result, Refused), result
+    assert "could not be restored" in result.reason, result.reason
+    assert "left as it was found" in result.reason, result.reason
+    assert not path.exists(), (
+        "the restore must NOT recreate a deleted destination: that resurrects "
+        "content the third party removed; the bytes it would restore are the "
+        f"pre-create ones: {path.read_bytes()[:40]!r}"
+    )
     assert [n for n in os.listdir(path.parent) if "refdes-tmp" in n] == []
 
 
