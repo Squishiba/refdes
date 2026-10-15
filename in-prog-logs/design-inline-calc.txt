@@ -2,7 +2,7 @@ TASK: design doc -- evaluate-in-place math for engineering notes (inline-calc)
 Branch: design-inline-calc
 PR: #250
 Date: 2026-10-15
-Status: finished -- design doc written and four review rounds addressed.
+Status: finished -- design doc written and five review rounds addressed.
 
 Owner decisions (as relayed by the orchestrator from the task brief)
 --------------------------------------------------------------------
@@ -210,6 +210,45 @@ Difficulties / choices
   "do not undershoot a supply rail" rule and still shows both candidates.
 - This log is now committed without amending so that its commit citations remain
   stable.
+
+Fix round 6 (chunk 1 doc review and chunk 2 log review, addressed in commit <pending>)
+------------------------------------------------------------------------------------
+Chunk 1 findings addressed in docs/design/inline-calc.md:
+1. setRangeText undo claim (§6.3 and Q8). The doc previously listed
+   `setRangeText` alongside `document.execCommand('insertText')` as preserving
+   native undo in Chromium and Firefox. Updated to say that
+   `document.execCommand('insertText')` is the documented undo-preserving path
+   (deprecated but functional), while `setRangeText` does not reliably preserve
+   undo across browsers and is not asserted to do so. The "browser test before P2
+   ships" gate is kept, and the explicit Fill button remains the fallback. Q8's
+   recommended default stays (a) but its rationale now rests on execCommand,
+   not on setRangeText.
+2. Grammar agreement with §7.2/Q9 on solve brackets. The `solve` production
+   previously made `from .. to ..` optional, while §7.2 and Q9(a) said it is
+   required. The grammar now requires `from .. to ..` in `solve`.
+3. Semantic invalidity. Added an explicit rule: a span that matches the grammar
+   but is semantically invalid (e.g. a solve with no bracket, or a calculator
+   call to an undefined equation) produces a build error, not an ordinary code
+   span.
+4. Undefined `equation-name` / version pinning not in grammar. Extended `call` to
+   define `equation-name` and an optional `[ "::" version ]` suffix, so the
+   pinned-call example `divider::1(...)` now parses under the grammar.
+5. Missing result-list on multi-out. `multi-out` now allows an optional
+   `= result-list`, and a missing result is warned/filled the same way a basic
+   missing result is, closing the silent-ignore gap.
+6. Diagnostic wording. Changed "no calc value named 'Rtop'" to the evaluator's
+   actual phrasing "unknown name 'Rtop'".
+7. 57-span count methodology. Clarified in §3.1 and Q1 that the count excludes
+   fenced code blocks and spans with more than one `=`; the direction of the
+   argument (many existing `NAME = value` spans, none with `:=`) is unchanged.
+8. Q1(c) wording. Removed the self-contradictory "unless the marker is required"
+   clause from the mandatory-leading-marker alternative.
+
+Rejected chunk 1 findings: none; all were accepted and fixed.
+
+Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
+1. Updated the header status line from "four review rounds addressed" to "five
+   review rounds addressed".
 
 Tests run
 ---------

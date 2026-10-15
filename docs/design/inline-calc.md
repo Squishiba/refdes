@@ -92,10 +92,11 @@ uses `` `V_cl = 0.8 V` `` and `` `CLR = 3.3 kohm` ``, and `docs/design/editor-im
 uses `` `MAX_BODY_BYTES = 1 MiB` ``. A trigger rule that fires on any `NAME = value`
 code span would misclassify all of these as inline math.
 
-I checked every single-backtick span in `docs/` and `tests/` that matches
-`NAME = value`. The count is **57 spans in `docs/` and 0 in `tests/`**. None of
-them contain `:=`, and none of them should be evaluated. Requiring `:=` is
-therefore the safest trigger.
+I checked single-backtick spans in `docs/` and `tests/` for a simple
+`NAME = value` pattern, excluding spans inside fenced code blocks and spans
+with more than one `=`. The count is **57 spans in `docs/` and 0 in `tests/`**.
+None of them contain `:=`, and none of them should be evaluated. Requiring `:=`
+is therefore the safest trigger.
 
 **Trigger rule (recommended).** A single backtick code span is interpreted as
 inline math only when its content contains `:=` and matches the grammar in §3.2.
@@ -119,13 +120,16 @@ A single backtick span is one of:
 ```text
 basic       = name " := " expression [ " = " result ]
 solve       = name " := " solve-result " where " expression " = " target
-              [ " from " quantity " to " quantity ]
-multi-out   = name-list " := " call " = " result-list
+              " from " quantity " to " quantity
+multi-out   = name-list " := " call [ " = " result-list ]
 
 name          = calc assignment name  ([A-Za-z_][A-Za-z0-9_]*)
 name-list     = name *(", " name)
 expression    = any existing calc expression
-call          = equation-name "(" [ expression *(", " expression) ] ")"
+call          = equation-name [ "::" version ] "("
+                [ expression *(", " expression) ] ")"
+equation-name = name
+version       = 1*DIGIT
 result        = calc quantity literal (may be dimensionless)
 result-list   = result *(", " result)
 solve-result  = "?" | quantity
@@ -141,9 +145,12 @@ Rules:
   the **last** ` = `.
 - In a **solve** span, the stored result is the `solve-result` before `where`.
   It is `?` before solving and a quantity after the fill command writes the root.
-- A span that matches the grammar but has no stored result (basic without
-  `= result`) is verified as a definition; the build warns that the result is
-  missing and the fill command can add one.
+- A span that matches the grammar but has no stored result (basic or multi-out
+  without `= result`) is verified as a definition; the build warns that the
+  result is missing and the fill command can add one.
+- A span that matches the grammar but is semantically invalid (for example, a
+  solve with no `from .. to ..` bracket, or a calculator call naming an
+  undefined equation) produces a build **error**, not an ordinary code span.
 - Any code span whose content does **not** match this grammar is treated as an
   ordinary inline code span.
 
@@ -282,7 +289,7 @@ they want.
 Messages reuse existing calc phrasing where possible:
 
 - Unit mismatch: `declared as V but the expression evaluates to A`.
-- Undefined name: `no calc value named 'Rtop' in this item`.
+- Undefined name: `unknown name 'Rtop' in this item`.
 - Missing stored result (new): `inline calc has no stored result; run 'refdes inline-calc fill' to add one`.
 
 ## 5. CLI fill/refresh command
@@ -341,11 +348,14 @@ adjusting them by the net length change before the cursor.
   squiggle overlay (`docs/design/thread-workbench.md:271-275`). It never injects
   error text into the body.
 - **Undo.** The default is live auto-update while typing, but the replacement
-  must use a browser-native text-insertion path (`document.execCommand('insertText')`
-  after selecting the result range, or `setRangeText`) so that Chromium and
-  Firefox keep native undo working. This needs a browser test before P2 ships.
-  The explicit `Fill inline results` button remains the fallback if the native
-  path does not preserve undo in the supported browsers. See Q8.
+  must use a browser-native text-insertion path that preserves undo.
+  `document.execCommand('insertText')` after selecting the result range is the
+  widely used, undo-preserving path in Chromium and Firefox (it is deprecated but
+  still functional). `setRangeText` does **not** reliably preserve native undo
+  across browsers and is not asserted to do so. A browser test is required before
+  P2 ships to confirm undo behavior on the supported browsers. The explicit
+  `Fill inline results` button remains the fallback if the live path does not
+  preserve undo. See Q8.
 
 ## 7. Solve in place for one unknown
 
@@ -583,8 +593,9 @@ dependencies are answered.
 span as inline math rather than an ordinary code span?
 - (a) **Require `:=` in the span** (recommended). A single-backtick span that
   contains `:=` and matches the §3.2 grammar is inline math; all other spans are
-  ordinary code. This is safe because a grep of every single-backtick span in
-  `docs/` found **57 existing `NAME = value` spans** (e.g.
+  ordinary code. This is safe because a grep of single-backtick spans in `docs/`
+  (excluding fenced code blocks and spans with more than one `=`) found
+  **57 existing `NAME = value` spans** (e.g.
   `docs/math.md`: `` `V_in = LOG-PWR-001.V_in | mV` ``,
   `docs/design/backlog.md`: `` `V_cl = 0.8 V` ``,
   `docs/design/editor-image-upload.md`: `` `MAX_BODY_BYTES = 1 MiB` ``) and
@@ -593,8 +604,8 @@ span as inline math rather than an ordinary code span?
 - (b) **Explicit opt-in per item**, e.g. `inline_calc: true` in item front
   matter. Safe, but adds friction for every item that uses inline math.
 - (c) **Mandatory leading marker** at the start of the span, such as
-  `` `= ...` `` or `` `:= ...` ``. Unambiguous, but noisier than the `:=` rule
-  and still has to avoid clashing with existing spans that happen to start with
+  `` `= ...` `` or `` `:= ...` ``. Unambiguous if required, but noisier than the
+  `:=` rule and must avoid clashing with existing spans that happen to start with
   `=`.
 - *Recommended default: (a).* It is the lightest rule that survives the existing
   corpus.
@@ -657,15 +668,16 @@ rewrite sealed entries, or should it offer to append a corrected continuation?
 
 **Q8 -- Live editor undo.** Native `<textarea>` undo is lost when JavaScript
 replaces the whole `value`. Which approach do you want?
-- (a) Live auto-update while typing, using a native text-insertion path
-  (`document.execCommand('insertText')` after selecting the result range, or
-  `setRangeText`) so Chromium and Firefox keep undo working; a browser test is
-  required before P2 ships (orchestrator recommendation).
+- (a) Live auto-update while typing, using `document.execCommand('insertText')`
+  after selecting the result range; this is the documented undo-preserving path
+  in Chromium and Firefox (deprecated but still functional). `setRangeText` is
+  not asserted to preserve undo because its behaviour differs by browser. A
+  browser test is required before P2 ships (orchestrator recommendation).
 - (b) Explicit `Fill inline results` button only; no auto-update.
 - (c) Auto-update plus a managed JS undo stack.
-- *Recommended default: (a).* It preserves the live authoring feel while keeping
-  native undo. The explicit Fill button stays as the fallback if the browser
-  test shows undo is not preserved.
+- *Recommended default: (a).* It preserves the live authoring feel while using
+  the only path that is widely known to keep native undo. The explicit Fill
+  button stays as the fallback if the browser test shows undo is not preserved.
 
 **Q9 -- Solve bracket syntax.** Should the author provide explicit bounds?
 - (a) Required `from ... to ...` (recommended).
