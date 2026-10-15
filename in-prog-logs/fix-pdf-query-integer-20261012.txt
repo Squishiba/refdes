@@ -1,0 +1,139 @@
+fix-pdf-query-integer-20261012 — DIAG-TRACE-001 (oversized page/row/token kills serve PDF handlers)
+==================================================================================================
+
+Task: fix the confirmed DIAG-TRACE-001 (in-prog-logs/current-main-resweep-cli-refusals.tsv
+row 2, REPRODUCED at 8b6a52e) in this worktree, starting at 8b6a52e. Implementation, not
+another audit.
+
+Status: FINISHED. Committed on branch fix/pdf-query-integer-refusal-20261012 (no PR, no
+touch to shared main).
+
+The bug
+-------
+A 5000-digit page/row/token query parameter made the handler die with an uncaught
+ValueError ("Exceeds the limit (4300 digits) for integer string conversion") raised by
+int() itself, so the client got no response at all (RemoteDisconnected):
+
+- GET /api/item/<ref>/sources/propose with page|row|token oversized — serve/sources.py:856,
+  _pdf_proposal's isascii()/isdigit() guard bounded nothing, int() raised.
+- GET /api/item/<ref>/sources/page?page=<5000 digits> — citations.py:311 page_number's
+  int(), and the call at api.py:403 sits outside the SourceRefusal try at api.py:410.
+
+Controls (same params, page=abc) correctly returned 422 (propose, via the SourceRefusal ->
+_refused path) and 400 (page route, the "page must be a positive integer" check).
+
+Reproduction (pre-fix, this worktree's src)
+-------------------------------------------
+.scratch/fix-pdf-query-integer-20261012/probe_diag001.py runs an in-process EditorApp and
+drives it over real HTTP (http.client via tests/serve_support.Client), asserting
+refdes.__file__ is the worktree's src. Output .scratch/fix-pdf-query-integer-20261012/
+diag001-prefix.out: four NO RESPONSE (RemoteDisconnected) lines with the two ValueErrors
+printed by the ThreadingHTTPServer's handler dump, at exactly the two sites above; the
+controls answered 422/400; /api/revision answered 200 afterwards.
+
+The fix
+-------
+The bound is the grammar's own, not the interpreter's. citations.MAX_PAGE_DIGITS = 64,
+documented at its definition (src/refdes/citations.py): the interpreter's int-conversion
+limit is 4300 by default, can be disabled (0), and the smallest non-zero value it accepts
+is 640 — verified on this interpreter (3.13.5): sys.set_int_max_str_digits(64) raises
+"maxdigits must be 0 or larger than 640", and PYTHONINTMAXSTRDIGITS=640 is accepted.
+64 digits therefore converts under every interpreter setting (64 < 640 < 4300), and no
+page of any document has sixty-five digits, so a longer run simply is not a coordinate:
+
+- citations.page_number returns None for a digit run longer than MAX_PAGE_DIGITS, which
+  makes the page route return its documented 400 at api.py:409 without touching the route.
+  Same effect (no crash, declaration error) for a 5000-digit `page:` in a YAML citation:
+  probed `refdes check` -> "page: ... is not a page number -- page: must be a positive
+  integer, counted from 1", exit 1, no traceback.
+- serve/sources._pdf_proposal checks len(text) > citations_mod.MAX_PAGE_DIGITS inside the
+  existing digit/minimum loop, so an oversized page/row/token raises SourceRefusal with
+  the route's own "X must be an integer >= N for a PDF pick" -> documented 422. That also
+  covers the POST /edit accept path, which revalidates through the same propose_payload
+  (edit.py:654 already maps SourceRefusal to the 422 refusal).
+
+The accepted grammar itself is unchanged below the bound: "2", "02" and friends still
+parse (page_number('2')==2, page_number('02')==2 probed), 19-digit and 64-digit values
+still flow through as integers and still get the reader's out-of-range refusal (probed:
+page of 19 digits -> 422 "page 999... is not in this document", both routes), only runs
+over 64 digits flip from crash to refusal.
+
+Tests (tests/test_serve_pdf_sources.py, real HTTP through the served fixture)
+------------------------------------------------------------------------------
+- test_an_oversized_page_query_is_a_400_and_not_a_dead_handler: page of 5000 digits and
+  of 65 digits -> 400 "page must be a positive integer", project byte-identical, and an
+  ordinary read on the same live app still returns 200.
+- test_an_oversized_pick_coordinate_is_a_refusal_and_not_a_dead_handler: page|row|token
+  each at 5000 digits and at 65 digits -> 422 refused "X must be an integer >= N",
+  byte-identical, ordinary pick on the same app still proposed. The 65-digit cases are
+  the anti-CPython-limit assertion: they sit under the interpreter's default 4300, so a
+  fix leaning only on that limit would wave them through instead of refusing them.
+- one new case in test_a_refused_pdf_accept_leaves_item_and_lockfile_byte_identical:
+  a pin with row of 5000 digits -> 422 refusal, nothing written.
+
+Targeted runs (venv /home/jorb/work/venv-refdes, conftest puts this worktree's src first
+on sys.path — verified refdes.__file__ resolves to the worktree):
+- pytest tests/test_serve_pdf_sources.py tests/test_citation_pages.py tests/test_serve_sources.py
+  tests/test_serve_sources_accept.py tests/test_render_assets.py tests/test_run5_friction_f1_f2_f6_f8.py
+  -> 239 passed.
+- Post-fix probe: zero ValueErrors; propose oversized -> 422 x3, page oversized -> 400,
+  controls unchanged (422/400/200), revision 200 after all probes, server alive
+  (.scratch/fix-pdf-query-integer-20261012/diag001-postfix.out).
+- ruff (scoped per AGENTS.md, whole ruff baseline is not clean): the three touched files
+  show only pre-existing findings, none on added lines.
+
+Difficulties: none material. One note — my first draft comment claimed the interpreter's
+smallest non-zero int-conversion limit was 64; running it proved 640, and the comment
+now says what was measured.
+
+PR prep (2026-10-14) — rebase onto current main, open PR
+---------------------------------------------------------
+- main advanced 8b6a52e -> f7df34d (9 commits, incl. #212 = 1a1c960, which also touches
+  citations.py). Fetched origin/main once; the only main-side change in the touched files
+  is citations.load_lockfile (~line 1070), which now raises LockfileError on a non-UTF-8
+  lockfile. My change sits at MAX_PAGE_DIGITS/page_number (~lines 294-330) -- disjoint.
+- `git rebase origin/main`: clean, zero conflicts (1/1 commit applied). New head f297f4d.
+  Both fixes verified co-present at the head: MAX_PAGE_DIGITS at citations.py:308, the
+  LockfileError UTF-8 guard at citations.py:1097 (git show HEAD:src/refdes/citations.py).
+- Verification with PYTHONPATH forced to this worktree's src (venv
+  /home/jorb/work/venv-refdes/bin/python3; every run prints/echoes refdes.__file__ =
+  .../worktrees/16msma8v/fix-pdf-query-integer-20261012/src/refdes/__init__.py):
+  * real EditorApp probe over live HTTP, .scratch/fix-pdf-query-integer-20261012/
+    probe_diag001.py -> diag001-postrebase.out: oversized page/row/token on the proposal
+    route 422 x3 ("must be an integer >= N"), oversized page on the page route 400,
+    controls 422/400/200 unchanged, 19-digit page still the reader's out-of-range 422,
+    /api/revision 200 after all probes; zero ValueError/tracebacks.
+  * real CLI on a project whose citation has a 5000-digit page:: check exits 1 with the
+    load error "page: ... is not a page number -- page: must be a positive integer,
+    counted from 1" (measured exit code 1, no traceback).
+  * pytest tests/test_serve_pdf_sources.py tests/test_citation_pages.py
+    tests/test_serve_sources.py tests/test_serve_sources_accept.py tests/test_render_assets.py
+    tests/test_run5_friction_f1_f2_f6_f8.py -> 239 passed (same set as pre-rebase).
+  * adjacent #212-area tests, post-rebase: tests/test_history.py tests/test_keys_adopt.py
+    tests/test_reseal_audit.py tests/test_seal.py tests/test_yaml_loaders.py -> 85 passed.
+  * scoped ruff on the three touched files: the same 10 pre-existing findings, none on
+    added lines (repo-wide ruff baseline is not clean; see AGENTS.md).
+
+PR #225 review round (2026-10-15) — reviewer 82f0e729: CHANGES REQUESTED
+-------------------------------------------------------------------------
+- Review verdict: code, full suite (3695 passed / 2 skipped) and all CI jobs
+  verified; one required fix — the change has no `changelog.d/<slug>.<category>.md`
+  fragment (changelog.d/README.md: "Commit the fragment together with the change
+  it describes"). Added `changelog.d/serve-pdf-oversized-coordinates.fixed.md`
+  (`fixed` = bug fix; content is the changelog bullet, `- ` start, no headings,
+  per README).
+- PR body edit (separate reviewer note): the body's first line cites
+  `in-prog-logs/current-main-resweep-cli-refusals.tsv`, which lives only in the
+  base checkout and is not tracked by this branch — a dangling reference for a
+  PR reader. The body itself states the defect, so the reference is reworded to
+  point at the evidence in this branch (the new tests + the probe outputs named
+  in the log), not at the untracked TSV. No mass-commit of the resweep TSV.
+- Rebase: origin/main had advanced f7df34d -> 3a3c101 -> cb24891 (incl. #233,
+  citations.py page-count provenance, and #231/#230/#216/#211). `git rebase
+  origin/main` clean, zero conflicts; new head: fix commit 2c41b6e, log commit
+  47328c3. Verified at the head: MAX_PAGE_DIGITS/page_number bound at
+  citations.py:308-328 and the _pdf_proposal length check at sources.py:864
+  co-present with #233's PAGE_COUNT_SHA256_KEY provenance work at
+  citations.py:735 (disjoint hunks).
+- Post-rebase verification: targeted pytest (same six files as before) and the
+  scoped ruff on the touched files, results below in the report.

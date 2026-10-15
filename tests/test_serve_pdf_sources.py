@@ -350,6 +350,28 @@ def test_a_cited_pdf_is_not_a_row_list_and_a_csv_is_not_a_page(tmp_path):
         app.stop()
 
 
+# DIAG-TRACE-001: a `?page=` of a few thousand digits used to raise ValueError
+# out of `int()` inside the handler -- the conversion limit is the
+# interpreter's, not the grammar's -- and the client got no response at all.
+# The bound is now the grammar's own (citations.MAX_PAGE_DIGITS), so the route
+# answers the way it answers `page=0` and `page=abc`; the 65-digit case is the
+# one a fix leaning only on the interpreter's current limit would wave through.
+@pytest.mark.parametrize("page", ["9" * 5000, "9" * 65])
+def test_an_oversized_page_query_is_a_400_and_not_a_dead_handler(served, page):
+    _app, client, root = served
+    before = snapshot_tree(root)
+    status, payload = client.api_get(page_url("DEC-001", "datasheets/sheet.pdf", page))
+    assert status == 400, payload
+    assert "page must be a positive integer" in payload["error"]
+    assert snapshot_tree(root) == before
+    # The handler refused; the server outlived it. The next ordinary read on
+    # the same live app still answers -- the probe's crash class killed the
+    # response, not the process, and this proves it did not become worse.
+    status, payload = client.api_get(page_url("DEC-001", "datasheets/sheet.pdf", "2"))
+    assert status == 200, payload
+    assert payload["page"] == 2
+
+
 # -------------------------------------------------------------- 2: the page
 
 
@@ -985,6 +1007,29 @@ def test_pdf_proposal_refuses_invalid_selection_and_shared_contract_errors(serve
     assert snapshot_tree(root) == before
 
 
+# DIAG-TRACE-001, the proposal side: an oversized digit run in page/row/token
+# used to raise ValueError out of the `int()`s of the selection check -- the
+# conversion limit is the interpreter's, not the grammar's -- and the handler
+# died with no response. The selection check now bounds the digit run itself
+# (citations.MAX_PAGE_DIGITS), so each field is refused in the route's own
+# 422 vocabulary. The 65-digit case sits under the interpreter's default limit
+# and over the bound: only the bound answers it.
+@pytest.mark.parametrize("field", ["page", "row", "token"])
+@pytest.mark.parametrize("digits", ["9" * 5000, "9" * 65])
+def test_an_oversized_pick_coordinate_is_a_refusal_and_not_a_dead_handler(served, field, digits):
+    _app, client, root = served
+    before = snapshot_tree(root)
+    status, payload = client.api_get(proposal_url(client, **{field: digits}))
+    assert status == 422, payload
+    assert payload["kind"] == "refused"
+    assert f"{field} must be an integer >=" in payload["error"]
+    assert snapshot_tree(root) == before
+    # Same live app, ordinary pick: still proposed, so the refusal cost the
+    # route a status code and nothing else.
+    status, payload = client.api_get(proposal_url(client))
+    assert status == 200, payload
+
+
 def test_pdf_proposal_is_confined_token_gated_and_read_only(served):
     _app, client, root = served
     good_url = proposal_url(client, unit="1", key="confirmed")
@@ -1156,6 +1201,7 @@ def test_pdf_accept_preserves_other_keys_and_refuses_rebinding_a_key(pdf_accept)
     ({"sha256": "stale"}, "changed since the page was read"),
     ({"sha256": ""}, "changed since the page was read"),
     ({"row": 99}, "not a numeric candidate"),
+    ({"row": "9" * 5000}, "row must be an integer"),
     ({"token": 0}, "not a numeric candidate"),
     ({"unit": ""}, "there is no default"),
     ({"unit": "invalid_unit"}, "unknown unit"),
