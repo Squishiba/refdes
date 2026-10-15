@@ -430,7 +430,7 @@ key:
 | `"unpinned"` | No lockfile entry yet — `refdes fetch` has not run for this path |
 | `"cache_missing"` | Pinned and kept, but the local blob is gone |
 | `"hash_mismatch"` | Kept blob's hash no longer matches the pinned sha256 (always an error), or a cited local file changed since it was pinned (warning, error with `--require-citations`) |
-| `"missing"` | A cited local file does not exist (always an error) |
+| `"missing"` | A cited local file does not exist, or the cited path is a directory and not a file (always an error) |
 | `"invalid"` | The `path:` itself is refused (escapes the project, drive letter, backslash, …) — validation already reported it with `file:line`; the citation is skipped, not resolved |
 
 `state` is about the **bytes**, so it stays `"ok"` for a citation whose bytes

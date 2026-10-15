@@ -128,6 +128,65 @@ def test_fetch_and_check_word_the_same_condition_identically(tmp_path, capsys):
         _assert_no_root(said, tmp_path, name)
 
 
+# DIAG-WORD-002: a citation naming a directory was one condition with two
+# wordings -- `check` called it `does not exist` (the `os.path.isfile` gate
+# in `_resolve_local`), `fetch` called it `cannot be read: Is a directory`
+# (the OS's phrasing, via the open() in the fetch loop). Both false in part:
+# the directory is there, and nothing about it is unreadable.
+ONE_DIR_CITER = (
+    "defaults:\n  type: component\nitems:\n"
+    "  - id: CMP-PWR-001\n    title: Regulator\n    datasheets:\n"
+    "      - path: datasheets/arealdir\n"
+)
+DIRECTORY = "cited local file 'datasheets/arealdir' is a directory, not a file"
+
+
+def test_a_cited_directory_gets_one_sentence_from_both_commands(tmp_path, capsys):
+    """DIAG-WORD-002, both commands: the shared sentence, and neither of the
+    two wordings it replaced. The negatives are the claim -- a fix that left
+    `check` saying `does not exist` (a lie: it is there) or `fetch` saying
+    `cannot be read` (the OS's phrasing, not `check`'s) would pass a
+    presence-only assertion."""
+    config = _cite_project(tmp_path, ONE_DIR_CITER)
+    (tmp_path / "datasheets" / "arealdir").mkdir(parents=True)
+    assert cli_mod.main(["-c", config, "fetch"]) == 1
+    fetched = capsys.readouterr()
+    assert cli_mod.main(["-c", config, "check"]) == 1
+    checked = capsys.readouterr()
+    for name, captured in (("fetch", fetched), ("check", checked)):
+        said = captured.err + captured.out
+        assert DIRECTORY in said, (name, said)
+        assert "does not exist" not in said, (name, said)
+        assert "cannot be read" not in said, (name, said)
+        _assert_no_root(said, tmp_path, name)
+    assert "cited by CMP-PWR-001" in fetched.err, fetched.err
+
+
+def test_a_removed_directory_falls_back_to_the_genuine_missing_sentence(
+    tmp_path, capsys
+):
+    """The genuine-missing case survives the directory fix. A deleted
+    directory is indistinguishable from a never-existing path -- `isdir` is
+    as false as `isfile` -- so it keeps `does not exist` on both commands,
+    and the new branch must not have widened the directory sentence over
+    it."""
+    config = _cite_project(tmp_path, ONE_DIR_CITER)
+    (tmp_path / "datasheets" / "arealdir").mkdir(parents=True)
+    assert cli_mod.main(["-c", config, "fetch"]) == 1
+    capsys.readouterr()
+    (tmp_path / "datasheets" / "arealdir").rmdir()
+    assert cli_mod.main(["-c", config, "fetch"]) == 1
+    fetched = capsys.readouterr()
+    assert cli_mod.main(["-c", config, "check"]) == 1
+    checked = capsys.readouterr()
+    for name, captured in (("fetch", fetched), ("check", checked)):
+        said = captured.err + captured.out
+        assert (
+            "cited local file 'datasheets/arealdir' does not exist" in said
+        ), (name, said)
+        assert "is a directory" not in said, (name, said)
+
+
 @pytest.mark.skipif(
     hasattr(os, "geteuid") and os.geteuid() == 0,
     reason="a root checkout can read a mode-000 file, so it cannot fail",
