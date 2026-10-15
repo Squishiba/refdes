@@ -801,8 +801,12 @@ def _print_reuse_note(retired_id: str, holders: list[str]) -> None:
 
 #: §6's sketch's checkbox column: the three authored states, and nothing else.
 #: Derived rows render without any glyph -- they have no tickable state (§5
-#: rule 2), which is exactly why they live in their own block.
-_THREAD_GLYPHS = {"open": "[ ]", "done": "[x]", "dropped": "[-]"}
+#: rule 2), which is exactly why they live in their own block. The mapping
+#: lives in threads.py because the task pane (thread-workbench.md §7a,
+#: W5a) prints the same glyphs: one spelling, two surfaces. It is a
+#: `MappingProxyType` there, so this alias is a read-only view, not a second
+#: handle that could mutate the pane's glyphs (PR #197 review C5).
+_THREAD_GLYPHS = threads_mod.TASK_GLYPHS
 
 # The thread surface's fixed wording, spelled once (owner decisions,
 # 2026-10-11 fix round). `refdes work` (plan §H7 chunk C, stacked on
@@ -810,23 +814,20 @@ _THREAD_GLYPHS = {"open": "[ ]", "done": "[x]", "dropped": "[-]"}
 # helpers instead of re-spelling the strings -- two spellings of one line
 # is exactly what this block exists to prevent.
 
-#: The derived block's heading: self-closing said in plain words.
-THREAD_DERIVED_HEADING = "Derived (auto clears when fixed):"
+#: The derived block's heading: self-closing said in plain words. The words
+#: live in threads.py (`DERIVED_HEADING`) because the task pane renders the
+#: same heading as a <summary>, without this command's trailing colon.
+THREAD_DERIVED_HEADING = f"{threads_mod.DERIVED_HEADING}:"
 
 #: The derived block's small per-kind headings (owner decision, 2026-10-11):
 #: the block is grouped under one heading per kind that has rows, and a row
 #: inside its group drops the kind column -- the heading names it. Both
 #: commands render through `cli._derived_lines`, and the kinds appear in the
-#: ONE order `threads._KIND_ORDER` sorts them in, so these words are spelled
-#: here once and nowhere else.
-THREAD_DERIVED_GROUP_HEADINGS = {
-    "coverage": "Coverage",
-    "verdict": "Verdicts",
-    "blocked": "Blocked",
-    "check": "Failing checks",
-    "citation": "Citations",
-    "fork": "Forks",
-}
+#: ONE order. Spelled once in `threads.DERIVED_GROUP_HEADINGS`, which IS the
+#: order (the table's insertion order); this name stays as the cli-side
+#: handle. (PR #197 NOTE dedupe: #194 and W5a met with two spellings, and
+#: the table won -- the pane groups by the very same object.)
+THREAD_DERIVED_GROUP_HEADINGS = threads_mod.DERIVED_GROUP_HEADINGS
 
 #: The store-failure sentence's subject, spelled once per command so the
 #: text warning and the --json `diagnostics` payload can never diverge.
@@ -860,43 +861,14 @@ def _thread_capture_line(capture: dict) -> str:
     return f"{THREAD_CAPTURE_PREFIX} {capture['entry']} ({wording})"
 
 
-def _thread_verdict_suffix(verdict: dict, open_count: int) -> str:
-    """§5 rule 4's "never alone" as a suffix on the verdict line: a
-    concluding verdict with open tasks at its tip says how many remain
-    below, in the owner's wording. Empty for a non-concluding verdict or
-    a tip with no open tasks (the verdict then prints alone because there
-    is nothing to conclude *against*)."""
-    if not verdict["concluding"] or not open_count:
-        return ""
-    return (
-        f", {open_count} open task" + ("" if open_count == 1 else "s")
-        + " remaining below"
-    )
-
-
 def _thread_age_suffix(row: dict, as_of, date_format: str) -> str:
-    """§5 rule 3's age line: the declaring entry and its authored date,
-    absolute; a relative span is appended ONLY under an explicit --as-of, so
-    a run without the flag is byte-identical whatever the wall clock says."""
-    since = row.get("open_since") or {}
-    entry, declared = since.get("entry"), since.get("date")
-    if not entry:
-        return ""
-    text = f"  (open since {entry}"
-    if declared:
-        text += f", {declared}"
-        if as_of is not None:
-            try:
-                start = dates_mod.parse_date(declared, date_format)
-            except ValueError:
-                start = None
-            if start is not None:
-                days = (as_of - start).days
-                if days < 0:
-                    text += " -- declared after --as-of"
-                else:
-                    text += f" -- {days} day" + ("" if days == 1 else "s")
-    return text + ")"
+    """§5 rule 3's age line as `refdes thread` prints it: the whole wording
+    is composed once in `threads.age_suffix` (PR #197 review P2, the same
+    posture as B3's `verdict_line`, shared with the task pane); this wrapper
+    only prepends the row's separator, so a run without --as-of stays
+    byte-identical whatever the wall clock says."""
+    suffix = threads_mod.age_suffix(row, as_of, date_format)
+    return f"  {suffix}" if suffix else ""
 
 
 def _thread_header(view: dict) -> str:
@@ -919,7 +891,9 @@ def _task_row_lines(rows: list[dict], as_of, date_format: str) -> list[str]:
     than printing the literal "None"."""
     out = []
     for number, row in enumerate(rows, start=1):
-        glyph = _THREAD_GLYPHS.get(row.get("state"), "[?]")
+        glyph = _THREAD_GLYPHS.get(
+            row.get("state"), threads_mod.TASK_GLYPH_UNKNOWN
+        )
         age = (
             _thread_age_suffix(row, as_of, date_format)
             if row.get("state") == "open"
@@ -932,63 +906,26 @@ def _task_row_lines(rows: list[dict], as_of, date_format: str) -> list[str]:
 
 
 def _verdict_line(verdict: dict, open_rows: list[dict]) -> str:
-    """One folded verdict as a line, spelled once for both commands. A fold
-    that *refused* (§5 rule 3) prints the projection's own state word
-    (`threads.VERDICT_CONFLICTING`) -- never displayed as though nothing had
-    concluded, and never spelled a second way; a `concluding` verdict with
-    open tasks at its tip says how many remain below (rule 4's "never
-    alone", via the shared `_thread_verdict_suffix`). `open_rows` is that
-    tip's open tasks (already the empty list when there are none)."""
-    if verdict["state"] == threads_mod.VERDICT_CONFLICTING:
-        return (
-            f"Verdict: {verdict['state']} -- entries at the same distance "
-            "declare different statuses; a continuation must declare one "
-            "explicitly"
-        )
-    on = f", {verdict['declared_on']}" if verdict["declared_on"] else ""
-    return (
-        f"Verdict: {verdict['status']} ({verdict['declared_by']}{on})"
-        f"{_thread_verdict_suffix(verdict, len(open_rows))}"
-    )
+    """One folded verdict as a line, spelled once for both commands: the
+    whole line is composed in `threads.verdict_line` (PR #197 review B3 --
+    the wrapper and its suffix are one spelling, shared with the task pane).
+    `open_rows` is that tip's open tasks (already the empty list when there
+    are none)."""
+    return threads_mod.verdict_line(verdict, len(open_rows))
 
 
-def _derived_detail(row: dict) -> str:
-    """The right-hand column of a derived row, spelled once for both
-    commands. The `verdict`/`fork` kinds only ever appear in `refdes work`'s
-    whole-project block; the per-thread block carries none of them. An
-    unknown kind is said as itself (review #194 W6): `threads.py` is free to
-    grow a kind, and a renderer that never heard of it must name the gap
-    rather than die on a bare `KeyError` three frames away."""
-    kind = row["kind"]
-    if kind == "check":
-        return f"{row['value']} violates {row['against']}"
-    if kind == "blocked":
-        stale = " (stale)" if row["stale"] else ""
-        return f"by {row['root']} ({row['root_status']}){stale}"
-    if kind == "verdict":
-        return row["status"]
-    if kind == "fork":
-        return "tips " + ", ".join(row["tips"])
-    if kind in ("coverage", "citation"):
-        return row["problem"]
-    raise ValueError(_unknown_kind_message(kind))
-
-
-def _unknown_kind_message(kind: str) -> str:
-    known = ", ".join(sorted(THREAD_DERIVED_GROUP_HEADINGS))
-    return (
-        f"unknown derived row kind {kind!r} reached the renderer: the producers "
-        f"in refdes.threads emit a kind refdes.cli does not know (it knows: "
-        f"{known}) -- teach THREAD_DERIVED_GROUP_HEADINGS and _derived_detail "
-        "before emitting it"
-    )
+#: The right-hand column of a derived row is spelled once in
+#: `threads.derived_detail` (PR #197 review P2, the same posture as B3's
+#: `verdict_line`), used by both commands and by the task pane; aliased
+#: here so the block renderer below and any existing callers keep one name.
+_derived_detail = threads_mod.derived_detail
 
 
 def _derived_heading(kind: str) -> str:
     try:
         return THREAD_DERIVED_GROUP_HEADINGS[kind]
     except KeyError:
-        raise ValueError(_unknown_kind_message(kind)) from None
+        raise ValueError(threads_mod.unknown_derived_kind_message(kind)) from None
 
 
 def _derived_lines(rows: list[dict]) -> list[str]:
@@ -1141,17 +1078,21 @@ def cmd_thread(args) -> int:
                 if row.get("state") == "open"
             ]
             print(_verdict_line(verdict, open_rows))
-        heading = "Tasks at tip:" if single else f"Tasks at {branch['tip']}:"
+        heading = threads_mod.task_heading(branch["tip"], single_tip=single)
         tasks = branch["tasks"]
         if tasks["state"] == "ambiguous":
-            print(f"{heading} task reconciliation required")
+            print(f"{heading} {threads_mod.TASK_POSTURE_AMBIGUOUS}")
         elif tasks["state"] == "undeclared":
-            print(f"{heading} none (never declared)")
+            print(f"{heading} {threads_mod.TASK_POSTURE_UNDECLARED}")
         elif tasks["state"] == "cleared":
-            print(f"{heading} none (cleared by {tasks['declared_by']})")
+            print(
+                f"{heading} {threads_mod.task_posture_cleared(tasks['declared_by'])}"
+            )
         else:
             malformed = tasks.get("malformed")
-            note = f" ({malformed} malformed row(s) not shown)" if malformed else ""
+            note = (
+                f" {threads_mod.task_malformed_note(malformed)}" if malformed else ""
+            )
             print(f"{heading}{note}" if note else heading)
             for line in _task_row_lines(tasks["rows"], as_of, project.date_format):
                 print(line)
@@ -1193,14 +1134,14 @@ def _work_authored_blocks(views: list[dict], as_of, date_format: str) -> list[li
                     continue
             if lines is None:
                 lines = [_thread_header(view)]
-            heading = "Tasks at tip:" if single else f"Tasks at {branch['tip']}:"
+            heading = threads_mod.task_heading(branch["tip"], single_tip=single)
             verdict = branch["verdict"]
             if verdict is not None and (
                 verdict["state"] == threads_mod.VERDICT_CONFLICTING or verdict["concluding"]
             ):
                 lines.append(_verdict_line(verdict, open_rows))
             if state == "ambiguous":
-                lines.append(f"{heading} task reconciliation required")
+                lines.append(f"{heading} {threads_mod.TASK_POSTURE_AMBIGUOUS}")
                 continue
             lines.append(heading)
             lines.extend(_task_row_lines(open_rows, as_of, date_format))
@@ -2880,7 +2821,7 @@ def main(argv: list[str] | None = None) -> int:
         "section 5 as a command. Two structurally separate groups with separate "
         "numbering: the authors' own open tasks at each thread tip (numbered, "
         "one block per tip; a fork prints every tip and no single current "
-        "status), then a labelled `Derived (auto clears when fixed)` block of "
+        f"status), then a labelled `{threads_mod.DERIVED_HEADING}` block of "
         "every gap that can be produced offline -- uncovered/unverified active "
         "requirements, proposed/on-hold verdicts, blocked-by cascades and stale "
         "blockers, failing checks, unpinned citations and missing kept copies, "

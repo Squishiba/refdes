@@ -1,0 +1,162 @@
+/* The floating task pane (docs/design/thread-workbench.md §7a, W5a).
+
+   Progressive enhancement, decided 2026-10-10: the pane and its toggle are
+   rendered `hidden` and only taskpane.js ever reveals the toggle, so with
+   JavaScript off neither appears and the page reads fully. Both are `fixed`
+   — that is what "follows the scroll" and "stays put" mean in §7a: the pane
+   never moves with the document and never jumps. Colours are the site's own
+   tokens, so dark mode and themes recolor it for free; this file is emitted
+   only for projects that actually show a pane. */
+
+/* The `bottom` here and on `.refdes-taskpane` below are the STATIC site's
+   place. On the `refdes serve` preview the bar owns that corner and
+   `serve/static/bar.css` overrides both offsets (it loads after this file)
+   — that file's comment spells out the geometry, which is derived from the
+   toggle metrics this rule sets. */
+
+.refdes-taskpane-toggle {
+  position: fixed;
+  right: var(--space-16);
+  bottom: var(--space-16);
+  z-index: 63; /* above #preview-card's 60 (style.css), like the pane below */
+  padding: var(--space-6) var(--space-14);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: #fff;
+  font: var(--weight-medium) var(--text-sm) var(--sans-simple);
+  cursor: pointer;
+  box-shadow: 0 var(--space-2) var(--space-8) rgba(0, 0, 0, 0.25);
+}
+
+.refdes-taskpane {
+  position: fixed;
+  right: var(--space-16);
+  bottom: var(--space-64);
+  z-index: 62; /* above #preview-card's 60 (style.css): the pane wins */
+  width: min(23rem, calc(100vw - var(--space-32)));
+  max-height: min(60vh, 36rem);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2xl);
+  background: var(--panel);
+  color: var(--fg);
+  padding: var(--space-4) var(--space-16) var(--space-10);
+  box-shadow: 0 var(--space-4) var(--space-24) rgba(0, 0, 0, 0.22);
+  font-size: var(--text-sm);
+}
+
+.refdes-taskpane[hidden] {
+  display: none;
+}
+
+.refdes-taskpane.refdes-taskpane-grey {
+  /* §7a sub-decision 5: no thread in view — stay put, grey out, keep
+     showing the last thread's name. The pane does not move. */
+  opacity: 0.45;
+}
+
+.refdes-taskpane-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+
+.refdes-taskpane-title {
+  font-size: var(--text-lg);
+  border-bottom: none;
+  margin: var(--space-8) var(--space-0) var(--space-6);
+  padding-bottom: var(--space-0);
+}
+
+.refdes-taskpane-close {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: var(--text-2xl);
+  line-height: 1;
+  cursor: pointer;
+  padding: var(--space-2) var(--space-4);
+}
+
+.refdes-taskpane-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: var(--space-8) var(--space-0) var(--space-4);
+}
+
+.refdes-taskpane-tab {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--text-xs);
+  padding: var(--space-2) var(--space-10);
+  cursor: pointer;
+}
+
+.refdes-taskpane-tab[aria-selected="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.refdes-taskpane-note {
+  color: var(--muted);
+  margin: var(--space-8) var(--space-0) var(--space-2);
+}
+
+.refdes-taskpane-tip,
+.refdes-taskpane-verdict,
+.refdes-taskpane-heading {
+  margin: var(--space-4) var(--space-0);
+}
+
+.refdes-taskpane-tasks {
+  /* PR #197 review R2: `list-style: none` because the rows number
+     themselves (item.html.j2 renders `{{ loop.index }}.` as the marker,
+     matching `refdes thread`), and style.css resets no `ul` globally — so
+     without this every row shows a disc bullet AND its own number. */
+  list-style: none;
+  margin: var(--space-2) var(--space-0) var(--space-10);
+  padding-left: var(--space-10);
+}
+
+.refdes-taskpane-tasks li {
+  margin: var(--space-2) var(--space-0);
+}
+
+.refdes-taskpane-derived {
+  border-top: 1px solid var(--line);
+  margin-top: var(--space-8);
+  padding-top: var(--space-6);
+}
+
+.refdes-taskpane-derived > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.refdes-taskpane-derived h3 {
+  font-size: var(--text-sm);
+  margin: var(--space-8) var(--space-0) var(--space-2);
+}
+
+.refdes-taskpane-derived ul {
+  /* Same reason as `.refdes-taskpane-tasks` above: no bullets behind the
+     pane's own rows (PR #197 review R2). */
+  list-style: none;
+  margin: var(--space-2) var(--space-0) var(--space-6);
+  padding-left: var(--space-10);
+}
+
+@media print {
+  .refdes-taskpane,
+  .refdes-taskpane-toggle {
+    display: none;
+  }
+}

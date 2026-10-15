@@ -55,27 +55,22 @@ Nothing here writes — the same tree-hash guarantee every read surface carries.
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
 from . import blocked as blocked_mod
 from . import chains as chains_mod
+from . import dates as dates_mod
 from . import history as history_mod
 from . import lifecycle as lifecycle_mod
 from .model import Item, Project
 
-# The derived rows' ONE order, spelled once here for BOTH commands (owner
-# decision, 2026-10-11): coverage < verdict < blocked < check < citation <
-# fork — the order §5's worklist table lists the kinds in. The per-thread
-# block simply never carries a `verdict` or `fork` row; `refdes work`'s
-# whole-project block carries all six. Both producers sort by this and both
-# renderers group by it, so the two commands can never reorder differently,
-# and the block never reorders itself between builds.
-_KIND_ORDER = {
-    "coverage": 0,
-    "verdict": 1,
-    "blocked": 2,
-    "check": 3,
-    "citation": 4,
-    "fork": 5,
-}
+# The derived rows' ONE order (owner decision, 2026-10-11): coverage <
+# verdict < blocked < check < citation < fork — the order §5's worklist
+# table lists the kinds in. It is spelled once, as the
+# DERIVED_GROUP_HEADINGS table below; `_KIND_ORDER` is that table's
+# insertion order made numeric, and both commands' producers sort rows by
+# it while both renderers group by the table itself, so the two can never
+# reorder differently and the block never reorders itself between builds.
 
 #: The verdict discriminator's two non-null states (owner wording, 2026-10-11
 #: fix round: `declared`/`ambiguous` read as the task fold's own postures,
@@ -85,6 +80,205 @@ _KIND_ORDER = {
 #: `refdes work` (H7c) renders these same strings, so they live here once.
 VERDICT_RESOLVED = "resolved"
 VERDICT_CONFLICTING = "conflicting"
+
+#: The surface wording every thread view shares, spelled once here (the same
+#: reason VERDICT_RESOLVED lives here): `refdes thread` (cli.cmd_thread)
+#: renders through these, and so does the task pane
+#: (docs/design/thread-workbench.md §7a, W5a) — the pane "shows the same
+#: facts and wording as that command" by rendering these same strings, not
+#: a second spelling that can drift.
+#: A `MappingProxyType`, not a plain dict: `cli._THREAD_GLYPHS` aliases this
+#: very object (PR #197 review C5), and a mutable shared mapping would let a
+#: bug on one surface rewrite the other's printed bytes.
+TASK_GLYPHS = MappingProxyType({"open": "[ ]", "done": "[x]", "dropped": "[-]"})
+TASK_GLYPH_UNKNOWN = "[?]"
+
+#: The authored block's heading for a one-tip thread, spelled once (PR #197
+#: review C1): `refdes thread` and `refdes work` print it and the task pane
+#: renders it, so the pane takes it from here instead of hard-coding it.
+TASK_HEADING_TIP = "Tasks at tip:"
+
+
+def task_heading(tip: str, *, single_tip: bool) -> str:
+    """One branch's task-block heading: `Tasks at tip:` when the thread has
+    exactly one tip, `Tasks at <tip>:` when a fork names it (the same rule
+    every surface follows; `refdes thread`/`refdes work` render through it).
+    """
+    return TASK_HEADING_TIP if single_tip else f"Tasks at {tip}:"
+
+
+#: The derived block's heading, without the CLI's trailing colon: `refdes
+#: thread` prints `DERIVED_HEADING + ":"`, the pane's <summary> is the bare
+#: heading (the task's owner string, 2026-10-11).
+DERIVED_HEADING = "Derived (auto clears when fixed)"
+
+#: The derived block's per-kind group headings (the owner's words), in the
+#: ONE kind order — the table is the order: `DERIVED_GROUP_ORDER` is this
+#: dict's insertion order and `_KIND_ORDER` numbers it, so a kind added
+#: here appears in the sort, the grouping and the headings at once and
+#: cannot be half-registered (the #194 review posture; after the PR #197
+#: NOTE rebase, `refdes work`'s `cli.THREAD_DERIVED_GROUP_HEADINGS` is an
+#: alias of this table — one spelling, used by both commands and the pane).
+#: A thread's own derived block simply never carries a `verdict` or `fork`
+#: row — those kinds belong to a whole-project worklist — but the table
+#: names all six so the grouping and the order are spelled once.
+#: A `MappingProxyType` for the same reason as TASK_GLYPHS (PR #197 review
+#: K2): `cli.THREAD_DERIVED_GROUP_HEADINGS` aliases this very object, so a
+#: mutable shared mapping would let a bug on one surface rewrite the other's
+#: printed bytes.
+DERIVED_GROUP_HEADINGS = MappingProxyType(
+    {
+        "coverage": "Coverage",
+        "verdict": "Verdicts",
+        "blocked": "Blocked",
+        "check": "Failing checks",
+        "citation": "Citations",
+        "fork": "Forks",
+    }
+)
+DERIVED_GROUP_ORDER = tuple(DERIVED_GROUP_HEADINGS)
+_KIND_ORDER = {kind: index for index, kind in enumerate(DERIVED_GROUP_ORDER)}
+
+#: The four postures the task block can show in place of a list, and the
+#: full conflicting-verdict sentence — `refdes thread` prints these and the
+#: task pane renders them, from this one spelling (the pane "shows the same
+#: facts and wording as that command" by the same mechanism as the glyphs
+#: above: one constant, two surfaces).
+TASK_POSTURE_AMBIGUOUS = "task reconciliation required"
+TASK_POSTURE_UNDECLARED = "none (never declared)"
+VERDICT_CONFLICTING_DETAIL = (
+    "entries at the same distance declare different statuses; "
+    "a continuation must declare one explicitly"
+)
+
+
+def task_posture_cleared(declared_by: str) -> str:
+    """The `cleared` posture, naming the entry that declared the empty list."""
+    return f"none (cleared by {declared_by})"
+
+
+def task_malformed_note(malformed: int) -> str:
+    """The dropped-row count riding on the `declared` heading — a count of
+    rows `build.validate_items` already reported, never a posture: the
+    valid rows print under it (surface fix, PR #197 review B1: the pane
+    once let this note hide them)."""
+    return f"({malformed} malformed row(s) not shown)"
+
+
+def verdict_conflicting_line(state: str) -> str:
+    """The whole conflicting verdict line, the state word spelled from the
+    projection's own (`VERDICT_CONFLICTING`)."""
+    return f"Verdict: {state} -- {VERDICT_CONFLICTING_DETAIL}"
+
+
+def verdict_open_suffix(verdict: dict, open_count: int) -> str:
+    """§5 rule 4's "never alone" as a suffix on the verdict line: a
+    concluding verdict with open tasks at its tip says how many remain
+    below, in the owner's wording. Empty for a non-concluding verdict or
+    a tip with no open tasks (the verdict then prints alone because there
+    is nothing to conclude *against*)."""
+    if not verdict["concluding"] or not open_count:
+        return ""
+    return (
+        f", {open_count} open task" + ("" if open_count == 1 else "s")
+        + " remaining below"
+    )
+
+
+def verdict_line(verdict: dict, open_count: int) -> str:
+    """One folded verdict as a whole line, spelled once (PR #197 review B3):
+    `refdes thread`, `refdes work` and the task pane all render through it,
+    so the wrapper cannot drift from the suffix it embeds. A fold that
+    *refused* (§5 rule 3) prints the projection's own state word — never as
+    though nothing had concluded; a `concluding` verdict with open tasks at
+    its tip says how many remain below (rule 4's "never alone", via
+    `verdict_open_suffix`). `open_count` is that tip's open tasks (already
+    the empty count when there are none)."""
+    if verdict["state"] == VERDICT_CONFLICTING:
+        return verdict_conflicting_line(verdict["state"])
+    on = f", {verdict['declared_on']}" if verdict["declared_on"] else ""
+    return (
+        f"Verdict: {verdict['status']} ({verdict['declared_by']}{on})"
+        f"{verdict_open_suffix(verdict, open_count)}"
+    )
+
+
+def unknown_derived_kind_message(kind: str) -> str:
+    known = ", ".join(sorted(DERIVED_GROUP_HEADINGS))
+    return (
+        f"unknown derived row kind {kind!r} reached the renderer: a producer "
+        f"emitted a kind no renderer is taught (it knows: {known}) -- teach "
+        "threads.DERIVED_GROUP_HEADINGS (the one table) and "
+        "threads.derived_detail before emitting it"
+    )
+
+
+def derived_detail(row: dict) -> str:
+    """The right-hand column of a derived row, spelled once (PR #197 review
+    P2, the same posture as B3's `verdict_line`): `refdes thread`, `refdes
+    work` and the task pane all render through it, so a row's detail cannot
+    read differently on two surfaces. The `verdict`/`fork` kinds only ever
+    appear in `refdes work`'s whole-project block -- the per-thread block
+    carries none of them and the read-only pane refuses them by name before
+    it gets here. An unknown kind is said as itself (review #194 W6): a
+    producer is free to grow a kind, and a renderer that never heard of it
+    must name the gap rather than die on a bare `KeyError` three frames
+    away."""
+    kind = row["kind"]
+    if kind == "check":
+        return f"{row['value']} violates {row['against']}"
+    if kind == "blocked":
+        stale = " (stale)" if row["stale"] else ""
+        return f"by {row['root']} ({row['root_status']}){stale}"
+    if kind == "verdict":
+        return row["status"]
+    if kind == "fork":
+        return "tips " + ", ".join(row["tips"])
+    if kind in ("coverage", "citation"):
+        return row["problem"]
+    raise ValueError(unknown_derived_kind_message(kind))
+
+
+def age_suffix(
+    row: dict, as_of=None, date_format: str = dates_mod.DEFAULT_DATE_FORMAT
+) -> str:
+    """§5 rule 3's age line, spelled once (PR #197 review P2, the same
+    posture as B3's `verdict_line`): the declaring entry and its authored
+    date, absolute; a relative span is appended ONLY under an explicit
+    `as_of` -- that is what `refdes thread`'s --as-of passes -- so a run
+    without the flag is byte-identical whatever the wall clock says, and
+    the static task pane (no flag, no clock) always prints the absolute
+    line alone. `date_format` is read only when `as_of` is given, and must
+    be a `dates.parse_date` format -- the project's own `date_format:`,
+    which is what `refdes thread` passes; the default is
+    `dates.DEFAULT_DATE_FORMAT` because that is the format the authored date
+    is parsed with. A strftime pattern (e.g. `%Y-%m-%d`) is NOT one of
+    those, and the `ValueError` guard below -- there to tolerate an
+    unparseable *authored* date -- would swallow a bad format into an
+    absolute-only line, so a caller with `as_of` set would silently age
+    nothing (found while writing the round-6 age test, which now pins the
+    default by using it). The
+    parenthesis only: `refdes thread`'s row layout prepends its own
+    separator, the pane renders the text as-is."""
+    since = row.get("open_since") or {}
+    entry, declared = since.get("entry"), since.get("date")
+    if not entry:
+        return ""
+    text = f"(open since {entry}"
+    if declared:
+        text += f", {declared}"
+        if as_of is not None:
+            try:
+                start = dates_mod.parse_date(declared, date_format)
+            except ValueError:
+                start = None
+            if start is not None:
+                days = (as_of - start).days
+                if days < 0:
+                    text += " -- declared after --as-of"
+                else:
+                    text += f" -- {days} day" + ("" if days == 1 else "s")
+    return text + ")"
 
 
 def entry_label(item: Item) -> str:

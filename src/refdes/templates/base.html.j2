@@ -7,6 +7,8 @@
 <link rel="stylesheet" href="assets/style.css">
 {% if theme_css %}<link rel="stylesheet" href="{{ theme_css }}">
 {% endif %}
+{% if taskpane_assets %}<link rel="stylesheet" href="assets/taskpane.css">
+{% endif %}
 </head>
 <body>
 <aside class="sidenav">
@@ -61,5 +63,7 @@
 <div id="preview-card" role="tooltip" hidden></div>
 <script id="preview-data" type="application/json">{{ previews_json | safe }}</script>
 <script src="assets/app.js"></script>
+{% if taskpane_assets %}<script src="assets/taskpane.js" defer></script>
+{% endif %}
 </body>
 </html>

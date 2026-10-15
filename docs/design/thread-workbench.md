@@ -8,10 +8,14 @@ page; the records are `in-prog-logs/thread-workbench-w1.md`,
 §7.4, and its finding is the same in all three logs: nothing cheap and
 obvious was visible in the touch path, so no speculative optimization was
 made. Since then **§7a — the floating task pane — is decided (Jared,
-2026-10-10)**, with its six sub-decisions recorded there, and §8 phases it
-as **W5: not started**, blocked on living-notes-plan H6 (`tasks:` + fold)
-and H7 (the two read commands and the index `threads` projection), which
-the pane consumes rather than reimplements. One half of D1 is deliberately
+2026-10-10)**, with its six sub-decisions recorded there. H6 and H7 have
+since landed, and §8's **W5 is phased: W5a — the read-only task pane, on
+the preview and on the static site — has landed**, as the record
+`in-prog-logs/workbench-w5a-task-pane.txt` attests; W5b (ticks collected
+into a draft continuation) is not started. Unlike W1–W3 the pane is not a
+response-only decoration: it is rendered in the shared item template
+(§7a's "the same pane" sub-decision), and it computes nothing — the pane is
+a client of the projection it consumes. One half of D1 is deliberately
 **not** shipped — dotted `ITEM.NAME`
 mentions in prose stay undecorated, per the note under §5.
 
@@ -53,7 +57,8 @@ a presentation, not as a workbench.
 A **workbench view** inside `refdes serve`: a single-item projection, pinned
 to the entry under work (typically a thread tip), rebuilt when the project
 changes, carrying **additive author decorations** the published site does not
-show.
+show — with the §7a task pane the one shared piece, read-only on the site per
+§7a.6.
 
 This is not a new storage model, not a new renderer, not a new document genre.
 The thread tip *is* the worksheet genre; this is the missing projection of it.
@@ -212,6 +217,19 @@ new surface.
 - When you scroll over a different thread, the pane switches to that thread's
   task list.
 
+  *W5a status (PR #197 review K3, 2026-10-11, narrowed by R2 of review
+  round 6):* following and switching need a page that carries **more than
+  one** thread anchor. Today's item pages carry exactly one — the whole
+  `<article class="item">` — so on them the pane always shows its own
+  thread's list and never switches or greys; `taskpane.js` skips the
+  observer entirely below two anchors. The two bullets above that follow or
+  switch (a newer tip bringing the pane along, scrolling over a different
+  thread) are the rule for that multi-anchor page shape, not a claim about
+  today's one-thread-per-page item pages. The first bullet works today as
+  written: the click opens and closes the pane, and its `fixed` placement is
+  what §7a means by "follows the scroll" (see the header comment of
+  `templates/taskpane/taskpane.css`).
+
 Sub-decisions:
 
 1. **Older entry, tip's list.** On an older entry of a thread, the pane shows
@@ -261,12 +279,14 @@ and the index projection). CLI parity (`refdes thread`, `refdes work`) stays.
   incremental/single-item rebuild effort stays deferred unless the ~1 s
   ceiling is actually felt. No speculative optimizations: if nothing cheap is
   visible while implementing W1–W3, that is the finding, stated plainly.
-- **W5 — task pane.** The floating task pane of §7a: tip-following task list
-  over the preview, ticks collected into a draft continuation, one tab per
-  open tip, collapsed derived section, and the read-only variant on the
-  static site. **Not started; blocked on H6 (`tasks:` + fold) and H7 (`refdes
-  thread` / `refdes work` + the index `threads` projection)** — the pane is a
-  client of that projection and computes nothing itself.
+- **W5a — task pane, read-only.** The floating task pane of §7a as it reads:
+  tip-following task list over the item page, one tab per open tip (never a
+  union), collapsed derived section, and the same pane on the static site
+  with progressive enhancement. **Landed**
+  (`in-prog-logs/workbench-w5a-task-pane.txt`) — a client of the H7
+  projection, computing nothing itself.
+- **W5b — ticks.** Ticks collected into a draft continuation. **Not
+  started.**
 
 Each phase is independently shippable and independently verifiable against the
 contract: for every rendered fact, name the Python mechanism that produced it.
@@ -277,4 +297,6 @@ contract: for every rendered fact, name the Python mechanism that produced it.
 - No new storage, no database, no editor-owned truth.
 - No client-side semantics of any kind.
 - No change to capture, sealing, coverage, or check semantics.
-- No change to what the published site renders.
+- No change to what the published site renders, beyond the read-only task
+  pane of §7a.6/§8-W5a: the site gains that one pane and nothing else it
+  renders changes.
