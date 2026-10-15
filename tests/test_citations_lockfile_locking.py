@@ -17,7 +17,7 @@ the window is closed rather than a description of it:
 * a writer that lands **during the gate** is never clobbered, because the
   pair lands in one section behind the revision check: the late check
   refuses the accept and its lockfile never moves
-  (`test_a_write_that_landed_before...`);
+  (`test_a_write_that_landed_during_the_gate...`);
 * the accept's own pin write happens inside the lock
   (`test_the_accepts_lockfile_write...`);
 * `refdes fetch` -- the CLI writer -- writes while holding the lock, and a
@@ -25,7 +25,8 @@ the window is closed rather than a description of it:
   (`test_refdes_fetch_holds...`, `test_a_second_holder_keeps_fetch...`).
 
 The interleavings are built with threads and an event, and by monkeypatching a
-hook at the exact point in the rollback, not with sleeps: the bounded wait in
+hook at the exact point in the landing section, not with sleeps: the bounded
+wait in
 the interleaving test asserts that a writer *cannot* have landed, and every
 final assertion below is a fact about bytes, so nothing here passes by being
 lucky about timing.
@@ -73,20 +74,6 @@ def accept(root, *, text=calc_body(RAIL, EFF), key="eff"):
     )
 
 
-def body_replace_fails(monkeypatch):
-    """Make the body's replace fail -- the one failure that can now follow the
-    lockfile's landing, and the only way to be standing in the restore with
-    the file on disk."""
-    real = edit_mod._atomic_replace
-
-    def replace(path, payload):
-        if os.path.basename(path) == "decisions.yaml":
-            return "simulated write failure on items/decisions.yaml"
-        return real(path, payload)
-
-    monkeypatch.setattr(edit_mod, "_atomic_replace", replace)
-
-
 def another_pin(root) -> bytes:
     """A whole lockfile holding one pin more than this project's fetch wrote --
     what a cooperating writer's replace looks like from the outside."""
@@ -128,7 +115,7 @@ def lock_is_held(root) -> bool:
         return False
 
 
-# ------------------------------------------------------- the rollback's window
+# --------------------------------------------------- the landing section's window
 
 
 def test_no_writer_lands_between_the_lockfiles_write_and_its_restore(
@@ -200,7 +187,9 @@ def test_no_writer_lands_between_the_lockfiles_write_and_its_restore(
     assert EFF not in (root / ITEM).read_text("utf-8")
 
 
-def test_a_write_that_landed_before_the_rollback_is_not_clobbered_by_it(tmp_path, monkeypatch):
+def test_a_write_that_landed_during_the_gate_is_not_clobbered_by_the_refusal(
+    tmp_path, monkeypatch
+):
     # The gate's window from the writer's side: a whole accept that lands
     # during the slow candidate gate -- which runs without the project lock,
     # on purpose -- is caught by the landing section's revision check, so
@@ -228,7 +217,7 @@ def test_a_write_that_landed_before_the_rollback_is_not_clobbered_by_it(tmp_path
     monkeypatch.setattr(edit_mod, "_blocking_diagnostics", a_whole_accept_lands_during_the_gate)
     result = accept(root)
     assert isinstance(result, Conflict), result  # the late revision check is what says no
-    assert lock_file.read_bytes() == landed, "the rollback destroyed a save that had landed"
+    assert lock_file.read_bytes() == landed, "the refused accept destroyed a save that had landed"
     assert "other" in lock(root)["citations"][CSV_PATH]["values"]
 
 

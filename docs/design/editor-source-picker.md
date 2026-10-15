@@ -226,16 +226,22 @@ behind the revision check, in one section of the cross-process lock that
 `refdes fetch` runs inside.
 
 The landing section is not a compare-and-skip either — a file a cooperator
-replaced during the gate is input, not an obstacle. It re-reads the records under the lock: if the file already holds this accept's
-staged bytes, the write is skipped; if it holds the bytes the accept staged
-from, the staged bytes land; if it already pins every pair this accept
-brings, the file stands — writing bytes staged before the writer landed
-would erase pins the writer added, which is this section's own clobber
-class — and only the body lands; anything else, the accept's keys are
-re-staged over the records as they now stand, under fetch's own policy, and
-the merged bytes land — so a cooperator's pins survive in the file, and this
-accept's pair lands with its body. A record the keys no longer describe is
-a refusal, not a clobber.
+replaced during the gate is input, not an obstacle. It re-reads the records
+under the lock: if the file already holds this accept's staged bytes, the
+write is skipped; if it holds the bytes the accept staged from, the staged
+bytes land; if it already pins every pair this accept brings, **at the
+values this accept read**, the file stands and only the body lands —
+writing bytes staged before the writer landed would erase pins the writer
+added, which is this section's own clobber class. A pair pinned at a
+*different* value is a refusal, not a stand: the gate judged the body's
+calc line against the value this accept read, and landing it over a pin on
+another value lands a tree the gate never judged. Anything else, the
+accept's keys are re-staged over the records as they now stand, under
+fetch's own policy, and the merged bytes land — so a cooperator's pins
+survive in the file, and this accept's pair lands with its body. A record
+the keys no longer describe is a refusal, not a clobber, and so is a key
+the re-extraction reads at a value other than the one the gate was judged
+on: both repairs are the same — re-accept against the file as it now is.
 
 Two locks, in that order, and never the other way round. `write_lock_for` is
 the in-process one and it stops this server interleaving its own saves; the

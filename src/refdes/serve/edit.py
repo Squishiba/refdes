@@ -48,12 +48,13 @@ after the revision check: the lockfile bytes are staged in memory (the loader's
 lockfile overlay), judged by the delta gate, and landed in the same section as
 the body that names them -- no cooperating writer lands between the pin and
 the body, and a file a cooperating writer moved during the gate is re-staged
-from, not restored over (§4). Both lockfile mutations -- the read-compute that
-stages and the write-then-restore of the final section -- run under the same
-`project_write_lock` `cli.main` wraps its commands in
-(`serve`, `init`, `new` and `schema` exempt, as are read-only runs), so no
-cooperating writer can land between their read and their replace; the delta
-gate between them deliberately does not hold it. It is still one
+from, not restored over (§4). Both lockfile sections -- the read-compute that
+stages and the write-then-restore of the final section -- each run as one
+section under the same `project_write_lock` `cli.main` wraps its commands in
+(`serve`, `init`, `new` and `schema` exempt, as are read-only runs); the delta
+gate between the two sections deliberately does not hold the lock, and a
+cooperating writer that lands inside that window is met by re-reading the file
+at landing, not by a promise that no writer lands there. It is still one
 apply-operation call and still one mutation entry point; what widened is the
 request, not the number of writers.
 
@@ -147,9 +148,9 @@ class EditRequest:
     # Source values to pin alongside this edit (`SourcePin`). Only a `set_body`
     # may carry them, because only a body can name them; the write is then a
     # transaction over two files -- the item and `.refdes/citations.yaml` --
-    # inside this one lock, with the lockfile's own read-modify-write and its
-    # rollback each inside the project's cross-process lock as well. Empty for
-    # every edit that is not an accept.
+    # whose bytes are staged in memory and land together in one section of
+    # the project's cross-process lock (§4). Empty for every edit that is not
+    # an accept.
     pins: tuple = ()
 
 
@@ -284,11 +285,10 @@ def file_revision(path: str) -> str:
 def _disk_write_lock(root: str):
     """Use the same project lock as CLI writers.
 
-    Re-entrant per thread (`write_lock.project_write_lock`), so a save may
-    take it again inside a section it already holds -- which is what the
-    accept's rollback does when a conflict is found inside the item's own
-    check-and-replace section. A read-only root raises `LockUnavailable`, an
-    `OSError`, which every caller here already turns into a refusal.
+    Re-entrant per thread (`write_lock.project_write_lock`), so a save that
+    takes it inside a section it already holds does not deadlock itself. A
+    read-only root raises `LockUnavailable`, an `OSError`, which every caller
+    here already turns into a refusal.
     """
     from ..write_lock import project_write_lock
 
@@ -599,16 +599,23 @@ def _land_lockfile(before: Project, accept: _Acceptance) -> str | None:
       file; the staged bytes land;
     * anything else -- a cooperating writer's read-modify-write landed
       during the gate. The file is input, not an obstacle. If its records
-      already pin every pair this accept brings (its bytes differ from
-      ours only in pins we do not carry), the file stands: writing this
-      accept's staged bytes -- computed before the writer landed, and
-      therefore missing the writer's pins -- would erase them from under
-      the bodies that name them, which is this PR's own clobber class.
-      Otherwise this accept's keys are re-staged over the records as they
-      now are, under fetch's own non-update policy, and the merged bytes
-      land, so the writer's pins survive in the file and the pair lands
-      with the body. A record the keys no longer describe (a changed
-      source file) is a refusal, not a clobber.
+      already pin every pair this accept brings AT THE VALUES this accept
+      read them (its bytes differ from ours only in pins we do not carry),
+      the file stands: writing this accept's staged bytes -- computed
+      before the writer landed, and therefore missing the writer's pins --
+      would erase them from under the bodies that name them, which is this
+      PR's own clobber class. A pair the file pins at a DIFFERENT value is
+      a refusal: the gate judged the body against the value this accept
+      staged, and landing the body over the writer's pin would let a
+      `source()` line evaluate at a value the gate never judged; the
+      deliberate repair is a fresh accept against the current lockfile,
+      and overwriting the writer's file is not on the table. Otherwise
+      this accept's keys are re-staged over the records as they now are,
+      under fetch's own non-update policy, and the merged bytes land, so
+      the writer's pins survive in the file and the pair lands with the
+      body. A record the keys no longer describe (a changed source file)
+      is a refusal, not a clobber, and so is a re-extraction that reads a
+      value other than the one the gate was judged on.
 
     A refusal after this function returned None can only be the body's
     replace failing, and the section restores what its own write replaced --
@@ -635,17 +642,40 @@ def _land_lockfile(before: Project, accept: _Acceptance) -> str | None:
         except citations_mod.LockfileError as exc:
             return str(exc)
         pairs = [(plan["path"], plan["key"]) for plan in accept.plans]
-        if all(
-            citations_mod.locked_source_value(records.get(canon), key) is not None
+        expected = {
+            (entry["path"], entry["key"]): str(entry["value"])
+            for entry in accept.pinned
+        }
+        pinned_on_disk = {
+            (canon, key): citations_mod.locked_source_value(records.get(canon), key)
             for canon, key in pairs
+        }
+        if all(
+            pinned_on_disk[pair] == expected[pair] for pair in pinned_on_disk
         ):
             return None
+        drifted = [
+            f"{canon}: key {key!r} is pinned to {on_disk!r}, not the "
+            f"{expected[(canon, key)]!r} this accept read"
+            for (canon, key), on_disk in pinned_on_disk.items()
+            if on_disk is not None and on_disk != expected[(canon, key)]
+        ]
+        if drifted:
+            return "; ".join(drifted) + "; re-accept against the current lockfile"
         errors, pinned = citations_mod.stage_source_pins(
             before, records, pairs,
             anchors=accept.anchors, digests=accept.digests,
         )
         if errors:
             return "; ".join(errors)
+        drifted = [
+            f"{entry['path']}: key {entry['key']!r} now reads {str(entry['value'])!r}, "
+            f"not the {expected[(entry['path'], entry['key'])]!r} the gate was judged on"
+            for entry in pinned
+            if str(entry["value"]) != expected[(entry["path"], entry["key"])]
+        ]
+        if drifted:
+            return "; ".join(drifted) + "; re-accept against the current lockfile"
         lock.staged = citations_mod.lockfile_text(records).encode("utf-8")
         # The response reports the values this section's bytes pin, which
         # is the same extraction under the same policy -- the reader's
