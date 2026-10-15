@@ -1,0 +1,56 @@
+Task: Editor create rollback byte restoration (isolated from held PR #241)
+Branch: fix/editor-create-rollback-bytes-20261015, cut from origin/main 509a487
+Status: FINISHED — rollback-only fix + regressions, PR to main
+Date: 2026-10-15
+
+The bug (present on main):
+In `_create_locked` (src/refdes/serve/edit.py) both append shapes read the
+destination and stored `original = fh.read().decode("utf-8")` — a str. The
+post-write rollback (`ids.reserve_id` raising OSError -> `_rollback` ->
+`_restore`) hands `original` to `open(path, "wb").write(original)`. The
+"wb" open truncates the destination to zero bytes first; the str write then
+raises TypeError, which passes straight through `_restore`'s `except
+OSError` and out of `create_item`, where the contract says it returns a
+result. Net effect of a failed id reservation: a zero-byte items file and
+an exception.
+
+Reference: PR #241's c4a7d33 fixed this together with the lost-update
+`expected`-check redesign. This branch splits ONLY the rollback part out,
+rebuilt on current main (509a487, which does not contain #241's retry
+loop). #241's branch/commit untouched; nothing cherry-picked.
+
+Red evidence (on unpatched main, deterministic):
+- tests: test_a_failed_id_reservation_restores_the_yaml_append_bytes and
+  ..._the_markdown_append_bytes (tests/test_serve_create.py; seam:
+  `edit_mod.ids.reserve_id` raising ENOSPC; both append shapes).
+  Signature: TypeError: a bytes-like object is required, not 'str' at
+  edit.py:984 (_restore).
+- probe (.scratch/zero-byte-probe): size before: 230, raised: TypeError,
+  size after: 0 — the zero-byte file reproduced directly.
+
+The fix:
+`original` keeps the raw bytes (`original = raw`); the decoded text is a
+local `text` used only for append planning (eol/head/new_text). Comment in
+place spelling out why the rollback payload must stay bytes.
+
+Green evidence:
+- tests/test_serve_create.py: 63 passed.
+- Full suite: 3827 passed, 2 skipped (289s).
+- ruff scoped to the two touched files: 6 findings, all pre-existing on
+  HEAD (verified via git show | ruff --stdin-filename), none introduced
+  here (AGENTS.md: the repo's ruff baseline is not clean; scoped check
+  only).
+
+Limits documented honestly:
+- This fixes the rollback payload only. The create's check-vs-replace race
+  (the residual-loss gap that held #241) is untouched and untouched in
+  behavior: on this branch `_atomic_replace` keeps main's post-write
+  verify/restore, and a destination that moves between the plan read and
+  the replace is still not detected before the swap (main's existing
+  behavior, not regressed; tests confirm no change).
+- The new-md shape (original is None -> unlink) was never affected.
+- The `new_text.encode("utf-8")` round-trip means a destination whose
+  bytes were not valid UTF-8 never reaches the rollback (refused earlier
+  at the decode); unchanged by this fix.
+
+Ledger: PROGRESS.md row updated to OPEN PR at commit.

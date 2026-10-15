@@ -1171,15 +1171,24 @@ def _create_locked(config: str, request: CreateRequest):
     else:
         try:
             with open(path, "rb") as fh:
-                original = fh.read().decode("utf-8")
+                raw = fh.read()
+            text = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             return Refused(who, new_id, f"could not read {rel}: {exc}")
+        # The rollback payload is the RAW bytes, never the decoded text:
+        # `_restore` writes to the destination opened `"wb"`, which
+        # truncates it to zero bytes before the first write -- handing it
+        # a `str` truncated the file, then raised `TypeError` past
+        # `_restore`'s `except OSError`, out of a function documented to
+        # return a result. The decoded text is only what the append plans
+        # onto; the bytes are what a failed creation restores.
+        original = raw
         # The ending of the line the new block is being appended *after*, not
         # "CRLF if the file mentions CRLF anywhere": appending to a file whose
         # tail is LF used to hand the new item CRLF endings, because an
         # unrelated line higher up was CRLF. The block joins the end, so it
         # takes the end's style.
-        eol = textio.append_ending(original)
+        eol = textio.append_ending(text)
         if dest["kind"] == "append-md":
             block = ["---", f"id: {new_id}", f"key: {key}", f"type: {request.type}", *body, "---", ""]
         else:
@@ -1188,10 +1197,10 @@ def _create_locked(config: str, request: CreateRequest):
             if dest["type"] != request.type:
                 block.append(f"{ind}  type: {request.type}")
             block.extend(f"{ind}  {ln}" for ln in body)
-        head = "" if original.endswith("\n") else eol
+        head = "" if text.endswith("\n") else eol
         # Pure append: every existing byte of the file stays exactly where
         # it was -- the fidelity contract, trivially satisfied.
-        new_text = original + head + eol.join(block) + eol
+        new_text = text + head + eol.join(block) + eol
 
     # Validate the candidate before a byte changes, the same overlay gate
     # apply_edit runs: exactly one more item, no newly introduced error, and

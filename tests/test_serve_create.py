@@ -596,6 +596,65 @@ def test_missing_required_field_is_blocked_by_the_schema(project_root):
     assert tree(project_root, "items", ".refdes") == before
 
 
+def reserve_id_crash(monkeypatch):
+    """A ledger write that fails -- ENOSPC on the id ledger's directory --
+    after the item bytes are already on disk: the rollback path runs."""
+
+    def boom(*_args, **_kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(edit_mod.ids, "reserve_id", boom)
+
+
+def test_a_failed_id_reservation_restores_the_yaml_append_bytes(project_root, monkeypatch):
+    """The rollback after a failed reservation restores *bytes*, not the
+    decoded text. `_restore` opens the destination `"wb"`, which truncates
+    it to zero bytes before the first write; handing it a `str` then raises
+    `TypeError` -- past `_restore`'s `except OSError`, out of `create_item`
+    where the contract says it returns a result -- and leaves a zero-byte
+    file where the original bytes were. A failed creation burns nothing;
+    it must also destroy nothing."""
+    path = project_root / "items" / "reqs.yaml"
+    before = read(path)
+    reserve_id_crash(monkeypatch)
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Unreservable."},
+            destination="items/reqs.yaml",
+        ),
+    )
+
+    assert isinstance(result, Refused), result
+    assert "rolled back" in result.reason
+    after = read(path)
+    assert after == before, "the rollback did not restore the original bytes"
+    assert after != "", "the destination was left zero-byte"
+    ledger = project_root / ".refdes" / "ids.yaml"
+    assert not ledger.exists() or "REQ-012" not in ledger.read_text(encoding="utf-8")
+
+
+def test_a_failed_id_reservation_restores_the_markdown_append_bytes(project_root, monkeypatch):
+    """The same rollback on the multi-item Markdown shape: both append
+    shapes planned against the decoded text, so both fed a `str` to the
+    rollback's binary write."""
+    path = project_root / "items" / "notes.md"
+    before = read(path)
+    reserve_id_crash(monkeypatch)
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Unreservable."},
+            destination="items/notes.md",
+        ),
+    )
+
+    assert isinstance(result, Refused), result
+    assert read(path) == before, "the rollback did not restore the original bytes"
+
+
 @pytest.mark.parametrize(
     ("destination", "fragment"),
     [
