@@ -296,15 +296,22 @@ def _disk_write_lock(root: str):
 # ---------------------------------------------------------------- the entry point
 
 
-def apply_edit(project_root: str, request: EditRequest):
+def apply_edit(project_root: str, request: EditRequest, config_path: str | None = None):
     """Apply one edit request to the project at `project_root`.
+
+    `config_path` is the project's settings file when the server was
+    launched with `-c/--config` at a path that is not the default marker
+    name; every load below reads the file the model was built from, so a
+    save against a custom-configured project loads -- and refuses on -- the
+    same file, not a `refdes-project.yaml` that was never there. Omitted,
+    the default marker beside the root is the config, exactly as before.
 
     Returns `Applied` | `Conflict` | `Refused` | `Invalid`. Authoring outcomes
     are values; only a genuinely unexpected internal fault raises, and the
     write path itself restores the original bytes if a replacement half-fails.
     """
     root = os.path.abspath(project_root)
-    config = os.path.join(root, CONFIG_NAME)
+    config = os.path.abspath(config_path) if config_path else os.path.join(root, CONFIG_NAME)
     with write_lock_for(root):
         return _apply_locked(config, request)
 
@@ -1055,13 +1062,15 @@ class Created:
         return f"created: {self.item_id} ({self.type}) in {self.path}"
 
 
-def create_item(project_root: str, request: CreateRequest):
+def create_item(project_root: str, request: CreateRequest, config_path: str | None = None):
     """Create one item in the project at `project_root`, under the same
     per-project write lock every edit takes: two creates in flight cannot
     claim the same id, because the second plans against the state the first
-    committed. Returns `Created` | `Refused` | `Invalid`."""
+    committed. `config_path` is threaded exactly as in `apply_edit`: the
+    configured settings file when the launch used `-c/--config`, the default
+    marker beside the root otherwise. Returns `Created` | `Refused` | `Invalid`."""
     root = os.path.abspath(project_root)
-    config = os.path.join(root, CONFIG_NAME)
+    config = os.path.abspath(config_path) if config_path else os.path.join(root, CONFIG_NAME)
     with write_lock_for(root):
         # A lock the filesystem will not host -- a read-only root's
         # `LockUnavailable`, or any other `OSError` on the way in -- is a
