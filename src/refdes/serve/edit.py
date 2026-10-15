@@ -1015,9 +1015,13 @@ def _restore(path: str, original: bytes) -> bool:
     put back must ask, not assume. The swap preserves the destination's
     mode, copied from the file itself -- which also narrows the old
     in-place write: a destination DELETED before the restore is not
-    recreated (the mode stat fails and the restore reports failure), and
-    no call site reaches that shape today, since every restore runs on
-    the file its own write just landed."""
+    recreated -- the mode stat fails, the temp is discarded, the restore
+    reports failure, and the file stays deleted. That shape is reachable
+    wherever a destination can vanish between the caller's write and the
+    restore: the reread-failure branch of `_atomic_replace` (a vanished
+    file is one way the reread fails), and, per the same
+    lock-bypassing-writer model the failure messages state, any writer
+    outside the lock."""
     directory = os.path.dirname(path)
     tmp = None
     try:
@@ -1031,8 +1035,12 @@ def _restore(path: str, original: bytes) -> bool:
             # once the contents are fully written: a crashed or partial
             # temp keeps mkstemp's 0600, so the file's PREVIOUS contents
             # are never left permissive in the directory mid-restore
-            # (the PERM-OWNER-001 discipline; _atomic_replace stages the
-            # author's new payload and keeps its own ordering)
+            # (the PERM-OWNER-001 discipline; _atomic_replace and
+            # _atomic_create keep their chmod-before-write ordering --
+            # out of scope here, and the justification is narrower than
+            # it looks: apply_edit and the create-append shapes stage
+            # the WHOLE rewritten file, previous contents included, so
+            # their crash windows predate this change)
             os.chmod(tmp, mode)
         os.replace(tmp, path)
         tmp = None  # the swap consumed the temp file

@@ -666,9 +666,9 @@ def test_a_failed_id_reservation_restores_the_markdown_append_bytes(project_root
 def test_a_successful_rollback_keeps_the_destination_mode(project_root, monkeypatch):
     """The restore swaps the bytes in, and a swap takes the TEMP's mode --
     so the temp must carry the destination's mode before the swap lands.
-    A 0640 file restored by a 0600 temp would silently widen to 0600...
-    or, if the chmod were dropped, the destination would narrow; the
-    mode round-trips only while the copy is in place. (The chmod runs
+    A 0640 file restored by a 0600 temp would silently narrow to 0600
+    (dropping group-read); the mode round-trips only while the copy
+    is in place. (The chmod runs
     after the write, so a crashed partial temp stays 0600 -- the
     PERM-OWNER-001 ordering.)"""
     path = project_root / "items" / "reqs.yaml"

@@ -195,7 +195,7 @@ Fixes (round 4 head):
   the affirmative lie ("was rolled back") -- the new message contains
   "rolled back" only inside "not rolled back", so the loose substring
   check was updated to the claim it exists to catch (not a weakening:
-  it is red at 5f33aa3, where the affirmative claim is present).
+  it is red at b1a135b, where the affirmative claim is present; green at 5f33aa3, whose failure path already read "could not be restored").
 - yaml test: vacuous ledger read replaced by the module's own posture,
   `tree(project_root, "items", ".refdes")` byte-identity -- one
   unfailable assertion covering no-ledger-write (the unreserved id),
@@ -237,3 +237,27 @@ same truncate-then-write shape -- probe showed 390-byte event file -> 0
 bytes under a faulted restore, and the OSError escapes `except Exception`
 replacing the original error. Reviewer's probe .scratch/review244 (their
 checkout); defect recorded here for the ticket.
+
+-------------------------------------------- round 5 (final, text-only)
+Reviewer f4ca9ae8 (CHANGES REQUESTED, no behavioural defects): four
+text fixes, no code behavior touched.
+- This log's red-at citation for the tightened negation assertion
+  corrected: b1a135b is the head with the affirmative "was rolled back"
+  in the failure path (my 5f33aa3 claim was measured wrong -- the test
+  runs green there, its failure path already said "could not be
+  restored").
+- `_restore` docstring: dropped the "no call site reaches that shape"
+  overclaim (false: the reread-failure branch reaches it -- a vanished
+  file fails the reread -- and the lock-bypassing-writer model the
+  messages themselves carve out). Now states the deleted-destination
+  outcome: stat fails, temp discarded, restore reports failure, file
+  stays deleted.
+- The chmod-ordering comment: dropped the "_atomic_replace stages the
+  author's new payload" justification -- false for apply_edit and the
+  create-append shapes, which stage the WHOLE rewritten file (previous
+  contents included); their chmod-before-write crash windows predate
+  this PR (textio.atomic_write_text, by contrast, chmods after the
+  write). The ordering fix for those stays out of scope.
+- Mode-test docstring: 0600 NARROWS a 0640 file (I wrote "widen").
+Targeted tests (tests/test_serve_create.py) green; no code change, so
+no full suite (per orchestrator).
