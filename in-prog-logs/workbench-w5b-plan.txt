@@ -1,0 +1,219 @@
+Task: W5b (ticks -> draft continuation) implementation plan. Doc only: no
+src/, no tests/ (branch workbench-w5b-plan, cut from main at 48501ce).
+
+Deliverable: docs/design/thread-workbench-w5b-plan.md. Shape copied from
+docs/design/living-notes-plan.md (read its phase sections and its "Open
+questions for Jared" first): Status preamble -> goal -> verified mechanisms ->
+one-paragraph shape -> phases with "Adds / Files / Verified against /
+Deliberately does not do" -> Risks -> numbered questions with options and an
+assumed conservative default -> "Not in W5b" -> "What this plan does not
+decide".
+
+How the reads were done (narrowly, per the task): grep -n for the section
+headings of thread-workbench.md / living-notes.md / browser-editor.md /
+living-notes-plan.md, then read only the ranges needed (thread-workbench.md
+202-292; living-notes.md 153-212, 258-307, 375-500; browser-editor.md 785-884,
+951-1020; living-notes-plan.md 43-107, 660-769). The W5a pane was read from the
+open PR without checking anything out:
+
+  git fetch origin workbench-w5a-task-pane-readonly
+  git show origin/workbench-w5a-task-pane-readonly:src/refdes/task_pane.py
+  git show origin/workbench-w5a-task-pane-readonly:src/refdes/templates/taskpane/taskpane.js
+  git show origin/workbench-w5a-task-pane-readonly:src/refdes/templates/item.html.j2
+  git show origin/workbench-w5a-task-pane-readonly:docs/design/thread-workbench.md
+
+PR #197 confirmed OPEN, base main, head workbench-w5a-task-pane-readonly
+(`gh pr view 197 --json state,...`). The branch is not on main, so every
+citation taken from it is marked "(PR #197)" in the new page.
+
+CLI claims were produced by running, in this worktree:
+
+  PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli --help
+  ... -m refdes.cli thread --help
+  ... -m refdes.cli work --help
+  ... -m refdes.cli serve --help
+
+Findings worth recording (all re-read at the cited lines, not from memory):
+
+1. The editor has no way to write `tasks:` at all. `tasks` is in
+   NON_SCALAR_FIELD_TYPES (src/refdes/model.py:198-200), the editor model
+   reports the field "collections are not editable here"
+   (src/refdes/serve/api.py:213), `set_field` refuses a collection (api.py:508),
+   patcher.SetField is "one direct scalar field" (src/refdes/patcher.py:127),
+   and creation emits scalar fields only (src/refdes/serve/edit.py:1533-1551).
+   The comment at src/refdes/build.py:339-341 is about something else: a
+   non-list `tasks:` "is the loader's error -- `_reject_scalar_collection`
+   owns that keystroke", i.e. parse._reject_scalar_collection
+   (src/refdes/parse.py:741) is the one that reports that malformed shape. It
+   says nothing about the editor. (The first draft read the comment as naming
+   the editor; it does not -- corrected in fix round 1 below.) The gap above
+   is the gap W5b's core phase fills, and it is why the plan does not propose
+   reusing the existing /edit/ save op.
+
+2. An editor save does not write the `followed` history event. edit.py loads
+   with write=False (src/refdes/serve/edit.py:340) and nothing under
+   src/refdes/serve/ calls history.capture_followed or links.anchor_follows
+   (the `capture` hits in serve/upload.py are the unrelated "would capture a
+   bare-name reference" lint). The capture point is links.anchor_follows
+   (links.py:770-815, reached from loader.load_tree at loader.py:143 with the
+   load's own write flag), so a continuation written by the browser captures its
+   predecessor on the next writable load. living-notes.md:185-188 asks for entry
+   + event in one transaction. Raised as Q2's explicit sub-question rather than
+   quietly decided.
+
+3. Creation has no revision check: CreateRequest has no expected_revision
+   (edit.py:1013-1038), so Q3 ("the tip moved while the draft was open") has no
+   mechanism on the create path today. Said so in the doc instead of assuming a
+   compare exists.
+
+4. The draft mechanism exists and is real, but its shape does not fit:
+   src/refdes/serve/static/drafts.js holds {revision, fields, body, pins,
+   links} per item handle, memory + sessionStorage, beforeunload. Keyed by
+   item, not by tip, and no task rows -- so the plan reuses its *lifetime rules*
+   and adds a sibling draft kind, rather than reusing the draft shape.
+
+5. The serve-only seam for anything that writes is the response decoration, not
+   a template flag: serve/server.py:_decorate (:738-776) injects the toolbar and
+   _reload_probe into the HTTP response only. Note `draft_build`
+   (src/refdes/render.py:976) is NOT that discriminator: it is
+   `draft=args.dry_run` (cli.py:409), so it is true for `build --dry-run`
+   -- whose site output is still written to disk (cli.py:430, "dry run, not
+   sealed") -- and true for every serve preview page (serve/preview.py:86
+   passes draft=True). A template gate on it would put a control into
+   `build --dry-run` output on disk, and it does not track serve-vs-build
+   either. (Round 4 fix: an earlier draft of this sentence said a template
+   test on it "would not keep a control out of a plain `refdes build`" --
+   backwards under the plain reading: the sealing build renders it False, so
+   the gate keeps the control out of THAT; the leak is the --dry-run one.)
+
+6. Vocabulary drift worth flagging: living-notes.md §5 proposed
+   `on_change: log` for `tasks:`; the shipped standard says
+   `on_change: timeline`
+   (src/refdes/standards/hardware/v3/base.yaml:302). The page cites the shipped
+   spelling and names the drift.
+
+Deliberate non-changes, with the reason:
+
+- No changelog.d fragment. Checked the precedent the task named: the commit that
+  added living-notes-plan.md (972997f "docs: implementation plan for living
+  notes") touched that one file and nothing else. So design-plan pages do not
+  get fragments, and this one does not either.
+- No docs-site change. Design pages reach the docs site by recursive discovery
+  (src/refdes/pages.py:39-46 os.walk under site.pages:), and site.nav in
+  docs-site/refdes-project.yaml names only the top-level guides --
+  living-notes-plan.md is not listed there either. Confirmed by grep: no file
+  under docs-site/ and no mkdocs*.yml mentions living-notes-plan (there is no
+  mkdocs config in this repo). Nothing to add for the new page.
+- docs/design/thread-workbench.md left alone. Its §8 is where a pointer to this
+  page would naturally go, but open PR #197 rewrites exactly that bullet list
+  into W5a/W5b; a main-side edit there is a guaranteed conflict for that PR for
+  no gain. The new page cites its parents in its Status block instead.
+
+Checks run (both green):
+  PYTHONPATH=$PWD /home/jorb/work/venv-refdes/bin/python -m pytest tests/test_docs_anchors.py -q
+  -> 2 passed (the new page is picked up by DOCS.rglob and contains no
+     fragment links; every cross-reference is written as a `file:line` code
+     span, which the anchor test does not treat as a link)
+  /home/jorb/work/venv-refdes/bin/python docs-site/gen_examples.py --check
+  -> up to date
+
+Status: finished. One commit (this log + the new page), no source or test
+changes. Scope note: worked only in /home/jorb/.paseo/worktrees/16msma8v/
+workbench-w5b-plan; scratch stayed in this worktree's .scratch/.
+
+Fix round 1 (PR #211 review, 2026-10-14): both chunk reviewers requested
+changes; every point is an accuracy fix to the page and this log. No code.
+
+Rebase first: #197 (read-only pane) merged to main (7c72311), as did #210
+and #213. Branch rebased onto origin/main 374a4aa (clean, no conflicts).
+The page's citation base moved 48501ce -> 374a4aa, every file:line was
+re-checked with grep -n (script over all page citations, .scratch/
+verify_cites.py), and the "(PR #197)" markers are dropped -- task_pane.py,
+item.html.j2, taskpane.js and thread-workbench.md's W5a text are on main
+now. Lines that moved on main, and their new cites:
+  thread-workbench.md: 7a.2 quote 220-224 -> 238-242; W5a/W5b status
+  277-285 -> 282-289; W5a status note cited as 220-229.
+  task_pane.py: glyph :194 -> :195; pane fns +1 (:115/:128/:160/:225).
+  threads.py: threads_projection :134 -> :328; posture block
+  247-298 -> 441-494 (_tasks).
+  render.py: threads key :630 -> :651; pane block 997-1022 -> 997-1023;
+  draft_build (this log, item 5) :922 -> :976.
+  serve/server.py: _decorate 726-761 -> 738-776 (this log, item 5, too);
+  boundary quote 727-729 -> 740-741; token/Origin 769-770/773-774 ->
+  782-783/785-787.
+  links.py: anchor_follows 770-812 -> 770-815 (this log, item 2, too).
+  build.py: tasks branch of validate_items 330-348 -> 329-380.
+  api.py: create's --no-write refusal 656-660 -> 655-659.
+Fixes, numbered as on the PR:
+1. build.py:339-341 misread, in page §2 and in item 1 above: the "owns that
+   keystroke" comment is about a non-list `tasks:` --
+   parse._reject_scalar_collection (parse.py:741) reports that shape -- and
+   says nothing about the editor. Both places rewritten, inference dropped.
+2. "no phase is blocked twice" (intro) and "at most one phase reopens per
+   answer" (§8) are false by the page's own Gates-on lines: Q2 and Q10 each
+   gate W5b.2 and W5b.5, and Q6 gates W5b.3 and reaches W5b.1's refusal set
+   (its (a) flag). Replaced by an explicit answer -> phases table in §8.
+3. Added the missing "Deliberately does not do." field to W5b.3, W5b.4,
+   W5b.5 (W5b.1 and W5b.2 had it; the PR body promised it on all).
+4. Applied/Conflict/Refused/Invalid now each cited at its `class` line:
+   edit.py :157/:177/:204/:220 (re-checked at 374a4aa).
+5. _decorate and anchor_follows ranges: true start-end, page and log.
+6. links.composite_for is called in _link_target (:1455) and _amends_line
+   (:1427), not in the _link_lines span; page cites the call sites.
+7. "never written back" is living-notes.md §5 binding rule 1 (461-464),
+   not rule 2 (self-closing, 465-468); the §7 bullet now cites each clause
+   to its own rule.
+8. Q1/R4: "a serve restart means a new port, so a new origin, so the draft
+   dies" predates #210. With a pinned --port a relaunch reclaims its own
+   port (commit 8b6a52e), keeps the origin, and the sessionStorage draft
+   can survive; without --port the port stays ephemeral (serve --help:
+   "ephemeral by default, --port to pin one"; docs/cli-reference.md
+   `refdes serve`, --port). Both cases now stated.
+
+Checks run (all green):
+  PYTHONPATH=$PWD python -m pytest tests/test_linkify_anchors.py
+  tests/test_docs_examples.py tests/test_standard_docs_complete.py
+  tests/test_docs_anchors.py -q  -> 23 passed
+  python docs-site/gen_examples.py --check -> up to date
+Status: finished. Pushed once with --force-with-lease after the rebase.
+
+Round 2 (PR #211 chunk 1 review, feb65317): two citation fixes, nothing
+else. (1) The vocabulary-drift sentence split its attributions: P2 renamed
+only the project key history: -> on_change: (vocabulary-review.md:851);
+the value rename log -> timeline is P9 (vocabulary-review.md:951, landed
+2026-10-11 per :964). (2) item.html.j2's pane block is 309-390 (the
+{% if pane %} at 309 through its closing {% endif %} at 390), not
+311-373; row.glyph stays :360. Citation base stays 374a4aa. Checks:
+test_docs_anchors + test_linkify_anchors -> 15 passed; gen_examples
+--check -> up to date. Pushed normally (PR is MERGEABLE, no rebase).
+
+Round 3 (PR #211 chunk 1 re-review, 74de2e69, 2026-10-14): three accuracy
+fixes, verified by reading the cited code. (1) Q2's sub-question claimed
+the (b) window is the state uncaptured_edits (history.py:760-824) exists
+to diagnose; it is not -- that check fires only for capture-less entries
+whose live bytes no longer match a legacy seal record's hash, skips
+never-recorded entries (:810-811), and the W5b save changes no predecessor
+bytes (R2), so nothing diagnoses the window today; (a) stays the default
+*because* the gap is invisible, not because a diagnostic catches it.
+(2) object_payload's identity split is key/id/source -- links stay in the
+digest (semantic_payload:177); follows: exclusion now rests on "the new
+entry names its own tip", id/key on the split. (3) drafts.js shape:
+emptyDraft (:10-14) is scalar fields, body, pins and pending link
+adds/removes per item handle -- not "scalars only"; the no-task-rows /
+not-keyed-by-tip point stands. Checks: pytest docs/linkify tests -> 15
+passed; gen_examples --check -> up to date. Pushed normally.
+
+Round 4 (PR #211 chunk 2 re-review, 2026-10-14): two findings, both in
+this log, both verified against the code before changing anything.
+(1) Item 5's draft_build sentence: "a template test on it would not keep
+a control out of a plain `refdes build`" is backwards under the plain
+reading -- draft_build is draft=args.dry_run (cli.py:409), so the sealing
+`refdes build` renders it False and a template gate keeps the control out
+of THAT; the real leaks are `build --dry-run`, whose site is still written
+to disk (cli.py:430), and the serve preview pages (serve/preview.py:86,
+draft=True), so the flag tracks neither serve-vs-build nor sealed-vs-not
+as wanted. Sentence rewritten to say that, with the old wording flagged.
+(2) Item 7's rule-2 cite: living-notes.md rule 2 runs 465-468 (rule 3
+starts at 469), not 465-469. Fixed. The page itself cites rule 2 without
+a range, so no doc change. Checks: pytest docs/linkify tests -> 15
+passed; gen_examples --check -> up to date. Pushed normally.
