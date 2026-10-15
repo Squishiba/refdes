@@ -875,7 +875,23 @@ def _copy_project_assets(
             continue  # already reported as a build error when the reference was resolved
         dest = os.path.join(asset_out, *dest_rel.split("/"))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        shutil.copy2(src, dest)
+        try:
+            shutil.copy2(src, dest)
+        except OSError as exc:
+            # The copy reads the project's own file, so an OSError here is
+            # the *source* refusing (IMAGE-ASSET-007: a mode-000 image on a
+            # `site.assets:` directory), not the destination being unwritable
+            # -- the latter is `refdes build`'s own refusal in cli.py, which
+            # names the site directory. Naming the asset and the OS's reason
+            # here keeps that distinction: without it this OSError escapes
+            # `render_site` and cli.py reports it as "cannot write the site",
+            # sending the user to chmod their output directory.
+            project.error(
+                f"asset {rel!r} cannot be read: {exc.strerror or exc}. Make "
+                f"it readable, or remove it from the site.assets: directory "
+                f"-- this build does not publish it"
+            )
+            continue
         written.add(f"assets/{dest_rel}")
 
 

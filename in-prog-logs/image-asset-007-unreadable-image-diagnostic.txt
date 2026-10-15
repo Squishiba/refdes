@@ -1,0 +1,78 @@
+IMAGE-ASSET-007: unreadable image gets a named diagnostic
+==========================================================
+Date: 2026-10-15. Branch: fix/image-unreadable-diagnostic-20261015, base 3793ac9 (main, includes #261).
+
+Finding (row in in-prog-logs/current-main-resweep-image-digests.tsv)
+--------------------------------------------------------------------
+An image src that resolves to a file the build cannot open (mode 000):
+- hash pass `_image_inputs_hash_value` (build.py) records `[rel, None]` --
+  the same None sentinel as "unresolved", silently;
+- render pass `_process_images.swap` (build.py, the `with open(full_path,
+  "rb")` digest read) has no OSError handling: `refdes check` / `refdes
+  build` die with a raw PermissionError traceback naming the image nowhere.
+
+Reproduction on current main (real CLI, PYTHONPATH pinned to this worktree's
+src, refdes.__file__ verified; probes in .scratch/image-unreadable/)
+---------------------------------------------------------------------
+- proj2: items/dec-a.md body `![gone](gone.png)`, items/gone.png chmod 000,
+  no site.assets. `refdes check` and `refdes build` -> PermissionError
+  traceback from build.py swap (open), exit 1, zero diagnostics.
+- proj1 (the TSV probe's layout): site.assets [assets], assets/gone.png
+  chmod 000, body refs frozen /assets/gone.png. `refdes check` exits 0
+  reporting 0 errors (the collect_static_assets registration makes the
+  render digest-cache hit, so the crash moves to render_site's
+  shutil.copy2, where cli.py's site-write catch turns it into
+  "cannot write the site to _site (Permission denied) -- nothing was
+  rendered", exit 2, pointing at the output directory).
+- In-process: `_image_inputs_hash_value` returns [['assets/gone.png', None]].
+Delta vs the TSV's pin: at 3793ac9 the site.assets layout does not crash
+`check`; it is quiet on check and misleading on build. The local-reference
+layout reproduces the crash exactly. Claim ("no diagnostic names the
+unreadable image") PRESENT on current main.
+
+Fix
+---
+- build.py `_process_images.swap`: wrap the digest read in
+  `except OSError` -> project.error naming src, resolved project-relative
+  path and exc.strerror ("image src 'X' exists at 'rel' but cannot be read:
+  Permission denied. Make the file readable, or point the reference at a
+  readable file"), record(False) for the preview, leave the reference
+  unrewritten -- same posture as missing-image (build error, not warning,
+  exit 1). The two sentences stay distinct (permission semantics preserved).
+- build.py hash pass: unchanged behavior (the None sentinel is the
+  deterministic hash contribution; raising there would crash compute_hashes
+  before the render pass can report, and kill serve's poller); docstring +
+  comments updated to name the third sentinel producer.
+- render.py `_copy_project_assets`: wrap shutil.copy2 in `except OSError`
+  -> project.error naming the asset and the OS's reason, continue (asset
+  not published, rest of site published). Without this, the site.assets
+  bulk-copy PermissionError escapes render_site into cli.py's
+  "cannot write the site" refusal (cli.py deliberately keeps that catch for
+  real destination failures -- untouched).
+- #261's src canonicalization untouched.
+- docs/markdown.md: documented both sentences.
+
+Tests (4 new, red on base 3793ac9, green after; 31 controls pass on base)
+--------------------------------------------------------------------------
+- tests/test_image_search.py: named build error + unrewritten ref + preview
+  record; `cli.main(["check"]) == 1` with the diagnostic and no traceback;
+  unreadable site.assets file refused naming the asset, rest of site
+  publishes.
+- tests/test_image_hash.py: `[["items/gone.png", None]]` sentinel under the
+  resolved path (payload recomputed while unreadable) + the named error.
+All chmod-based tests use the repo's existing nt/root skipif.
+
+Verification
+------------
+- red on base: 4 new fail (PermissionError / traceback / quiet check), 31
+  controls pass (verified by running the HEAD archive tree with the new test
+  files).
+- green: tests/test_image_search.py + test_image_hash.py 35 passed.
+- adjacent: test_serve_images, test_render_assets, test_site_assets_confinement,
+  test_integration, test_exit_codes, test_serve_state: 133 passed.
+- full suite: see below.
+- scoped ruff (build.py, render.py, both test files): 2 findings, identical
+  to the base baseline (build.py:3 I001, render.py:114 SIM103 pre-existing);
+  test files clean at baseline and after.
+
+Status: COMPLETE. PR opened, not merged (per lane rules).

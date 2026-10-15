@@ -11,14 +11,23 @@ from __future__ import annotations
 import hashlib
 import os
 
+import pytest
 from conftest import write_project_config
 from helpers import COVERAGE_SCHEMA, _build_and_render
 
 from refdes import build as build_mod
+from refdes import cli as cli_mod
 from refdes import loader, parse
+from refdes import render as render_mod
 from refdes.schema import load_project
 
 PNG = b"\x89PNG\r\n\x1a\n"
+
+needs_chmod = pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permission bits: chmod 0o000 does not stop Windows (or root) "
+    "from opening the file, so the unreadable case cannot be produced that way",
+)
 
 
 def _digest(data: bytes) -> str:
@@ -171,6 +180,107 @@ def test_the_missing_image_sentence_is_grammatical_with_and_without_assets(tmp_p
     )
     # The specific failure this pins: two clauses welded into one.
     assert "searched no site.assets" not in without_assets
+
+
+# ------------------------------------------------------------- unreadable files
+
+
+@needs_chmod
+def test_an_unreadable_image_is_a_named_error_not_a_crash(tmp_path):
+    """IMAGE-ASSET-007: the file exists (`os.path.isfile` is true) and resolves,
+    so the reference reaches the digest read -- where opening a mode-000 file
+    raised `PermissionError`, which the render pass did not catch: the whole
+    build died in a traceback naming the image nowhere, before this reference
+    (or any later one) could be reported. It is now a build error at the
+    reference naming the src, the resolved file and the OS's reason, and the
+    reference stays unrewritten. Sabotage: drop the `except` (the traceback);
+    reuse the missing-image sentence (the user is told to create a file that
+    is sitting right there); register the asset anyway (a hashed leaf naming
+    bytes the build never read)."""
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    _item(tmp_path, "![the board](board.png)\n")
+    beside = tmp_path / "items" / "board.png"
+    beside.write_bytes(PNG)
+    beside.chmod(0o000)
+    try:
+        project = _load(tmp_path)
+    finally:
+        beside.chmod(0o644)
+
+    failing = next(d for d in project.errors if "board.png" in d.message)
+    assert "cannot be read" in failing.message, failing.message
+    assert "items/board.png" in failing.message
+    assert "Permission denied" in failing.message
+    assert "does not exist" not in failing.message
+    assert failing.file == "items/dec-a.md"
+    assert failing.item_id == "DEC-A-001"
+    html = project.item_by_id("DEC-A-001").body_html
+    assert 'src="board.png"' in html
+    assert "assets/" not in html
+    # The preview decorator's record says "failed", same as for a missing src.
+    (entry,) = project.image_results["DEC-A-001"]
+    assert entry["ok"] is False and entry["src"] == "board.png"
+
+
+@needs_chmod
+def test_check_reports_the_unreadable_image_and_exits_1(tmp_path, monkeypatch, capsys):
+    """The CLI half of the same finding: at the resweep pin `refdes check` died
+    with a raw `PermissionError` traceback -- exit 1, zero diagnostics, the
+    image named nowhere. Now it reports through the normal channel and exits 1
+    on its diagnostics, the way a missing image does. Sabotage: any except
+    narrowed away from `OSError`, and the traceback is back."""
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    _item(tmp_path, "![the board](board.png)\n")
+    beside = tmp_path / "items" / "board.png"
+    beside.write_bytes(PNG)
+    beside.chmod(0o000)
+    monkeypatch.chdir(tmp_path)
+    try:
+        status = cli_mod.main(["check"])
+    finally:
+        beside.chmod(0o644)
+
+    captured = capsys.readouterr()
+    report = captured.out + captured.err
+    assert status == 1, report
+    assert "Traceback" not in report
+    assert "cannot be read" in report
+    assert "board.png" in report
+
+
+@needs_chmod
+def test_an_unreadable_site_assets_file_is_refused_naming_the_asset(tmp_path):
+    """The bulk-copy half (the resweep probe's own layout): a mode-000 file in a
+    declared `site.assets:` directory is registered by `collect_static_assets`
+    without any reference gating it, and `shutil.copy2`'s `PermissionError`
+    escaped `render_site` into `refdes build`'s "cannot write the site to
+    _site" refusal -- which names the *output* directory and tells the user
+    to make it writable, sending them to chmod the wrong thing. The copy now
+    names the asset and the OS's reason, publishes the rest of the site, and
+    leaves that file out of it. Sabotage: swallow the OSError silently -- the
+    asset vanishes from the published site with a clean build."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "No image referenced here.\n")
+    (tmp_path / "shots").mkdir()
+    shot = tmp_path / "shots" / "board.png"
+    shot.write_bytes(PNG)
+    shot.chmod(0o000)
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    assert not project.errors, project.errors  # collect registers; copy reads
+    try:
+        out = render_mod.render_site(project)
+    finally:
+        shot.chmod(0o644)
+
+    failing = next(d for d in project.errors if "board.png" in d.message)
+    assert "cannot be read" in failing.message, failing.message
+    assert "Permission denied" in failing.message
+    assert not os.path.isfile(os.path.join(out, "assets", "shots", "board.png"))
+    assert os.path.isfile(os.path.join(out, "assets", "style.css")), (
+        "the rest of the site publishes"
+    )
 
 
 def test_a_multi_segment_path_is_never_searched(tmp_path):

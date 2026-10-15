@@ -2252,11 +2252,12 @@ def _image_inputs_hash_value(project: Project, item: Item, digest_cache: dict):
     the bare-name `site.assets:` search (`_search_image_matches`, the shared
     pure half of `_search_image_src`, so the two resolutions can never drift).
 
-    An unresolved or ambiguous src contributes ``[raw src, None]``: the render
-    pass reports both as build errors at the reference, this only has to be
-    deterministic and distinct from any real pair -- the posture of a ``None``
-    calc-ref value. URL-scheme srcs contribute nothing, same skip as
-    `_process_images`. The src set comes from the same markdown-it
+    An unresolved, ambiguous, or unreadable src contributes ``[path, None]``:
+    the render pass reports all three as build errors at the reference (the
+    unreadable file recorded here under its resolved path -- IMAGE-ASSET-007),
+    this only has to be deterministic and distinct from any real pair -- the
+    posture of a ``None`` calc-ref value. URL-scheme srcs contribute nothing,
+    same skip as `_process_images`. The src set comes from the same markdown-it
     configuration `render_bodies` uses, so the hash pass and the render pass
     see the identical set of images: code fences and escaped raw `<img>`
     (html is disabled) contribute none, link-wrapped images contribute theirs.
@@ -2852,9 +2853,14 @@ def _process_images(
     a content-hashed destination path, computed once per source and reused for
     every further reference to the same file) and rewritten to
     `assets/<hashed path>`, which is where `render_site` copies it. One that does
-    not resolve     is a build error, not a warning: unlike a dangling cross-reference,
+    not resolve is a build error, not a warning: unlike a dangling cross-reference,
     there is no sensible way to render a missing image, and now that a resolving
     src is actually made to work end to end, a broken one should stop the build.
+    One that resolves to a file the build cannot read (mode 000, EACCES from
+    any cause -- IMAGE-ASSET-007) is the same kind of build error at the same
+    place, naming the src, the file, and the OS's reason: "does not exist"
+    and "cannot be read" are kept as distinct sentences, and neither one
+    escapes as a PermissionError traceback.
 
     The scanned attribute carries markdown-it's HTML-escaped spelling of the
     src; it is canonicalised with `image_src_from_html` before any resolution,
@@ -2900,8 +2906,26 @@ def _process_images(
             # Read once, on the path already being opened to confirm it
             # resolves -- not a second I/O pass. Cached by source path, so
             # the same image referenced from many items/pages hashes once.
-            with open(full_path, "rb") as fh:
-                digest = hashlib.sha256(fh.read()).hexdigest()[:16]
+            # A file that exists but will not open (IMAGE-ASSET-007: mode
+            # 000, EACCES from any cause) used to escape here as an
+            # unhandled PermissionError, crashing the whole render pass
+            # before this reference -- or any other diagnostic -- could be
+            # reported. It is a build error at the reference, same posture
+            # as "does not exist": the hash pass recorded the same
+            # `None`-digest sentinel the unresolved src contributes, and
+            # the reference is left unrewritten.
+            try:
+                with open(full_path, "rb") as fh:
+                    digest = hashlib.sha256(fh.read()).hexdigest()[:16]
+            except OSError as exc:
+                project.error(
+                    f"image src {src!r} exists at {rel!r} but cannot be "
+                    f"read: {exc.strerror or exc}. Make the file readable, "
+                    f"or point the reference at a readable file",
+                    file=where_file, line=where_line, item_id=where_id,
+                )
+                record(False, src)
+                return match.group(0)
             dest = _hashed_leaf(rel, digest)
             project.assets[rel] = dest
         record(True, src, rel, dest)

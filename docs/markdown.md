@@ -132,6 +132,18 @@ so a broken one stops the build:
 ERROR items/log/dec-001.md:2 [LOG-001] — image src 'figures/nope.png' does not exist
 ```
 
+A `src` that resolves to a file the build **cannot read** (its permissions
+deny the `refdes` process) is the same kind of build error at the same place,
+with its own sentence naming the file and the OS's reason:
+
+```
+ERROR items/log/dec-001.md:2 [LOG-001] — image src 'figures/locked.png' exists at 'items/log/figures/locked.png' but cannot be read: Permission denied. Make the file readable, or point the reference at a readable file
+```
+
+A mode-000 file inside a `site.assets:` directory with no reference to gate
+it gets the same treatment at publish time: the build names the asset,
+publishes the rest of the site, and leaves that file out.
+
 ### A bare filename, found on the search path
 
 A `src` written as a **bare filename** — no `/` in it — that does not resolve
