@@ -153,3 +153,31 @@ once more onto 9f83092, no conflicts; final heads 94bab70/57d9c86/c61eed6.
 Re-ran test_seal + reseal-audit + yaml-loaders on the new base (52 passed)
 and the fresh-build CLI probe (new seal file 664 under umask 002, matching
 schema.json).
+
+----------------------------------------------------------------- review round 1
+Reviewer agent 7b5408de-cf26-4bbb-9f57-fb58539bc2f3 on PR #229: production
+fix sound, Windows CI RED -- the two mode-asserting tests (new-file
+002/022 -> 664/644, rewrite 0640-preservation) read st_mode bits that
+Windows chmod/umask make advisory (Windows reports 0666). Applied the
+reviewer's decorator, verbatim in repo style, to exactly those two tests:
+  @pytest.mark.skipif(os.name == "nt", reason="chmod-based: advisory mode
+  bits on Windows")
+(same family as test_serve_security.py's "POSIX permission bits" skips).
+The os.umask-spy and collision tests stay active on Windows: os.umask,
+O_CREAT|O_EXCL, os.replace all exist there; neither asserts numeric mode
+bits -- verified by inspection (spy asserts zero os.umask calls; collision
+asserts name/retry only).
+Reviewer's prose correction accepted and checked: serve/edit.py:952 is
+inside _atomic_replace, which *reads the existing target first* (returns a
+reason when it is absent) -- replacement-only, no new-file path; new files
+there go through _atomic_create (os.open 0666, umask-respecting). The
+real new-file gap in that file family is textio.atomic_write_text
+(PERM-OWNER-002). PR body corrected.
+Rebased onto c608363 (main advanced: #230 DIAG-WORD-008 refusal-cause,
+#232, #228, #224; none touch seal.py/tests/test_seal.py since my base --
+diff empty), clean, no conflicts; #212 reader and my writer coexist
+unchanged.
+Local checks on the new head: targeted set (seal + callers + #212
+adjacency: reseal-audit, yaml-loaders, history, keys-adopt) 233 passed;
+CI's exact lint command `ruff check --select E9,F src tests` clean; CLI
+probe re-run (fresh 664 under umask 002, 600 preserved).

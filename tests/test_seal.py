@@ -658,6 +658,7 @@ def _umask(mask: int):
     ("umask", "expected"),
     [(0o002, 0o664), (0o022, 0o644)],
 )
+@pytest.mark.skipif(os.name == "nt", reason="chmod-based: advisory mode bits on Windows")
 def test_a_new_seal_file_gets_the_umask_default_mode(sealed_flat_project, umask, expected):
     project = load_project(config_path=str(sealed_flat_project / "refdes-project.yaml"))
     path = seal.seal_path(project)
@@ -710,10 +711,17 @@ def test_saving_seals_never_reads_or_writes_the_process_umask(sealed_flat_projec
     assert calls == []
 
 
+@pytest.mark.skipif(os.name == "nt", reason="chmod-based: advisory mode bits on Windows")
 def test_a_rewritten_seal_file_keeps_the_mode_it_had(sealed_flat_project):
     """The other half: the new-file default must not start overwriting a mode
     someone deliberately set. 0640 is neither umask default, so a rewrite
-    that recomputed instead of copied would land 0664 and fail here."""
+    that recomputed instead of copied would land 0664 and fail here.
+    Windows: chmod/umask mode bits are advisory (stat reports 0666, chmod is
+    a no-op on the bits asserted), so these two mode assertions are POSIX-only
+    -- the repo's own chmod-based tests (test_serve_security) skip the same
+    way. The write path itself runs everywhere; only the numeric mode
+    read-back is Windows-meaningless, so the os.umask-spy and collision
+    tests stay active on every platform."""
     project = load_project(config_path=str(sealed_flat_project / "refdes-project.yaml"))
     path = seal.seal_path(project)
     with _umask(0o002):
