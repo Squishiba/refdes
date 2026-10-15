@@ -177,7 +177,7 @@ Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
    round 3 = chunk 1, round 4 = chunk 1 doc + chunk 2 log.
 4. Removed the duplicate "Tests run" block; tests are recorded once at the end.
 
-Fix round 5 (chunk 2 log review only, addressed in commit <pending>)
+Fix round 5 (chunk 2 log review only, addressed in commit 4cd076c)
 --------------------------------------------------------------------
 Findings addressed in in-prog-logs/design-inline-calc.txt:
 1. Fixed the round-4 commit citation from the orphaned pre-amend `11ce4dc` to
