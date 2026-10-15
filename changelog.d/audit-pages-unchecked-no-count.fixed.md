@@ -8,6 +8,11 @@
   F13). Such a row now reads `pages unchecked` with the reason the record
   supports: a document that is not a PDF has no page count for any command to
   record; a PDF with no count on record yet is counted by a plain
-  `refdes fetch --path <path>`. `refdes check`'s page warnings are unchanged —
-  a document with no count on record at all leaves `check` silent, and the
-  audit row is where that state is named. Pinned in `tests/test_run7_f13_f14_f16.py`.
+  `refdes fetch --path <path>`. The finding's heading names both commands, so
+  `check` gains the matching half: a document that is not a PDF and a remote
+  pin kept hash-only — the two states no plain fetch can fill — are warned
+  about by name, and the one silence `check` keeps is the state its own next
+  fetch repairs (a PDF whose bytes are on the machine with no count recorded
+  yet). A trusted `page_count: 0` is a count, not an absence: a cited page
+  past it is `check`'s out-of-range warning to give. Pinned in
+  `tests/test_run7_f13_f14_f16.py`.

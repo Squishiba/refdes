@@ -100,16 +100,21 @@ def test_audit_says_a_plain_texts_pages_are_unchecked(tmp_path, capsys):
     assert "it is not a PDF, so its pages are never counted" in out, out
 
 
-def test_check_stays_silent_for_a_plain_text_cited_page(tmp_path, capsys):
-    """The scope of the fix: `check`'s documented posture for a citation the
-    plain fetch can still fill is unchanged (the audit row is where a no-count
-    record is named; `check`'s page warnings stay a property of counted
-    documents)."""
+def test_check_names_a_plain_texts_cited_page(tmp_path, capsys):
+    """The finding's heading names both commands, so `check` gets the same
+    fact from the same record: a document that is not a PDF has no count for
+    any command to record, and the build must not publish a cited page number
+    as verified. (The pre-fix silence was reasoned from "a plain fetch can
+    still fill it" -- true for a PDF's bytes on the machine, false here,
+    which is what the review round caught.)"""
     config = _citation_project(tmp_path, CITED_TEXT)
     _run(capsys, config, "fetch")
     code, out, err = _run(capsys, config, "check")
     assert code == 0, err
-    assert "page" not in out + err, out + err
+    assert "the page numbers cited for docs/notes.txt are not checked" in out + err, (
+        out + err
+    )
+    assert "it is not a PDF, so its pages are never counted" in out + err, out + err
 
 
 def _pin_local_pdf(root, path: str, page: str, **record) -> str:
@@ -181,6 +186,40 @@ def test_audit_keeps_ok_for_a_counted_pdf(tmp_path, capsys):
     assert _audit_row(out).startswith("ok"), out
     code, out, err = _run(capsys, config99, "check")
     assert "page 99" in out + err, out + err
+
+
+def test_check_stays_silent_for_a_pdf_the_plain_fetch_will_count(tmp_path, capsys):
+    """The asymmetry's remaining half, pinned: bytes on this machine with no
+    count on record are the one state the command's own next fetch repairs,
+    and `check` stays silent there (its documented rule: warn about the
+    lockfile, not the citation) while `audit` names the state. The silence
+    is scoped to this shape by the non-PDF test above -- a document whose
+    count no fetch can write is named by both."""
+    config = _pin_local_pdf(tmp_path, "docs/manual.pdf", "3")
+    code, out, err = _run(capsys, config, "check")
+    assert code == 0, err
+    assert "not checked" not in out + err, out + err
+
+
+def test_check_warns_for_a_page_past_a_zero_count(tmp_path, capsys):
+    """A trusted `page_count: 0` (an empty PDF pypdf opened and found no
+    pages in) is a count, not an absence: a cited page past it is the
+    out-of-range warning `check` already owes, with `audit`'s row keeping
+    its `ok` (the pinned-count promise). A provenance-matched zero reaching
+    neither report -- `audit` silent, `check` publishing the page -- was the
+    review round's finding; the load-refused negative (CITE-LOCK-012) was
+    already impossible."""
+    sha = hashlib.sha256(b"document bytes").hexdigest()
+    zero = tmp_path / "zero"
+    zero.mkdir()
+    config = _pin_local_pdf(
+        zero, "docs/manual.pdf", "3", page_count=0, page_count_sha256=sha
+    )
+    code, out, err = _run(capsys, config, "check")
+    assert code == 0, err
+    assert "page 3 is not in this document" in out + err, out + err
+    code, out, err = _run(capsys, config, "audit")
+    assert _audit_row(out).startswith("ok"), out
 
 
 # ------------------------------------------------------------------ F14

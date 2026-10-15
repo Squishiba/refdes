@@ -108,11 +108,64 @@ VERIFICATION:
   check silence) pass on main too, by design.
   Targeted: tests/test_citations.py + run7 file: 100 passed, 1 skipped.
 
-STATUS: done.
+STATUS: PR opened, review round in progress.
   Full suite (command above): 3925 passed, 2 skipped in 331.99s, exit 0; the
   known flake (test_serve_cli stale-token-file) did not fire.
   ruff check --select E9,F on the touched src/test files: clean.
   docs-site/gen_examples.py --check: up to date.
-  Committed as e67e1cc, pushed to origin/run7-small-nits, PR against main
-  opened (URL in the PR list; no commits after the PR).
+  Committed as ea59616 (amended from e67e1cc), pushed to origin/run7-small-nits,
+  PR #273 against main.
+
+REVIEW ROUND (PR #273 head ea59616 came back CHANGES REQUESTED; read via
+`paseo logs 3ef56faf`). All findings accepted, all in scope for F13/F14/F16.
+
+  1. MEDIUM (F13, `check` half): the finding's heading names both commands,
+     so `check` had to gain the non-PDF fact `_apply_page` was leaving
+     silent. Reproduced: a plain-text file cited with a `page:` left `check`
+     permanently silent, and the old "a plain fetch can fill it" reasoning
+     was true only for a PDF's bytes on the machine, false for a non-PDF.
+     Fix: `_apply_page` warns for the non-PDF no-count state (the state no
+     plain fetch can fill), mirroring the existing remote hash-only warning;
+     added `_is_pdf_path` helper shared by `_hash_only_without_count`,
+     `_no_count_why`, and `_apply_page`; `_apply_page`/`page_count_gaps`
+     docstrings rewritten to scope the remaining `check` silence to a PDF
+     whose bytes are on the machine (a plain fetch records the count).
+  2. LOW/MED: docs + changelog said "a document with no count on record at
+     all leaves `check` silent" -- overbroad (remote hash-only already warns;
+     non-PDF now warns). Scoped both to the one fillable state.
+  3. LOW: docs "Three exceptions" paragraph + the seal/baseline table row now
+     record that the seal-carry refusal keeps the unconditional
+     `(read-only tree?)` marker: `seal.save_seals` reports a plain boolean,
+     no OSError in hand to read a cause from (unlike the baseline-entry
+     refusal). Not a code fix -- the rule is the rule for refusals that carry
+     a cause.
+  4. LOW (F13 adjacency): a provenance-trusted `page_count: 0` (an empty PDF
+     pypdf opened, found no pages in -- a real count, CITE-LOCK-012) reached
+     neither report: `page_count_gaps` correctly gave no gap (audit `ok`),
+     but `_apply_page` read `count < 1` as no-count, so `check` published the
+     cited page as verified. Fix: `_apply_page` count guard `count < 1` ->
+     `count < 0`, so 0 is a count and a cited page past it is the
+     out-of-range warning `check` already owes. The load-refused negative
+     (CITE-LOCK-012) was already impossible at this line. Updated the
+     validator comment (src/refdes/citations.py:1159) that had recorded the
+     old "reads 0 as no count, not contradicted here" reading.
+  5. TRIVIAL: work log said `e67e1cc`; head is `ea59616`. Fixed above.
+  6. cross-file: `serve/filters.py::item_tags` docstring claimed "the same
+     tag read `refdes ls` uses"; F16 made `cli._item_tags` string-only.
+     Docstring now records the deliberate divergence (serve read stays
+     lenient `str()`, ls string-only).
+
+  Tests (tests/test_run7_f13_f14_f16.py, now 11): flipped the pinned
+  `check`-silence-for-plain-text test to a `check`-warns test; added
+  `check`-silent-for-a-PDF-the-fetch-will-count (pins the asymmetry's
+  remaining half) and `check`-warns-for-a-page-past-a-zero-count.
+  Sabotage for the review fixes: swapped citations.py to ea59616 -> the two
+  new check-side/zero-count tests fail (both silent there), pass restored.
+  Targeted (5 files): 301 passed, 1 skipped. ruff --select E9,F,I on touched
+  files: clean. gen_examples --check: up to date.
+
+STATUS: gates green.
+  Full suite (command above): 3927 passed, 2 skipped in 327.06s, exit 0 (+2 =
+  the new tests; known flake did not fire). Commit + push once below.
+
 
