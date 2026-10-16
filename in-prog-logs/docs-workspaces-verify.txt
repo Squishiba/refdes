@@ -125,3 +125,15 @@ and ls --help claims byte-identical.
 - ruff check --select E9,F src tests -> All checks passed!
 - full suite -> 3938 passed, 2 skipped in 334.38s, exit=0 (.scratch/suite.txt)
 - status: TASK FINISHED
+
+## PR #286 review round (CHANGES REQUESTED, head 651eb14)
+Review finding (MEDIUM): the paragraph fix #4 added claimed the `no workspace:`
+warning fires "on every command". Re-probed in .scratch/wsverify/strayws with
+this worktree's src: check -> 2 warnings, build -> 2, ls/index/audit/schema/
+history/id -> 0 printed (index carries them as JSON diagnostics, not printed
+lines). cmd_ls prints project.errors only (src/refdes/cli.py:819-821).
+Agree — commit-message phrasing had the same overstatement (log kept as
+record; the doc sentence is the deliverable, now scoped).
+Fix applied: sentence now reads "records a `no workspace:` warning on every
+load ... `ls` prints errors only, never warnings ... `check` (and `build`) do."
+No findings rejected. No code change -> no new tests; docs-only gates re-run.

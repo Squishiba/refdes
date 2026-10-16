@@ -244,9 +244,11 @@ workspace, and blank is not a name you can pass to the filter.
 
 The blank column is silent only under `flat`, where no path segment is asked
 the question. Under `item_layout: workspace` an item in an unregistered first
-segment — including one sitting directly in `items/` — gets a `no workspace:`
-warning on every command, until the item, its file's `defaults.workspace`, or
-a matching registry entry names it.
+segment — including one sitting directly in `items/` — records a
+`no workspace:` warning on every load, until the item, its file's
+`defaults.workspace`, or a matching registry entry names it. `ls` prints
+errors only, never warnings, so it is precisely not the command that shows
+you this; `check` (and `build`) do.
 
 With no `workspaces:` block there is no column at all, and `ls` prints exactly
 what it printed before: `workspaces:` being opt-in is a promise that an
