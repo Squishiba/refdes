@@ -22,7 +22,7 @@ knowing:
   The bundled standard defines its terms; a project's own types are the
   project's business.
 - **Engine-reserved keys are defined in code, not YAML.** `id`, `type`,
-  `key`, `body`, `history` and the rest are not author-declared, so their
+  `key`, `body`, `former_ids` and the rest are not author-declared, so their
   definitions live in `refdes/vocabulary.py` — the one place they can be
   written once and cited from the page.
 - **Every example is schema-true.** The bundled standard's terms carry
