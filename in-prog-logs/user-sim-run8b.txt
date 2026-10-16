@@ -1,0 +1,87 @@
+Task: user-simulation release gate, run 8b (branch user-sim-run8b, main f33efa4).
+Exercise serve/editor/workbench/patcher fixes in 885e9e6..HEAD as an author via
+refdes serve + curl; report only, no code/docs changes. Report file per TASK.txt:
+in-prog-logs/user-sim-release-gate-run8a.md.
+
+Targets (from git log --oneline 885e9e6..HEAD | grep -iE 'serve|editor|workbench|patcher'):
+- 185aa53 #267 editor: empty target_types offers all candidates (EDITOR-API-006)
+- 4686a49 #265 serve: editor writes honor -c custom config path (EDITOR-API-003)
+- 8c647e7 #264 serve: superseded create-preview never writes the form (EDITOR-API-011)
+- e31e26b #254 patcher: remove_link refuses to delete comment inside multiline flow entry (EDITOR-API-005)
+- f7a244c #256 serve: create form picks a workspace (EDITOR-API-008)
+- 64a05c6 #260 serve: three sealed upload refusals expose one details shape (DIAG-WORD-004)
+- 44ddf7e #249 serve: undo of pending link op cancels it (EDITOR-API-004)
+- 9e948e9 #248 workbench: pane-model key set, .mono scale, posture count
+
+Note: TASK.txt's expected numbering is jumbled vs the log: task's "#254 undo" is
+PR #249 (44ddf7e); task's "#261 patcher remove_link" is PR #254 (e31e26b), which IS
+serve-facing (editor remove_link op). Commit 8c647e7's title is truncated and says
+(#260) — it is PR #264 (gh pr view 264 confirms); #260 is the sealed-upload PR.
+
+Progress log follows (append as I go).
+
+## Progress
+
+- Built .scratch/run8b/proj (hardware@3, boards: power, workspaces registry,
+  REQ/LOG items incl. a multiline flow `blocked_by` entry with an interior
+  `# keep me` comment), proj-ws (item_layout: workspace), proj-c (config
+  renamed custom-project.yaml for -c), proj-rel (release rel1/rel2 +
+  refdes-schema.yaml types log sealing:build to make items sealable).
+- Servers: setsid serve --no-open, ports 8751/8752/8754/8755, PIDs recorded in
+  .scratch/run8b/serve*.pid, token files. NOTE: bash-tool timeouts SIGTERM the
+  server when it shares the shell's process group; setsid detach fixed it; the
+  token file is removed on clean SIGTERM (documented behavior).
+- Author pass: set_field title (200, disk ok), add_link satisfies (200, flow
+  entry with comment PRESERVED, composite REQ-PWR-002@key written), set_body
+  (200, `body: "quoted"` written), create via POST (200). Disk checked after
+  each. create with fields.body -> clean 422 naming declared field set.
+- #267: live /api/item shows blocked_by editable target_types:[]; add_link
+  with a log target applies (200). links.js ships PICKER_LIMIT=5000, empty
+  list -> unfiltered [base], isSelf, cap notice. /api/items?limit=5000 200;
+  5001 -> 400 boundary. Harness tests green.
+- #265: on -c server (8754): GET 200, POST edit 200 applied + disk, POST
+  create 200, poller reload picks up semantic edit of custom-project.yaml
+  (boards+debug shows in /api/create/schema). api.py:546 threads config_path.
+- #264: create.js previewSeq counter ships (:145-168); node harness
+  test_editor_create_preview_sequence green. CAN'T VERIFY IN BROWSER.
+- #256: preview workspace narrowing verified ONLY under item_layout: workspace
+  (w2/w4 -> product-a file; ghost w5/w6 -> fallback 200; flat proj shows no
+  narrowing = by design, not a regression). create fields.workspace lands +
+  writes workspace: line; ghost-x 422 names workspaces: registry;
+  c3 NOTE: product-b (registered, no files) lands item in product-a's file
+  inheriting REQ-PA id series -- suggest-never-decide fallback, same as board.
+  create.js Workspace select ships (value '' placeholder).
+- #260: all three sealed refusals live (target/replace/capture) + mixed
+  referrer set: every details row carries item, source_file, srcs, sealed,
+  why; capture adds src, resolves_to. Controls: identical bytes -> 200 no-op;
+  unsealed referrer disclosed with sealed:false. NOTE: hardware@3 log is
+  sealing: history -> is_sealed always False; refusals need types overlay
+  {log: {sealing: build}} (cli.py:193 documents it as the opt-back-in shape);
+  seal written by `refdes build` (seal_write, cli.py:498).
+- #249: draftLinkCancel ships drafts.js:291, links.js:140/153/197; harness
+  green. Server control live: remove of a link the item lacks -> 422 "has no
+  'satisfies' links to remove". CAN'T VERIFY IN BROWSER.
+- #254: live 422 "a comment sits on the 'blocked_by' entry ... would destroy
+  it", bytes kept; controls: non-last-target remove 200 inside flow w/
+  comment; comment-free flow entry remove 200; ADJACENT spelling: block-
+  sequence list with comment on last item -> 422 too ("comment sits on the
+  line holding REQ-PWR-002"). Duplicate add_link -> 422 names composite text.
+- #248: pane_for key set == template read set (task_pane.py:118-124, no
+  viewing), .refdes-taskpane .mono{font-size:inherit} ships, posture comment
+  says three. test_task_pane + test_serve_preview_task_pane 50 passed.
+  Visual pane look: CAN'T VERIFY IN BROWSER.
+- Scoped harness runs: 17 passed (5 editor/serve files), 50 passed (task pane).
+
+## Close-out
+
+- Gates: full suite 3947 passed / 2 skipped exit=0 (no flake re-run needed),
+  ruff --select E9,F src tests clean, gen_examples.py --check up to date.
+- All four servers killed by recorded PID (8751/8752/8754/8755); foreign
+  server on 8779 untouched; token files removed on clean stop.
+- Report written: in-prog-logs/user-sim-release-gate-run8a.md (name per
+  TASK.txt; branch is run8b - followed the task text literally). Citations
+  spot-checked: v3/base.yaml:290 sealing:history, seal.py:417-419,
+  api.py:546, upload.py core-key docstring, task_pane.py:118-124.
+- Changelog rule: no changelog.d fragment - report-only task, no user-visible
+  change shipped (changelog.d/README.md scope).
+- Task finished: report + log committed together, one push, PR opened.
