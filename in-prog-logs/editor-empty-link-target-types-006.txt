@@ -1,0 +1,172 @@
+task: EDITOR-API-006 — empty target_types hides editor link candidates
+branch: fix/editor-empty-link-target-types-20261015
+date: 2026-10-15
+
+## Finding, verified
+
+`src/refdes/serve/static/links.js` `candidatesFor(types)` built one
+`/api/items?type=` query per declared target type. For a verb declared
+with `target_types: []` it issued no request at all, the picker rendered
+"no candidates match", and the author could not add a link that the server
+freely accepts.
+
+The server reads an empty list as UNRESTRICTED in three places, all
+consistent (verified by reading, file:line cited):
+
+- `model.py:1143` `Project.accepts_type` — docstring: "an empty list is
+  unrestricted"; returns True when `allowed` is falsy.
+- `build.py:911` `resolve_links` — the type check runs `if allowed and ...`,
+  so an empty list skips it.
+- `serve/edit.py:795` `_resolve_link_op` — gates adds through
+  `accepts_type`; the refusal message at edit.py:803-804 reads "targets of
+  type X" for the non-empty case and "any declared type" for the empty
+  case (round 2 review: this "any declared type" phrasing is edit.py's,
+  not the model docstring's -- model.py:1145 says "an empty list is
+  unrestricted").
+
+Real-world case in the bundled standard (hardware@3):
+`src/refdes/standards/hardware/v3/base.yaml` — `log.links.blocked_by: []`.
+
+Live HTTP probe (`.scratch/editor-empty-target-types/probe.py`, run with
+this worktree's src on sys.path, real `EditorApp` on a temp project):
+
+- `GET /api/item/LOG-001` reported
+  `blocked_by: {editable: true, target_types: [], targets: []}`.
+- `POST /api/item/LOG-001/edit` with
+  `{op: add_link, verb: blocked_by, target: REQ-001}` → 200 `applied`,
+  wrote `blocked_by: REQ-001@gchz7enm6r9` (the composite) to items/log.yaml.
+
+So: server accepts, picker offers nothing. The narrow seam is JS-only.
+
+## Fix
+
+links.js `candidatesFor`: empty declared list → fetch the unfiltered
+`/api/items`; declared types → unchanged per-type queries. Header comment
+and a block comment say why, naming the three server-side readings. No
+Python touched (edit.py avoided per the active-PR note: #240/#241/#244/#253).
+
+## Tests
+
+New `tests/test_editor_empty_link_target_types.py`, two halves:
+
+- HTTP pins (green at base, pinning the contract the UI must mirror):
+  the empty verb is reported editable with `target_types: []`; an add of
+  any type is applied and writes the composite.
+- Node harness over the REAL served modules (same posture as
+  `test_editor_link_undo.py`), RED at base: with `target_types: []` the
+  picker must fetch `/api/items` (base fetched: none) and offer all three
+  fixture items; clicking Add drafts `add_link blocked_by REQ-001`; the
+  restricted-verb control keeps its `?type=requirement` query and offers
+  only the requirement.
+
+Red-before evidence: base run failed with
+`picker fetched [] (it loops the declared types and issues nothing for an
+empty list)`.
+
+Green-after: new file 3/3;
+`test_editor_link_undo.py`, `test_serve_edit_http_links.py`,
+`test_serve_static.py`, `test_editor_draft_mirror.py`,
+`test_serve_editor_e2e.py` all pass;
+`-k "serve or editor or link"` sweep: 955 passed, 1 skipped.
+`node --check links.js` clean.
+
+## Traps hit
+
+- `tests/test_serve_static.py::test_served_js_parses_as_es2020_modules`
+  scans the served JS with a naive quote-state machine that does NOT skip
+  comments — an apostrophe in a new comment ("schema's") desynchronizes it
+  and fails the balance check. The shipped comments in links.js carry no
+  apostrophes for exactly this reason; keep new comments in that file
+  apostrophe-free.
+- In the node harness, a candidate row's `textContent` includes the Add
+  button's label; assert on the `link-target` span (row's first child).
+
+Status: finished. Changelog fragment
+`changelog.d/editor-empty-link-target-types-candidates.fixed.md`.
+
+## Round 2: PR #267 review (CHANGES REQUESTED) -- fix round
+
+Reviewer findings, by disposition:
+
+1. MEDIUM, REAL, FIXED: the unfiltered picker silently truncated at the
+   list API's default page of 500 (filters.py DEFAULT_LIMIT=500,
+   MAX_LIMIT=5000; api.py applies it; reviewer reproduced with a real
+   600-item EditorApp: total 600, items 500). Fix: links.js candidatesFor
+   now requests `limit=5000` (the server's MAX_LIMIT, PICKER_LIMIT const
+   naming filters.py), on both the per-type and the unfiltered query; and
+   renderCandidates appends "showing N of M targets -- filter to narrow"
+   when the fetched page is smaller than the list total (candidatesFor
+   returns {items, total}, summing `total` across the per-type queries).
+   New tests in the same node harness, red-before verified against the
+   round-1 links.js in .scratch/red-static-267 (fetches `/api/items` with
+   no limit -> offered 500 of 600): a 600-item project must offer all 600
+   and fetch limit=5000; a 6000-item project shows the capped 5000 rows
+   plus the notice. Plus an HTTP pin on the real EditorApp: GET /api/items
+   caps at 500 with total 601, ?limit=5000 returns all 601.
+2. LOW, NO CODE CHANGE: CI checks pending at review time; this push
+   re-runs them.
+3. LOW, DISAGREED (explained in the PR comment, not changed): the picker
+   lists the item being edited among candidates. Live probe
+   (.scratch/editor-empty-target-types/probe-self-link.py): the server
+   gate itself accepts the self-link, and the save is refused by build
+   validation with a named reason -- 422 "blocked_by cycle: LOG-001 ->
+   LOG-001", tree unchanged, editor surfaces it in the refusal banner.
+   The restricted picker has always offered self when self's type is a
+   declared target type (pre-existing, predates this PR), and self-links
+   are schema-legal for verbs without a cycle rule; excluding self is a
+   product decision outside this ticket's seam.
+
+Traps (repeat of round 1, keep in mind): links.js comments must carry no
+apostrophes (test_serve_static quote-state scanner), and the node harness
+needs STATIC as an ABSOLUTE path (file:// URL import; a relative STATIC
+fails the node spawn, which reads like a harness crash).
+
+## Round 3: PR #267 review round 2 (CHANGES REQUESTED) -- fix round
+
+1. MEDIUM, FIXED: the capped notice promised "filter to narrow", but the
+   filter (renderCandidates) only searches the FETCHED rows -- past the
+   5000 cap no filter reaches the rest. Chose the smaller remedy (the
+   orchestrator's menu: honest text vs server-side filtering): the notice
+   now reads "showing the first N of M targets -- the filter searches only
+   these". Test: the capped scenario asserts the new text.
+2. Orchestrator decision (finding 2 reversed): the picker NEVER offers the
+   item under edit. links.js gains isSelf (handle, key, and id matching)
+   and renderCandidates skips self rows on both the restricted and the
+   unrestricted path. Test: the unrestricted scenario's item is now
+   LOG-001, present in the universe (handle + id + key all match) -- it
+   must be absent from the offered labels; red-before verified against
+   the pre-change links.js (.scratch/red-static-267): the offered list
+   contained it.
+3. LOW (finding 3, 5000 full rows fetched per picker open, no cache):
+   noted, no code change -- a caching layer is a separate seam.
+4. FIXED: the round-1 log section above attributed "any declared type" to
+   the model docstring; it is edit.py:803's message (model.py:1145 says
+   "unrestricted"). Citations corrected in place.
+5. NOT IN THE REVIEW FINDINGS, REAL: the round-2 Windows CI run failed on
+   my new test (tests/test_editor_empty_link_target_types.py) -- the
+   harness labels carry an em dash and node's UTF-8 stdout decoded under
+   Windows cp1252. Fixed with encoding="utf-8" on subprocess.run.
+
+Round-2 note: the .scratch/ probes are gitignored scratch, not PR-
+reproducible; the in-test HTTP pins carry the equivalent evidence.
+
+## Round 4: split review -- chunk 1 APPROVE (d15966f), chunk 2 CHANGES REQUESTED (6519751a)
+
+1. Chunk 2 Low (test asserts self-exclusion beyond the ticket): KEPT by
+   orchestrator decision -- an earlier review round asked for it. Answered
+   in a PR comment: the server accepts a self-link wherever the verb
+   permits one (verified live round 2: the gate accepts, cycle rules
+   enforce at save), so the exclusion is a picker-side product decision,
+   NOT the empty-list contract. The test docstring now says exactly that,
+   the contract assertion is pure again, and the self-check is a dedicated
+   assertion.
+2. Chunk 1 nit (capped notice counted the fetched page incl. self):
+   FIXED -- renderCandidates subtracts the self row from fetched and total
+   (at most one row), so the notice counts what is pickable. New scenario:
+   capped AND self in the fetched page -> "showing the first 4999 of 6000
+   targets -- the filter searches only these".
+3. PR body was stale (chunk 1 Low, docs): rewritten via gh pr edit to
+   describe everything the diff does -- unfiltered fetch, PICKER_LIMIT=5000
+   on every picker query, the honest capped notice, self-exclusion on both
+   paths, and the utf-8 test decode.
+Rebased onto main 8ed01c5. No edit.py touched.

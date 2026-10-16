@@ -43,7 +43,9 @@ instead — not a heuristic the tool invents on your behalf.
 scoped, following the same shape as [references](markdown.md#citing-a-datasheet)
 and every other generated report. Each row: the exact part number, which
 components declare it directly, which citations name it, and (on the global
-page) which boards it appears on.
+page) which boards it appears on. A hand-written `pages/parts.md` collides
+with the report: `refdes build` refuses it as a generated-report name, so
+name the page something else.
 
 A component's own fields table links straight to its part's section on
 `parts.html` when something else also uses it — "also used elsewhere" —
@@ -121,9 +123,9 @@ items:
 The winner does **not** move to a separate file — one file, one status
 edit, one `selects:` link, and every candidate stays in the same
 `{{compare}}` scope. A file whose `defaults:` declares a `status` no item
-in it actually has (after every entry's own value won) gets a
-project-suppressible warning calling the dead default out — set an item's
-status, or drop the `status:` from `defaults:`.
+in it actually has (after every entry's own value won) gets a warning
+calling the dead default out — set an item's status, or drop the `status:`
+from `defaults:`.
 
 The file name is a convention, nothing more: the tool derives nothing from
 it, and renaming the file changes nothing. `refdes new component --list`

@@ -1,0 +1,100 @@
+Task: verify docs/parts.md against actual refdes behavior; fix what's wrong.
+Branch: docs-parts-verify (base main 185aa53).
+
+Environment notes:
+- venv refdes entrypoint resolves to the MAIN checkout (/home/jorb/work/refdes),
+  so all probes run with
+  PYTHONPATH=/home/jorb/.paseo/worktrees/16msma8v/docs-parts-verify/src
+  prepended, which makes `import refdes` resolve to this worktree's src
+  (verified: python -c "import refdes" prints worktree path).
+- refdes 0.5.0. Probes live in .scratch/parts-probe/.
+
+Claim table (docs/parts.md) — status as verified:
+
+(P1) "indexes what's already there rather than adding a `part` item type"
+(P2) component.part_number is a plain `text` field
+(P3) any field literally named part_number on ANY item type feeds the index,
+     no config change (e.g. add to connector)
+(P4) nested part_number inside a citations: entry is indexed; example with
+     citations: - path: .../lm358.pdf  part_number: LM358
+(P5) exact string, no normalization / family grouping
+(P6) parts.html global + parts-<board>.html + parts-<workspace>.html
+(P7) row contents: part number, components declaring directly, citations
+     naming it, (global) boards it appears on
+(P8) component fields table links to its part section on parts.html when
+     something else also uses it — "also used elsewhere"
+(P9) refdes audit gets a "Parts:" section, every part number, unfiltered
+(P10) {{index by="part_number" type="component"}} works
+(P11) {{index}} type= is singular (one type only)
+(P12) parts page is derived: stores nothing, no links, no edges; cross-
+     workspace lint walks only item.links so shared part_number never trips it
+(P13) drop_in/alternate link types exist (links.md anchor)
+(P14) candidate list file: defaults: merges under every entry, entry's own
+     value wins
+(P15) dead-default warning: file whose defaults: declares a status no item
+     has -> project-suppressible warning
+(P16) file name is a convention, tool derives nothing from it
+(P17) refdes new component --list prints this skeleton to stdout
+
+Verification results (all via PYTHONPATH=worktree/src probes in
+.scratch/parts-probe/p1 (workspaces+boards, connector probe) and p2
+(flat layout, items/power/candidates.yaml, pages collision)):
+
+P1  VERIFIED  refdes schema types: bound, component, group, log, requirement,
+    test -- no part type.
+P2  VERIFIED  base.yaml:253 component part_number: {type: text}; schema JSON
+    shows it as string.
+P3  VERIFIED  connector type with declared part_number field -> CONN-001
+    appears on parts.html (citations.py gate: "part_number" in spec.fields).
+    "No config change" = nothing beyond declaring the field on the type.
+P4  VERIFIED  doc's exact citations: snippet -> LM358 row, Cited by CMP-004.
+P5  VERIFIED  STM32G474 and STM32G474RET6 are separate rows; declared
+    family: field + {{index by="family"}} groups them (STM32G4).
+P6  VERIFIED  parts.html, parts-main.html, parts-power.html, parts-alpha.html,
+    parts-beta.html in _site.
+P7  VERIFIED  global columns Part number/Components/Cited by/Boards; scoped
+    pages omit Boards.
+P8  VERIFIED  cmp-001.html has href="parts.html#part-stm32g474">also used
+    elsewhere</a>; unique-part components have no such link.
+P9  VERIFIED  audit "Parts:" lists all 4 part numbers incl. citation-only
+    LM358 and single-use MP1584EN-LF-Z.
+P10 VERIFIED  {{index by="part_number" type="component"}} renders component
+    half only; LM358 absent.
+P11 VERIFIED  type="component,log" -> "unknown type 'component,log'".
+P12 VERIFIED  items.json links={} for shared-part components;
+    cross_workspace_severity: error -> no cross-workspace diagnostic from
+    shared part_number (workspaces.py lint iterates item.resolved_links only;
+    code comment: "Iterates `item.links` exclusively -- never item.backlinks").
+P13 VERIFIED  drop_in/alternate on component in hardware@3; links.md:221
+    anchor matches #part-equivalence-drop-in-and-alternate.
+P14 VERIFIED  CMP-PWR-014 status selected (entry wins), CMP-PWR-015 inherits
+    candidate.
+P15 PARTLY   warning fires verbatim with doc's remedy, BUT "project-
+    suppressible" is not implemented: no project-level warning suppression
+    exists (no suppress key; audit's "suppressed" section is on_change field
+    suppression only; per-lint knobs exist only for cross_workspace_severity,
+    check_severity, lint_own_tags). Design doc docs/design/candidate-
+    parts.md:581 promises "project-suppressible like the other authoring
+    warnings" -> code gap, listed under possible bugs in PR body.
+P16 VERIFIED  renamed candidates.yaml -> shortlist.yaml: warning count and
+    parts index unchanged.
+P17 VERIFIED  refdes new component --list skeleton: defaults type component /
+    status candidate, commented field set; redirect into place works.
+
+MISSING FROM DOCS (added): hand-written pages/parts.md collides with the
+report -- refdes check passes, refdes build errors:
+"page 'parts.md' would be written to parts.html, which is a generated
+report. Rename the page." (render.py:1132; re-probed in p2).
+
+Doc edits made (docs/parts.md only):
+1. Dropped "project-suppressible" from the dead-default warning sentence
+   (claim not implemented; see P15 above).
+2. Added one sentence in "The parts page": pages/parts.md collides with the
+   generated report, refdes build refuses it, name the page something else.
+
+Cross-page checks: docs/output.md:14, docs/schema-reference.md:590,
+docs/vocabulary.md:94 all consistent with parts.md; no contradictions.
+docs/blocks.md has no {{compare}} section (only an inline mention) -- parts.md
+refers to {{compare}} only in passing, not as a docs link; noted for PR body.
+
+Status: COMPLETE. Task started and finished 2026-10-16.

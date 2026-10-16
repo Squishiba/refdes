@@ -161,8 +161,10 @@ the whole item, or as a mapping with `mode:`, per-field `fields:`, and the
 ```
 
 Every mode value in the override -- the scalar, `mode:`, each `fields:`
-entry -- must be one of the three modes, and the mapping accepts no keys
-beside `mode:`, `fields:` and `reason:`.
+entry -- must be one of the three modes, the mapping accepts no keys
+beside `mode:`, `fields:` and `reason:`, `fields:` must be a mapping, and
+each of its entries must name a field the item's type declares (or
+`body`).
 
 This entire surface only matters to a project under version control. Without a
 VCS there is no history layer to feed, and `on_change:` reduces to nothing more

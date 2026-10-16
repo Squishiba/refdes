@@ -2,9 +2,11 @@
 // One picker per verb the server declared editable (`item.edit.links`), with
 // the schema-declared target types of the verb deciding which items the
 // picker offers -- fetched through the same /api/items filter the list pane
-// uses, so there is one query language and one snapshot behind both. Adds and
-// removes are draft ops like a field edit: nothing posts until Save, and the
-// same revision check, conflict screen, and refusal handling cover them.
+// uses, so there is one query language and one snapshot behind both (an
+// empty declared list means the verb accepts any type, so the picker
+// fetches the unfiltered list). Adds and removes are draft ops like a
+// field edit: nothing posts until Save, and the same revision check,
+// conflict screen, and refusal handling cover them.
 //
 // The picker never sends a composite: it sends the handle of the candidate
 // and the service writes DISPLAY-ID@key. Removal names the target as it is
@@ -25,14 +27,37 @@ function displayHalf(target) {
   return at > 0 ? target.slice(0, at) : target;
 }
 
+// An empty declared list is not an empty candidate list: it is how the
+// schema spells "unrestricted" -- model.Project.accepts_type says so in its
+// docstring, build.resolve_links skips the type check for it, and the
+// editor gate serves it as "any declared type" (the standard verb
+// `log.blocked_by: []` is the live case). The picker offers exactly what
+// the server accepts: the declared types when there are any, the whole
+// project when the list is empty.
+//
+// The picker asks the list API for its full page (MAX_LIMIT in
+// serve/filters.py) rather than the default 500. When even a full page is
+// capped the notice says so, and says the filter searches only the fetched
+// rows: the list API has no offset, so nothing the picker does can reach
+// rows past the cap, and a notice promising a filter remedy would hide
+// valid targets with false hope.
+const PICKER_LIMIT = 5000;
+
 async function candidatesFor(types) {
+  const base = `/api/items?limit=${PICKER_LIMIT}`;
+  const queries = types && types.length
+    ? types.map((type) => `${base}&type=${encodeURIComponent(type)}`)
+    : [base];
   const out = [];
-  for (const type of types || []) {
-    const payload = await api(`/api/items?type=${encodeURIComponent(type)}`);
-    out.push(...(payload.items || []));
+  let total = 0;
+  for (const query of queries) {
+    const payload = await api(query);
+    const found = payload.items || [];
+    total += payload.total ?? found.length;
+    out.push(...found);
   }
   out.sort((a, b) => String(a.id || a.handle).localeCompare(String(b.id || b.handle)));
-  return out;
+  return { items: out, total };
 }
 
 function verbPicker(item, handle, verb, spec, onChange) {
@@ -76,6 +101,16 @@ function verbPicker(item, handle, verb, spec, onChange) {
     return serverTargets.find(
       (t) => displayHalf(t) === id || (row.key && t.slice(t.lastIndexOf('@') + 1) === row.key)
     );
+  }
+
+  // The picker never offers the item being edited: self-links make no
+  // sense to pick from a list, the build cycle checks refuse the directed
+  // self-cycles of the standard at save time, and verbs without a cycle
+  // rule would accept one silently.
+  function isSelf(row) {
+    if (row.handle && row.handle === handle) return true;
+    if (row.key && item.key && row.key === item.key) return true;
+    return Boolean(item.id && row.id === item.id);
   }
 
   function refresh() {
@@ -138,12 +173,14 @@ function verbPicker(item, handle, verb, spec, onChange) {
   wrap.appendChild(pickers);
 
   const rows = new Map(); // row id -> candidate row, for isLinked lookups
+  let totalFound = null; // full count of the list, when it exceeds the page
 
   function renderCandidates(all) {
     pickers.textContent = '';
     const want = filter.value.trim().toLowerCase();
     let shown = 0;
     for (const row of all) {
+      if (isSelf(row)) continue;
       const label = `${row.id || row.handle} — ${row.title || ''}`;
       if (want && !label.toLowerCase().includes(want)) continue;
       shown += 1;
@@ -166,13 +203,22 @@ function verbPicker(item, handle, verb, spec, onChange) {
       pickers.appendChild(line);
     }
     if (!shown) pickers.appendChild(el('p', 'muted', 'no candidates match'));
+    // Count what is pickable, not what was fetched: the self row (at most
+    // one, the item under edit) is in the fetched page and in the server
+    // total, and is offered by neither -- the counts must not claim it.
+    const selfRows = all.filter(isSelf).length;
+    const offered = all.length - selfRows;
+    const pickable = totalFound === null ? null : totalFound - selfRows;
+    if (pickable !== null && offered < pickable)
+      pickers.appendChild(el('p', 'muted', `showing the first ${offered} of ${pickable} targets -- the filter searches only these`));
   }
 
   let all = [];
   filter.addEventListener('input', () => renderCandidates(all));
   candidatesFor(spec.target_types)
     .then((found) => {
-      all = found;
+      all = found.items;
+      totalFound = found.total;
       renderCandidates(all);
       refresh();
     })
