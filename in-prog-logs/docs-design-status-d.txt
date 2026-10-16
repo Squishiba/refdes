@@ -1,0 +1,102 @@
+Task: audit implementation-status claims in docs/design/candidate-parts.md,
+docs/design/named-calc-blocks.md, docs/design/index-blocks.md against the
+code and git history; correct stale ones. Branch docs-design-status-d.
+Date: 2026-10-16. (No probe project needed — every claim resolved by grep,
+git log -S, and file:line inspection; the docs-related test subset +
+gen_examples --check were run per TASK.txt instead of the full suite.)
+
+Per-claim rows (doc | claim (line at audit) | actual | evidence):
+
+candidate-parts.md
+1. header "shipped (2026-09-25), all five phases in §12 landed" | MOSTLY TRUE,
+   PARTIAL on phase 5's doc rows | phases 1-4 code all verified; see rows 2-8.
+2. "`{{compare}}` renders in `blocks.py` (§3)" | DONE | _render_compare at
+   src/refdes/blocks.py:692; registry entry ~917; landed 7544a38 (#15,
+   2026-09-22).
+3. "`check_severity` accepts a status mapping (§4)" | DONE |
+   schema.py:694 _parse_check_severity, build.py:1679 _severity_for; 73967a1 (#11).
+4. "hardware@3 component.status includes rejected (§5)" | DONE (unreleased
+   v3, per house rule not called shipped) | standards/hardware/v3/base.yaml:255
+   choices [candidate, selected, rejected, obsolete]; check_severity mapping
+   at :250.
+5. "`refdes new --list` + dead-defaults warning (§6)" | DONE | cli.py:3234
+   --list; scaffold.py:584 new_list_text; parse.py:1522 warning; a361b98 (#13).
+   "refdes init closing line" (phase 4) verified: cli.py ~2097-2098.
+6. §9's three test files with 28 named tests | DONE | all 28 def names found
+   in tests/test_compare_block.py, test_check_severity_status.py,
+   test_component_rejected.py.
+7. §8 row docs/coverage.md ("rejected is not satisfying, why not obsolete") |
+   NOT BUILT | grep "rejected" docs/coverage.md: zero matches (only matches
+   in git history were the log-status enum example, removed by d71c143).
+8. §8 row docs/index.md ("Generated blocks row: ... {{compare}}") | NOT BUILT |
+   docs/index.md:22 lists {{index}},{{cascade}},{{tree}},{{calcblock}} — no
+   compare; git log -S"compare" -- docs/index.md is empty, never landed
+   (#298 audited that row 2026-10-16 and still missed compare; blocks.py
+   ships five blocks).
+9. §8 rows blocks/checks/schema-reference/standard-library/parts/lifecycle |
+   DONE | docs/blocks.md:110 compare section + non-goal line 289;
+   docs/checks.md:209 mapping form; docs/schema-reference.md:375;
+   docs/standard-library.md:617,624 v3 notes; docs/parts.md:90 + :131;
+   docs/lifecycle.md:59 per-item severity.
+Edit: header — added a sentence recording rows 7-8 as the open remainder.
+
+named-calc-blocks.md
+10. header "all five phases (§13) landed" | TRUE | #24 phases 1+4 (2026-09-24,
+    4d1a9c0), #25 (e1ed2f2), #26 (4d1597d), #27+#28 docs (24d1dbc, ea6199e).
+    Named fences: calc.py:1018 parse_fence_attrs, CALC_BLOCK_RE :993;
+    fragments: build.py:2538; {{calcblock}}: blocks.py:826; hash pins + §11's
+    ten decided questions all check out (id= key used, §11.5).
+11. §6.1 "`HASH_FORMAT` stays **4**" (present tense) | SUPERSEDED by c9e32e4
+    (#35, 2026-09-25, the day after the doc's date) — HASH_FORMAT is 5
+    (build.py:1904), bumped by referenced image bytes, not by naming; naming
+    adds no payload key, re-pinned by
+    tests/test_calc_block_hash.py::test_hash_format_bumped_to_5_moves_nothing_here
+    (docstring says exactly that).
+12. §10 row "test_hash_format_stays_4 | build.HASH_FORMAT == 4" | STALE | that
+    test no longer exists (grep: MISSING); current test is
+    test_hash_format_bumped_to_5_moves_nothing_here.
+13. §5.4 block="" / anchor claims | CURRENT | already updated by #215
+    (doc line 431 dated 2026-10-12; blocks.py:862-870 cites §5.4).
+Edits: §6.1 supersession note; §10 row updated to the current test name.
+§12.13 (rejected bump option) and §13 phase-4 scope line left alone: design
+decisions, and TASK.txt says record status only for calc docs (Jared's open
+calc thoughts are PR #250, held, a different design doc — untouched).
+
+index-blocks.md
+14. header "**Implemented**, as of v0.5.0 (unreleased)" | WRONG twice |
+    {{index}}/{{cascade}} landed d82d59d 2026-08-18 and released in v0.4.0
+    (CHANGELOG.md:839 under [0.4.0]); fig identity 3d27398 (2026-08-18,
+    _apply_figure_attrs build.py:3084, resolve_figures :3204). v0.5.0 is NOT
+    unreleased: tagged (571ca45) and released 2026-08-21 (CHANGELOG.md:464);
+    pyproject version = 0.5.0.
+15. header note "prose describes the landed shape accurately" | PARTIAL |
+    §2 "Three, each a single fixed knob" (by/type/board) vs the registry:
+    index optional=("board","tag","subtypes") (blocks.py:919) — tag= arrived
+    with the [Unreleased] batch (CHANGELOG.md:369, 72ccf1d) and subtypes= with
+    extends.md phase 2 (37071ea). Cascade params from/direction/depth/via and
+    the trace: flag (schema.py:826, base.yaml:165-168) verified accurate.
+16. §10 "Deferred at the same time as the rest of the asset pipeline" |
+    SUPERSEDED — DONE in 4b34238 (2026-08-18, released v0.4.0, CHANGELOG:967):
+    content-hashed <img src> destinations; render.py:874-881 docstring
+    ("content-hashed for a resolved <img src> ... identity-mapped for
+    site.assets:"), sha256[:16] computed in _process_images (build.py:2947) —
+    shape matches the design. site.assets: verbatim as scoped.
+17. §6 line 674 "not done here, since the brief scopes this document..." |
+    left alone — describes the writing brief, not implementation; the
+    "if this document lands first" conditional never fired (standard-library
+    §9 predates the cascade block; blocked.py and blocks.py walkers are
+    separate, CHANGELOG:273).
+Edits: header rewritten (0.4.0, v0.5.0 shipped, §2 param drift); §10 status
+"done in 4b34238" added.
+Note: design-doc code citations with line numbers (build.py:22/37/451-487,
+render.py:389-415/418-431, markdown.md:174) have drifted (INLINE_VALUE_RE is
+now build.py:78, FIGURE_ATTR_RE :161). Not status text; left per task scope.
+
+Process notes
+- No behaviour fix -> no test, no sabotage step (per TASK.txt line 10).
+- No changelog fragment: internal design-doc status text only, not a
+  user-visible change (changelog.d/README.md: docs-only/internal changes do
+  not get a fragment).
+- Checks: pytest -k "docs or anchor or link" (see .scratch/suite.txt) and
+  docs-site/gen_examples.py --check.
+- Tree was clean at start; touched only the three design docs + this log.
