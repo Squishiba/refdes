@@ -1,0 +1,46 @@
+Task: audit status lines of findings 1-19 in docs/design/backlog.md against
+code + git history; correct stale ones. Branch docs-backlog-status-a.
+Docs-only task: no code changes, so no test and no sabotage step (per
+TASK.txt). No changelog fragment: internal design-doc status lines only
+(changelog.d/README.md covers user-visible changes; this is not one).
+
+Table format: number | stated status | actual status | evidence
+
+1  | shipped, deploying           | DONE (089fdbe; gate 1f1ec03)            | .github/workflows/docs.yml (gen_examples --check at :40); gh api repos/Squishiba/refdes/pages -> status "built", build_type "workflow", html_url squishiba.github.io/refdes; has_pages true (re-verified 2026-10-16)
+2  | done                         | DONE (c659c23)                          | schema_json.py:325 section_marker def, :331 appended to oneOf
+3  | done-differently             | DONE-differently (50cf460)              | v3/base.yaml requirement body:{required:true} (:200), title optional; migration.yaml text:/method: -> body:, revise.check_body_merge_conflicts (revise.py, named at migration.yaml:26)
+4  | done                         | DONE (dd203e3)                          | docs/authoring.md "Bodies in list files" area + four-field comparison (authoring.md, section present; grep confirms)
+5  | done                         | DONE (c85deda)                          | cli.py:498 seal_write=not (args.dry_run or args.no_write); render.py:1026 draft_build; base.html.j2:50
+6  | done                         | DONE (10b7263)                          | model.py:624-625 inherited_fields/defaults_line
+7  | done, component half revised, requirement half superseded, decision keep governed_by | DONE + decision recorded (50cf460) | v3/base.yaml:146-147 claims set satisfies:[requirement,bound] constrained_by:[bound] (component includes claims, :244ff); requirement governed_by:[requirement,bound] (:197-198); component checks field (:254)
+8  | done                         | DONE (1044c96)                          | editors/vscode/extension.js:667 filterText includes sourceFile + board
+9  | done                         | DONE (491283e)                          | cli.py:806 cmd_ls
+10 | done                         | DONE (c743328 pt1; ebc1c8f pt2)          | render.py:797 payload["next_ids"], :799 ids_mod.high_water; ids.py:180 orphaned_allocations, reported in cmd_audit (cli.py:1788)
+11 | done                         | DONE (a1bcdf0)                          | build.py:625 lint_own_tags (opt-in, gated on project.lint_own_tags :642)
+12 | done                         | DONE (8e33c08)                          | docs/authoring.md:35 "Bodies in list files" + tradeoff table at :244; old "one file per entry" wording gone
+13 | done                         | DONE (1cf3e88)                          | blocks.py:901 index optional=("board","tag","subtypes") -- subtypes added by later work, tag= filter shipped as scoped
+14 | done                         | DONE (1330dee)                          | v3/base.yaml group type (:270ff, coverable:false), part_of/contains link (:171), changelog.d/hardware-v3-group-type.added.md exists
+15 | architecture decided; shipped since, still moving | ACCURATE (serve package landed) | src/refdes/serve/ = api/edit/filters/preview/security/server/sources/state/upload/__init__ + static/ (ten modules as claimed); edit.py:299 apply_edit(project_root, request, ...); registered in CLI. Stale detail: status cited cli.py:1367-1368, moved (cmd_serve now cli.py:547, subparser :2800/:2839) -> line pointer corrected
+16 | done (3c52c4e, decision.links declares recorded_by:[log]) | SUPERSEDED by Phase 4a (d71c143, #176) -- decision merged into log; no decision type and no recorded_by in hardware@3 base.yaml (grep: zero hits); log carries the verdict (status accepted -> satisfying_statuses, base.yaml:280ff) | v3/base.yaml:68 comment "Phase 4a later merged decision into log"; base.yaml grep recorded_by = none; threads.md:17 now "Phase 4a implemented". STATUS LINE CORRECTED. Flag paragraph's "Phase 3a implemented" quote + landed-slice sentence also updated.
+17 | superseded by threads.md (header "Phase 3a implemented") | same conclusion, quote stale: header now "Phase 4a implemented" (threads.md:17) | grep threads.md:17; chains.py exists. Quote corrected 3a->4a.
+18 | done (3a2fced)               | DONE (3a2fced)                          | calc.py:467 _SEGMENT continuation class [A-Za-z0-9_Ωµμ°]*, :468 _UNIT_RUN %-alternative -- verbatim match to status text
+19 | done, both parts             | DONE                                    | build.py:63-66 EXPLICIT_REF_RE admits #fragment (and cite: namespaced id group); model.py:1072 citation_ids; build.py:583-593 validate_items population; item.html.j2:128 field- anchors, :205 cite- row ids; tests/test_field_refs.py + tests/test_citation_ids.py exist
+
+Edits made to docs/design/backlog.md (status lines only, existing style):
+- Finding 16: **Status: done.** -> **Status: done, since superseded.** naming
+  3c52c4e, d71c143/#176, and the current hardware@3 state; flag paragraph's
+  threads.md header quote Phase 3a -> Phase 4a, landed-slice sentence notes
+  the Phase 4a merge.
+- Finding 17: header quote "Phase 3a implemented" -> "Phase 4a implemented".
+- Finding 15: stale cli.py:1367-1368 pointer -> cli.py:547 (cmd_serve) and
+  :2800 (registration).
+
+Verification method: grep -n of src/ + tests/, git show -s for every cited
+commit (all 12+ hashes resolve), gh api for finding 1's live Pages state,
+grep of templates. No refdes init probe run: every claim in scope was
+confirmable from code + history directly (the cheap-run allowance was not
+needed).
+
+Tests: PYTHONPATH=$PWD/src ... -m pytest -q -k "docs or anchor or link" +
+docs-site/gen_examples.py --check (docs-only change; full suite skipped per
+TASK.txt).
