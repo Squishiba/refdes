@@ -1,0 +1,67 @@
+Task: audit status of findings 29-35 in docs/design/backlog.md, correct stale
+status lines. Branch docs-backlog-status-c. Docs-only task: no code changes,
+so no test/sabotage step (per TASK.txt); no changelog fragment (internal
+design doc; changelog.d/README.md scope is user-visible changes).
+
+Table (number | stated | actual | evidence):
+
+29 | Status: fixed | DONE (verified) | log.html.j2:44 renders
+   figured(entry.body_html); tests/test_render_assets.py:707
+   test_figure_reference_resolves_on_the_log_page exists. No change.
+
+30 | Status: fixed | DONE (verified) | build.py _esc escapes "'" as &#39;
+   (build.py:2500-2508), blocks.py _esc same (blocks.py:80); pinned by
+   tests/test_build.py:21 and tests/test_blocks.py:20. No change.
+
+31 | Status: closed | DONE (verified) | tests/test_text_node_escaping.py
+   exists with test_evil_title_is_escaped_on_index_page (:69) and
+   ..._on_coverage_page (:74). No change.
+
+32 | Status: done, shipped in c0d1722 | DONE (verified) | commit c0d1722
+   exists ("log: sort by parsed date..."); src/refdes/dates.py has
+   validate_format (:18) and parse_date (:65); render.py _date_sort_key
+   (:119) calls dates.parse_date(value, project.date_format) with sort sites
+   at render.py:158/:262/:508; date_format validated in schema._validate_settings
+   (schema.py:212) and enforced in build.validate_items (build.py:290,
+   date check at :336-344); changelog.d/date-format-log-sort.fixed.md exists.
+   Stale detail inside the status text (it cites render.py:97/:133/:264;
+   sites have drifted to :158/:262/:508) — status itself correct, left as
+   written per "don't rewrite the discussion text". No change.
+
+33 | Status: decided, "This has since shipped" | DONE (verified) |
+   includes: list[str] on board spec exists (model.py:256 — the status cites
+   model.py:174, drifted, field itself present); boards.included_map at
+   boards.py:116 and displays at boards.py:149 match cited line ranges
+   exactly; shipped in ce31349 "feat(boards): display-only includes: for
+   shared groups (finding 33)". No change.
+
+34 | Status: decided, "it has shipped" | DONE (verified) |
+   tests/test_style_tokens.py, src/refdes/theme.py, src/refdes/contrast.py
+   all exist; theme/tokens in the site-key allowlist (configcheck.py:71,
+   validated :375-378), plumbed schema.py:1093-1094 onto the site spec
+   (model.py:1048+). Status's line citations (configcheck.py:48/:210/:213,
+   schema.py:772-773, model.py:772-781) have drifted; claims themselves true.
+   No change.
+
+35 | Status: decided (2026-09-19) — no shipped note | PARTIAL-DRIFT: fully
+   DONE, status line STALE | shipped in 4 consecutive chunks: cabd9e1
+   (chunk 1, cross-item refs), 3078c45 (chunk 2, values in content hash,
+   HASH_FORMAT 4), 89c6383 (chunk 3, baseline diff names moved reference),
+   1dbfd77 (chunk 4, docs); changelog.d/calc-cross-item-refs.added.md +
+   -hash.changed.md pending; code present: calc.py cross-item resolver
+   (:1106, :1244, :1522), build.py cycle error (:1647), tests
+   test_calc_cross_refs.py / test_calc_cross_ref_hash.py, docs/math.md.
+   CHANGED: appended a "shipped" note to the status paragraph, matching the
+   style findings 33/34 use.
+
+Supersession check (task note re: PR #303 drift): nothing in 29-35's statuses
+cites a hardware@3 feature later removed. HASH_FORMAT has since moved 4->5
+(build.py:1902, editor images) — Finding 35's status text says only that the
+number "stays coordinated", which is still true; no claim to correct.
+
+Verification runs:
+- grep/line checks above (all on this branch).
+- docs tests: pytest -q -k "docs or anchor or link" -> see .scratch/suite.txt.
+- python docs-site/gen_examples.py --check.
+- No test/sabotage step: docs-only change (TASK.txt line 8).
+- No changelog fragment: internal design-doc status line only.
