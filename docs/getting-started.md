@@ -88,7 +88,7 @@ writing commands, since a plain `check` or `build` load can itself rewrite
 files; `refdes serve` is exempt here because it takes the lock instead in
 short sections of its own, around each save). If your
 project
-already existed, `init` is not what wrote that `.gitignore`: add those same four
+already existed, `init` is not what wrote that `.gitignore`: add those same five
 lines yourself, one per line — except any one your file already covers, which
 `init` would not add a second line for either. See
 [editor support](standard-library.md#editor-support-json-schema-emission).

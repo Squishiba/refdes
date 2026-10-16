@@ -1,0 +1,169 @@
+Task: verify docs/troubleshooting.md against actual refdes behavior; fix docs only.
+Branch: docs-troubleshooting-verify, base main 185aa53.
+
+Tooling:
+- refdes runs via PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli (wrapper: .scratch/rf) so the WORKTREE code runs, not the venv's editable install of the main checkout.
+- Probes in .scratch/probe-NNN/.
+
+Claim table format: CLAIM (docs line) -> VERIFIED / WRONG(real output) / MISSING / CAN'T VERIFY(why)
+
+## Progress log
+
+21:47 worktree clean at 185aa53; .scratch/rf wrapper + probe-001 created (`refdes init` -> refdes-project.yaml standard hardware@3, items/<board>/candidates.yaml hint).
+
+## Claim table (running)
+
+L8  "no refdes-project.yaml found in ... or any parent directory" — CAN'T VERIFY by running (every dir in this worktree has the repo's own project above it; orchestrator rule: probes stay in worktree). Message text verified in src/refdes/schema.py:482 (exact prefix matches; tail adds "that file is the project marker, and holds every project setting; refdes-schema.yaml is the optional overlay holding only types:, link_types: and sets:"). Docs text consistent.
+L11 "-c path/to/refdes-project.yaml" — VERIFIED (works as GLOBAL flag: `refdes -c <path> check` loads project from anywhere; AFTER subcommand it is refused: "unrecognized arguments"). Docs don't show position; considered adding "(before the subcommand)".
+L13 refdes.yaml retired — VERIFIED by run: `refdes -c refdes.yaml check` -> configuration error, exit 2; setting list matches docs exactly. (Walk-up refuse not runnable in-worktree, same constraint; source schema.py:479-480.)
+L24 item has no 'type' — VERIFIED exact; defaults: type: fixes it.
+L27 unknown type 'requirment'. Did you mean 'requirement'? — VERIFIED exact.
+L31 no YAML front-matter (file must start with '---') — VERIFIED exact.
+L35 invalid YAML front-matter mid-file — VERIFIED; line number points inside the failing block.
+L41 duplicate key 'id' in one mapping — VERIFIED (lines named; "'REQ-PWR-002' is dropped for 'REQ-PWR-003'"; body dup reported too; defaults: repeat reported "in this file's defaults:, so every item here inherited it"; flow mapping reports "twice on line 4"; 3x repeat reports pairs naming each line; identical repeat: "both lines read 'REQ-PWR-002', so nothing is lost here").
+L75 config duplicate key 'site' — NOT YET RUN.
+L103 unknown field 'sorce' on requirement -- did you mean the field 'source'? — VERIFIED exact (+tail "A misspelled field name silently drops it instead of erroring."); thermal_model warning VERIFIED, value kept in index fields.
+L111 missing required field 'title' — VERIFIED on component; log requires 'summary' VERIFIED. WRONG: "requirement and bound have no required field at all under hardware@3" — bound requires 'limit' (refdes schema --json: bound__bare required ['limit']; run: missing required field 'limit'). Also 'test' and 'component' use title — true, but group also requires title (schema --json) — docs omit group.
+L119 body-empty warning quote — VERIFIED prefix; real message continues "A warning, not an error, so a stub can exist while it's still being drafted." (docs quote stops at "itself." w/o ellipsis).
+L128 status 'in-review' not one of draft, active, retired — VERIFIED (+ real appends "Did you mean 'retired'?").
+L131 hardware@2 constraint rename — VERIFIED; `refdes standard upgrade --to 2` exists; v2 bound required ['text','limit'] (title->text, CON->BND per v2/base.yaml header).
+L124 v2 'missing required field text' — VERIFIED (v2 requirement without text). v3 text: -> 'requirement.text' is now 'requirement.body' VERIFIED.
+L138 constraint.title is now constraint.text — VERIFIED exact via hand-rolled refdes-schema.yaml (constraint type w/ text: field, title: written).
+L143 project history: rename — VERIFIED exact, exit 2; v3 on_change default: log -> renamed-to-timeline error; v2 accepts log (VERIFIED); add-preset refuses w/ config error exit 2 (VERIFIED).
+L155 item history: rename — VERIFIED exact; on_change {mode,fields,reason} accepted; type with real 'history' field keeps key (no error) VERIFIED.
+L165 item has no id — VERIFIED exact.
+L168 duplicate id 'REQ-PWR-004' (also defined at ...) — VERIFIED.
+L172 could not write id back into the source — message exists ids.py:641/653 as "could not write id {new_id} back into the source"; trigger = non-list-entry line / unclosed flow (docs paraphrase ok). Note flow entries DO write back (rewritten in-braces).
+L175 id: unquoted number — VERIFIED incl. no-leading-zero (id: 42 fires same message).
+L181 id: 042 would expand to CAN-042... — VERIFIED on `refdes id` (check --no-write shows "id: 042 has no prefix yet" first).
+L185 prefix mismatch (from defaults:) — VERIFIED exact, warning.
+L191-202 malformed key x3 + link variant + check-char suffix — VERIFIED via keys.malformed_key_message (all docs examples reproduce, incl. Expected 'a' for k7f3m2q9x4c).
+L204 key collision — VERIFIED exact incl. git log -S hint and "taking it from the original ... the build passes" (trap VERIFIED end-to-end: 0 errors, exit 0, composite ref kept pointing at copy; fresh key minted for original after key line deleted).
+L225 key changed since baseline — VERIFIED.
+L231 key deleted since baseline — VERIFIED (+ "The old key is recorded for REQ-PWR-002 in baseline 'rev-b'.").
+L240 older baseline references key — VERIFIED (INFO under `refdes audit`; build clean exit 0).
+L246-307 dangling composite: 3 shapes + DISPLAY-ID placeholder + live-label clause — VERIFIED; keys restore dry-run/real VERIFIED; --force refusal VERIFIED w/ title+content-hash; --force overrides; keys adopt refuses unresolved refs VERIFIED.
+L292 imported-composite ending — NOT YET RUN (needs imports).
+L307 keys adopt refuses unresolved refs — VERIFIED.
+
+Possible bugs (PR body, not documented):
+- `refdes rename` crashes AttributeError on flat fields: mapping (`fields:\n  history: on_change`) — revise.py:199 assumes per-type nesting, no type check.
+
+Missing-from-docs candidates (evaluate later):
+- Load-time warning when a composite ref's key belongs to a DIFFERENT live item: "refines references 'REQ-PWR-002@K', but that key is REQ-PWR-003 and REQ-PWR-002 is a different live item. Refusing to refresh the label until you confirm which was meant." (key-collision section doesn't mention it)
+- bare-id dangling message tail: "...-- a typo, a deleted item, or an item renamed while this reference was still bare, and a bare reference cannot follow a rename: write the item's new id here." (Links section L311 headline matches; fine)
+
+=== Links (L29-33) ===
+L29 dangling satisfies: VERIFIED exact shape (items/pcb-a probe-links).
+L30 bare-ref rename + former_ids bullet: VERIFIED (probe-formerids: former_ids on replacement leaves structured-link error as-is; docs claim matches).
+L31 wiki unresolved warning: VERIFIED (reference to 'REQ-PWR-999', which does not exist).
+L32 prose near-miss REQ-PWR-2 stays plain: VERIFIED.
+L33 hand-rename console block: VERIFIED EXACTLY with active statuses (probe-rename2):
+  "(rewrote 1 reference(s) while loading)" + "WARNING <project> — 2 item(s) with no
+   coverage — see coverage.html" + "2 items, 0 errors, 1 warnings"; key unchanged after
+   rename. Coverage warning needs status: active (v3 requirement coverable_statuses:
+   [active], base.yaml:190) — draft reqs print 0 warnings. DOCS FIX: parenthetical
+   L373-374 should say the items are active (draft reqs excluded from coverage).
+
+=== Math (L34-46) ===
+L34 cannot add V and A: VERIFIED (calc 'v': prefix).
+L35 unknown unit 'wat'; 2 x juxtaposition: VERIFIED (unknown unit 'x' for `2 x`).
+L36 unit-shadowing warning + 1.2 [A]: VERIFIED; real ends "...also defined here.";
+  docs quote truncated w/o ellipsis (minor, leave; prose conveys).
+L37 declared as W evaluates to V/A: VERIFIED exact.
+L38 unknown function 'sin'; 7 functions; trig absent: VERIFIED (x = sin(1) alone;
+  `3 sin(1)` gives "only plain function calls are allowed" — not claimed).
+L39 division by zero-tolerance: VERIFIED.
+L40 only one ± tolerance: VERIFIED.
+L41 torque pin "Pin it: tq = ... | N*m": WRONG — pin is accepted, display stays "1 J"
+  (t1/t2 both J; renderer uses pint {units:~P} canonical form, calc.py:530). DOCS FIX.
+L42 fence unknown attribute 'name' + 'not an attribute' (bare word & unquoted value):
+  VERIFIED exact both shapes.
+L43 block name must match [a-z][a-z0-9_-]*, suggestion transform Losses/1losses/losses!
+  -> losses: VERIFIED; 1-40 chars matches BLOCK_NAME_RE {0,39} (calc.py:1005).
+L44 named twice + dup_2 suggestion + same name in two items fine: VERIFIED.
+L45 #calc: fragment warning w/ names list; unnamed-blocks and no-blocks variants:
+  VERIFIED exact.
+L46 warning-not-error, build succeeds, link renders unresolved: VERIFIED (warnings, exit 0).
+
+=== Checks (L47-50) ===
+All 4 VERIFIED (probe-checks, checks: YAML field w/ value/against; 'name' key is
+unknown-key warning — docs/checks.md example uses value/against only, consistent).
+violation message shape incl. W/in² vs ^2: VERIFIED exact (repo-root project + probe).
+
+=== Design log (L51-56) ===
+L51 modified-since-sealed + amends + --reseal + audit record: VERIFIED (probe-seal
+v2; audit "Accepted append-only reseals (durable history):").
+L52 sealed-but-deleted + --reseal drops seal + former_ids stops firing: VERIFIED
+  (probe-seal2 clean repro).
+L53 edited after captured warning (v3): VERIFIED incl. amends-verb sentence (log) and
+  editable-type sentence (component, probe-hist3).
+L54 legacy seal record of deleted entry warning: VERIFIED (v2->v3 flip, probe-seal).
+  log-seal-<board>.yaml naming real (seal.py:57-61).
+L55 whitespace-normalised hash (trailing space/reflow/CRLF all silent): VERIFIED.
+L56 schema.json --no-write/refreshed pair: VERIFIED both exact.
+
+=== Imports (L57-60) ===
+All 4 VERIFIED live (up/down probes): no artifact / pin mismatch + cascading
+"does not exist" / defines X which already exists / has type 'interface' which this
+project's schema does not declare (warning). msgs in imports.py:35,51,86,113.
+id: project config takes ledger/width only (prefix via defaults).
+
+=== Citations (L61-77) ===
+page: '2-4'/'xiv'/0/-1/1.5/'9 9' at load, w/ range+printed-page sentences: VERIFIED.
+Store file shapes: not-valid-YAML / list-not-mapping / merge-conflict / sha256 not-64hex
+(incl. all-digit unquoted int) / no sha256 / page_count 'eight' / -3 / both count+error /
+page_count_sha256 not-hex / duplicate key (identical blocks say "nothing is lost here"):
+ALL VERIFIED exact (probe-cite; record needs sha256+fetched+kept_copy).
+page_count: 0 not an error: VERIFIED.
+Exit-code postures: citations corrupt -> check exit 1 VERIFIED; baseline/membership
+manifest (boards.yaml)/seal corrupt -> exit 2 VERIFIED; id ledger corrupt -> check
+rides past exit 0 (clean probe) + reader cmd (refdes id) exit 2 VERIFIED;
+keys-adopted corrupt -> keys adopt refusal exit 1, check exit 0 VERIFIED;
+history file corrupt -> history redact --confirm exit 1 naming it; check AND build
+demote to "edited-after-captured was not checked: the history store could not be
+read (...)" exit 0 VERIFIED.
+fetch refuses + leaves byte-identical / check --refresh unreachable-exit-1 prose:
+NOT re-probed live (network-dependent); messages exist in source (cli.py) — cite
+source only.
+
+=== Output (L78-82) ===
+assets/app.js+style.css in _site: VERIFIED.
+local image src missing -> build ERROR; resolving src copied to _site/assets/items/...
+  with hash, src rewritten: VERIFIED (probe-clean).
+[datasheet](spec.pdf) href emitted unchanged; site.assets: [pdfs] copies dir: VERIFIED.
+CLI reconfigures stdout UTF-8: VERIFIED (cli.py:51 reconfigure encoding utf-8).
+audit sections (invalidate fields, Item-level overrides, reseals, Imported projects):
+VERIFIED live; items.json diagnostics carries level/message/file/line/item: VERIFIED.
+
+=== DOCS FIXES TO APPLY ===
+1. L114-122: bound HAS required limit: (bound__bare required ['limit'] per
+   schema --json); group also requires title. requirement alone has none.
+2. L120-122 console block: complete the real warning sentence tail.
+3. L373-374 parenthetical: coverage warning needs active reqs (draft excluded).
+4. L408-409: pinning tq | N*m does NOT change display (stays J); fix remedy text.
+
+=== FIXES APPLIED (docs/troubleshooting.md) ===
+1. required-field paragraph: test/component/GROUP use title; BOUND requires limit:;
+   only requirement has no required field under hardware@3 (verified via
+   `refdes schema --json` requireds).
+2. body-empty console block: completed the real warning's tail sentence.
+3. hand-rename coverage parenthetical: noted items are `active`; draft reqs are
+   excluded from coverage (coverable_statuses: [active], base.yaml:190) and print 0
+   warnings (probe-rename vs probe-rename2).
+4. torque display entry: pinning `tq = ... | N*m` is accepted but display stays `J`
+   (renderer prints pint canonical form, calc.py:530 {units:~P}); prose says so now.
+
+No code changes -> no new tests (docs-only task; sabotage rule N/A, noted in PR).
+
+=== VERIFICATION RESULTS ===
+- python docs-site/gen_examples.py --check: pass.
+- ruff check --select E9,F src tests: pass.
+- full suite: 3938 passed, 2 skipped (exit 0; load flake did not fire).
+
+CAN'T VERIFY (logged):
+- "no refdes-project.yaml found" message: repo root is a refdes project, so every
+  worktree subdir loads the root config; source text verified at schema.py:482.
+- fetch refuse/byte-identical + check --refresh unreachable prose: source-verified
+  (messages in cli.py), not re-probed (network-dependent).
+- CHANGELOG "name= earlier draft spelling" history claim: prose, not probed.
