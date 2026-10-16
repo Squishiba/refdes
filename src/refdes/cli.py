@@ -678,10 +678,27 @@ def _run_stamp(args, kind: str) -> int:
         # as the `--no-write` one (`_refuse_no_write`), not the "errors found"
         # code. Naming the file is the whole point: the user asked for a stamp
         # and has to be told which path would have held it.
+        #
+        # The parenthetical follows the reported cause, the rule DIAG-WORD-008
+        # established for the other destination refusals (`id`'s write-back
+        # first among them): a full disk is not a tree that is read-only, and
+        # `(read-only tree?)` with "make the tree writable" sends the user
+        # hunting for a permission that was never the problem. A cause the
+        # tree cannot explain keeps the marker (model.destination_refusal).
+        cause = outcome.refusal_cause
+        remedy = (
+            "Make the tree writable and run it again"
+            if cause is None or model.could_be_read_only(cause)
+            else "Fix the reported failure and run it again"
+        )
         print(
-            f"\nerror: cannot write {outcome.refusal} (read-only tree?) -- "
-            f"{kind} {args.name!r} was not stamped. Make the tree writable and "
-            "run it again, or run it with --no-write to see what it would stamp.",
+            "\nerror: "
+            + model.destination_refusal(
+                outcome.refusal,
+                f"{kind} {args.name!r} was not stamped. {remedy}, or run it "
+                "with --no-write to see what it would stamp.",
+                cause,
+            ),
             file=sys.stderr,
         )
         return 2
@@ -768,10 +785,22 @@ def cmd_index(args) -> int:
 
 
 def _item_tags(item) -> list[str]:
+    """An item's tags, the strings only.
+
+    A `tags:` entry is a plain string, and a mapping element is a load-time
+    error the item is still listed under -- so this read decides what the
+    listing *matches*, and `str()`ing the element put the dict's repr in the
+    haystack: `ls --tag name` found `{'name': 'not-a-string', ...}`, and so
+    did the free-text query (run-6a B6's residual, run-7 F16). An entry that
+    is not a string is not a tag: it gets no match in `--tag` and none in
+    the query, same as the item whose file failed to parse is not in the
+    listing at all."""
     tags = item.fields.get("tags")
-    if not tags:
-        return []
-    return [str(t) for t in tags] if isinstance(tags, list) else [str(tags)]
+    if isinstance(tags, str):
+        return [tags]
+    if isinstance(tags, list):
+        return [t for t in tags if isinstance(t, str)]
+    return []
 
 
 def cmd_ls(args) -> int:

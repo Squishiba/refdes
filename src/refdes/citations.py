@@ -747,6 +747,28 @@ HASH_ONLY_UNCOUNTED_WHY = (
     "it is pinned hash-only, with no kept copy to count offline"
 )
 
+# The other two no-count states `audit` names (run-7 F13, run-6a F1's
+# residual): a document that is not a PDF never has a count -- the count and
+# the extension test share `_page_count_for_pin`'s rule, so nothing will
+# ever write one -- and a PDF whose bytes are here simply has no count on
+# record yet, which a plain fetch fills. Both clauses keep the shape
+# `HASH_ONLY_UNCOUNTED_WHY` has: a clause `audit` prints after "no cited
+# page number was checked:", true of the record, naming what would change
+# it when anything would.
+NOT_A_PDF_UNCOUNTED_WHY = "it is not a PDF, so its pages are never counted"
+UNRECORDED_PAGE_COUNT_WHY = (
+    "the lockfile records no page count for these bytes -- run "
+    "'refdes fetch --path {path}' to count them"
+)
+
+
+def _is_pdf_path(path: str) -> bool:
+    """Whether counting this path's pages is even a thing -- the same
+    extension test `_page_count_for_pin` uses, shared by every reader of the
+    no-count states so `check` and `audit` can never call one document
+    countable and uncountable."""
+    return os.path.splitext(path)[1].lower() in sources_mod.PdfReader.extensions
+
 
 def _hash_only_without_count(path: str, record: Mapping) -> bool:
     """A remote, hash-only pin of a PDF whose record claims no count at all.
@@ -762,13 +784,31 @@ def _hash_only_without_count(path: str, record: Mapping) -> bool:
         return False
     if record.get("kept_copy"):
         return False
-    return os.path.splitext(path)[1].lower() in sources_mod.PdfReader.extensions
+    return _is_pdf_path(path)
 
 
 def _page_count_matches_pin(record: Mapping) -> bool:
     """Whether the count (or failed count) was derived from the pinned bytes."""
     pinned = record.get("sha256")
     return bool(pinned) and record.get(PAGE_COUNT_SHA256_KEY) == pinned
+
+
+def _no_count_why(path: str, record: Mapping) -> str:
+    """Why a record with no page count has unchecked pages, as one clause.
+
+    The three no-count states are three different facts, and the row that
+    prints them has to be true of the record it is printing: a non-PDF can
+    never have a count (same extension test as `_page_count_for_pin`, so the
+    two can never call one document countable and uncountable); a remote pin
+    kept hash-only has no bytes here and a plain fetch will not fetch them;
+    anything else is bytes on this machine with no count *yet*, which is the
+    one state a plain `refdes fetch` repairs.
+    """
+    if not _is_pdf_path(path):
+        return NOT_A_PDF_UNCOUNTED_WHY
+    if _hash_only_without_count(path, record):
+        return HASH_ONLY_UNCOUNTED_WHY
+    return UNRECORDED_PAGE_COUNT_WHY.format(path=path)
 
 
 def _count_provenance_untrusted(path: str, record: Mapping) -> bool:
@@ -1118,8 +1158,9 @@ def _record_problem(cited: object, record: object) -> str | None:
         # output as malformed -- the one failure this validator must not be
         # able to cause. The one range refusal is the clause below, where
         # `fetch`'s own output provably is not in the running. (`_apply_page`
-        # reads a count of 0 as no count, which is its own business and is not
-        # contradicted here.)
+        # reads a count of 0 the same way -- as a real count, so a cited page
+        # past it is out of range -- agreeing with this clause; run-7's review
+        # round closed the earlier reading of 0 as no count.)
         return (
             f"the entry for {cited!r} has {PAGE_COUNT_KEY} {counted!r}, which is not a whole "
             f"number of pages -- it is the count `refdes fetch` took of the bytes it was "
@@ -1505,16 +1546,25 @@ def page_count_gaps(records: Mapping[str, Mapping]) -> dict[str, str]:
 
     A count is not enough by itself: `page_count_sha256` says which pinned bytes
     it counted, and `_count_provenance_untrusted` decides when a count or failed
-    count cannot be read as checked. Two kinds of record are deliberately absent:
-    one with a trusted count, whose pages were checked, and one with neither key
-    whose bytes are on this machine -- a pin a plain `refdes fetch` can still
-    count from the local file or the kept copy the moment a citation gives it a
-    `page:`. The exception is the third row below: a remote pin kept hash-only has
-    no bytes to count and a plain fetch will not fetch them, so no future run of
-    anything but `fetch --update` records a count for it, and an `audit` that
-    stayed silent while `check` warns is exactly the run-5 F1 hole. That is
-    `_apply_page`'s distinction, kept here so the two commands cannot disagree
-    about what "we could not check this" means.
+    count cannot be read as checked. One kind of record is absent: one with a
+    trusted count -- including `page_count: 0`, the real count of a document
+    pypdf opens and finds no pages in (a negative is refused at load,
+    CITE-LOCK-012) -- whose pages were checked, and a cited page past it is
+    `check`'s out-of-range warning to give. Every no-count state is present,
+    with a reason true of the record -- the remote pin kept hash-only (no bytes
+    here and no plain fetch to fetch them), a document that is not a PDF (never
+    counted, by the same extension test `_page_count_for_pin` uses), and bytes on
+    this machine whose count a plain `refdes fetch` has not yet been asked to
+    take (run-7 F13, run-6a F1's residual: an `ok` row for a cited `page:` of a
+    plain-text file read byte-identically to a row whose pages were counted and
+    in range, so "the count may arrive later" was never a fact an `audit` row
+    was entitled to print as `ok`). `check` names the two no-count states no
+    plain fetch can fill (hash-only, not-a-PDF) in its own words, and stays
+    silent for the one state it can still fill -- bytes on this machine whose
+    count a plain fetch records the moment it is asked; `audit` names all
+    three. The asymmetry is deliberate: `check` walks cited `page:` values as
+    it goes, while `audit` is the report a release reviewer reads once, and
+    an unverified citation is the fact it exists to surface.
 
     What a record cannot know is whether anything still cites a `page:` of this
     path -- `fetch` writes the failure against the path, and deleting the `page:`
@@ -1533,8 +1583,8 @@ def page_count_gaps(records: Mapping[str, Mapping]) -> dict[str, str]:
         why = record.get(PAGE_COUNT_ERROR_KEY)
         if why:
             gaps[path] = str(why)
-        elif PAGE_COUNT_KEY not in record and _hash_only_without_count(path, record):
-            gaps[path] = HASH_ONLY_UNCOUNTED_WHY
+        elif PAGE_COUNT_KEY not in record:
+            gaps[path] = _no_count_why(path, record)
     return gaps
 
 
@@ -1838,14 +1888,16 @@ def _apply_page(project, item, spec, record, status, severity) -> None:
 
     A record with neither `page_count` nor `page_count_error` claims nothing
     about its pages -- a hand-written lockfile, or one written before any of
-    this -- and is left alone while a plain `refdes fetch` can still fill it:
-    the skip path counts the pinned document from the bytes on disk the moment
-    a citation gives it a `page:`, and warning about the gap before that run
-    would warn about a lockfile rather than about a citation. The one record
-    no plain fetch can fill is a remote pin kept hash-only: its bytes are not
-    here to count and fetch does not go and get them, so this says the pages
-    are not checked -- `check` and `build` must not publish an out-of-range
-    page number as verified (CITE-LOCK-003).
+    this. It is left alone only where a plain `refdes fetch` can still fill
+    it: the skip path counts the pinned document from the bytes on disk the
+    moment a citation gives it a `page:`, and warning about the gap before
+    that run would warn about a lockfile rather than about a citation. The
+    two states no plain fetch can fill are reported: a remote pin kept
+    hash-only (its bytes are not here to count and fetch does not go and get
+    them) and a document that is not a PDF (the count and the extension test
+    share `_page_count_for_pin`'s rule, so nothing will ever write one) --
+    run-7 F13 names both commands, and `check` and `build` must not publish
+    an out-of-range page number as verified (CITE-LOCK-003).
     """
     if not spec.page or status.state != "ok":
         return
@@ -1869,23 +1921,41 @@ def _apply_page(project, item, spec, record, status, severity) -> None:
         )
         return
     count = (record or {}).get(PAGE_COUNT_KEY)
-    if not isinstance(count, int) or count < 1:
+    if not isinstance(count, int) or count < 0:
         why = str((record or {}).get(PAGE_COUNT_ERROR_KEY) or "")
         if not why:
-            if PAGE_COUNT_KEY not in (record or {}) and _hash_only_without_count(
-                spec.path, record or {}
-            ):
-                status.detail = (
-                    f"the page numbers cited for {spec.path} are not checked: "
-                    f"the lockfile records no page count for this document "
-                    f"because {HASH_ONLY_UNCOUNTED_WHY} -- run 'refdes fetch "
-                    f"--update --path {spec.path}' to establish it"
-                )
-                severity(
-                    status.detail,
-                    file=item.source_file, line=item.source_line, item_id=item.id,
-                )
-            return  # the count is missing, but a plain fetch can still record it
+            if PAGE_COUNT_KEY not in (record or {}):
+                if _hash_only_without_count(spec.path, record or {}):
+                    status.detail = (
+                        f"the page numbers cited for {spec.path} are not checked: "
+                        f"the lockfile records no page count for this document "
+                        f"because {HASH_ONLY_UNCOUNTED_WHY} -- run 'refdes fetch "
+                        f"--update --path {spec.path}' to establish it"
+                    )
+                    severity(
+                        status.detail,
+                        file=item.source_file, line=item.source_line, item_id=item.id,
+                    )
+                elif not _is_pdf_path(spec.path):
+                    # The other state no plain fetch can fill (run-7 F13, the
+                    # `check` half of the finding): pages are never counted
+                    # for these bytes, so the cited page number is not
+                    # checked, and the build must not publish it as verified.
+                    status.detail = (
+                        f"the page numbers cited for {spec.path} are not checked: "
+                        f"the lockfile records no page count for this document "
+                        f"because {NOT_A_PDF_UNCOUNTED_WHY}"
+                    )
+                    severity(
+                        status.detail,
+                        file=item.source_file, line=item.source_line, item_id=item.id,
+                    )
+            # A count of `0` is a count (an empty PDF pypdf opened and found
+            # no pages in); a negative one never reaches this line -- the
+            # lockfile refuses it at load (CITE-LOCK-012). Anything less
+            # than 0 with no reason recorded is a record a plain fetch can
+            # still fill, and that gap is `audit`'s to name.
+            return
         status.detail = (
             f"the page numbers cited for {spec.path} are not checked: the "
             f"lockfile records no page count for this document because {why} -- "

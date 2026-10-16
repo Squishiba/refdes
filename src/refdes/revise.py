@@ -2062,11 +2062,23 @@ def _rewrite_baseline_file(
     try:
         lifecycle._save_baseline_file(project, data)
     except lifecycle.BaselineUnwritable as exc:
+        # The parenthetical and the remedy follow the reported cause, not a
+        # read-only guess (DIAG-WORD-008, the rule `id`'s write-back keeps):
+        # a full disk is no more a read-only tree than the advice is for it,
+        # so it is refused as a full disk.
+        remedy = (
+            "Make the tree writable and run it again"
+            if model.could_be_read_only(exc.cause)
+            else "Fix the reported failure and run it again"
+        )
         raise Refused(
-            f"cannot write {exc.rel} (read-only tree?) -- this baseline was not "
-            "carried forward, so the next build or diff would report every "
-            "entry this rename touched as changed. Make the tree writable and "
-            "run it again."
+            model.destination_refusal(
+                exc.rel,
+                "this baseline was not carried forward, so the next build or "
+                "diff would report every entry this rename touched as changed. "
+                f"{remedy}.",
+                exc.cause,
+            )
         ) from exc
 
 
