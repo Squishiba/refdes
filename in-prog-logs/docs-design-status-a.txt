@@ -1,0 +1,118 @@
+docs-design-status-a — audit implementation-status claims in 5 design docs
+===========================================================================
+
+Task: audit status claims in docs/design/{stale-arithmetic-signal,
+seal-marker-identity,form-ingestion,composition,extends}.md against code and
+git history; correct stale status text only. No code changes -> no behaviour
+tests, no sabotage step (per TASK.txt). No changelog fragment: internal
+design docs only (changelog.d/README.md rule: user-visible changes only).
+Full suite skipped per TASK.txt; ran `pytest tests -k "docs or anchor or
+link"` and `gen_examples.py --check` instead.
+
+Row format: doc | claim (line) | actual | evidence
+
+stale-arithmetic-signal.md
+1. Header "Implemented, as of v0.5.0 (unreleased)" (L3) | SUPERSEDED:
+   v0.5.0 SHIPPED 2026-08-21 (CHANGELOG.md:464, tag v0.5.0); implementation
+   b537edd is 2026-08-28 -> signal ships with the NEXT release, currently
+   unreleased | git log -1 b537edd; git tag; CHANGELOG.md:464
+2. Header "stale_arithmetic field on lifecycle.Baseline/diff output" (L3-4) |
+   PARTIAL: field is on DiffResult; baseline entries carry verdict/calc_hash
+   | lifecycle.py:955 (DiffResult), :374-376 (baseline entries)
+3. Prose "still describes accurately" header claim: verified the landed shape
+   matches: _stale_arithmetic (lifecycle.py:1005), _verdict_field_name =
+   status/enum (lifecycle.py:562), calc_hash_for via calc.extract_blocks
+   (build.py:1988-2010), cli annotation "stale arithmetic: status changed,
+   calc block did not" (cli.py:1626-1627), no-baseline silence strings
+   (cli.py:1823,1831), blocked.py exists, threads.md landed (spec +
+   src/refdes/threads.py) | all file:line as named; d71c143 sweep already
+   fixed decision->log prose
+EDITS: header rewritten (L1: v0.5.0 -> b537edd/next-release; Baseline/ ->
+DiffResult + verdict/calc_hash).
+
+seal-marker-identity.md
+1. Header "proposed... Nothing here is landed" (L1-2) | DONE-TRUE: options
+   (c)/(d)/(e) unbuilt; derivation fallback unchanged
+   (history.py:1160 key or item.key or display_id or record_id) | left as is
+2. "refdes history is unreleased; fragment pending; no CHANGELOG entry; last
+   release 0.5.0" (L51-52, L251) | DONE-TRUE | changelog.d/
+   history-commands.added.md exists; CHANGELOG 0.5.0 section has no
+   refdes-history entry; tag v0.5.0
+3. "This repo's own .refdes/ has no history/ directory. There are no markers
+   on disk anywhere outside test fixtures." (L52-53, L253) | SUPERSEDED by
+   3010883 (#158, 2026-10-02): repo's own .refdes/history/events/ carries 6
+   legacy-seal markers (git show 3010883 --stat; ls + grep) | EDITED x2
+4. "a derivation decision is nearly free today" (L95-97) | PARTIAL: free for
+   unmigrated projects only — this repo is migrated | EDITED (paren note)
+5. "H5's planned downgrade of _report_deleted from error to warning" (L234)
+   | DONE in 3edb68b (#157): history-backed orphan is "a warning ... never
+   an error" | seal.py:703-743 docstring+branches | EDITED
+6. "_report_deleted scans the base seal file only (seal.py:354)" (L238) |
+   SUPERSEDED by own evidence: the pass loops all boards since 55fd49d that
+   introduced it (git show 55fd49d:src/refdes/seal.py) | EDITED (Q5 premise)
+NOTE: seal.py/history.py line cites in §7 drifted (functions moved); left
+(dated verification records; status text corrected).
+
+form-ingestion.md — NO EDITS (all claims verified true)
+1. Header "proposed; no slices scoped, no code written" (L1) | TRUE: no
+   intake/ingestion code in src/ (grep), in-prog-logs/form-ingestion-design
+   .md is design-only
+2. "shipped New Item form ... sends no links (create.js:154-157)" (L137-139)
+   | TRUE: create.js posts type/fields/id/destination/amends only
+   (create.js:189-193) |
+3. "create API's link support landed as 9d9b549 ... (#100)" (L141) | TRUE
+   (2026-09-29)
+4. §4 assumptions-wrong (no body: in create; create schema doesn't advertise
+   link verbs) | TRUE: CreateRequest has links, no body (serve/edit.py:1021
+   -1036); _create_schema returns types/fields/boards/workspaces/date_format
+   only (serve/api.py:607-640)
+5. "grammar is small enough ... calc.py:834-861" | TRUE (parse_limit at
+   calc.py:834)
+
+composition.md
+1. Header "landed on ao/refdes-106/root (rename 6f2ea68, widening 5d05498,
+   doc-only patches 08b79e4)" (L1-4) + same SHAs in Implementation status
+   (L34-35) | SUPERSEDED: all three SHAs unresolvable (branch gone,
+   rebased); landed SHAs: rename dc0c138, widening 0459f64, doc-only patches
+   8085da2, docs-landed f842faa (all 2026-09-20) | git rev-parse fatal; git
+   log --grep/-S | EDITED x2
+2. "base.yaml factoring refactor is deliberately deferred" (L4-5) / "the
+   sets-factoring half is still to do" (L37-38) | DONE in ecb85bb
+   (2026-09-21); base.yaml:111 declares sets:; oracle
+   test_hardware3_base_resolves_unchanged lives tests/test_extends.py:582 |
+   EDITED x2
+3. "Today include: carries fields only: _expand_include (standards.py:305)
+   merges field_sets: entries into fields:" (L46-48) | SUPERSEDED by landed
+   widening+rename: _expand_include (standards.py:440) resolves
+   fields/links/body over sets: | EDITED
+4. §5 table coords "_merge_field_sets (standards.py:71)", "_expand_include
+   ... standards.py:361,371", "schema.py:489 resolves" | SUPERSEDED:
+   _merge_sets at standards.py:416 (called :74), _merge_types :78,
+   _resolve_extends called at standards.py:90; schema.py:489 is
+   _validate_required_when | EDITED (drift note)
+5. §6 quoted messages "field_sets.<name> ..." | renamed: standards.py:86
+   ships "sets.{name} collides..." | EDITED (note)
+6. §7 "hardware@3 is unreleased, so the rename costs..." (L425) | TRUE,
+   dated decision recap | not touched
+7. tests test_extends_naming_a_set_is_an_error /
+   test_extends_and_include_together_own_declaration_wins "are implemented"
+   (L38-40) | TRUE (test_composition.py:390,413) | not touched
+
+extends.md
+1. Header "Implemented (phases 1-4, ao/refdes-113)" (L4) | SUPERSEDED
+   pointer: branch unresolvable; landed as engine ab55e27 (2026-09-20, phase
+   1) + follow-ups cd05c4b/4d421af/7305402; Implementation-status para
+   verified true: _resolve_extends (standards.py:646), coverage.group_
+   inherited default true (configcheck.py:75,419), base.yaml:210
+   "extends: requirement", oracle tests/test_extends.py:582 | EDITED (branch
+   pointer only)
+2. "hardware@3 is still [Unreleased]" (L327, L389-390) + repo pinned to it |
+   TRUE (CHANGELOG [Unreleased]; refdes-project.yaml standard version: 3) |
+   not touched
+3. design-debate adoption "cancelled on 2026-10-01 (§7.2)" (L27,401-403) |
+   TRUE and consistent with threads-4a retirement (#176) | not touched
+4. §11 backlog quote "not yet implemented" | dated 2026-09-19 record,
+   explicitly dated | not touched
+
+Suite: pytest tests -k "docs or anchor or link" — see .scratch/suite.txt
+(tail in PR body). gen_examples.py --check — see PR body.
