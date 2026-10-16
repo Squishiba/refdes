@@ -221,6 +221,111 @@ def test_item_on_change_valid_mapping_override_has_no_error(tmp_path):
     assert item.on_change_for("status", project.types["note"], "ignore") == "invalidate"
 
 
+def _fields_shape_case(shape: str):
+    return (
+        "defaults: {type: note}\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    on_change:\n"
+        f"      fields: {shape}\n"
+        "      reason: Rotates during bring-up.\n"
+    )
+
+
+def test_item_on_change_fields_list_is_a_clean_load_error_not_a_crash(tmp_path):
+    # B8 (user-sim run 7): `fields:` written as a list used to survive the
+    # load-time mapping validation untouched and crash model.on_change_for
+    # with a raw AttributeError in every command that computes a hash.
+    _write_project(
+        tmp_path,
+        CONFIG,
+        "defaults: {type: note}\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    on_change:\n"
+        "      fields:\n"
+        "        - status: invalidate\n"
+        "      reason: Rotates during bring-up.\n",
+    )
+    project = _build_at(tmp_path)
+    item = project.item_by_id("NOTE-001")
+    errors = [d for d in project.errors if "on_change fields:" in d.message]
+
+    assert len(errors) == 1
+    assert errors[0].message.startswith(
+        "on_change fields: must be a mapping of field name to mode, "
+        "got [{'status': 'invalidate'}] -- write it as fields: {status: timeline}"
+    )
+    assert (errors[0].file, errors[0].line, errors[0].item_id) == (
+        "items/note.yaml",
+        3,
+        "NOTE-001",
+    )
+    assert item.on_change_override == {"reason": "Rotates during bring-up."}
+    assert item.on_change_for("status", project.types["note"], "ignore") == "ignore"
+
+
+def test_item_on_change_fields_other_non_mapping_shapes_are_clean_errors(tmp_path):
+    # B8's neighbouring shapes: string, number, null each crashed the same
+    # model.on_change_for line ('str'/'int'/'NoneType' has no attribute
+    # 'get'); each now gets the same clean load diagnostic.
+    for shape, shown in (
+        ("'status: invalidate'", "'status: invalidate'"),
+        ("3", "3"),
+        ("null", "None"),
+    ):
+        _write_project(tmp_path, CONFIG, _fields_shape_case(shape))
+        project = _build_at(tmp_path)
+        item = project.item_by_id("NOTE-001")
+        errors = [d for d in project.errors if "on_change fields:" in d.message]
+
+        assert len(errors) == 1, shape
+        assert errors[0].message.startswith(
+            f"on_change fields: must be a mapping of field name to mode, got {shown}"
+        )
+        assert item.on_change_override == {"reason": "Rotates during bring-up."}
+        assert item.on_change_for("status", project.types["note"], "ignore") == "ignore"
+
+
+def test_item_on_change_field_entry_naming_an_undeclared_field_errors(tmp_path):
+    # F15 (user-sim run 7): an entry naming a field the type does not
+    # declare loads clean and does nothing. It now errors, matching the
+    # unknown-mapping-key convention (error + drop), and the entry is dropped.
+    _write_project(
+        tmp_path,
+        CONFIG,
+        "defaults: {type: note}\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    on_change:\n"
+        "      fields:\n"
+        "        bogusfield: invalidate\n"
+        "        status: timeline\n"
+        "        body: ignore\n"
+        "      reason: Rotates during bring-up.\n",
+    )
+    project = _build_at(tmp_path)
+    item = project.item_by_id("NOTE-001")
+    errors = [d for d in project.errors if "has no field" in d.message]
+
+    assert len(errors) == 1
+    assert errors[0].message.startswith(
+        "on_change fields.bogusfield: type 'note' has no field 'bogusfield'"
+        " -- declared fields: status, body"
+    )
+    assert (errors[0].file, errors[0].line, errors[0].item_id) == (
+        "items/note.yaml",
+        3,
+        "NOTE-001",
+    )
+    assert item.on_change_override == {
+        "fields": {"status": "timeline", "body": "ignore"},
+        "reason": "Rotates during bring-up.",
+    }
+    assert item.on_change_for("status", project.types["note"], "ignore") == "timeline"
+    assert item.on_change_for("body", project.types["note"], "invalidate") == "ignore"
+
+
 def test_on_change_override_inherited_from_defaults_is_reported_at_the_defaults_line(
     tmp_path,
 ):

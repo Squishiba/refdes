@@ -1,0 +1,190 @@
+docs-checks-verify — verify docs/checks.md against the tool (2026-10-16)
+
+Branch: docs-checks-verify, base main@185aa53. Tree clean at start.
+Method: fresh .scratch/checks-verify/{proj1..proj10}/, `refdes init`
+(pins standard: hardware@3) + hand-built projects; every quoted string
+reproduced by running the command, not read from source. Static schema
+facts via `refdes schema` (proj1/schema.json) + `grep -n` into
+src/refdes/calc.py, build.py, schema.py and
+standards/hardware/v3/base.yaml.
+
+CLAIM TABLE (line numbers are docs/checks.md at 185aa53)
+
+L8 "Any item with a `limit` field can be checked against; in the standard
+  schema that is the `bound` type" — VERIFIED. schema.json: bound requires
+  limit (base.yaml:222 `type: limit, required: true`); run_checks resolves
+  `against:` generically off target.fields.get("limit") (build.py:1836).
+
+L20-27 form table `<= < >= > == range` — VERIFIED. COMPARE_RE accepts
+  exactly these five ops (calc.py:812); runtime proj2: all six forms parse
+  and check (`<= 0.15 W/in^2`, `< 85 degC` fails at exactly 85 with margin
+  0, `>= 0.90`, `> 1 MHz`, `== 50 ohm` passes exact 50 ohm / fails
+  50 ohm ± 1%, `9 V .. 36 V` fails a straddling 40 V ± 20%).
+
+L29 lower bound may omit the unit, `9 .. 36 V` — VERIFIED. calc.py:850-853
+  borrows the upper unit; proj2 BND-LIM-006 parses and a 20 V ± 5% check
+  passes it.
+
+L31-38 unparseable limit = build error at validation — VERIFIED verbatim:
+  `ERROR items/bounds/bad.yaml:7 [BND-BAD-001] — limit: could not read
+  limit 'somewhere under 2 watts'; expected a comparison such as
+  '<= 2 W/in^2' or a range such as '9 V .. 36 V'`.
+
+L40-46 multi-bound note — VERIFIED. Fires on >=2 numbers AND a
+  conjunction (calc.py:814-831). The docs' sensor-sentence reproduces:
+  second line `note: if this limit describes more than one bound, split it
+  into one item per bound`.
+
+L48-84 one limit/one bound — VERIFIED. A list limit fails to parse
+  (proj9: `could not read limit "['<= 1 A', '<= 2 A']"` + note); omitting
+  limit is `missing required field 'limit'`; `<= 1 %` parses and a 0.5 %
+  check passes ("% is a unit the tool understands"); the three-item split
+  (BND-SNS-010/011/012 shape) builds clean.
+
+L92-104 calc-sum against scalar bound — VERIFIED. proj8 is exactly this:
+  I_total = I_slot1 + I_slot2 + I_slot3 checked against
+  BND-PWR-020 (limit "<= 25 A").
+
+L106-121 checks: on the working item; `value` must be a calc variable of
+  the same item; `against` needs a limit, may be imported — VERIFIED.
+  proj7/proj8: board checks against the imported bound; tightening the
+  platform limit 25 A -> 20 A (rebuild platform, rebuild board, board file
+  untouched) fails the board: `I_total violates BND-PWR-020: worst case
+  24 A vs <= 20 A`. A value not defined in the item's own calc:
+  `check refers to 'nope', which no calc block defines`.
+
+L122-129 composite expansion + rename refresh — VERIFIED. proj1: after a
+  writable load, `against: BND-THM-001@0zp1nvttysk` (key minting line
+  "(minted N key(s) and rewrote N reference(s) while loading)" — `refdes
+  check` itself does it). Renaming the bound BND-THM-001 -> BND-THM-007
+  refreshed the stored label in place (`against: BND-THM-007@0zp1nvttysk`)
+  and the check kept resolving; message names the new id.
+
+L131-140 worst case not nominal — VERIFIED. `V = 10 V ± 20%` against
+  `<= 11 V`: `worst case 12 V vs <= 11 V (nominal 10 V)`, exit 1.
+
+L142-163 failure shape — VERIFIED byte-for-byte:
+  `ERROR   items/log/regulator.md:2 [LOG-PWR-001] — P_dens violates
+  BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2` (superscript ²
+  in the value, caret ^2 in the limit text, as written). Nominal-suffix
+  case reproduces the docs' shape: `CLIM violates BND-LIM-009: worst case
+  697 mA vs <= 600 mA (nominal 606.1 mA)`.
+  - PARTLY WRONG: "A value that does carry a tolerance gets a
+    `(nominal X)` suffix" — the suffix is added only for one-sided
+    comparisons (build.py:1852-1853). A tolerance-carrying value failing a
+    RANGE check shows `range 40 V vs 9 V .. 36 V` (proj3, 40 V ± 20%), and
+    an `==` failure shows `50 Ω vs == 50 ohm` — no suffix. FIXED (qualified
+    to one-sided bounds).
+  - fail badge, check table detail, site-index listing, `refdes check` exit
+    1 — all VERIFIED (proj1 build site; proj5 info-severity build shows the
+    badge and index row too).
+
+L165-166 tip `P_dens : W/in^2` — WRONG. The colon spelling is retired
+  (calc.py:1093-1095; changelog.d/calc-colon-units-retired.breaking.md)
+  and is a hard error: `calc 'Q': the 'name : unit = expression' spelling
+  was retired -- write `Q = 5 W | W`; run 'refdes calc-rewrite' to fix a
+  whole project`. math.md:17 shows the current pipe spelling. FIXED to
+  `(P_dens = P_diss / A_board | W/in^2)`.
+
+L168-201 check_severity scalar levels — VERIFIED. proj4 (failing P_dens on
+  a log): `warning` -> WARNING visible, 0 errors, exit 0; `info` -> hidden
+  (grep count 0), visible with -v (count 1), exit 0; default error -> exit
+  1. "one level per type... whatever its status": the log item kept status
+  accepted throughout and followed the type's scalar.
+  Badge/table unaffected by info: VERIFIED (proj5 site, candidate
+  component: `fail` badge + `worst case 3 A vs <= 2 A` row + index row).
+
+L203-234 severity per status — VERIFIED. proj4 mapping
+  {default: error, superseded: info, rejected: info}: accepted+failing ->
+  exit 1; flip status to superseded -> exit 0, hidden, -v shows it; flip
+  back -> exit 1. Coverage refusal verbatim: `configuration error:
+  types.log.check_severity does not cover status 'proposed'. Add it, or
+  add default: <level>.` (docs show exactly this). `refdes release` gate:
+  proj5 with the standard component mapping, item candidate (info):
+  `release rev-a` stamped with default gate (info_check_failures release:
+  false); with `info_check_failures: { release: true }` -> `FAIL
+  info_check_failures  CMP-U10`; flip the item to `selected` (severity
+  error) -> release blocked at the floor by the ERROR. One-word status edit
+  confirmed.
+
+L236-247 bundled standard ships component
+  {candidate: info, selected: error, rejected: info, obsolete: info} —
+  VERIFIED: base.yaml:250 byte-identical; runtime proj5: candidate+failing
+  = hidden info, exit 0; `-v` shows it; move to selected = ERROR exit 1.
+  Overlay `component: check_severity: warning` replaces it wholesale
+  (selected+failing became WARNING, exit 0) — VERIFIED.
+
+L249-256 three refusals — VERIFIED verbatim (proj4):
+  - key 'choosen' -> `configuration error: types.log.check_severity key
+    'choosen' is not a declared status. Declared choices: proposed,
+    in_progress, accepted, on_hold, rejected, superseded.`
+  - mapping on group -> `configuration error: types.group.check_severity
+    is a mapping but type 'group' declares no 'status' field. Write
+    check_severity: error, or declare status.`
+  - bad level incl. default -> `configuration error:
+    types.log.check_severity[default] must be one of error, warning, info,
+    got 'fatal'`
+
+L258-260 unevaluable checks always errors regardless of severity —
+  VERIFIED: with log check_severity: info, a dangling `against:` is still
+  ERROR and exit 1 (proj4).
+
+L262-271 unevaluable table — all four VERIFIED verbatim (proj3):
+  `check refers to 'nope', which no calc block defines` /
+  `check against 'BND-NOPE-999', which does not exist -- ...` /
+  `check against BND-BAD-006, which declares no limit` /
+  `check P_bad against BND-BAD-004: cannot compare: Cannot convert from
+  'watt' ... to 'volt' ...`.
+  MISSING FROM DOCS: the malformed-entry messages (run_checks,
+  build.py:1705-1770) — `checks: must be a list of {value, against}
+  entries`, `each checks: entry needs 'value' and 'against'`, and the
+  unknown-key tiers (near-miss key = error naming the fix, other extra key
+  = warning, kept). A user hits these on any typo in `checks:`. ADDED one
+  table row (kept it small).
+
+L273-282 margin + summary.html — VERIFIED. proj6: margins -3%, +3%, +40%
+  render in summary.html in tightest-first order (bad/warn/good bars).
+  - PARTLY WRONG: "the sign always agrees with the pass/fail verdict" — a
+    strict `<` failing at exactly the limit reports margin 0.0% with the
+    failed verdict (proj10: `I_e violates BND-E-001: worst case 10 A vs
+    < 10 A`, summary bar 0.0%). See-pointer to output.md covers the
+    undefined-margin cases (output.md:124-153 documents them, incl. margin
+    0 at the limit). FIXED with the zero-margin exception named.
+
+L284-289 cross-project tightening — VERIFIED (proj7/proj8 above).
+
+FIXES MADE (docs/checks.md only; no code/standard/other pages changed):
+1. Tip spelling `P_dens : W/in^2` -> `P_dens = P_diss / A_board | W/in^2`
+   (colon form retired, a build error).
+2. "(nominal X)" suffix qualified to one-sided bounds (ranges/equality
+   don't get it).
+3. Sign-agrees sentence names the one exception: a strict `<`/`>` that
+   fails exactly at the limit reports a margin of zero.
+4. Unevaluable table: added the malformed-entry row (missing 'value'/
+   'against').
+
+NO CHANGELOG FRAGMENT — docs-page corrections only; nothing about tool
+behavior changes, per changelog.d/README.md ("each change that deserves a
+changelog entry"; the changelog records the tool, not the docs). Task says
+no fragment; rule applied: README's gate is "deserves a changelog entry",
+and a pure docs fix to an internal page's accuracy doesn't change what a
+release contains for its users.
+
+SABOTAGE (COMMON rule): not applicable — this task makes no behaviour
+fix (docs-only per TASK line 5: "don't change code"), so there is no
+behaviour fix to revert-watch-fail. Checked for a docs-content guard on
+this page: tests reference docs/checks.md only in a comment
+(tests/test_check_severity_status.py:157); test_docs_examples.py pins
+schema-reference.md only. Nothing parses checks.md, so a sabotage of these
+prose edits could not fail any test; running the docs gates is the
+substitute (anchors suite + gen_examples --check, below).
+
+TESTS:
+- `pytest -q tests/test_docs_anchors.py tests/test_docs_examples.py
+  tests/test_check_severity_status.py` -> 24 passed (docs gates over the
+  edited page: anchors + pinned schema-reference examples + severity suite).
+- `python docs-site/gen_examples.py --check` -> "up to date", exit 0.
+- `ruff check --select E9,F src tests` -> All checks passed!
+- Full suite, foreground, once, at the end (`.scratch/suite.txt`):
+  `3938 passed, 2 skipped in 327.31s`, exit 0. Known serve flake did not
+  fire; no re-run needed.

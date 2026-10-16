@@ -21,7 +21,7 @@ coverage, and previews all work across folders. A shared bound checked by two
 boards shows both in its incoming links:
 
 ```
-IFC-CAN-001 backlinks: {'constrained_by': ['LOG-A-001', 'LOG-B-001']}
+IFC-CAN-001 backlinks: {'constrains': ['LOG-A-001', 'LOG-B-001']}
 ```
 
 Tighten that shared limit and each board's own arithmetic is re-checked against it.
@@ -43,10 +43,12 @@ boards:
     path: brd-b        # optional; use when the folder is spelled differently
 ```
 
-A board is the first path segment under `items/`, matched against this registry —
-`items/board-a/requirements.yaml` is on `board-a`. A segment that is not registered
-(`shared/` above) gets no board; that is not an error, since shared items
-legitimately belong to none.
+A board is the first path segment under `items/` (the second under
+`item_layout: workspace` — see [workspaces](workspaces.md)), matched against this
+registry — `items/board-a/requirements.yaml` is on `board-a`. A segment that is
+not registered (`shared/` above) gets no board, and every item under it gets a
+`no board:` warning naming the two ways to fix it; it is not an error, since
+shared items legitimately belong to none.
 
 `boards:` is entirely opt-in. **With no `boards:` block, nothing here does
 anything** — every item's board stays unset and the site is unaffected. Adding the
@@ -87,8 +89,9 @@ WARNING items/board-b/requirements.yaml:9 [REQ-PWR-004] — item is on board
 ```
 
 **Per-board pages.** Each registered board gets its own scoped
-`document-<board>.html`, `coverage-<board>.html`, `log-<board>.html`, and
-`summary-<board>.html`, alongside the unchanged project-wide versions. Handing
+`document-<board>.html`, `coverage-<board>.html`, `log-<board>.html`,
+`summary-<board>.html`, and `tree-<board>.html`, alongside the unchanged
+project-wide versions. Handing
 `document-board-a.html` to Board A's team shows only their items. The sidebar
 gets a group per board linking to that set automatically — see
 [pages](pages.md#grouping-a-page-under-a-board) for tagging a hand-written
@@ -116,8 +119,8 @@ surrogate is the map key and the current display id stays inside for readability
 ```yaml
 boards:
   k7f3m2q9x4a:
-    id: REQ-PWR-004
     board: board-a
+    id: REQ-PWR-004
 ```
 
 Readers accept either shape, including a mixed manifest left by a live identity
@@ -131,9 +134,11 @@ WARNING items/board-b/requirements.yaml:9 [REQ-PWR-009] — REQ-PWR-009 moved fr
         --accept-board-move' if this is deliberate, or move the file back.
 ```
 
-Run `refdes build --accept-board-move` to accept it; `refdes audit` lists every
-accepted and outstanding move. Unlike a sealed log entry, a board move is never a
-build error — moving a file is an ordinary thing to do on purpose.
+Run `refdes build --accept-board-move` to accept it: the accepting build reports
+the move as accepted and the manifest records the new board, so `refdes audit` —
+which lists only the moves still outstanding — goes quiet. Unlike a sealed log
+entry, a board move is never a build error — moving a file is an ordinary thing
+to do on purpose.
 
 **After `refdes keys adopt`, the manifest is keyed by surrogate key.**
 `keys adopt` converts it: live, identifiable memberships are re-keyed by
@@ -192,8 +197,8 @@ So is a `conforms_to:` that is not a list of group ids, reported once at load
 rather than once per character of a bare string:
 
 ```
-configuration error: boards.board-a conforms_to must be a list of group ids,
-        got 'GRP-DBG' -- write conforms_to: [GRP-001]
+configuration error: refdes-project.yaml: boards.board-a conforms_to must be
+        a list of group ids, got 'GRP-DBG' -- write conforms_to: [GRP-001]
 ```
 
 `coverage-<board>.html` grows a **Conforming contracts** table listing those
@@ -272,9 +277,10 @@ that had been written anyway. The moment the board's first item lands, its
 pages appear.
 
 The same applies one report down: a board with items but no [design
-log](design-log.md) entries gets no `log-<board>.html`, and one with no
+log](design-log.md) entries gets no `log-<board>.html`, one with no
 [citations](markdown.md#citing-a-datasheet) gets no
-`references-<board>.html`. Every scoped report that exists is linked from
+`references-<board>.html`, and one whose items carry no part numbers gets no
+`parts-<board>.html`. Every scoped report that exists is linked from
 the sidebar, and every link resolves to a page that exists.
 
 ## Separate projects with imports
@@ -322,7 +328,7 @@ something that no longer exists.
 | Be linked to | Be edited or renumbered |
 | Be checked against (`limit` works) | Be validated by your schema |
 | Show a reference page | Appear in your coverage |
-| Show *your* incoming links | Show other projects' incoming links |
+| Show *your* incoming links | Show incoming links from outside the artifact |
 
 They keep the content hash their own project computed, which is what makes
 cross-project suspect links work once the history layer lands. Their artifact

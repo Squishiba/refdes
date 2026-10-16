@@ -54,7 +54,10 @@ verifies: [REQ-PWR-002]
 ```
 
 `REQ-PWR-002` now shows `verified_by: [TST-PWR-002]` without mentioning the test.
-Declaring both ends is allowed but redundant.
+The computed half is not also authorable: the standard's inverse verbs
+(`verified_by`, `satisfied_by`, …) are never listed under a type's `links:`, so
+writing `verified_by:` on a requirement is an unknown-field diagnostic with the
+edge dropped, not a second copy of it.
 
 ## Units are the type system
 
@@ -81,11 +84,11 @@ is the absence of all of them:
 
 | Stage | Means | Comes from |
 |---|---|---|
-| `open` | Nothing references it | — |
+| `open` | Nothing counts as covering it | — |
 | `addressed` | Somebody has worked on it | a **log** entry `addresses` it |
 | `claimed` | A verdict or component says it meets it, but that claim hasn't settled | a **log**/**component** `satisfies` it, with a `status` not (yet) in the type's `satisfying_statuses:` |
 | `satisfied` | A settled verdict or component claims to meet it | a **log**/**component** `satisfies` it, with a `status` in `satisfying_statuses:` |
-| `verified` | A test proves it | a **test** `verifies` it |
+| `verified` | A test proves it | a **test** `verifies` it, with a `status` in the type's `verifying_statuses:` |
 
 A requirement can be satisfied on paper and completely unverified. Another can be
 addressed for weeks with no decision reached. One "done" flag hides both. See
