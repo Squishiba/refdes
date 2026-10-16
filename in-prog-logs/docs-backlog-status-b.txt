@@ -1,0 +1,114 @@
+Task: audit status of findings 20-28 in docs/design/backlog.md; correct stale
+status lines. Branch docs-backlog-status-b. Docs-only change: no code, so no
+test and no sabotage step (per TASK.txt); no changelog fragment (internal
+design doc — the changelog.d/README.md "user-visible change" rule does not
+apply).
+
+Method: for each finding, read its section with sed -n (narrow ranges, never
+the whole ~2900-line file), grep src/ + tests/ for the named identifiers,
+git show/log the cited commits, and check the cited line numbers against the
+current tree.
+
+Row per finding (number | stated status | actual status | evidence):
+
+20 | done | DONE — status accurate | docs-site/gen_examples.py exists;
+   tests/test_docs_examples.py:47,56,67 (injected==live, per-type==new-item,
+   standard-version label); .github/workflows/docs.yml:40 runs
+   `gen_examples.py --check`; cited commit 1e997b8 exists
+   ("docs: inject a generated per-type example into the schema reference").
+   No edit.
+
+21 | decided (Jared 2026-09-19); implemented on ao/refdes-113 phases 1-4,
+   preset adoption cancelled 2026-10-01 | DONE (landed on main) — status
+   accurate | extends parsed at schema.py:987; inheritance applied at
+   standards.py:692-696 (_apply_parent), merge at standards.py:595;
+   coverage.group_inherited default True at model.py:956 (configcheck.py:75,
+   build defaults True); v3 base.yaml:210 `bound: extends: requirement`;
+   docs/design/extends.md §7.2 "Design-debate preset adoption cancelled",
+   §12 "Implementation notes"; follow-on claim checked:
+   `_check_overlay_link_nulls` is absent from src (removed as claimed); no
+   design-debate preset remains in src (d71c143/#176 merged decision into
+   log). No edit.
+
+22 | DONE (heading suffix) | DONE — status accurate | v3 base.yaml:146-147
+   (claims set) `satisfies: [requirement, bound]` + `constrained_by: [bound]`
+   applied to decision (component include `claims` at :258); component
+   `checks:` field at :257; CHANGELOG.md:35 breaking point 2. No edit.
+
+23 | both parts done | DONE — status accurate | Part 1: commit a077cb2
+   exists; templates/item.html.j2:204,214,216,220 append `#page=` to both
+   hrefs, guarded, text unchanged; references.html.j2 has no `page` (0
+   matches), document.html.j2 unchanged as claimed. Part 2: CitationSpec
+   .section model.py:419, CitationStatus.section_page model.py:460;
+   citations.py:657 resolve_sections, :1813 _apply_section, :2494
+   _section_bytes, sections_sha256 written at :3043 and refused on mismatch
+   at :1118-1123; pyproject.toml:57 `pdf = ["pypdf>=6.19"]`. No edit.
+
+24 | shipped | DONE — status accurate | BoardSpec.conforms_to parsed at
+   schema.py:1033 (configcheck.py:78,461); build.py:1011
+   validate_conforms_to hard-errors unregistered/non-group targets;
+   build.py:1161 compute_board_coverage per (item, board);
+   templates/coverage.html.j2:48 "not yet satisfied on boards", :74+
+   "Conforming contracts" table. No edit.
+
+25 | both parts done | DONE, but the status line names a key that no longer
+   exists (drift) | Part 1: f8e7ee0 exists; the `citations` set is the third
+   entry of v3 base.yaml's `sets:` block (:110, entry at :121 — NOT
+   `field_sets:`), and decision/component include it (:303/:258);
+   migration.yaml:82 `datasheets: citations`; items/components/power.yaml:16
+   uses `path:`. Part 2: CitationSpec.path model.py:411; citations.py:148
+   classify; revise.py:58,130 `citation_keys` mapping section;
+   migration.yaml:84 citation_keys; stale `url:` fails validation at
+   build.py:443-449 naming the rename. EDIT: the status text says
+   "hardware@3's `field_sets:` has a third entry" — `field_sets:` was renamed
+   to `sets:` in dc0c138 (schema.py:62 SCHEMA_KEYS={types,link_types,sets};
+   schema.py:377-379 makes `field_sets:` a hard error naming the rename;
+   changelog.d/sets-rename.breaking.md). Same drift class PR #303 warned
+   about. Fixed the key name + rename citation; rest untouched.
+
+26 | implemented for CSV and XLSX; design reviewed | DONE for CSV+XLSX —
+   substance accurate, two cited line numbers stale | sources.py:232
+   `extensions = (".csv",)` (status cites :230) and sources.py:472
+   `csv.reader(fh, strict=True)` (status cites :465); calc.py:643 line-shape
+   message confirmed exact; xlsx reader sources.py:519-541 with
+   pyproject.toml:58 `xlsx = ["openpyxl>=3.1"]`; calc-sources.md:1-3 "Status:
+   Reviewed ... All section 11 questions are now answered" confirmed; 2001801
+   + 4496053 both exist, both 2026-09-15. "XLSX name listing in the browser
+   picker" confirmed still future work (XlsxReader has no list_entries; only
+   CSV/Pdf readers do, sources.py:309/:904). EDIT: corrected the two drifted
+   line cites.
+
+27 | done (shipped in c96d96b) | DONE — status accurate | commit c96d96b
+   exists; calc.py:329 Equation, :357 set_equations, :370 validate_equations;
+   schema.py:393 _load_equations wired at :790;
+   changelog.d/calc-project-equations.added.md present. No edit.
+
+28 | done (shipped in aa94058) | DONE, status line names a key that no longer
+   exists (same drift) | schema.py:47 PROJECT_SETTINGS_NAME, :52 SCHEMA_NAME,
+   :56 LEGACY_CONFIG_NAME, :90 LEGACY_CONFIG_ERROR; aa94058 exists;
+   changelog.d/config-split-two-files.breaking.md present; AGENTS.md confirms
+   the split is current behavior. EDIT: the status text says the overlay file
+   "holds only `types:`/`link_types:`/`field_sets:`" — it is `sets:` since
+   dc0c138 (schema.py:62); fixed with the rename named.
+
+Result: 3 sections edited (25, 26, 28), all drift corrections; 6 confirmed
+accurate, no edit. No discussion text, decisions, headings, or other findings
+touched.
+
+Verification commands (all run, foreground):
+- grep -n of every cited identifier in src/ and tests/ (rows above)
+- git show -s --oneline for 1e997b8 a077cb2 f8e7ee0 2001801 4496053 c96d96b
+  aa94058 dc0c138 — all exist
+- docs tests: PYTHONPATH=$PWD/src <venv> -m pytest -q -p no:cacheprovider
+  tests -k "docs or anchor or link" > .scratch/suite.txt 2>&1
+- python docs-site/gen_examples.py --check
+
+No code changes were made, so the per-item test + sabotage step of COMMON.txt
+does not apply (docs-only); full suite skipped per TASK.txt.
+
+Difficulties: none blocking. The main real finding is that the field_sets→sets
+rename (dc0c138) left two status lines naming the retired key — exactly the
+"done that a later change superseded" drift PR #303 flagged. Line-number
+cites into sources.py drifted by 2-7 lines.
+
+Finished: yes.
