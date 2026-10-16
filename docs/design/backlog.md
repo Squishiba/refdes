@@ -363,8 +363,10 @@ A sealed, append-only `log` can never link to anything created after it
 with no `on_change` equivalent for links), so "write the log while
 deliberating, decide afterward" is unauthorable in that order today. No new
 verb needed — `schema.py` already resolves a link from either declared
-direction (verified: `records`/`recorded_by` already exist as an inverse
-pair at the `link_types:` level in every bundled version) — the fix is
+direction (verified at the time: `records`/`recorded_by` already exist as
+an inverse pair at the `link_types:` level in every bundled version —
+true of v1/v2 as they ship today; since `d71c143` hardware@3 is the
+version that carries neither `decision` nor `recorded_by`) — the fix is
 declaring `recorded_by: [log]` on `decision`'s own `links:` block, verified
 end-to-end against a real sealed log in the finding.
 

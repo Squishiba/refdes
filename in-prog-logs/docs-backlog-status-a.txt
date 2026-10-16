@@ -44,3 +44,20 @@ needed).
 Tests: PYTHONPATH=$PWD/src ... -m pytest -q -k "docs or anchor or link" +
 docs-site/gen_examples.py --check (docs-only change; full suite skipped per
 TASK.txt).
+
+--- Review round 1 (PR #303, head a42e17b, CHANGES REQUESTED by codex/gpt-6-luna) ---
+Reviewer ran the FULL suite on the head: 3969 passed, 2 skipped, exit 0; CI
+all three checks pass. One finding:
+
+- Medium (finding 16, backlog.md ~:365): the finding's own text says
+  records/recorded_by "already exist ... in every bundled version", which
+  contradicted the new status line (hardware@3 has no recorded_by). AGREED.
+  Verified truth: grep -l recorded_by over standards/hardware/*/base.yaml ->
+  v1 and v2 only; v3 has neither decision nor recorded_by since d71c143.
+  Fix: marked the parenthetical "verified at the time" and stated the
+  current split (v1/v2 keep the pair; hardware@3 carries neither), so the
+  section reads consistently. No code, so no test; docs gate re-run.
+
+Gates re-run (docs-only): pytest -k "docs or anchor or link" (see
+.scratch/suite.txt) + gen_examples.py --check. Full suite per the reviewer
+was green on a42e17b; this round changes only a prose line.
