@@ -2012,7 +2012,13 @@ it moved from and to; the `HASH_FORMAT` number stays coordinated with finding
 ordering and second-scope reasons given there; published-exports (§2); and
 recompute-silently or mark-suspect-only (§4), the latter because suspect links
 do not exist yet and a correctness guarantee cannot be built on machinery that
-has not been built.
+has not been built. **This has since shipped, exactly as decided, in four
+commits: `cabd9e1` (the `V_in = DEC-PWR-001.V_in` reference itself),
+`3078c45` (reference values enter the content hash, `HASH_FORMAT` 4 — since
+bumped to 5 for an unrelated reason), `89c6383` (the baseline diff names the
+moved reference), `1dbfd77` (docs). Covered by
+`tests/test_calc_cross_refs.py` and `tests/test_calc_cross_ref_hash.py`; see
+`changelog.d/calc-cross-item-refs.added.md`.**
 
 **Local model (not decided — my read): not suitable.** The parser change and the
 scheduler are small, but the correctness claim is "every item whose arithmetic
