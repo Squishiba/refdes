@@ -1,0 +1,147 @@
+Task: verify every claim in docs/markdown.md against live refdes behavior;
+fix the docs only. Branch docs-markdown-verify, base main a3e9600.
+Method: real probe project at .scratch/mdverify/ (hardware@3, site.assets:
+figures + photos/shared), run via .scratch/mdverify/refdes shim (PYTHONPATH ->
+worktree src; the venv's installed refdes points at the MAIN checkout and was
+not used). Code-read used only for browser-editor claims (serve/upload.py,
+serve/api.py, serve/static/{editor,images,create}.js) and site JS
+(_site/assets/app.js), which need a live browser/session to run.
+
+RESULT COUNTS
+- Verified by running the real command: ~95 distinct claims (table below).
+- Verified by code read (marked C): the browser-upload/preview claims.
+- Fixed: 1 (the "only command that touches the network" sentence).
+- Possible bugs / notes: 1 (cli-reference.md internal contradiction, same
+  sentence - listed in PR body, not touched).
+
+VERIFICATION TABLE (claim -> evidence)
+All quoted messages below are verbatim from live runs in .scratch/mdverify.
+
+Images (docs/markdown.md lines ~90-160):
+- src relative to source file dir; resolution order; bare-name site.assets
+  search; site.assets copied verbatim (no hash) vs hashed relative copy. OK
+- "does not exist" error verbatim: ERROR items/log/dec-001.md:N [LOG-001] —
+  image src 'figures/nope.png' does not exist. OK
+- unreadable src (#268 posture) verbatim: ... exists at '...' but cannot be
+  read: Permission denied. Make the file readable, or point the reference at
+  a readable file (mode-000 file, run as non-root). OK
+- mode-000 file in site.assets dir: check names it ("site.assets file
+  'figures/locked.pdf' cannot be read: ... remove it from the site.assets:
+  directory -- it is not published"), build publishes rest of site excluding
+  it, exit 1. Gate image-only: hyperlink to unreadable registered file gets
+  removal advice + page keeps dangling link. OK
+- ambiguity: "image src 'curve.png' is ambiguous: it exists in more than one
+  site.assets directory (figures/curve.png, photos/shared/curve.png). Write
+  the path relative to ... -- no tiebreak; two dirs = build error. OK
+- %-escapes unreferenceable (thermal%20curve.png -> build error; space name
+  not found as image); '&' names resolve, published as a&amp;b.<hash>.png. OK
+- frozen bare-name pin: writable load rewrites short form to /figures/solo.png
+  in source; --no-write (global, before subcommand) leaves short form and
+  resolves in memory. OK
+- hash format 5: append bytes to pattern.png + revision probe1 -> audit shows
+  "changed ... LOG-001, LOG-003" (images contribute to hash). OK
+- image-free item contributes no images to hash: code (build.py HASH_FORMAT=5
+  at 1904, _image_inputs_hash_value docstring "None when its body references
+  none"); URL <img> contributes nothing: build.py:2233-2236 + _image_inputs_
+  hash_value docstring ("every LOCAL image the body resolves"). OK (C)
+
+Editor upload (lines ~162-233) - verified by code read (serve/upload.py,
+api.py, static js); no live browser session was driven, noted in PR:
+- 8 MiB cap enforced twice (server.py Content-Length + MAX_ASSET_BYTES,
+  upload.py:63); PNG/JPEG/GIF/WebP signature sniff, Content-Type ignored;
+  SVG refusal text. OK (C)
+- single safe path segment, dest must exist (no directories created, no
+  symlinks followed, deletes nothing, touches no .md/.yaml). OK (C)
+- identical-bytes re-upload = §5 no-op; replace via expected_hash, Replace
+  button + size/hash in images.js. OK (C)
+- §9.1 refuses upload making a bare site.assets ref ambiguous; §9.2 captures
+  existing bare-name refs; §9.3 reports affected referrers; §10 sealed item
+  upload refused pre-write, sealed-referenced file not replaceable. OK (C)
+- dest defaults to item's source dir, relpath from_source inserted into body
+  draft, Save applies text edit, data: preview of picked bytes pre-upload,
+  refdes never stages/commits. OK (C)
+
+Figures (lines ~235-283):
+- ![..](..){width=60%}{id=..} -> <figure class="md-figure" id="fig-a"
+  style="width: 60%">, caption "Figure 1 — <caption text>", id-only/alt-only
+  forms, alt fallback ("<figcaption>Figure 2 — Only alt here"), width ->
+  <img style="width: 30%">, standalone-inline width warning. OK
+- numbering per rendered document (log page Figure 1, document page Figure 2);
+  fig: refs resolve same-document only ("figure references only resolve
+  within the same rendered document" warning); duplicate figure id = build
+  error naming both locations. OK
+
+Cross-references (lines ~69-88):
+- all five [[..]] forms render; unknown field -> "reference to 'CMP-001'
+  names field 'nope', which type 'component' does not declare" warning +
+  class="ref ref-missing"; unknown cite -> ref-missing title="unknown
+  citation"; field links -> cmp-001.html#field-part_number, options ->
+  #field-options; declared-but-empty field anchors (field-part_number on
+  CMP-PWR-001 page). OK
+- hover previews on generated site: app.js mouseover on a.ref[data-ref],
+  pv-title card. OK (C)
+
+Calc fences + inline {{P_loss}} -> <code>3.96 W</code>, the four fence
+messages verbatim ('is not an attribute', 'unknown attribute', block-name
+regex). OK
+
+Citations (lines ~310-594):
+- local path citations, root-relative resolution, refusal of outside-root,
+  assets/citations publishing, changed-bytes warning naming citers, missing
+  file = error, --require-citations promotes warnings to ERROR. OK
+- section: resolves via PDF outline (offline, no pypdf at build); #page +
+  Page column; case-sensitive w/ closest-title hint; two matches ->
+  "the outline has 2 entries titled 'Dup' (pages 1, 3) -- cite page:
+  instead"; no outline -> "this PDF has no outline (bookmarks); section:
+  cannot be resolved -- cite page: instead". OK
+- remote sections pinned at fetch: offline at build via sections/
+  sections_sha256; sections_sha256 mismatch -> build warning + link without
+  #page; un-cited sections stop being recorded; --update re-resolves. OK
+- page: grammar: 0, -1, eight, xiv, 1.5, 2-4 all load errors, quote "page:
+  must be a positive integer, counted from 1"; build enforces. OK
+- page count binding (CITE-LOCK-004): count at fetch; page_count vs lockfile
+  check; stripping page_count_sha256 -> "the lockfile's page count is not
+  tied to the pinned sha256 -- run 'refdes fetch --path ...' to recount"
+  warning; plain fetch repairs. OK
+- pypdf failure line verbatim shape: FAILED docs/broken.pdf: sections
+  'Whatever' (cited by CMP-C11): pypdf could not read the PDF: Stream has
+  ended unexpectedly (EOF marker not found). OK. "pypdf not installed" line
+  and page_count_error lockfile record: code (citations.py PAGE_COUNT_ERROR_
+  KEY; install-extra message) - can't run without uninstalling pypdf (C).
+- blob/keep_copy: blob missing -> warning naming the path; --require-
+  citations -> ERROR; blob hash mismatch -> always ERROR; local copy changed
+  -> warning (escalates); missing local -> error; keep_copy: local rejected.
+  OK
+- fetch: bare fetch, --item CMP-PWR-001, --path docs/sch.pdf, --update all
+  run as documented; skipped/fetched/FAILED lines. OK
+- fetch = only puller; build/check offline: **FIXED** - check --refresh
+  re-fetches pinned citations (verified live: unreachable origin -> exit 1
+  naming url + "drift NOT verified", writes nothing; --allow-unreachable
+  demotes to warning). Original sentence called fetch "the only command
+  that touches the network", contradicted ~35 lines lower on the same page.
+- check --refresh: re-fetch, compare hashes, write nothing, nonzero on
+  drift. OK. references.html + references-<board>.html render (render.py:1427
+  per board; page present in _site). OK
+
+Standard markdown / not-supported (lines ~596-611):
+- <s>, <hr />, tables, lists, blockquotes render; raw <img> escaped;
+  footnotes/definition lists/callouts render literally; field values plain
+  text (**not bold**, **smoother** in options 'because' render literal in
+  html). OK
+
+SABOTAGE RECORD
+- Fix is prose-only; no test asserts its string, so plain-revert is
+  test-invisible. Sabotaged the fix's own content instead: changed the new
+  anchor to cli-reference.md#refdes-check-refresh ->
+  tests/test_docs_anchors.py::test_no_broken_anchor_links_in_docs FAILED,
+  restored -> 2 passed. The check that guards the edited lines is real.
+
+FINISH
+- full suite: see below; ruff --select E9,F scoped; gen_examples --check.
+- Not verifiable by running: browser-only upload UX (code-read), pypdf-extra
+  line, page_count_error record (code).
+
+FINAL CHECKS
+- full suite: 3991 passed, 2 skipped, exit 0 (5:13) — no flake run needed
+- ruff check --select E9,F src tests: All checks passed
+- docs-site/gen_examples.py --check: up to date, exit 0
