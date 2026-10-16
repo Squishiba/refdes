@@ -24,7 +24,9 @@ my-board/
 
 No front-matter is required. The title comes from the first `# heading`, and the
 filename becomes the URL — `power-architecture.md` renders to
-`power-architecture.html`.
+`power-architecture.html`. Pages in subfolders of `pages/` work too:
+`pages/sub/deep.md` renders to `sub-deep.html`, and its slug is `sub-deep`.
+Folders whose name starts with `.` or `_` are skipped.
 
 Add front-matter only when you want to override something:
 
@@ -68,8 +70,9 @@ sorted by `order` then title.
 ## Grouping a page under a board
 
 If the project has a `boards:` registry (see [multi-board](multi-board.md)), the
-sidebar already gets one collapsible group per board, listing that board's own
-reports — summary, coverage, design log, references, full record. Tag a page's front-matter
+sidebar already gets one collapsible group per board that has something to show,
+listing that board's own reports — summary, coverage, design log, references,
+parts, tree, full record. Tag a page's front-matter
 `board:` with a board name and it joins that group too, instead of sitting in the
 top-level list:
 
@@ -87,7 +90,9 @@ same way inside a board's group as they do at the top level.
 A `workspaces:` registry (see [workspaces](workspaces.md)) works the same way
 one level up — tag `workspace: product-a` instead of, or as well as, `board:`.
 A page tagged with only `workspace:` sits directly in that workspace's group,
-alongside any board groups nested inside it.
+alongside any board groups nested inside it. A `board:` or `workspace:` tag
+naming a key the registry does not declare is a build error, not a quiet
+return to the top-level list.
 
 ## What pages can do
 
@@ -98,9 +103,10 @@ alongside any board groups nested inside it.
   repo and on the site.
 - **All the usual markdown.** See the [markdown reference](markdown.md), including
   tables and fenced code.
-- **Get an on-page contents list.** Any page with more than two `##` headings gets
-  a sticky contents list built from its headings, each with a stable anchor. See
-  [site navigation](output.md#site-navigation) for the sidebar that carries it.
+- **Get an on-page contents list.** Any page with more than two `##` and `###`
+  headings gets a sticky contents list built from them, each with a stable
+  anchor. See [site navigation](output.md#site-navigation) for the sidebar
+  that carries it.
 
 Pages do **not** get `calc` blocks evaluated — arithmetic belongs to items, where
 it can be checked against a bound.
@@ -129,8 +135,10 @@ types:
 
 With no items, the coverage page, design log, full record, and `items.json` are all
 skipped, and the nav shows only your pages. A page called `index` becomes
-`index.html`; if you have both pages and items, the item dashboard moves to
-`items.html` so your landing page can be prose.
+`index.html`; if the project has items too, the item dashboard moves to
+`items.html` so your landing page can be prose. With items in the project, the
+generated reports own their filenames: a page named `coverage.md` (or `log`,
+`tree`, …) is a build error — rename the page, it will not be written.
 
 ## Building it
 
