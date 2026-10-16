@@ -104,7 +104,9 @@ entry knows what it satisfies. Authoring the *same* edge from both ends is
 redundant, and only available where the schema declares it: the standard's
 inverse verbs (`verified_by`, `satisfied_by`, …) are computed, never listed
 under a type's `links:`, so writing `verified_by:` on a requirement is an
-unknown-field warning with the edge dropped, not a second copy of it. A
+unknown-field **error** with the edge dropped, not a second copy of it — the
+spelling is close to a link the type does declare (`governed_by`), and close
+spellings stop the build (see [authoring](authoring.md)). A
 project that declares an inverse verb as an authorable link of its own gets
 the redundancy — the page shows the edge once either way.
 
@@ -398,6 +400,8 @@ INFO    items/main-io/log.md:80 [LOG-IO-005] — blocked_by LOG-IO-001, which
   is now 'accepted' -- is it still blocked? Remove the edge if resolved, or say
   in 'rationale' why it still applies.
 ```
+
+(one line in real output — wrapped here to fit the page)
 
 `info`: default-hidden (a project mid-resolution trips this repeatedly as
 blockers clear one at a time, which is normal, not a defect), shown with
