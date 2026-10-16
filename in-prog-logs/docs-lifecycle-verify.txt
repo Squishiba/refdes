@@ -1,0 +1,111 @@
+Task: verify docs/lifecycle.md against actual refdes behavior; fix the page
+where claims are wrong or missing. First pass was docs-only; review round added
+one code fix.
+Branch: docs-lifecycle-verify. Date: 2026-10-15.
+
+Method
+- Read docs/lifecycle.md in full, then verified claims by running the real
+  CLI (refdes 0.5.0 from /home/jorb/work/venv-refdes/bin) in scratch
+  projects .scratch/lv1..lv8, and by reading src/refdes/{cli,lifecycle,model,
+  build,seal,citations}.py for wording the CLI can't show in one run.
+- Scratch projects cover: gates (all ten rules, each direction), release_gate
+  overlay + SchemaError suggestions, floor (tampered kept copy, unpinned,
+  missing copy), stamps (success/conflict/no-op), --no-write, --dry-run,
+  name validation, unwritable tree (exit 2), audit sections (Baselines,
+  changed/added/removed/relabelled/uncomparable, sub-lines), baseline yaml
+  shapes (legacy + adopted via refdes keys adopt, standard: none),
+  stamped_by os_user/git_identity incl. git-failure fallback, board/workspace
+  moves, open_tasks, captured_edits, hash_format 5 + migration.
+
+Fixes applied to docs/lifecycle.md
+1. Intro "no flags on either" -> "no flags of their own"; global --no-write
+   is honored by both commands (help text says so; verified output:
+   "release 'rel-z' not stamped (--no-write): would stamp 8 items to ...").
+2. Added name validation: letters/digits/-/_/.; invalid name refused at
+   startup, exit 2 (verified: "is not a valid revision/release name -- use
+   letters, digits, '-', '_', and '.' only").
+3. Added exit codes where the page claimed behavior silently: blocked release
+   exit 1, floor-blocked exit 1, re-stamp conflict exit 1 with the real
+   "Baseline names are permanent once written" message.
+4. First console example: warning line was "2 items with no coverage" --
+   real check output is "WARNING <project> — 2 item(s) with no coverage —
+   see coverage.html"; gate table was reordered FAILs-first with
+   column-aligned offenders -- real table is rule-declaration order
+   (passes/skips interleaved) with two-space offender separation
+   (cli.py _print_gate: f"  {status:<8} {name}  {offenders}").
+   Added a sentence saying so.
+5. Baseline example: log entry used "summary:" -- every baseline entry
+   writes title: for every type (lifecycle.py _stamp writes item.title).
+6. Added: adopted projects (refdes keys adopt) key entries by surrogate with
+   id: inside (verified in .scratch/lv6 baseline after adopt).
+7. "terser id: hash shape .refdes/log-seal.yaml/.refdes/boards.yaml" --
+   boards.yaml values are board names, not hashes; reworded.
+8. Deleted-item prose: real audit line uses single quotes and "— no longer
+   in the project" (cli.py removed-item print), not double quotes and
+   "— removed". Matches the audit example already in the page.
+9. standard: block is absent for a project on standard: none (verified with
+   lv8: standard: none baseline has no standard: key).
+10. hash format 4 also covers source() calc-line values. The verbatim code
+    note (build.py:1927-1930) is "finding 26 joined finding 35's bump rather
+    than taking a fifth"; the "no cross-item calc reference ... hashes
+    exactly as format 3" sentence now says "and no source() line".
+11. audit changed sub-lines: moved calc references
+    (lifecycle.py _moved_refs: "referenced X.name: old -> new") and stale
+    arithmetic (cli.py:1598) print under the changed count -- the
+    item-scoped-not-field-scoped paragraph now names them as the recorded
+    exception.
+12. --no-write parenthetical now shows the real line and exit 0.
+
+Verified-unchanged (spot list)
+- release_gate defaults table, rule order, SchemaError suggestion
+  ("Did you mean 'draft_items'?"), gate table on stderr, stamped success
+  messages + log nudge, baseline fields (kind/name/stamped_at/stamped_by/
+  refdes_version/standard/gate/items), gate block release-only with
+  pass/skipped, hash_format currently 5, uncomparable reporting, audit
+  Baselines "most recent stamp/release" + "(no revision stamped yet)",
+  relabelled "old -> new (key)" line, byte-identical re-stamp no-op,
+  unwritable tree exit 2 with the exact quoted error, git_identity fallback
+  warn + stamped_by=os_user, no git-cleanliness check (lifecycle.py reads
+  no git), log-seal.yaml/boards.yaml file names.
+
+Checks run
+- tests/test_docs_anchors.py tests/test_docs_examples.py tests/test_lifecycle.py
+  -> 43 passed
+- docs-site/gen_examples.py --check -> exit 0
+- full suite: .scratch/suite.txt -> 3930 passed, 2 skipped, exit 0
+  (first run; the serve-cli stale-token flake did not fire)
+
+Status at first commit: complete for docs-only page fixes. Review round below
+added one code fix, regression test, and changelog fragment, so the PR is no
+longer docs-only.
+
+Review round (PR #277, review e8746d71)
+- Accepted F1-F4. No findings rejected.
+- F1 was a real pre-existing product bug surfaced by the docs verification:
+  in a project that has run `refdes keys adopt`, byte-identical re-stamps of
+  an existing revision/release name falsely reported "different content".
+  Root cause: lifecycle._same_baseline_items popped `id` from the stored
+  baseline entry but not from the current adopted entry, so the two
+  key-keyed entries could never compare equal.
+- Code fix: added `right.pop("id", None)` in
+  src/refdes/lifecycle.py::_same_baseline_items.
+- Regression test:
+  tests/test_lifecycle.py::test_rerun_same_name_identical_content_after_keys_adopt_is_a_noop.
+- Sabotage check: with the one-line fix temporarily reverted, the new test
+  failed at `assert second.status == "unchanged"` with
+  `assert 'conflict' == 'unchanged'`; after restoring the fix it passes.
+- F2 docs fix: name rule now says bare `.` and `..` are refused, matching
+  lifecycle.validate_name's special case.
+- F3 docs fix: `hash_format` is always written; `key`/`id` is written only for
+  keyed items, including adopted-project keyless/pre-keys cases.
+- F4 docs/log fix: the build.py `source()` quote is now verbatim.
+- Added changelog fragment:
+  changelog.d/baseline-adopted-rerun-conflict.fixed.md.
+- Review-round checks:
+  - focused sabotage run: failed as expected with the fix removed
+  - focused fixed run: 1 passed
+  - docs/lifecycle focused suite: 44 passed
+  - gen_examples --check: exit 0
+  - full suite: .scratch/suite.txt -> 3931 passed, 2 skipped, exit 0
+
+Status: complete with one docs-surfaced code fix. PR is no longer docs-only.

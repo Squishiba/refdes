@@ -297,11 +297,15 @@ class CascadeNode:
 
 
 class CascadeCycleError(Exception):
-    """Raised by walk_cascade() when on_cycle="error" and a revisit occurs --
-    the seam the blocked_by cascade report (docs/design/standard-library.md
-    §9) reuses instead of `{{cascade}}`'s own graceful "already shown"
-    marker, since a blocked_by graph is specifically asserted acyclic and a
-    cycle in it is a real authoring bug, not a legitimate reconvergence.
+    """Raised by walk_cascade() when on_cycle="error" and the walk closes an
+    edge back to a node already on the CURRENT path -- a true cycle. A node
+    reached by two different paths (a diamond) is a legitimate
+    reconvergence, not a cycle: it is marked `already_shown` in both modes,
+    never raised. This is the seam the blocked_by cascade report
+    (docs/design/standard-library.md §9) reuses instead of `{{cascade}}`'s
+    own graceful "already shown" marker, since a blocked_by graph is
+    specifically asserted acyclic and a cycle in it is a real authoring bug,
+    not a legitimate reconvergence.
 
     `path` is the full walk from the root down to the closing edge, e.g.
     `["DEC-IO-003", "DEC-IO-001", "DEC-IO-003"]` -- enough to report the
@@ -335,9 +339,12 @@ def walk_cascade(
 
     `on_cycle="mark"` (default, what `{{cascade}}` uses) renders a
     re-visited node once more as a terminal leaf, annotated by the caller.
-    `on_cycle="error"` raises `CascadeCycleError` instead -- the option a
-    future blocked_by implementation wants, since it treats a cycle as a
-    hard build error rather than a legitimate reconvergence.
+    `on_cycle="error"` raises `CascadeCycleError` instead -- but only for a
+    target on the current path, a true cycle; a reconvergence that is not on
+    the path (a diamond: two paths reaching one node) is marked just as
+    `"mark"` does. This is the option the blocked_by cascade report uses,
+    since it treats a cycle as a hard build error while a legitimate
+    reconvergence is not one.
     """
     visited = {root_id}
     via_inverses = (
@@ -387,7 +394,12 @@ def _walk(
 
         for target_id in sorted(edges[link_name]):
             if target_id in visited:
-                if on_cycle == "error":
+                # `visited` is global, so a hit is a revisit of ANY
+                # previously-seen node -- most of them legitimate
+                # reconvergences (a diamond), not cycles. Only a target that
+                # is on the CURRENT path closes a real cycle; anything else
+                # is marked, exactly as on_cycle="mark" treats it.
+                if on_cycle == "error" and target_id in path:
                     raise CascadeCycleError(path + [target_id])
                 children.append(CascadeNode(target_id, label, already_shown=True))
                 continue

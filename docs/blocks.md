@@ -17,14 +17,16 @@ pages. Neither is legal in the other kind of document.
 ## Syntax
 
 ```markdown
-{{index by="schematic_page" type="log"}}
+{{index by="status" type="log"}}
 ```
 
 The directive must sit alone on its own line. The first token is the block
 name; everything after it is `key="value"` pairs, the same attribute
 microsyntax already used for image `{width=... caption="..."}` suffixes. A
 name that doesn't match a known block is left completely untouched, as
-literal text — a note to yourself like `{{TBD}}` keeps working. Once a name
+literal text — a note to yourself like `{{TBD}}` keeps working. Directives
+inside a fenced code block are left untouched too, so a page can show a
+block's syntax without running it. Once a name
 *does* match, its parameters are validated strictly: an unknown parameter or
 a missing required one is a build error naming the exact fix, matching every
 other diagnostic this tool produces.
@@ -35,14 +37,14 @@ Groups every local item of one type by the current value of a field,
 rendered as one table per group.
 
 ```markdown
-{{index by="schematic_page" type="log"}}
+{{index by="status" type="log"}}
 ```
 
 | Parameter | Required | Meaning |
 |---|---|---|
 | `type` | yes | The item type to list. Must be a declared type. |
 | `by` | yes | The field to group by. Must be a `text`, `enum`, `date`, `person`, `list`, or `quantity` field declared on `type`. |
-| `board` | no | Scope to one board's items only. Must be a declared board. |
+| `board` | no | Scope to one board's items only. Must be a declared board. Members of the board's [`includes:`](multi-board.md) groups are in scope too, marked `shared, via GRP-…` on their rows. |
 | `tag` | no | Scope to items carrying this tag only. Must be a tag some local item actually carries in its `tags:` field. |
 | `subtypes` | no | `true` also lists items of types that [`extends:`](schema-reference.md#extends) `type`, each marked with its own type name; `false` lists `type` alone. Default: the project's [`coverage.group_inherited`](schema-reference.md#coverage), which is `true` unless turned off. |
 
@@ -77,7 +79,7 @@ item — "what does this log entry ultimately satisfy, going up its links" or
 | `from` | yes | The root item's ID. Must exist. |
 | `direction` | yes | `up` (follow the root's own declared links), `down` (follow backlinks — what points at the root), or `both` (both, rendered as two separate labeled subtrees). |
 | `depth` | no | How many hops to walk. A positive integer; defaults to `3`. |
-| `via` | no | A comma-separated list of link type names to follow. Defaults to every link type whose schema declares it `trace: true` (every starter link except `amends`, `records`, `supersedes`, and `addresses`, which describe process rather than "this item's correctness rests on that one"). |
+| `via` | no | A comma-separated list of link type names to follow. Defaults to every link type whose schema declares it `trace: true` (every starter link except `amends`, `follows`, `supersedes`, and `addresses`, which describe process rather than "this item's correctness rests on that one"). |
 
 The walk stops expanding a node it has already visited on this walk — a
 revisited node renders once more, as a leaf marked "(already shown above)",
@@ -105,6 +107,38 @@ hoc rendering of one blocker chain — that's a convenience overlap, not a
 substitute for the dedicated report, which computes staleness and feeds
 coverage in a way the block does not.
 
+## `{{compare}}`
+
+One row per item of one type, a column per declared field or calc value,
+and a verdict column per bound: the spec-and-compliance table of a
+[candidate-parts](parts.md) selection.
+
+```markdown
+{{compare type="component" against="BND-PWR-020, BND-THM-001"}}
+```
+
+| Parameter | Required | Meaning |
+|---|---|---|
+| `type` | yes | The item type to compare. Must be a declared type. |
+| `against` | no | Comma-separated bound IDs — each becomes a column of `pass`/`fail` cells with signed margin, plus a `Checks` tally column. Each must exist and declare a `limit`, and `type` must declare a `checks:` field. |
+| `columns` | no | Comma-separated columns: field names declared on `type`, or `calc:<name>` for a calc value at least one row defines. Default: the type's declared [`preview:`](schema-reference.md#types) list, falling back to `title`. |
+| `status` | no | Comma-separated statuses; only rows carrying one of them are listed. Each must be a declared `status` choice of `type`. |
+| `board` | no | As in `{{index}}`. |
+| `tag` | no | As in `{{index}}`. |
+| `subtypes` | no | As in `{{index}}`. |
+
+The block never evaluates: every cell is formatted from results —
+`checks:` verdicts, calc values — that the build computed before the page
+ever rendered. Rows are local items only (an imported component carries the
+upstream project's checks), sorted by ID, always: there is no `order=` and
+no `sort=`, because a table that reorders itself when someone edits a bound
+turns a review diff into noise. An empty cell means nobody wrote the value
+down, which is a different finding from "it fails" — so every table carries
+a legend naming its states: `—` not specified, pass/fail checked, `error`
+check could not be evaluated. When a named bound has no checking row at
+all, the build warns that its column will be empty: an all-`—` column
+reads as a completed comparison, and that reading is wrong.
+
 ## `{{tree}}`
 
 ```markdown
@@ -120,7 +154,9 @@ collapsible with plain `<details>`, zero JavaScript. Parameters:
 - `board=` / `workspace=` narrow the forest to one scope, exactly like
   the scoped report pages. A board's tree includes the members of its
   `includes:` groups, marked shared. At most one of the two.
-- `depth=` sets how many levels start open (default 2).
+- `depth=` is the nesting level at which nodes start closed: with the
+  default `2` the top level opens and everything under it starts closed;
+  `3` opens two levels, `1` closes even the top one.
 
 `{{tree}}` deliberately has **no `via=`.** In `{{cascade}}` it names the
 relation the walk follows, and the walk's shape is whatever that relation
@@ -171,9 +207,10 @@ Two properties follow from the implementation:
   this project, so `item=` refuses one and says to read the upstream
   project's own page instead.
 
-An empty *selection* is not a state this block has. `{{cascade}}` and
-`{{compare}}` deliberately render a "nothing found" note when their result
-is legitimately empty; naming a block that doesn't exist — or an item with
+An empty *selection* is not a state this block has. `{{index}}`,
+`{{cascade}}` and `{{compare}}` deliberately render a "nothing found" note
+(an empty index reads `No test items.`) when their result is legitimately
+empty; naming a block that doesn't exist — or an item with
 no named blocks — is always an authoring mistake, so every nothing-to-render
 case is a build error (below) with `⚠` in place: never an empty table, never
 a silent drop.
@@ -185,7 +222,7 @@ other refdes diagnostic holds to:
 
 ```
 {{index by="pageno" type="log"}} — type 'log' has no field 'pageno'.
-    Declared fields: schematic_page, status, title.
+    Declared fields: date, status, summary.
 ```
 
 ```
@@ -249,9 +286,10 @@ directive isn't silently swallowed while you're reading the diagnostic.
 ## The non-goal
 
 Refdes's generated blocks take **parameters, never expressions.** `index`,
-`cascade`, `tree`, and whatever joins them are a small, closed family — each
-accepts a small, closed set of named parameters, each with one fixed
-meaning, validated against the resolved schema at build time. There is no
+`cascade`, `tree`, `compare`, and whatever joins them are a small, closed
+family — each accepts a small, closed set of named parameters, each with
+one fixed meaning, validated against the resolved schema at build time.
+There is no
 comparison operator, no `and`/`or`, no wildcard, and no nesting one block
 inside another. `{{calcblock}}` takes one block *name* — the absence of an
 `all=` is the no-wildcard rule holding at the calc boundary. A block only
