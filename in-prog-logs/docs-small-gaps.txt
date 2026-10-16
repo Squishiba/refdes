@@ -84,3 +84,18 @@ lands both, so merged origin/main (clean, no conflicts) and rewrote that
 header (lines 7-9) to say both rows landed in PR #319. Docs-only again:
 re-ran gen_examples --check (up to date) and the same pytest -k subset
 (408 passed, 3599 deselected). Pushed once.
+
+## Review round (CHANGES REQUESTED on head 293de6c)
+
+Single substantive finding, agreed and fixed: the new coverage.md sentence
+said "The bundled `component`'s two non-satisfying statuses" — the bundled
+hardware@3 component has THREE (status choices [candidate, selected,
+rejected, obsolete] with satisfying_statuses: [selected],
+src/refdes/standards/hardware/v3/base.yaml:255,249; probe2's own log records
+REQ claimed by candidate -> claimed). Rewritten per the reviewer's suggested
+shape: "Of the bundled `component`'s non-satisfying statuses, `rejected` and
+`obsolete` are not synonyms of each other — ...". No other finding required
+action: the candidate-parts.md header edit is NIT/noted-as-fine (disclosed),
+and all other claims verified clean by the reviewer. No code, so no test;
+docs gate re-run: gen_examples --check up to date, pytest -k subset
+408 passed, 3599 deselected. Pushed once.
