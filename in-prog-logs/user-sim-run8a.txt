@@ -58,9 +58,12 @@ P_dens vs BND-THM-001, satisfies/constrained_by links), LOG-PWR-002/003/004
 - #257 id prints load errors once: FIXED. 4 broken files + pending item -> each load
   error printed EXACTLY once (grep -c=1), allocation runs, exit1. nothing-pending path
   each once too.
-- #252 keys restore linked pair: FIXED. Restore LOG-PWR-001@old + REQ-PWR-002@old
-  together -> succeeds (owner NOT falsely refused), post-check clean. Owner-alone
-  (target keyless, not in batch) -> correctly REFUSED (keyless-target sentinel).
+- #252 keys restore linked pair: FIXED. Self-contained 2-item project (log
+  LOG-PWR-001 constrained_by bound BND-IFC-001), keys corrupted on disk. Restore
+  LOG-PWR-001 + BND-IFC-001 TOGETHER -> succeeds (owner NOT falsely refused),
+  owner's link resolves, post-check clean (report §1.11, the authoritative repro).
+  Owner-alone (target keyless, not in batch) -> correctly REFUSED: "supply all
+  lost keys in one command" (keyless-target guard, not the old false-refusal bug).
 - #254 patcher remove_link comment: FIXED (drove patch_item directly = editor per-op).
   multiline flow entry w/ interior `#` + last target -> REFUSED (pre-fix destroyed).
   trailing-comment control refused; quoted-target applies cleanly; two-target w/
