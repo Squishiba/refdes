@@ -539,9 +539,12 @@ refdes fetch --path docs/sch.pdf   # just this one cited path
 refdes fetch --update            # re-fetch even if already pinned
 ```
 
-`refdes fetch` is the **only** command that touches the network. `build` and
-`check` read only the committed lockfile (`.refdes/citations.yaml`) and the
-local copies, so they stay completely offline.
+`refdes fetch` is the **only** command that pulls, and `build` and `check`
+read only the committed lockfile (`.refdes/citations.yaml`) and the local
+copies, so they stay completely offline. The one opt-in exception is
+[`check --refresh`](cli-reference.md#refdes-check): it re-fetches every
+pinned citation to compare hashes, so it touches the network and writes
+nothing.
 
 **Pinning vs. keeping a copy.** Every fetched citation is pinned: its sha256 and
 fetch time are recorded in `.refdes/citations.yaml`, keyed by path, and
