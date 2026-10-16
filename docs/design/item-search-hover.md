@@ -114,9 +114,13 @@ already disagree**:
 
 | Where | Haystack | Case | Source |
 |---|---|---|---|
-| `refdes ls` free-text positional | `" ".join([item.id, item.title, *tags])` | lowered both sides | `cli.py:449,465-468` |
-| `GET /api/items?q=` | `" ".join([item.title, *item_tags(item)])` | lowered both sides | `serve/filters.py:144-147` |
-| link-candidate filter in the browser editor | `label.toLowerCase().includes(want)` | lowered both sides | `serve/static/links.js:134-138` |
+| `refdes ls` free-text positional | `" ".join([item.id, item.title, *tags])`, plus retired `former_ids:` since #150 | lowered both sides | `cli.py:878-886` |
+| `GET /api/items?q=` | `" ".join([item.title, *item_tags(item)])` | lowered both sides | `serve/filters.py:154` |
+| link-candidate filter in the browser editor | `label.toLowerCase().includes(want)` | lowered both sides | `serve/static/links.js:185` |
+
+(The Source line numbers above are re-pointed at the 2026-10-16 re-check; the
+formulas are unchanged, except that `ls`'s haystack gained retired former ids
+in 48f19ab/#150 — a `q` match on them is still not offered.)
 
 The first two are the interesting disagreement: `ls` matches the **id**, `q`
 does not. `cmd_ls`'s own docstring says why it does — "The id is in the haystack
@@ -198,9 +202,10 @@ landed**:
   refdes project" is **stale**; this document does not inherit it.
 - `editors/vscode/serveClient.js` exists — 337 lines, plain CommonJS, no
   `vscode` import, exactly as §7.2 wanted.
-- `extension.js` is 946 lines (the adapter doc recorded 536 at drafting, so V0
-  added roughly 400 of live server, status bar, and CodeLens).
-- The ten Python contract tests of §7.1 and five extension-side tests exist
+- `extension.js` is 988 lines (the adapter doc recorded 536 at drafting, so
+  V0 added roughly 450 of live server, status bar, and CodeLens; the count
+  keeps moving — later fixes grew it past 946 by the 2026-10-16 re-check).
+- The ten Python contract tests of §7.1 and nine extension-side tests exist
   (`tests/test_vscode_adapter_contract.py`, `tests/test_vscode_extension.py`).
 
 **Slice V1 and V2 have not.** No `webview`, no `WebviewViewProvider`, no
@@ -209,7 +214,8 @@ would be an addition to shipped V0, and the sidebar-panel route is not on the
 table.
 
 **The one fact that decides the shape of any hover work.** The live hover
-provider has exactly one entry condition (`extension.js:495-507`):
+provider has exactly one entry condition (the id-shape gate;
+`extension.js:516-530` as of the 2026-10-16 re-check):
 
     const range = document.getWordRangeAtPosition(position, ID_RE);
     if (!range) return null;
@@ -400,14 +406,18 @@ threshold chosen once and shipped is a threshold nobody revisited.
 This part measured out well and is the strongest idea in the conversation.
 
 `refdes schema --json`, run live against this repository, yields a domain
-vocabulary for free — 7 type names, 40 field names, 16 enum choices:
+vocabulary for free — 7 type names, 45 field names, 16 enum choices (re-run
+2026-10-16; the field list has grown since drafting — `history:` is now
+`on_change:`, and `defaults:`, `follows:`, `items:`, `section:` and `tasks:`
+joined it):
 
 - **types** — bound, component, decision, group, log, requirement, test
 - **fields** — addresses, alternate, amends, author, blocked_by, board, body,
-  checks, citations, constrained_by, date, derives_from, drop_in, governed_by,
-  history, id, last_reviewed, limit, note, options, owner, part_of, part_number,
-  prefix, rationale, recorded_by, records, refdes, refines, satisfies, selects,
-  source, status, summary, supersedes, tags, title, type, verifies, workspace
+  checks, citations, constrained_by, date, defaults, derives_from, drop_in,
+  follows, governed_by, id, items, last_reviewed, limit, note, on_change,
+  options, owner, part_of, part_number, prefix, rationale, recorded_by, records,
+  refdes, refines, satisfies, section, selects, source, status, summary,
+  supersedes, tags, tasks, title, type, verifies, workspace
 - **enum choices** — accepted, active, blocked, candidate, draft, failing,
   in_progress, obsolete, on_hold, passing, planned, proposed, rejected, retired,
   selected, superseded

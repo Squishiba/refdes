@@ -65,7 +65,7 @@ these are the readings it was ambiguous about:
 ## 1. Problem
 
 `source()` has shipped, and so has the read-only CSV picker service behind it
-(`editor-source-picker.md` §11, Slice A landed 2026-09-25). What neither
+(`editor-source-picker.md` §11, Slice A landed 2026-09-26, 59d2915/#49). What neither
 covers is the case Jared raised on 2026-09-21: most of the numbers an author
 actually wants do not live in a committed CSV. They live in a datasheet —
 a PDF — and getting one into a calc block today means:
