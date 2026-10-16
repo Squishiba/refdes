@@ -480,3 +480,93 @@ def test_items_json_is_unchanged_for_an_uncaptured_project(tmp_path):
     for entry in payload["items"]:
         assert "captured" not in entry
         assert "edited_after_captured" not in entry
+
+
+# ------------------------------------ calc fence labels are labels (run-9 F2)
+
+# docs/math.md calls a ```calc block's `id="..."` a label on the rendering.
+# Run 9 found that naming a block of an entry already captured by `follows`
+# read as a semantic edit and drew the warning above. The strip lives on
+# `semantic_payload`'s body, beside the whitespace collapse it joins: a label
+# is not more content than a reflow is.
+
+CALC_LOG = (
+    "defaults: { type: log }\n"
+    "items:\n"
+    "  - id: LOG-001\n    summary: First.\n    body: |\n"
+    "      ```calc\n"
+    "      P_diss = 3.3 V * 0.5 A | W\n"
+    "      ```\n"
+    "  - id: LOG-002\n    summary: Second.\n    follows: [LOG-001]\n"
+)
+
+CALC_LOG_NAMED = CALC_LOG.replace("```calc\n", '```calc id="thermal"\n')
+
+
+def _replace_in_log(tmp_path, old, new):
+    log = tmp_path / "items" / "log.yaml"
+    text = log.read_text(encoding="utf-8")
+    assert old in text
+    log.write_text(text.replace(old, new), encoding="utf-8")
+
+
+def test_naming_a_captured_calc_fence_draws_no_diagnostic(tmp_path):
+    """The run-9 F2 scenario, end to end: capture, THEN add id="thermal" to
+    the calc fence. Sabotage: drop the label strip from `semantic_payload`
+    and this is exactly the warning the report got."""
+    cfg = _setup(tmp_path, CALC_LOG)
+    loader.load_tree(cfg, write=True)  # captures LOG-001 at the follows edge
+    _replace_in_log(tmp_path, "```calc\n", '```calc id="thermal"\n')
+    project, _stale = loader.load_tree(cfg, write=True)
+    build_mod.build(project)
+    assert _edited_warnings(project) == []
+
+
+def test_renaming_a_captured_calc_fence_label_draws_no_diagnostic(tmp_path):
+    """A label is a label in both directions: `thermal` -> `hot` after the
+    capture is a rendering edit, not a content edit. Sabotage: hashing any
+    part of the fence's info string fails this."""
+    cfg = _setup(tmp_path, CALC_LOG_NAMED)
+    loader.load_tree(cfg, write=True)
+    _replace_in_log(tmp_path, 'id="thermal"', 'id="hot"')
+    project, _stale = loader.load_tree(cfg, write=True)
+    build_mod.build(project)
+    assert _edited_warnings(project) == []
+
+
+def test_editing_a_row_inside_a_captured_fence_is_still_an_edit(tmp_path):
+    """The strip takes the label off the fence line, not the block's rows:
+    0.5 A -> 0.6 A under a named fence remains an edit, warned once and
+    naming the entry. Sabotage: a strip that swallows the block -- or all
+    fenced content -- silences this."""
+    cfg = _setup(tmp_path, CALC_LOG_NAMED)
+    loader.load_tree(cfg, write=True)
+    _replace_in_log(tmp_path, "0.5 A", "0.6 A")
+    project, _stale = loader.load_tree(cfg, write=True)
+    build_mod.build(project)
+    warnings = _edited_warnings(project)
+    assert len(warnings) == 1
+    assert "LOG-001" in warnings[0].message
+
+
+def test_the_label_strip_leaves_unlabelled_digests_byte_identical(tmp_path):
+    """Every digest minted before the strip stays valid: for an item with no
+    labelled calc fence the semantic digest is exactly what the pre-strip
+    formula produced -- sha256 over the canonical JSON of
+    `{history_format, type, fields, links, _collapse_ws(body)}` -- so
+    existing stores keep matching, item for item. Sabotage: a payload-shape
+    change (a new key, a normalization the collapse does not absorb, a strip
+    that reaches an unlabelled body) moves one of these two digests."""
+    cfg = _setup(tmp_path, CALC_LOG)
+    project, _stale = loader.load_tree(cfg, write=True)
+    for item_id in ("LOG-001", "LOG-002"):
+        item = project.item_by_id(item_id)
+        assert history.semantic_digest(item) == history.digest_of(
+            {
+                "history_format": history.HISTORY_FORMAT,
+                "type": item.type,
+                "fields": item.fields,
+                "links": item.links,
+                "body": history._collapse_ws(item.body),
+            }
+        )

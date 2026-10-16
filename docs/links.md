@@ -454,7 +454,11 @@ fragment is read as a field name — `[[LOG-PWR-001#losses]]` warns that type
 `#calc:` fragment is a warning that says what the target actually has — a
 block of another name (naming them), fences with no name at all, or no calc
 blocks — never a build failure, the same unresolved-reference posture as
-above.
+above. A bare `[[LOG-PWR-001#calc]]` is that field-name miss for the one
+fragment readers reach for with the name left off, so its warning adds
+"did you mean `#calc:<name>`?" and names the blocks the target has (pointing
+at `id="..."` on the fence when they have none); a target that computes
+nothing gets no hint, and every other field miss keeps its plain sentence.
 
 A `[[fig:some-id]]` reference — the same `[[...]]` envelope, a `fig:` prefix —
 resolves to a numbered figure instead of an item. See [width and

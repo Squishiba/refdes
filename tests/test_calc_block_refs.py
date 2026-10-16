@@ -236,6 +236,60 @@ def test_calc_fragment_on_item_with_no_blocks_warns(tmp_path):
     assert "it names:" not in msg
 
 
+def test_bare_calc_fragment_hints_the_anchor_spelling(tmp_path):
+    """Run-9 F4: `[[ID#calc]]` (the anchor with the name left off) was read
+    as a field name and warned "names field 'calc'" with no hint of the
+    spelling that works. The hint names the anchor form and the blocks the
+    target has. Sabotage: a hint dropped, a hint on an item that computes
+    nothing (the anchor can resolve nowhere there), a field miss on another
+    name gaining the hint, or a name list out of fence order."""
+    root = _project(tmp_path, "See [[DEC-001#calc]].")
+    project = _build_at(root)
+    msg = next(d.message for d in project.warnings if "names field 'calc'" in d.message)
+    assert msg == (
+        "reference to 'DEC-001' names field 'calc', which type 'decision' "
+        "does not declare -- did you mean #calc:<name>? it names: losses, "
+        "supply."
+    )
+    # A warning, never an error (§11.9, same posture as every fragment miss).
+    code, _ = _site(tmp_path, "See [[DEC-001#calc]].")
+    assert code == 0
+    # A miss on any other field name keeps the plain sentence: the hint is
+    # about the calc anchor, and there is no calc anchor in `#weight`.
+    other = _build_at(_project(tmp_path, "See [[DEC-001#weight]]."))
+    omsg = next(d.message for d in other.warnings if "weight" in d.message)
+    assert "did you mean" not in omsg
+
+
+def test_bare_calc_fragment_on_unnamed_blocks_hints_the_fence(tmp_path):
+    """The target has calc blocks, none named: the hint's fix is on the
+    fence, not in the reference -- §7's second shape, same posture.
+    Sabotage: claiming a name the target does not have, or the named-blocks
+    phrasing with an empty list."""
+    root = _project(tmp_path, "See [[DEC-001#calc]].", owner=UNNAMED_BLOCK)
+    project = _build_at(root)
+    msg = next(d.message for d in project.warnings if "names field 'calc'" in d.message)
+    assert msg == (
+        "reference to 'DEC-001' names field 'calc', which type 'decision' "
+        'does not declare -- did you mean #calc:<name>? add id="..." to a '
+        "calc fence to give a block a name."
+    )
+
+
+def test_bare_calc_fragment_on_item_with_no_blocks_stays_plain(tmp_path):
+    """A target that computes nothing gets no hint: the anchor cannot
+    resolve there, so "did you mean #calc:<name>?" would point at a fix
+    that fixes nothing (§7's third shape has the same posture). Sabotage:
+    a hint on this item, naming blocks it has none of."""
+    root = _project(tmp_path, "See [[DEC-001#calc]].", owner=NO_BLOCKS)
+    project = _build_at(root)
+    msg = next(d.message for d in project.warnings if "names field 'calc'" in d.message)
+    assert msg == (
+        "reference to 'DEC-001' names field 'calc', which type 'decision' "
+        "does not declare"
+    )
+
+
 def test_calc_fragment_on_fig_or_cite_warns(tmp_path):
     """§5.3: a `#calc:` fragment on `[[fig:...]]`/`[[cite:...]]` stays the
     warning `#field` already produces there -- same message, same level, with

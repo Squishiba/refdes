@@ -2606,9 +2606,32 @@ def _linkify(
         spec = project.types.get(item.type)
         if spec is not None and field in spec.fields:
             return f"#field-{field}"
-        project.warn(
+        msg = (
             f"reference to {item.id!r} names field {field!r}, which type "
-            f"{item.type!r} does not declare",
+            f"{item.type!r} does not declare"
+        )
+        if field == CALC_FRAGMENT_PREFIX.rstrip(":"):
+            # Run-9 F4: `[[ID#calc]]` is the calc anchor with the name left
+            # off, and the bare field miss above does not hint the spelling
+            # that works. Name it, and name the blocks the target has --
+            # read off the same fence lines `calc_anchor` reads. An item
+            # that computes nothing gets no hint: the anchor cannot resolve
+            # there, and the plain field miss is the true sentence (§7's
+            # third shape has the same posture).
+            fences = calc.extract_blocks_with_lines(item.body)
+            names = [block_id for _, _, block_id in fences if block_id]
+            if names:
+                msg += (
+                    f" -- did you mean #{CALC_FRAGMENT_PREFIX}<name>? "
+                    f"it names: {', '.join(names)}."
+                )
+            elif fences:
+                msg += (
+                    f" -- did you mean #{CALC_FRAGMENT_PREFIX}<name>? add "
+                    f'id="..." to a calc fence to give a block a name.'
+                )
+        project.warn(
+            msg,
             file=where_file, line=where_line, item_id=where_id,
         )
         return None

@@ -25,7 +25,9 @@ Two deliberate departures from the doc's sketch, both stated in the plan:
 2. **The digest covers the semantic core only.** ``semantic_digest`` hashes
    ``{history_format, type, fields, links, body}`` — the item's own declared
    fields, raw link spellings (model.py keeps raw and resolved deliberately
-   separate and write-back needs raw), and the body with whitespace collapsed.
+   separate and write-back needs raw), and the body with whitespace collapsed
+   and calc-fence labels stripped (a ```calc block's ``id="..."`` is a label
+   on the rendering, not content — run-9 F2).
    Identity and provenance (``key``, display ``id``, ``source`` file/line) are
    *stored* in the object but excluded from the digest, for the same reasons
    ``compute_hashes`` excludes an item's own key and display id: minting an
@@ -159,6 +161,21 @@ def _collapse_ws(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+# A calc fence's `id="..."` is a label on the rendering (docs/math.md), not
+# content (run-9 F2): naming a block must not read as an edit of a captured
+# entry. The digest normalizes every calc fence's opening line to the bare
+# ``` ```calc ``` ``` before collapsing — anchored at the line start, the same
+# anchor `calc.extract_blocks_with_lines` reads, so an indented fence is
+# prose. A body with no labelled calc fence is byte-for-byte untouched: every
+# digest minted for an unlabelled item is exactly what it was before this
+# normalization existed (tests/test_history_edited.py pins it).
+_CALC_FENCE_OPEN_RE = re.compile(r"^```calc[^\n]*", re.MULTILINE)
+
+
+def _strip_calc_fence_labels(body: str) -> str:
+    return _CALC_FENCE_OPEN_RE.sub("```calc", body)
+
+
 def semantic_payload(item: Item) -> dict[str, object]:
     """The canonical semantic core of ``item``: what the digest covers.
 
@@ -169,14 +186,16 @@ def semantic_payload(item: Item) -> dict[str, object]:
     identically. Links are the *raw* spellings (``Item.links``), never
     ``resolved_links`` — a snapshot must record what was authored, and
     resolution is rebuildable. Body whitespace is collapsed exactly as
-    ``build._hash_payload`` does, so reflowing prose is not an edit.
+    ``build._hash_payload`` does, so reflowing prose is not an edit, and
+    calc-fence labels are stripped for the same reason (see
+    ``_CALC_FENCE_OPEN_RE``): naming a block is a label on the rendering.
     """
     return {
         "history_format": HISTORY_FORMAT,
         "type": item.type,
         "fields": item.fields,
         "links": item.links,
-        "body": _collapse_ws(item.body),
+        "body": _collapse_ws(_strip_calc_fence_labels(item.body)),
     }
 
 
