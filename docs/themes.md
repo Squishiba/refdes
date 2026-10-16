@@ -5,7 +5,8 @@ one for light mode, one for dark -- merged over the values the shipped
 stylesheet declares. `site: theme:` selects a built-in by name;
 `site: tokens:` overrides individual properties on top of it. Either
 way the build writes one extra stylesheet, `assets/theme.css`, and the
-pages link it after the main one.
+pages link it after the main one -- `default` with no `tokens:` is the
+exception: there is nothing to write, so there is no file and no link.
 
 ## The built-in gallery
 
@@ -114,8 +115,8 @@ site:
     --accent: '#8a1010'   # both palettes
 ```
 
-Or target one palette at a time, with the two headings and nothing
-else in the block:
+Or target one palette at a time: a nested block may use the `light:`
+and `dark:` headings -- one alone, or both -- and nothing else in it:
 
 ```yaml
 site:
@@ -137,6 +138,9 @@ two palettes stay independent. Values are validated the same way in
 both forms -- a bare token name, an empty value, a value over
 200 characters, or one containing a brace,
 a `</style>`, or a `url(`/`expression(` is a schema error.
+Names are checked the same way in both forms: a token the shipped
+stylesheet does not declare is a schema error with a did-you-mean, and
+so is an unknown `theme:` name -- that one names every built-in.
 
 ### Contrast
 
@@ -146,8 +150,8 @@ against `--bg` and, where applicable, `--panel`, plus the `--bad` /
 `--good` distinguishability rule. A failing pair is a **warning**, not
 an error -- `refdes build` still produces the site -- because the
 threshold is a floor, not a law, and an author may have a reason. What
-it is not is silent: the warning names the pair, the two values, and
-the ratio it measured.
+it is not is silent: the warning names the pair and the ratio it
+measured; the `--bad` / `--good` warning names the two values too.
 
 Non-hex values (named colours, `rgb()`, another `var()`) are skipped:
 guessing at a colour the checker cannot parse would warn about colours
@@ -157,6 +161,10 @@ that are fine, which is worse than not checking.
 
 The stylesheet follows the reader's OS preference. A host page that
 wants to pin one -- the editor, or a project that ships a toggle --
-sets `data-theme="light"` or `data-theme="dark"` on `<html>`; the
-generated `theme.css` carries matching attribute blocks that win over
-the media query in both directions.
+sets `data-theme="light"` or `data-theme="dark"` on `<html>`. The
+generated `theme.css` carries an attribute block for each override a
+project has: dark overrides land in `[data-theme="dark"]`, a
+light-only override in `[data-theme="light"]`, each re-asserting its
+palette in full so it wins over the media query. Overrides that are
+all flat pairs get no attribute blocks, and `default` ships no file
+at all -- where there is no block, the attribute pins nothing.
