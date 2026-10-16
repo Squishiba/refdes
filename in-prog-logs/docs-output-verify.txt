@@ -1,0 +1,145 @@
+Task: verify docs/output.md against actual refdes behavior; fix only the page.
+Branch: docs-output-verify (base main 90fabc0). refdes 0.5.0, standard
+hardware@3 (unreleased). All claims verified by running the tool, per
+AGENTS.md — a rich probe project in .scratch/output-verify/ (boards
+board-a/board-b, workspaces product-a/product-b, requirements/bounds/logs/
+components/groups, calc+check coverage, citations in every state, a follows:
+thread, narrative pages overview/two/three.md, refdes-schema.yaml overlay,
+theme/tokens variants), a no-follows copy in .scratch/nofollows/, targeted
+greps of src/ where a probe could not reach.
+
+Claim-by-claim verdicts:
+
+VERIFIED (probe = ran refdes and checked output; code = named file:line)
+- build writes site to site.out, default _site (probe: init + build message)
+- Empty project writes only assets/style.css + app.js (probe)
+- All top-level pages exist: index, summary, coverage, log, references, parts,
+  document, tree, vocabulary, items.json, per-item pages (lowercased ids);
+  per-board/per-workspace scope pages document-/summary-/coverage-/log-/
+  references-/parts-/tree-<scope>.html (probe)
+- index.html: counts line, Failing checks, Outstanding work, per-type tables,
+  Diagnostics (probe)
+- summary.html: Margins table sorted tightest-first (-57.7%, +3.3%, +3.7%,
+  +14.3%), "Not linked to anything" (probe)
+- coverage.html least-covered first: open bounds first, satisfied req last
+  (probe, after forcing dates)
+- log.html oldest-first; date parsed with project date_format:, default
+  YYYY-MM-DD (probe; code model.py:239, dates.py DEFAULT_DATE_FORMAT)
+- references.html grouped by path; parts.html exact-string part numbers with
+  where-used backlinks (probe)
+- document.html: TOC, type sections in schema order, log entries by date —
+  proved by swapping LOG-PWR-004/005 dates (probe); cross-ref hrefs rewritten
+  file.html -> #id (probe)
+- vocabulary.html: h2 Item types / Link verbs / Sets / Engine-reserved keys;
+  "No definition" for overlay types without doc:; blocked_by graph node reads
+  "any type"; graph SVGs byte-identical to refdes schema --graph (cmp);
+  anchors in SVG, no <script>; no vocabulary-<board>.html (project-wide only)
+  (probe)
+- tree.html: group nodes, items expanded once under first group by id,
+  reference leaf "(expanded under ...)", Project-wide rendered last with
+  count; tree-board-a shows board node "9 own, 1 shared" and leaf marker
+  "shared, via GRP-PWR" (probe — needed board includes:, not conforms_to:)
+- Sidebar: narrative pages first, generated reports, scope groups open when
+  the page is inside, board nested under workspace, empty scope (board-b) gets
+  no groups/pages, aria-current="page", CSS-only ☰ Navigation (probe)
+- TOC threshold: page.headings counts h2 AND h3 (code pages.py:133
+  HEADING_RE <h([23])>, page.html.j2 length > 2); probe: 2x##+1x### -> TOC,
+  2x## -> none. Docs said "more than two ## headings" — FIXED
+- Item pages: append-only badge (item.html.j2:25 imported badge), fields
+  table with on_change modes, calc tables, autolinked ids, options panel,
+  checks table with worst-case detail, citations table (page from authored
+  page:/section:, part number), coverage strip, traceability, provenance
+  file:line + content hash (probe)
+- items.json top-level: title, version, coverage, types, items, diagnostics
+  always; boards/workspaces present only with registries and items gain
+  board/workspace then (probe with registries stripped — keys absent
+  entirely, not empty); threads absent with no follows: edge (probe)
+- items.json per-item: links are RAW composite targets REQ-PWR-002@vf52bz5cade
+  (probe; code render.py:754 item.links); backlinks bare display ids (probe);
+  checks[] keys incl. margin as signed fraction, null ok with detail naming
+  missing value; margin null for ==, zero-limit, degC one-sided; K scale gets
+  margin; calcs[] bounds '' unless tolerance; diagnostics line is int (raw
+  JSON checked); coverage local-only (code build.py:1266 for item in
+  project.local_items); version gate is what imports check (code
+  imports.py:48-52); content_hash over invalidate fields only (probe: owner/
+  timeline edit leaves hash, body edit changes it)
+- citations: all six states observed live — ok, unpinned, missing, invalid
+  (escapes root), cache_missing (deleted .refdes/copies file), hash_mismatch
+  (edited pinned file; build warns with fetch --update hint); pinned ==
+  state != unpinned; section_page from lockfile, builds never open PDFs (code
+  citations.py); authored page: wins over section_page with a warning (code
+  citations.py:1805-1813); every entry same keys (probe)
+- threads projection: matches doc shape incl. tasks.state four values (code
+  threads.py:452-468), verdicts (VERDICT_CONFLICTING code threads.py:84),
+  captured entries, derived rows; derived unpinned row self-closes after
+  fetch (probe: row present, fetched, gone next build); forked == one branch
+  per tip (code threads.py:440); with no follows: edge the key is absent and
+  the task pane/assets/markup are absent (probe of nofollows copy; code
+  render.py:935-941)
+- themes: built-ins default/high-contrast/paper/slate (error text lists
+  them); site.theme + site.tokens -> assets/theme.css linked after style.css;
+  :root + prefers-color-scheme dark + data-theme="light|dark" blocks;
+  bare tokens and light:/dark: headings cannot mix (load error); unknown
+  theme/token -> "Did you mean"; url( and ; rejected; contrast warnings for
+  failing pairs (build still writes site); theme removal prunes file via
+  .refdes-manifest.json (probe); theme.css only when overrides exist (probe)
+- contrast warning wording: pair + ratio (contrast.py:144-146); the bad/good
+  distinguishability warning names the two values (contrast.py:161-164). Doc
+  said every warning names the two values — FIXED
+- site.assets: copied under assets/; markdown images copied under
+  assets/pages/ resolved relative to the source file; broken image src is a
+  build error (probe)
+- item pages of threaded logs carry the read-only task pane (Tasks button,
+  tasks, verdicts, derived rows) (probe)
+- print stylesheet hides nav/sidebar, expands details (style.css @media print)
+- fetch is the only network command; check --refresh exists; build
+  --require-citations exists (--help probe)
+- section_page: shape, lockfile sourcing, page: precedence verified by probe +
+  code; resolving a section against a real PDF NOT verified end-to-end (probe
+  PDF is random bytes; parser refused — CAN'T VERIFY full resolve)
+
+WRONG (fixed in docs/output.md):
+1. "A page with more than two `##` headings gets an on-page contents list" —
+   the count is h2+h3 together. Fixed to "`##` or `###`".
+2. Contrast warning "naming the pair, the two values and the measured ratio" —
+   plain pair failures name pair + ratio only; values appear in the bad/good
+   distinguishability warning. Fixed.
+3. items.json sample: item top-level key is title, not summary (summary is a
+   log field); sample now shows key + title and summary inside fields.
+4. items.json sample: links shown as bare ids; real output is raw composite
+   REQ-PWR-002@vf52bz5cade. Sample now composite; field note added telling
+   consumers to strip @key and that backlinks are bare.
+5. items.json sample calcs[] entries carry line (render.py:769); added.
+
+MISSING (added to field notes):
+- top-level next_ids (per-prefix next id number, render.py:797-799 + comment)
+- per-item key (always present; null only in --no-write loads, render.py:732)
+- links/backlinks composite-vs-bare rule (see fix 4)
+- captured / edited_after_captured on captured log entries only, absent-key
+  convention (render.py:742-746)
+
+Unverified-and-left-alone (accurate by construction or out of reach):
+- "byte for byte" claims for no-theme/no-thread builds (fixture
+  tests/no_theme_build_hashes.json covers the theme half; observed no pane
+  assets in nofollows copy)
+- section_page resolve against a real parseable PDF (see above)
+
+Possible bugs (NOT documented, reported in PR body):
+- (none) — the file:// citation scheme produces a clear build ERROR
+  ("only http/https URLs are remote, and a local path must be project-relative
+  without a scheme"), an earlier silent-drop observation was a probe artifact.
+
+Notes / difficulties:
+- refdes build rewrites authored files in place: it mints keys and expands
+  link targets to composite form (follows: [LOG-PWR-004@0b1spk8rf04]) —
+  expected per keys.md, worth knowing for probe authors.
+- Capturing a mid-thread fork normalizes siblings onto the tip
+  ("followed-corrected", history.py:609), so forked threads cannot be created
+  by authored capture in a scratch project; forked verified by code read.
+- Board tree "shared, via GRP-…" needs board includes: (boards.py:118);
+  conforms_to feeds coverage, not the tree.
+- Suite: see end of file.
+
+Status: FINISHED. Docs fixes applied as listed; suite run recorded below.
+
+Suite run: (appended after run)
