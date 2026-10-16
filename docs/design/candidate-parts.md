@@ -4,10 +4,9 @@ mapping (§4), `hardware@3`'s `component.status` includes `rejected` (§5), and
 `refdes new --list` plus the dead-`defaults:` warning ship in the CLI (§6).
 §10's questions were implemented as recommended; §11 records what was
 considered and rejected, including the rejection Jared made directly.
-Phase 5's two remaining §8 rows never landed and are the only open work:
-the `docs/coverage.md` sentence on why `rejected` is not `obsolete` (that doc
-names no `rejected` at all), and the `docs/index.md` Generated-blocks row,
-which still omits `{{compare}}` (`docs/index.md`, "Generated blocks").
+Phase 5's two remaining §8 rows landed in PR #319: the `docs/coverage.md`
+sentence on why `rejected` is not `obsolete`, and the `docs/index.md`
+Generated-blocks row, which now lists `{{compare}}`.
 
 # Candidate parts: comparing, disqualifying, and selecting
 

@@ -74,3 +74,13 @@ behaviour). Gates run:
   - ruff not run: no .py files touched.
 
 Status: finished.
+
+## Follow-up (orchestrator request, after PR #319 opened)
+
+PR #317 merged to main, whose candidate-parts.md header recorded Phase 5's
+two remaining §8 rows (the coverage.md rejected-vs-obsolete sentence, the
+index.md {{compare}} row) as "never landed and the only open work". This PR
+lands both, so merged origin/main (clean, no conflicts) and rewrote that
+header (lines 7-9) to say both rows landed in PR #319. Docs-only again:
+re-ran gen_examples --check (up to date) and the same pytest -k subset
+(408 passed, 3599 deselected). Pushed once.
