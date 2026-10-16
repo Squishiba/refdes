@@ -1,0 +1,127 @@
+# docs-workspaces-verify — verify docs/workspaces.md against the CLI
+
+Branch: docs-workspaces-verify @ 185aa53 (matches task's "main 185aa53").
+Tree clean at start.
+
+Method: every probe runs with
+  PYTHONPATH=/home/jorb/.paseo/worktrees/16msma8v/docs-workspaces-verify/src \
+  /home/jorb/work/venv-refdes/bin/refdes ...
+so the CLI is THIS branch's code (the venv's editable install points at the
+main checkout; PYTHONPATH shadows it — verified: refdes.__file__ resolves to
+this worktree's src).
+
+Scratch project: .scratch/wsverify/proj (refdes init, hardware@3).
+
+Status: in progress.
+
+## Claim table (docs/workspaces.md @ 185aa53) — all probes in .scratch/wsverify/
+CLI run as: PYTHONPATH=<worktree>/src refdes ... (verified refdes.__file__ = this worktree)
+
+VERIFIED (ran; output matches):
+- init writes standard hardware@3 (base: hardware, version: 3).
+- Namespace collision: `configuration error: 'power' is declared as both a board and a
+  workspace — boards and workspaces share one namespace for generated report names
+  (e.g. coverage-power.html); rename one of them` — check exit 2, build exit 2, no _site.
+- path: aliases do NOT dodge the collision (key `power` + `path: power-ws` still refused).
+- Collision is load-time only (no warning while writing the two blocks).
+- item_layout fixed choice: invalid value -> `configuration error: refdes-project.yaml:
+  item_layout must be one of flat, workspace, got '<workspace>/<board>/'`.
+- Table: flat = items/<board>/ (board from 1st segment — items/power/sub/x.yaml -> board power);
+  workspace = items/<ws>/<board>/ (ws 1st, board 2nd). No workspaces + flat: builds, ls has no
+  ws column, manifest has no workspaces: section.
+- workspaces: keys label (default = key), shared (default false), path (alias, default key;
+  items/prod-a/board-a/ resolves to key product-a).
+- Precedence item workspace: > file defaults.workspace > path (ovr probe: item ghostless beats
+  file default platform). Override works under flat too. Unregistered ws override ->
+  `ERROR workspace: 'nosuchws' is not declared in refdes-project.yaml's workspaces: registry`
+  (exit 1), parallel to board: `board: 'nosuchboard' is not declared in refdes-project.yaml's
+  boards: registry`.
+- Cross-workspace lint fires; message text matches doc verbatim (modulo the doc's file-specific
+  :5 line number): "satisfies points at REQ-A-009, in workspace 'product-a', which is not marked
+  shared: true -- workspace 'product-b' would gain a hidden dependency on it".
+- Exemptions: same workspace (REQ-A-011 refines REQ-A-009 -> silent); shared: true (REQ-A-010
+  refines platform -> silent). Backlink of the crossing link does NOT produce a mirrored warning
+  (only the authored edge fires).
+- cross_workspace_severity: error -> ERROR + check exit 1; info -> INFO (needs -v) + exit 0;
+  default warning -> exit 0; invalid -> `cross_workspace_severity must be one of error, warning,
+  info, got 'fatal'`.
+- Scope: link to an IMPORTED item (its upstream ws = platform) from a local ws item -> no lint
+  (imported items carry workspace "" downstream; code skips external targets).
+- Drift manifest: same .refdes/boards.yaml, second `workspaces:` section; non-adopted writes
+  legacy scalars (`LOG-B-014: product-b`); after `keys adopt` both sections use surrogate key
+  with `id:` inside — matches the doc's k7f3m2q9x4a example shape (real writer emits fields
+  alphabetically: board before id — cosmetic, left as-is).
+- Workspace move warns: "LOG-B-014 moved from workspace 'product-b' to 'product-a' since the last
+  build. Run 'refdes build --accept-board-move' if this is deliberate, or move the file back."
+  Rename in the same change still tracked (via key, adopted project).
+- `--accept-board-move` accepts both ("board move accepted" + "workspace move accepted" in one
+  run); `--accept-workspace-move` -> argparse "unrecognized arguments".
+- `refdes audit`: "Board moves since the manifest was last written:" then "Workspace moves ...".
+- Never-declared workspaces -> no workspaces: section in the manifest (flat probe).
+- Sidebar: board groups nest inside workspace groups derived from resolved items (product-a ->
+  board-a; platform -> shared; empty registered board/workspace: no group, no pages);
+  a board with items outside any workspace stays top-level.
+- Page front matter `workspace: product-a` moves the page into the ws group.
+- check/ls --workspace exist; posture as documented; combinable with --board; check --workspace
+  narrows printed diagnostics only; unknown name: ls -> "no items match" exit 0, check -> ERROR
+  exit 1 (not claimed by the doc).
+- index/index --compact: items[].workspace per item; top-level workspaces registry.
+- ls: ws column between type and board; blank for ws-less item; ls --workspace "" disables the
+  filter (blank is not selectable); no registry -> no column.
+
+WRONG (fixing):
+1. Namespace section lists 5 report names; the shared namespace has 7 written per scope —
+   parts-<key>.html and tree-<key>.html also exist (build wrote tree-board-a.html,
+   tree-product-a.html ...; render.py:1119-1121 report_names = coverage,log,document,summary,
+   references,parts,tree,vocabulary; vocabulary is project-only). Citation
+   "src/refdes/render.py:1124-1265" is the reserved-name loops at 1124-1127 (write loops are
+   1279-1446).
+2. Lint section: "Only `item.links` ... is walked" — workspaces.py:116 walks
+   `item.resolved_links` (AGENTS.md: graph walkers must read resolved_links, raw links are the
+   composite text). Semantics (authored-only) unchanged; field name stale.
+3. Rendered pages: "Each registered workspace gets its own scoped document-, coverage-, log-,
+   references-, summary-.html" — tree-<workspace>.html also (always, scope non-empty);
+   parts-/references-/log- are content-gated by nav.scope_reports (probe: no references-*.html
+   at all with no citations; no log-platform.html, no pages for empty-ws).
+
+MISSING (fixing):
+4. Under item_layout: workspace, items whose first path segment is not a registered workspace
+   (incl. files directly in items/) get a WARNING on every load: "no workspace: 'loose' is not
+   in the workspaces: registry and no workspace: key was set. Add `workspace: <name>` ...";
+   under flat a ws-less item is silent. The page says the column "leaves that column blank"
+   without the warning.
+5. (Noted, not fixed on this page — see PR body.)
+
+CAN'T VERIFY: "behaves exactly as it did before this feature existed" (byte-identity across
+versions) — spot-checked the observable parts (no ws column, no manifest section, clean build)
+and ls --help claims byte-identical.
+
+## Fixes applied to docs/workspaces.md (docs-only, 4 edits)
+1. Namespace section: report-names list now includes parts-<key>.html and tree-<key>.html;
+   citation narrowed render.py:1124-1265 -> 1124-1127 (the two naming loops).
+2. Lint section: "Only item.links ... is walked" -> walked as item.resolved_links (matches
+   workspaces.py:116 and AGENTS.md; authored-only semantics unchanged).
+3. Rendered pages section: document/coverage/summary/tree for any workspace with items;
+   log/references/parts gated on content; nav fallback split into "items outside every
+   workspace -> top-level" vs "no items at all -> no group" (was conflated).
+4. ls blank-column section: added the missing fact that under item_layout: workspace an
+   item in an unregistered first segment (incl. directly in items/) warns on every command;
+   flat is silent.
+
+## Checks
+- python docs-site/gen_examples.py --check -> schema-reference.md, vocabulary.md up to date.
+- ruff check --select E9,F src tests
+- full suite: see .scratch/suite.txt (record result here when done)
+
+## Notes for PR body
+- No changelog fragment: docs-only, no user-visible behavior change.
+- Possible code-side follow-ups (NOT fixed here, docs page untouched on them):
+  * `refdes ls --workspace ''` (empty string) silently disables the filter; the doc's
+    "blank is not a name you can pass to the filter" holds in spirit, but '' behaves as
+    "no filter" rather than an error.
+  * check --workspace <unknown> -> ERROR + exit 1 while ls --workspace <unknown> ->
+    "no items match" + exit 0; doc claims only "same report-filter posture as --board",
+    does not promise parity between check/ls here.
+- ruff check --select E9,F src tests -> All checks passed!
+- full suite -> 3938 passed, 2 skipped in 334.38s, exit=0 (.scratch/suite.txt)
+- status: TASK FINISHED

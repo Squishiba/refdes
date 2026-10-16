@@ -44,11 +44,11 @@ A workspace key and a board key are two different things — one is an ownership
 boundary, the other a hardware grouping — but they land in **one filename
 namespace**: both are substituted into the same generated report names —
 `coverage-<key>.html`, `document-<key>.html`, `log-<key>.html`,
-`references-<key>.html`, `summary-<key>.html` are written once per board and
-once per workspace (`src/refdes/render.py:1124-1265`, the two loops that name
-each file after its registry key) — so one name used for both would leave two
-reports fighting for the same file. The collision is therefore refused at
-load:
+`references-<key>.html`, `parts-<key>.html`, `summary-<key>.html` and
+`tree-<key>.html` are written once per board and once per workspace
+(`src/refdes/render.py:1124-1127`, the two loops that name each file after its
+registry key) — so one name used for both would leave two reports fighting
+for the same file. The collision is therefore refused at load:
 
 ```console
 $ refdes check
@@ -131,12 +131,13 @@ whether or not anyone meant to create that coupling.
 declared `shared: true` — the platform workspace above is meant to be
 depended on by everyone, so links into it never trip the lint.
 
-**Never trips on a derived relationship.** Only `item.links` — what an
-author actually typed — is walked, never a computed backlink, coverage, or
-any future aggregate view (a parts index spanning workspaces, say). Two
-boards in different workspaces happening to use the same MCU is a
-coincidence of the bill of materials, not a claimed dependency, and this
-lint has no way to see it even in principle.
+**Never trips on a derived relationship.** Only the links an author actually
+typed are walked — `item.links`, read as `item.resolved_links` so a composite
+`DISPLAY-ID@key` target counts as the item it names — never a computed
+backlink, coverage, or any future aggregate view (a parts index spanning
+workspaces, say). Two boards in different workspaces happening to use the
+same MCU is a coincidence of the bill of materials, not a claimed dependency,
+and this lint has no way to see it even in principle.
 
 **Severity is configurable**, in `refdes-project.yaml`:
 
@@ -181,13 +182,16 @@ never gets a `workspaces:` section written into the manifest at all.
 
 ## Rendered pages and nav
 
-Each registered workspace gets its own scoped `document-<workspace>.html`,
-`coverage-<workspace>.html`, `log-<workspace>.html`, `references-<workspace>.html`,
-and `summary-<workspace>.html`, exactly like a board does. The sidebar nests
-each board's group inside its workspace's group, derived from which boards
-actually have items resolving into that workspace — a board with no items
-yet (or items outside any workspace) falls back to a top-level group, same
-as it would with no `workspaces:` registry at all.
+Each registered workspace gets its own scoped pages, exactly like a board
+does: `document-<workspace>.html`, `coverage-<workspace>.html`,
+`summary-<workspace>.html` and `tree-<workspace>.html` for any workspace with
+items, plus `log-<workspace>.html`, `references-<workspace>.html` and
+`parts-<workspace>.html` when it has the log entries, citations, or part
+citations those pages are made of. The sidebar nests each board's group inside
+its workspace's group, derived from which boards actually have items resolving
+into that workspace — a board with items outside every workspace falls back to
+a top-level group; a board with no items at all gets no group at all, exactly
+as it does with no `workspaces:` registry.
 
 Tag a hand-written overview page into a workspace's group the same way a
 page joins a board's:
@@ -237,6 +241,12 @@ workspace folder — leaves that column blank rather than naming its absence, th
 same way an item with no board leaves the board column blank. No
 `--workspace` value selects it either; the column shows the resolved
 workspace, and blank is not a name you can pass to the filter.
+
+The blank column is silent only under `flat`, where no path segment is asked
+the question. Under `item_layout: workspace` an item in an unregistered first
+segment — including one sitting directly in `items/` — gets a `no workspace:`
+warning on every command, until the item, its file's `defaults.workspace`, or
+a matching registry entry names it.
 
 With no `workspaces:` block there is no column at all, and `ls` prints exactly
 what it printed before: `workspaces:` being opt-in is a promise that an
