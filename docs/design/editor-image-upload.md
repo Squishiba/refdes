@@ -1,9 +1,13 @@
-Status: proposed (drafted 2026-09-25) — a design spec, not a decision. It picks
+Status: **proposed** (drafted 2026-09-25) — a design spec, not a decision;
+**all of §17 has landed** (Phase 0: 86baa20/#50, 2026-09-25; Phases 1–5:
+03625df/#52, 271ece6/#53, 8d34251/#60, 79eaacf/#63, 00ca9d3/#69 — all
+2026-09-27), so this design is now the record of a shipped feature. It picks
 up the one deferred item of `docs/design/browser-editor.md` that was left open
 with no design behind it (§1). Every open question in §15 carries a
 recommendation, and each recommendation is the default if Jared lets it stand
-unanswered. §16 records what was considered and rejected. Nothing here is
-implemented, and §2's claims about current behaviour were each checked against
+unanswered. §16 records what was considered and rejected. At drafting nothing
+here was implemented (the updates below record the landing, in order), and §2's
+claims about current behaviour were each checked against
 the code or a run, with the citation at the claim.
 
 Update: §15.1 is answered — Jared decided on 2026-09-25 that images are build
@@ -28,7 +32,9 @@ Update: §15.6 is answered too — Jared decided on 2026-09-25 to take the
 `HASH_FORMAT` bump, and it is in: format 5 folds each referenced image's
 content digest into its owner's content hash, so a swapped image breaks a
 seal loudly (§2, §10, §15.6; plan in `in-prog-logs/hash-images.md`).
-The upload feature itself is still unimplemented.
+The upload feature itself is still unimplemented. *(Updated 2026-10: superseded
+— Phases 1–5 landed on 2026-09-27; see the update after the Phase 0 one and
+§17.)*
 
 Update: **Phase 0 has shipped** (2026-09-25) — the picker, alone and
 independently, as §17's row 0 scopes it. `GET /api/images?item=<handle>`
@@ -39,8 +45,18 @@ reference to insert, relative to that item's own source file;
 `serve/static/images.js` lists them, filters them, and inserts one into the
 body draft through the existing `setDraftBody` path, so the ordinary Save
 posts an ordinary `set_body`. No upload, no `POST /api/assets`, no Phase 1 or
-later. Pinned by `tests/test_serve_images.py` and the static checks in
+later *(true at writing — all of that landed two days later, 2026-09-27, see
+§17)*. Pinned by `tests/test_serve_images.py` and the static checks in
 `tests/test_serve_static.py`.
+
+Update: **Phases 1–5 have shipped** (2026-09-27) — `POST /api/assets` with the
+sniffed-type allowlist, asset cap, collision table and forced preview rebuild
+(03625df/#52); §9's ambiguity, capture and disclosure checks over the other
+documents that reference a replaced file (271ece6/#53); §10's seal refusals
+(8d34251/#60); the client — drag-and-drop and file input in `images.js`
+(79eaacf/#63); and the `docs/markdown.md` upload section with the
+browser-editor Deferred/Later lists updated (00ca9d3/#69). §17 is fully landed;
+the §14 cases live in `tests/test_serve_upload.py`.
 
 Two things §2 and §16.10 turned out to make easy, verified by running rather
 than reading: the thumbnail needs **no new read endpoint** at all — a file
@@ -98,7 +114,8 @@ actually crossed in either direction — upload is absent, and so is the thing
 that was supposed to stand in for it. *(Updated 2026-09-25: the second half is
 no longer true. Phase 0 landed — `serve/static/images.js` and
 `GET /api/images`; the body control now has an insertion helper, and the
-upload half of the boundary is still uncrossed.)*
+upload half of the boundary is still uncrossed.)* *(Updated again 2026-09-27:
+the upload half is crossed too — `POST /api/assets`, Phase 1, 03625df/#52.)*
 
 **The delta gate already refuses a dangling image, and nothing can pre-stage
 one.** A body edit whose text references a file that is not on disk is blocked
@@ -607,7 +624,8 @@ No git operation is performed by the upload endpoint: no stage, no commit, no
 | `test_upload_that_would_create_ambiguity_refuses` | A leaf already present in another declared `site.assets:` dir → refusal naming both paths, before the write. |
 | `test_upload_that_would_capture_a_bare_reference_refuses` | §9.2: a bare `curve.png` in a sibling document resolving elsewhere → refusal naming that document and its current resolution. |
 | `test_replace_reports_every_referencing_item` | Two items reference the file; the `Conflict` payload names both. |
-| `test_upload_moves_the_revision` | An upload changes the project revision and rebuilds the preview (§15.1's decision, pinned by `tests/test_serve_state.py` for the hand-written case; the endpoint case lands with Phase 1). |
+| `test_upload_moves_the_revision` | An upload changes the project revision and rebuilds the preview (§15.1's decision, pinned by `tests/test_serve_state.py` for the hand-written case; the endpoint
+case landed with Phase 1, as `tests/test_serve_upload.py:1646`). |
 | `test_upload_forces_a_preview_rebuild` | The new asset is present in the current generation without an intervening body save. |
 | `test_upload_requires_token_and_origin` | Missing token → 403; cross-origin → 403; `--no-write` → 403. |
 | `test_upload_content_type_allowlist` | `application/octet-stream` accepted; `multipart/form-data`, `text/plain`, and a missing `Content-Type` → 415. |
@@ -733,11 +751,11 @@ Each carries a recommendation; unanswered means the recommendation stands.
 | Phase | Scope |
 |---|---|
 | **0. Picker** | The v1 item that never shipped (§2, §15.10): list existing project images, insert a relative reference into the draft. No upload, no new endpoint. Independently useful. **Shipped 2026-09-25.** |
-| **1. Bytes** | `POST /api/assets`; content-type branch and asset cap in `_api`; sniff-based type allowlist; single-segment name validation; `_atomic_create` for new files; §5 collision table; forced preview rebuild. No §9 checks yet. |
-| **2. Conflicts** | `expected_hash` and the replace path through `_atomic_replace`; §9.1 ambiguity check; §9.2 capture check over `Project.image_results`; §9.3 referencing-item disclosure. |
-| **3. Seals** | §10: sealed-target refusal, sealed-referenced-file refusal. |
-| **4. Client** | Drag-and-drop and file input, `data:` preview before upload, insertion into the draft with default alt text, the conflict dialog's binary variant. |
-| **5. Docs** | `docs/markdown.md` upload section; `docs/design/browser-editor.md` Deferred/Later lists updated; §14's tests. |
+| **1. Bytes** | `POST /api/assets`; content-type branch and asset cap in `_api`; sniff-based type allowlist; single-segment name validation; `_atomic_create` for new files; §5 collision table; forced preview rebuild. No §9 checks yet. **Shipped 2026-09-27 (03625df/#52).** |
+| **2. Conflicts** | `expected_hash` and the replace path through `_atomic_replace`; §9.1 ambiguity check; §9.2 capture check over `Project.image_results`; §9.3 referencing-item disclosure. **Shipped 2026-09-27 (271ece6/#53).** |
+| **3. Seals** | §10: sealed-target refusal, sealed-referenced-file refusal. **Shipped 2026-09-27 (8d34251/#60).** |
+| **4. Client** | Drag-and-drop and file input, `data:` preview before upload, insertion into the draft with default alt text, the conflict dialog's binary variant. **Shipped 2026-09-27 (79eaacf/#63).** |
+| **5. Docs** | `docs/markdown.md` upload section; `docs/design/browser-editor.md` Deferred/Later lists updated; §14's tests. **Shipped 2026-09-27 (00ca9d3/#69).** |
 
 Phase 1 alone is a usable feature with a known hole (an upload can break another
 document), and the hole is exactly what Phase 2 exists to close — which is why
