@@ -1,0 +1,139 @@
+# docs-index-verify — work log
+
+Task: verify docs/index.md against live behavior; fix what's wrong. Branch
+docs-index-verify off main f33efa4. Docs-only.
+
+Method: every claim run against `PYTHONPATH=$PWD/src .../venv-refdes/bin/refdes`
+(venv's plain `refdes` imports the main checkout — always set PYTHONPATH to
+this worktree's src; verified via `import refdes; print(refdes.__file__)`).
+Scratch project: .scratch/claimtest (refdes init, hardware@3). Nav checks
+script: .scratch/navcheck/check_nav.py. All docs page headings dumped to
+.scratch/navcheck/headings.txt.
+
+## Extra mechanical checks (nav)
+
+- docs-site nav lives in docs-site/refdes-project.yaml `site.nav` (confirmed
+  by reading it; site builder "anything not listed falls in alphabetically").
+- check_nav.py: 25 pages on disk (excl. docs/design/), 25 nav entries —
+  every page in nav, every nav entry has a page; index.md links all 24
+  non-index pages. (a) and (b) PASS as-is, no fix needed.
+
+## Claim table (index.md)
+
+| Claim | Verdict | Evidence |
+|---|---|---|
+| init → hardware@3 | VERIFIED | `refdes init` wrote `standard: hardware@3` |
+| "five coverage stages" (concepts row) | VERIFIED | concepts.md "## The five coverage stages"; build.py cov.stage "claimed" |
+| coverage row "Open → addressed → satisfied → verified" | WRONG — omits `claimed` | coverage.md + concepts.md tables: open/addressed/claimed/satisfied/verified |
+| cli-reference row "Every command and flag" | VERIFIED (round 2 — initial claim WITHDRAWN) | `## \`refdes serve\`` exists at cli-reference.md:2042; all 22 `refdes --help` commands have sections (prefix grep, round 2). Initial finding came from a truncated headings dump (`head -40` per file cut cli-reference.md before line 2042) — false claim, corrected after PR #298 review. |
+| math row "brackets" | VERIFIED | math.md:276 "Brackets are the escape hatch" |
+| change-tracking row "auditing suppression" | VERIFIED | change-tracking.md:151,172 |
+| design-log row "amendments, sealing" | VERIFIED | design-log.md amends/sealing sections |
+| multi-board row "imports, version pinning" | VERIFIED | multi-board.md "You need to pin a version" |
+| lifecycle row "draft → revision → release" | VERIFIED | lifecycle.md:5 "**draft** — the state..." |
+| blocks row "{{index}} and {{cascade}} ... parameters-not-expressions" | MISSING — page also has {{tree}}, {{calcblock}} | blocks.md headings |
+| one-para: "requirements, bounds, decisions, tests, and log entries" | WRONG — hardware@3 merged decision into log | v3 base.yaml types: requirement,bound,test,component,group,log; concepts.md:112 "hardware@3 merged it into log" |
+| one-para: "Decisions can contain calc blocks ... declare checks" | WRONG for same reason — checks live on log entries (and components in v3) | v3 log type fields include checks/options |
+| one-para: build evaluates math, checks at worst case, renders site + items.json | VERIFIED | live build: items.json check detail "worst case 12 V vs <= 13 V" from `V_out = 10 V ± 20%`; _site/ HTML + items.json |
+| one-para: tightening a bound tells you which decisions stopped being true | VERIFIED | tightened limit 13→11 V: `ERROR items/pwr/log.md:2 [LOG-PWR-001] — V_out violates BND-PWR-001: worst case 12 V vs <= 11 V (nominal 10 V)`, exit 1 |
+| getting-started row "about ten minutes" | CAN'T VERIFY | time estimate; page is a 7-step from-empty-folder walkthrough, nothing contradicts it |
+| standard-library row "what each pinned version changed" | VERIFIED | standard-library.md "### The versions shipped so far" (v1/v2/v3) |
+| blocks row scope "on narrative pages" | VERIFIED | blocks.md "Scope: narrative pages only, not items" |
+| schema-reference row "Every key in refdes-project.yaml..." | PAGE GAP | schema-reference.md top-level list omits `sigfigs:`/`release_gate:` (model.py:1084,1103; cli-reference.md:323). PR-body note, page not touched. |
+| themes row "token tables" | VERIFIED | themes.md token tables present |
+| markdown row "works in an item body" | VERIFIED | markdown.md:3 "Item bodies are markdown... verified to render" |
+| links/ids/math/checks/design-log/change-tracking/multi-board/lifecycle/workspaces/parts/pages/output/vocabulary rows | VERIFIED | heading greps (.scratch/navcheck/headings.txt) + live build |
+
+## Fixes made to docs/index.md (3)
+
+1. Coverage row: added missing `claimed` stage (five, per coverage.md/
+   concepts.md/build.py).
+2. Blocks row: added `{{tree}}` and `{{calcblock}}` (blocks.md sections).
+3. One-paragraph: hardware@3 merged decision into log (v3 base.yaml types +
+   header + concepts.md:112). "requirements, bounds, decisions, tests, and
+   log entries as small files with YAML front-matter" -> (round 1)
+   "requirements, bounds, tests, components, and log entries as small YAML
+   files" -> (round 2, after review finding 3) "requirements, bounds,
+   tests, components, groups, and log entries as small files — a YAML list
+   file, or markdown with YAML front-matter" (round 1 mirrored the original
+   defect: it named only the list-file format; authoring.md: "the two file
+   formats"), and adds the omitted `group` type; "Decisions can contain" ->
+   "A log entry that reaches a verdict can contain" (phrasing mirrors
+   concepts.md). Kept closing "which
+   decisions just stopped being true" — live run names LOG-PWR-001, the
+   verdict entry, and "decision" as activity is still the page's title word.
+
+## Tests / sabotage
+
+- No behaviour fix, so no new test (TASK: docs only, no code changes — a
+  test file would be code).
+- Sabotage: reverted the coverage-row fix -> tests/test_docs_anchors,
+  test_docs_examples, test_nav, test_standard_docs_complete,
+  test_vocabulary_page: 42 passed, nothing catches index.md prose.
+  Restored (grep confirms `addressed → claimed` back, diff intact). Honest
+  record: the fix is guarded by nothing automated; verification is the
+  live runs + coverage.md/concepts.md tables.
+- Docs tests: 67 passed (8 docs test files).
+- gen_examples.py --check: exit 0 (schema-reference.md, vocabulary.md up to
+  date).
+- ruff check --select E9,F src tests: All checks passed. (docs-site has 5
+  pre-existing F541 in gen_examples.py:121-126, untouched by this branch,
+  out of the gate's scope — PR-body note, not silenced.)
+- Full suite: 3947 passed, 2 skipped in 322.82s, exit 0.
+
+## Changelog fragment: none
+
+Round-2 correction: round 1 cited a "'user-visible change' rule" as if it
+were changelog.d/README.md's — it is not; README.md:5 says "Each change that
+deserves a changelog entry gets one fragment." The "user-visible changes"
+rule is from this task's own instructions (COMMON.txt line 6). Outcome
+unchanged and re-grounded: docs prose only, no tool behavior changed, so it
+does not deserve a changelog entry; sibling precedent is mixed — #288 (same
+series) added a fragment, #287 and #289 (closest siblings) did not.
+
+## Other-page findings (PR body, not touched)
+
+- cli-reference.md has no `## refdes serve` section though index.md says
+  "Every command and flag" (serve is in `refdes --help`, first command).
+  WITHDRAWN (round 2) — false: `## \`refdes serve\`` is at
+  cli-reference.md:2042; see the round-2 section below.
+- schema-reference.md top-level list omits `sigfigs:` and `release_gate:`.
+- No "possible bugs" found: every verified behavior matched the docs.
+
+
+## Round 2 — PR #298 review (CHANGES REQUESTED) findings
+
+1. MEDIUM, ACCEPTED: the "cli-reference.md has no ## refdes serve section"
+   finding was FALSE. cli-reference.md:2042 has a full `## \`refdes serve\``
+   section (with options table); all 22 commands from `refdes --help` have
+   sections (verified by prefix grep, round 2). Root cause: the headings
+   dump piped each file through `head -40`, truncating cli-reference.md
+   before line 2042. Claim withdrawn in the claim table above and in the PR
+   body (gh pr edit). Deliverable never touched the page.
+2. LOW, ACCEPTED: changelog justification cited a rule not in README.md;
+   corrected above (rule is COMMON.txt's; README wording and sibling
+   precedent #287/#289-vs-#288 recorded).
+3. LOW, ACCEPTED with fix: docs/index.md one-paragraph round-1 phrasing
+   "small YAML files" under-described the markdown+front-matter format
+   (mirrored the defect it replaced) and omitted `group`. Reworded to
+   "small files — a YAML list file, or markdown with YAML front-matter"
+   and added `groups` to the type enumeration. checks-sentence kept naming
+   only log entries: reviewer judged it "acceptable as a paragraph"; the
+   component-checks v3 addition is recorded here and in round 1's table.
+4. INFORMATIONAL: closing "which decisions just stopped being true" kept —
+   reviewer agrees it is defensible.
+5. INFORMATIONAL: no action (mutation-test disclosure accepted).
+
+Round-2 gates: docs tests (8 files), gen_examples --check, ruff E9,F src
+tests, full suite — see below. No code changes, so no tests added (docs
+prose only, per task).
+
+## Round 3 — PR #298 review 2 (codex Luna, head 6cdcfc8)
+
+- One finding (low), ACCEPTED: the round-1 "Other-page findings" section
+  (log line 96) still asserted the withdrawn serve claim as current.
+  Annotated in place with WITHDRAWN + pointer to the round-2 section
+  (kept, not deleted, so the record shows what was claimed and retracted).
+- Review's suite result (3478/2/93F/376E) is its sandbox blocking loopback
+  binds (orchestrator: ignore; CI green — 3/3 pass). My gates re-run below.
+- No code changes: no tests added.

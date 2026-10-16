@@ -19,13 +19,13 @@ build time.
 | [Authoring items](authoring.md) | The two file formats, fields, bodies, when to use which |
 | [Pages](pages.md) | Narrative markdown alongside your items — and pages-only sites |
 | [Markdown reference](markdown.md) | Every formatting feature that works in an item body |
-| [Generated blocks](blocks.md) | `{{index}}` and `{{cascade}}` on narrative pages, and the parameters-not-expressions non-goal |
+| [Generated blocks](blocks.md) | `{{index}}`, `{{cascade}}`, `{{tree}}` and `{{calcblock}}` on narrative pages, and the parameters-not-expressions non-goal |
 | [IDs](ids.md) | Allocation, prefixes, why numbers are never reused |
 | [Links and traceability](links.md) | Link types, back-links, cross-references, hover previews |
 | [Math](math.md) | Calc blocks, units, tolerances, brackets, unit assertions |
 | [Checks](checks.md) | Limits, worst-case evaluation, failing the build |
 | [The design log](design-log.md) | Append-only entries, amendments, sealing |
-| [Coverage](coverage.md) | Open → addressed → satisfied → verified |
+| [Coverage](coverage.md) | Open → addressed → claimed → satisfied → verified |
 | [Change tracking](change-tracking.md) | `on_change`, content hashes, auditing suppression |
 | [Multiple boards](multi-board.md) | Folders, separate projects, imports, version pinning |
 | [Workspaces](workspaces.md) | Grouping boards by product, the two-level layout, the cross-workspace lint |
@@ -45,10 +45,11 @@ build time.
 
 ## The one-paragraph version
 
-You write requirements, bounds, decisions, tests, and log entries as small
-files with YAML front-matter. Each gets a stable ID and typed links to the others.
-Decisions can contain `calc` blocks whose arithmetic carries real units and
-tolerances, and can declare `checks` against a bound's limit. `refdes build`
+You write requirements, bounds, tests, components, groups, and log entries
+as small files — a YAML list file, or markdown with YAML front-matter. Each
+gets a stable ID and typed links to the others. A log entry
+that reaches a verdict can contain `calc` blocks whose arithmetic carries real
+units and tolerances, and can declare `checks` against a bound's limit. `refdes build`
 validates everything, evaluates the math, verifies the checks at the worst-case
 tolerance bound, and renders a static HTML site plus a machine-readable
 `items.json`. When someone tightens a bound, the build tells you which
