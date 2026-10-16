@@ -420,6 +420,30 @@ def test_cascade_unknown_root_is_an_error(blocks_project):
     assert any("REQ-999 does not exist" in d.message for d in project.errors)
 
 
+def test_cascade_from_resolves_a_composite_ref(blocks_project):
+    """`from=` takes a `DISPLAY-ID@key` composite and resolves it by its key
+    half -- the same way `{{calcblock}}`'s `item=` does (blocks.md, §5.4).
+
+    The label here is deliberately stale: it names no live item. A lookup
+    that only read the display id reports "does not exist" and renders
+    nothing -- sabotage by restoring `project.item_by_id(root_id)` in
+    `_render_cascade` and this test fails on both assertions.
+    """
+    _build_at(blocks_project)  # mint the keys the composite needs
+    cli_mod.main(["-c", str(blocks_project / "refdes-project.yaml"), "build"])
+    project = _build_at(blocks_project)
+    key = project.item_by_id("DEC-001").key
+    assert key
+
+    _page_with_block(blocks_project, '{{cascade from="REQ-OLD-999@%s" direction="up"}}' % key)
+    project, page = _index_page(blocks_project)
+    assert not project.errors, project.errors
+    # The root row is the resolved item, not the stale label.
+    assert 'data-ref="DEC-001"' in page.body_html
+    # The walk ran from the resolved root, so its links are here.
+    assert "REQ-001" in page.body_html
+
+
 def test_cascade_unknown_direction_is_an_error(blocks_project):
     _page_with_block(blocks_project, '{{cascade from="DEC-001" direction="sideways"}}')
     project, _page = _index_page(blocks_project)

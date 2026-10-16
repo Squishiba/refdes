@@ -1,0 +1,90 @@
+TASK: four small {{block}} defects from the blocks.md docs check (PR #291)
+Branch: fix-blocks-nits (main fd8dcee). Started 2026-10-16.
+
+COMMON.txt rules read: verify each claim by running the tool; narrow reads
+(grep -n first); test per behaviour fix; sabotage each fix; changelog
+fragments for user-visible fixes (README rule: "fixed" = a bug fix);
+one full-suite run in the foreground at the end; stage by path; log in the
+same commit as the work; push once; never git stash.
+
+## Verification (all four reproduced before touching code)
+
+Probes in .scratch/repro1 and .scratch/repro2 (refdes init, hardware@3,
+pages/index.md with the block, `refdes build` run through
+PYTHONPATH=<worktree>/src python -c "from refdes.cli import main; main([...])"):
+
+1. CONFIRMED. `{{tree board="power" workspace="rev-a"}}` built clean and
+   rendered the intersection (Power board, only the rev-a item). Code:
+   blocks.py `_render_tree` validated each parameter alone; tree.py
+   `build_forest` ANDs the two scopes (displays(i, board) and
+   i.workspace == workspace). docs/blocks.md: "At most one of the two."
+2. CONFIRMED. `{{cascade from="REQ-PWR-001@424cmrz419v" direction="up"}}`
+   (composite taken from the key minted into the item file by the build)
+   -> ERROR "... does not exist."; the page got the block-error marker.
+   `_render_cascade` used `project.item_by_id`, which never takes a key;
+   `_calcblock_target` (calcblock's `item=`) is the precedent.
+3. CONFIRMED. With `io: {label: IO}` registered and no items on it,
+   `{{tree board="io"}}` rendered exactly `<ul class="tree"><li>IO</li></ul>`
+   -- no count, no note. The block's emptiness test was the string
+   comparison `markup == '<ul class="tree"></ul>'`, which only the
+   unscoped empty project hits (a scoped forest keeps its scope node as a
+   root). The unscoped empty note is `<p class="tree-empty">No items in
+   ...</p>` -- that's what the scoped case now renders.
+4. CONFIRMED. Module docstring said "index, cascade, and whatever joins
+   them later" and "one of the two below"; `_REGISTRY` registers five
+   blocks (calcblock, compare, index, cascade, tree).
+
+## Fixes
+
+1. blocks.py `_render_tree`: both scopes present -> `_BlockError`
+   "board= and workspace= are mutually exclusive. tree accepts: at most
+   one of the two." (checks params, before the name-validity checks --
+   the finding is the pair, not the names). Test:
+   tests/test_tree_scoped.py::test_tree_block_board_and_workspace_together_is_a_build_error
+   (message + file + line 3). Fragment: tree-block-one-scope.fixed.md.
+2. blocks.py: `_calcblock_target` renamed to `_item_target` (docstring
+   now names both users) and `_render_cascade` resolves `from=` through
+   it; the walk starts from the RESOLVED item's id/key (`root_ref`), not
+   the raw composite text -- composite is not a graph reference and the
+   walk reads Item.resolved_links/backlinks (AGENTS.md). Root text prints
+   the resolved display id. Test:
+   tests/test_blocks.py::test_cascade_from_resolves_a_composite_ref (stale
+   label, key resolves; asserts root row is DEC-001 and the walk ran).
+   Fragment: cascade-composite-from.fixed.md. docs/blocks.md cascade `from`
+   row now names the composite (matches the calcblock `item` row).
+3. blocks.py `_render_tree`: emptiness decided by the forest
+   (`tree_mod.build_forest(...).expanded` empty) instead of the markup
+   string; note text unchanged. Test:
+   tests/test_tree_scoped.py::test_tree_block_scope_with_no_items_renders_the_empty_note.
+   Fragment: tree-block-empty-scope-note.fixed.md.
+4. blocks.py module docstring: names the five registered blocks; "one of
+   the two below" -> "one of the five registered blocks below". No
+   behaviour change: no test, no fragment.
+
+## Sabotage (revert each fix, watch its test fail, restore)
+
+1. Dropped the mutual-exclusion check ->
+   test_tree_block_board_and_workspace_together_is_a_build_error FAILED.
+   Restored.
+2. `_render_cascade` back to `project.item_by_id(root_id)` ->
+   test_cascade_from_resolves_a_composite_ref FAILED. Restored from
+   .scratch/blocks.py.fixed (cp), verified green again.
+3. Restored the `markup == '<ul class="tree"></ul>'` comparison ->
+   test_tree_block_scope_with_no_items_renders_the_empty_note FAILED.
+   Restored via cp, verified green again.
+
+## Gates
+
+- Targeted: tests/test_tree_scoped.py tests/test_blocks.py
+  tests/test_calcblock.py tests/test_compare_block.py tests/test_tree.py
+  -> 106 passed.
+- ruff check --select E9,F on the touched files and on all of src tests
+  (per COMMON) -> All checks passed.
+- docs-site/gen_examples.py --check -> up to date.
+- Full suite: see below (fill in from .scratch/suite.txt).
+
+## Full-suite run
+
+PYTHONPATH=$PWD/src ... python -m pytest -q -p no:cacheprovider
+-> exit=0; 3972 passed, 2 skipped in 340.81s (.scratch/suite.txt).
+No load flake hit; nothing needed a re-run.

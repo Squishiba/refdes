@@ -76,7 +76,7 @@ item — "what does this log entry ultimately satisfy, going up its links" or
 
 | Parameter | Required | Meaning |
 |---|---|---|
-| `from` | yes | The root item's ID. Must exist. |
+| `from` | yes | The root item's ID (or a `DISPLAY-ID@key` composite, resolved by its key half, as in `{{calcblock}}`'s `item=`). Must exist. |
 | `direction` | yes | `up` (follow the root's own declared links), `down` (follow backlinks — what points at the root), or `both` (both, rendered as two separate labeled subtrees). |
 | `depth` | no | How many hops to walk. A positive integer; defaults to `3`. |
 | `via` | no | A comma-separated list of link type names to follow. Defaults to every link type whose schema declares it `trace: true` (every starter link except `amends`, `follows`, `supersedes`, and `addresses`, which describe process rather than "this item's correctness rests on that one"). |
