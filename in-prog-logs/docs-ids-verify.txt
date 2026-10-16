@@ -1,0 +1,263 @@
+# docs-ids-verify — verify docs/ids.md against actual behaviour
+
+Branch: docs-ids-verify, base main e16a0df. Task: run every claim in
+docs/ids.md against the tool, fix the page where it is wrong. Docs-only.
+
+All probes run with `PYTHONPATH=$PWD/src
+/home/jorb/work/venv-refdes/bin/refdes` from
+`.scratch/ids-verify/proj<N>/` (fresh `refdes init` per probe = hardware@3),
+so the branch's own `src/` answers, not the installed venv copy.
+
+## Claim table (line numbers are pre-edit docs/ids.md)
+
+L8-27 Allocation
+- `refdes id` allocates ids for items with no `id:`; entry may omit `id:`
+  entirely — VERIFIED (proj17: entry with no `id:` key -> `allocated
+  REQ-N-001`).
+- Output format `allocated REQ-PWR-005  (items/requirements/power.yaml:36)
+  <body>` + `allocated 1 id(s)` — VERIFIED (proj1: exact two-space shape).
+- First writable load prints `(minted 1 key(s) while loading)` before the
+  allocation lines — REAL OUTPUT, doc snippet omits it. Page explains key
+  minting later (Surrogate keys), so a trimmed snippet is defensible; kept.
+- `--dry-run` — VERIFIED: `would allocate REQ-PWR-001  (...)` /
+  `would allocate 1 id(s)`, file untouched.
+- Write-back preserves comments and indentation — VERIFIED (proj1: the
+  `# No id yet` comment stayed above the item). Write-back ALSO adds a
+  `key:` line the doc's example does not show — MISSING FROM DOCS (fixed:
+  allocation and CAN examples now show the minted `key:`).
+
+L29-72 Choosing your own number
+- `id: "042"` + `defaults.prefix: CAN` -> `refdes id` rewrites to
+  `id: CAN-042` in the file — VERIFIED (proj1/items/can.yaml).
+- "nothing is ever resolved live" / check doesn't resolve — VERIFIED:
+  `refdes check` before `refdes id` reports
+  `ERROR items/can.yaml:6 — id: 042 has no prefix yet -- run 'refdes id'
+  to expand it into a full id`. The page never mentions that a left-behind
+  hint is a check ERROR — MISSING FROM DOCS (fixed: one sentence added).
+- Unquoted numbers refused, `042` and `42` both — VERIFIED (proj1/num.yaml):
+  `ERROR ... id: is an unquoted number -- YAML reads a leading zero as
+  octal (042 silently becomes 34, not 42) ... Quote the value as a string
+  (id: "042") ... or write the complete id by hand.`
+- Already-used and burned numbers refused at expansion:
+  `id: 042 ... already used or was burned by an earlier item under prefix
+  'CAN' -- pick a number higher than 42, or leave id: blank ...`; same for
+  a deleted item's number (`REQ-PWR-001` after its item was deleted:
+  `pick a number higher than 1`) — VERIFIED (proj1).
+- Blank `id:` picks next free (REQ-PWR-002, skipping burned 001) — VERIFIED.
+
+L74-94 Numbers never from position
+- Design claim VERIFIED (allocation appends next number regardless of file
+  position; REQ-PWR-002 allocated after burned 001 with nothing renumbered).
+- L100 "Display order comes from the file, not from the number." — WRONG.
+  proj20: file order REQ-TMP-001, -003, -002; `refdes ls` printed
+  -001, -002, -003, and index.html/tree.html/items.json carry the same
+  id order. Code: src/refdes/cli.py:832 (`sorted(..., key=lambda i: i.id)`),
+  src/refdes/render.py:160 (per-type `items.sort(key=lambda i: i.id)`, logs
+  by date). Fixed the sentence.
+
+L96-112 Ledger `.refdes/ids.yaml`, high-water mark per prefix, commit it
+- VERIFIED: file has `allocated:` list and `burned:` prefix->number map
+  (`CAN: 42`, `REQ-PWR: 2` in proj1). Real file lists `allocated:` before
+  `burned:`; the doc shows them in the other order — cosmetic YAML key
+  order, content matches; kept as-is.
+
+L114-136 Hand-typed reuse gap
+- Hand-typed `id: REQ-PWR-001` after deleting its item: `refdes check`
+  accepts silently — VERIFIED (proj1: `2 items, 0 errors, 0 warnings`).
+- `refdes audit` reports ledger entries with no live item and no
+  `former_ids:` — VERIFIED (audit section "Ledger entries with no live item
+  and no former_ids: explaining them:" listed REQ-PWR-001/002 after the
+  deletions).
+
+L138-153 Surrogate keys
+- 11-char key, `key:` in source, Crockford base32 + Damm check char —
+  VERIFIED (observed keys all 11 chars, e.g. `3xhgw0z9jpm`;
+  src/refdes/keys.py:31 ALPHABET comment, KEY_LEN = DATA_LEN+1; corrupt
+  hand-typed key -> `key '4yqf0by64pj' is malformed: check character
+  mismatch. ... (Expected check character '8'.)`).
+- Minting as side effect of loading: `refdes id`, `check`, `build`,
+  `revision`, `audit`, even `refdes ls` all print `(minted N key(s) while
+  loading)` on first writable run — VERIFIED.
+- `--no-write` (global flag, before the subcommand) suppresses minting —
+  VERIFIED (file gains no `key:`; no mint message).
+- Bare ref rewritten to `DISPLAY-ID@key` on writable load — VERIFIED
+  (`refines: [REQ-PWR-001@aqv7ee9brz4]`); `checks: against:` too — VERIFIED
+  (proj12: `against: BND-T-001@qknzzear55f`).
+- Rename refreshes only the label half — VERIFIED (id 001->010, link became
+  `REQ-PWR-010@aqv7ee9brz4`).
+- Never-writable-loaded project + reused id: bare ref re-attaches silently
+  — VERIFIED (`2 items, 0 errors, 0 warnings`, exit 0).
+- After one writable `refdes check`, reused id captures nothing:
+  `refines points at key 'x9w6rvfpm06' (labelled REQ-PWR-001), which no
+  item declares. ...` — VERIFIED, doc's quoted fragment matches. (The real
+  message also names `refdes keys restore`; page links cli-reference for
+  the commands; left.)
+- Legacy baselines keyed by display id, key inside the entry — VERIFIED
+  (proj4 `.refdes/baselines/rev-a.yaml`: `REQ-PWR-001: {..., key:
+  s24a55867g2, ...}`). Renamed item across baseline: `refdes audit` shows
+  `relabelled 1` / `REQ-PWR-001 -> REQ-PWR-010 (s24a55867g2)`, not
+  removed+added — VERIFIED.
+- `refdes keys adopt` rebases baselines + membership, writes
+  `.refdes/keys-adopted.yaml` (`adopted: true`) — VERIFIED; rebased
+  baseline is keyed by the surrogate key with the display id inside.
+- Membership follows the key across rename+move — VERIFIED (proj15
+  adopted: id 010->011 and board-b->board-a in one change, build warns
+  `REQ-011 moved from board 'board-b' to 'board-a'`). In the legacy scheme
+  the same combined change does NOT warn (manifest keyed by display id,
+  rename hides the move) — consistent with L151's own legacy description;
+  no page change.
+- Duplicate key on two items = build error — VERIFIED (proj14: `key
+  'aqv7ee9brz4' on REQ-K-002 ... already used by REQ-K-001 ...`).
+
+L155-191 Prefixes
+- Precedence item-prefix > defaults.prefix > type prefix — VERIFIED
+  (proj5: item `prefix: CAN` beats type REQ; blank ids -> REQ-001/REQ-002
+  from the type).
+- Prefixes may contain hyphens (`REQ-PWR`, `BND-THM`) — VERIFIED
+  (proj13: `BND-THM-0001` from type `bound` with prefix `BND-THM`).
+- Markdown leading `defaults:` block prefix — VERIFIED (proj16:
+  `allocated REQ-MD-001 (items/a.md:6)`).
+- L163 "the type's `prefix` in `refdes-schema.yaml`" — WRONG. A fresh
+  `refdes init` writes no refdes-schema.yaml (verified: init prints only
+  refdes-project.yaml/.vscode/.gitignore; proj1 dir listing), and the REQ
+  prefix came from the bundled standard
+  (src/refdes/standards/hardware/v3/base.yaml:186). `refdes-schema.yaml` is
+  the optional project overlay (AGENTS.md). Fixed to say the type's own
+  prefix, declared by the standard, overlaid in refdes-schema.yaml. Same
+  fix at L306 ("Type ... from `refdes-schema.yaml`").
+- Browser editor New Item form follows the same chain — code-VERIFIED
+  (src/refdes/serve/edit.py:1122-1134 plans from the destination file's
+  `defaults.prefix`, falls back to the type prefix; not exercised in a
+  browser).
+- Mismatch warning text: real is `WARNING items/a.yaml:6 [CNA-001] — id
+  'CNA-001' does not match this item's prefix 'CAN' (from defaults:)` —
+  VERIFIED (doc snippet omits the `file:line [id] —` location, same as the
+  page's style elsewhere; core text matches). Nonblocking — VERIFIED exit 0.
+- "starts with, not equal" — VERIFIED (`CAN-PWR-001` under
+  `prefix: CAN` -> no warning).
+- `legacy_prefixes:` exemption (hardware@3 `log` carries `DEC`) —
+  code-VERIFIED (src/refdes/ids.py:348-354) and behaviour-VERIFIED (proj19:
+  log item `id: DEC-001` with no file-level prefix -> 0 warnings; with
+  `prefix: LOG-PWR` in defaults -> warns). MISSING FROM DOCS (fixed: one
+  clause in the warning paragraph).
+
+L193-204 Width
+- `id.width` in refdes-project.yaml sets zero-padding — VERIFIED (init
+  writes `id: width: 3`; width: 4 -> `REQ-PWR-0001`, `BND-THM-0001`).
+
+L206-222 Merge collisions
+- Duplicate id -> check fails: real
+  `ERROR items/requirements/thermal.yaml:6 [REQ-PWR-004] — duplicate id
+  'REQ-PWR-004' (also defined at items/requirements/power.yaml:6)`,
+  exit 1 — VERIFIED (doc wraps the "(also defined at ...)" onto a
+  continuation line; content matches).
+
+L224-259 former_ids
+- `[[CAN_00]]` resolves with rendered `(formerly CAN_00)` marker — VERIFIED
+  (built site: `<a ... data-ref="REQ-CAN-001">REQ-CAN-001</a><span
+  class="ref-former-marker" ...>(formerly CAN_00)</span>`).
+- Bare `CAN_00` (underscore) does NOT autolink — VERIFIED (renders as
+  plain text; hyphen-shaped `REQ-CAN-005` former id gets no warning).
+- check warns for non-bare-autolinkable declared former id — VERIFIED:
+  `WARNING ... former_ids: 'CAN_00' does not match the bare-reference
+  shape (PREFIX-NNN) and will never autolink in prose -- reference it
+  explicitly as [[CAN_00]]`.
+- former id naming a live id = build error — VERIFIED: `former_ids:
+  'REQ-X-002' is still a live item id -- former_ids must name only retired
+  ids, never one still in use`.
+- Same former id on two items = build error — VERIFIED: `former_ids:
+  'REQ-X-009' is declared by both REQ-X-001 and REQ-X-002 -- a former id
+  must resolve to exactly one item`.
+- Retired number burned into ledger high-water mark — VERIFIED (proj10:
+  item REQ-PWR-007 with former_ids [REQ-PWR-005]; next blank allocation
+  was REQ-PWR-008).
+- audit lists full former-id mapping — VERIFIED (`Former IDs:` section,
+  `REQ-PWR-005    -> REQ-PWR-007`).
+- `refdes former-ids propose` infers from most recent baseline, writes
+  nothing until confirm — VERIFIED (proj11: `1 candidate ... exact match
+  (surrogate key)` + `Nothing written.`; `--confirm REQ-PWR-001` wrote
+  `former_ids: [REQ-PWR-001]` into the item).
+
+L261-281 ls by retired id
+- `refdes ls CAN_00` -> `REQ-CAN-001  requirement  <title> (formerly
+  CAN_00)` — VERIFIED, format matches doc example.
+- Substring + case rules: `ls can_00` matches — VERIFIED.
+- Site: item page lists former ids under the title (`<h1>REQ-CAN-001</h1>`
+  then `formerly known as <code>CAN_00</code>`) — VERIFIED; hover preview
+  data carries `former_ids` and app.js:46 renders "formerly known as" —
+  VERIFIED.
+- "the VS Code hover says the same" — CAN'T VERIFY (the VS Code extension
+  is not in this repository; the in-repo side is the generated
+  `.refdes/schema.json`, which carries no per-item former ids — render.py
+  only puts them in site preview data).
+- Reused retired id: live item wins the ls listing, note under the table
+  names the item recording it, check reports the build error — VERIFIED
+  (proj9: `note: REQ-X-002 is a live item's id again, so that item is
+  listed above; REQ-X-001 still records it as a former id, which
+  'refdes check' reports as an error -- former_ids: may only name retired
+  ids.`).
+
+L283-332 Boards planning + recommended shape
+- `.refdes/boards.yaml` exists (drift manifest, header comment),
+  `refdes build --accept-board-move` exists in build --help — VERIFIED.
+- "Type is the type's own prefix (`REQ`), from `refdes-schema.yaml`" —
+  WRONG, fixed with L163 (see above).
+- "refdes check only requires the id to start with the declared prefix" —
+  VERIFIED (ids.py:340-343 + proj6).
+
+## Edits made (docs/ids.md only)
+1. L163 prefix-source fix (standard, overlay in refdes-schema.yaml);
+   L306 same.
+2. Allocation + CAN write-back examples now show the minted `key:` line
+   (+ one parenthetical pointing at Surrogate keys).
+3. One sentence: a left-behind hint is a `refdes check` error until
+   `refdes id` expands it.
+4. One clause in the warning paragraph: `legacy_prefixes:` honoured.
+5. L100 display-order sentence corrected (ls/site sort by id, logs by
+   date) — verified against proj20 ls + built site + cli.py:832 +
+   render.py:160.
+6. Warning snippet given the real `file:line [id] —` location.
+
+## Verification of the edits
+- Fix probe (edit 1/5, prefix source): `refdes init` in a fresh dir writes
+  only `refdes-project.yaml`, `.vscode/`, `.gitignore` (proj1 listing) —
+  no `refdes-schema.yaml` — yet a blank-id `requirement` minted `REQ-001`
+  (proj5), and `REQ` is declared at
+  src/refdes/standards/hardware/v3/base.yaml:186. So the pre-fix sentence
+  ("the type's `prefix` in `refdes-schema.yaml`") names a file a default
+  project does not have; the fixed sentence matches what was run.
+- Sabotage: docs-only task — no behaviour fix, so no behaviour test to
+  write and nothing in tests/ parses ids.md prose (grep 'ids.md' in
+  tests/test_docs_examples.py: no matches; test_docs_anchors covers links,
+  not claims). The sabotage equivalent is the probe pair above: revert
+  edit 1 and the page contradicts `ls` of a fresh `refdes init` +
+  `refdes id` output recorded this session; with the edit in place the
+  page matches the recorded outputs. Each quoted message added by the
+  edits (hint-left-behind error, warning line) was re-run and grep-F
+  matched against real output (`.scratch/quoted.txt`).
+
+## Suite / gates (final)
+- docs tests (test_docs_anchors, test_docs_examples,
+  test_standard_docs_complete): 10 passed.
+- full suite: 3930 passed, 2 skipped in 305.97s, exit 0
+  (.scratch/suite.txt; no flakes this run).
+- ruff check --select E9,F src tests: All checks passed, exit 0.
+- python docs-site/gen_examples.py --check: schema-reference.md and
+  vocabulary.md up to date, exit 0.
+
+## Status
+COMPLETE. docs/ids.md edited + this log; commit/push/PR follow.
+
+## Changelog
+No fragment: docs-only page fix, no user-visible behaviour change
+(changelog.d/README rule: fragments track changes to behaviour/CLI, not
+documentation prose).
+
+## Notes for PR body
+- Cross-page: docs/concepts.md:19 "Item types ... are declared in
+  `refdes-schema.yaml`" has the same looseness (standard + optional
+  overlay). Not touched (other page).
+- CAN'T VERIFY: VS Code hover claim (extension not in repo).
+- Possible doc nit (not changed): `refdes id` first-run snippet omits the
+  `(minted N key(s) while loading)` line; ledger example shows `burned:`
+  before `allocated:`, real file is the other order.

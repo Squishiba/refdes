@@ -1,0 +1,168 @@
+Task: walk docs/getting-started.md then docs/authoring.md as a new user and fix every step that
+doesn't match what refdes actually does. Branch: docs-walkthrough-verify (base main 9fbd89b).
+Started clean: `git status` empty at 9fbd89b.
+
+Method: fresh project under .scratch/gswalk/ (dirs my-board, fresh2..fresh5, nostd, existing),
+running the exact commands/commands+files from the pages with
+`PYTHONPATH=<worktree>/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli` (the pages' own
+documented module fallback; venv creation + pip install -e . not run literally -- see CAN'T VERIFY
+below). Stream-separated captures used where order matters.
+
+STEP TABLE -- docs/getting-started.md
+
+ 1. Install: `python -m venv .venv` + `pip install -e .` -- CAN'T VERIFY (offline; no network for
+    pip). Verified the page's own fallback (`./.venv/bin/python -m refdes.cli`) works: every
+    command below ran through `python -m refdes.cli` on Linux.
+ 2. `refdes init` -- OK. Writes exactly the quoted refdes-project.yaml (site/out/standard 3/id
+    width 3 ledger .refdes/ids.yaml), .vscode/settings.json (yaml.schemas on items/**/*.yaml),
+    .gitignore. `items/` NOT created -- OK. Layout tree OK.
+ 3. `--version` / `-V` print "refdes 0.5.0" and exit -- OK.
+ 4. `version: 3` = newest bundled -- OK (init prints `standard: hardware@3`).
+ 5. `refdes init --standard none` -- OK; prints "standard: none -- types:/link_types: are yours
+    to declare", writes config with `standard: none`.
+ 6. Lock paragraph (cli.main takes .refdes-write.lock for every command but serve/init/new/schema
+    and not under --no-write/--dry-run) -- OK; matches cli.py main() (`args.command in {"serve",
+    "init", "new", "schema"}`, `_writes_allowed`).
+ 7. `.gitignore` keeps FIVE paths -- OK as enumerated, but the sentence "add those same four lines
+    yourself" is WRONG: init writes 5 entries (observed: 5 non-comment lines; and the
+    pre-existing-.gitignore probe: init added the 4 uncovered ones, skipped the covered one --
+    its dedup claim OK). FIX: four -> five.
+ 8. power.yaml + `refdes id` -- OK, byte-exact: "(minted 2 key(s) while loading)",
+    REQ-PWR-001 at power.yaml:9, REQ-PWR-002 at :13, "allocated 2 id(s)". Keys written into the
+    file -- OK; mint line appears once, not on later builds -- OK.
+ 9. thermal.yaml bound + `limit: "<= 0.15 W/in^2"` -- OK (limit parsed, compared at check/build).
+    "called `constraint` in hardware@1" -- OK (v1 base.yaml types: requirement, constraint,
+    decision, test, component, log).
+10. `refdes new log` starter -- OK: every field commented in, from resolved schema.
+11. regulator.md + `refdes build` -- OK, reproduced the quoted block byte-for-byte in fresh3
+    (doc's exact order: id, then bound, then log; first build mints the log/bound keys and rewrites
+    the 3 references): stdout "(minted 2 key(s) and rewrote 3 reference(s) while loading)",
+    "WARNING <project> -- 2 item(s) with no coverage -- see coverage.html",
+    "4 items, 1 errors, 1 warnings", "site written to .../_site"; stderr the ERROR line with
+    0.2366 W/in² and "build completed with errors (use --keep-going to exit 0)". Note: a SECOND
+    build of the same tree prints none of the mint/coverage/summary lines (keys already minted) --
+    the doc's "first line is not noise" paragraph covers this -- OK.
+12. "`V * A` yields watts; `V + A` would be a build error" -- OK:
+    ERROR items/mid/clash.md:9 [LOG-PWR-221] -- calc 'Q': cannot add V and A -- the units do not match.
+13. Step 6 test + coverage claims -- OK: after adding items/tests/power.yaml, _site/coverage.html
+    shows REQ-PWR-001 >verified, REQ-PWR-002 >satisfied; build warns "1 requirement(s) satisfied
+    but not verified". Back-links computed -- OK.
+14. Step 7 board.yaml (defaults type log, prefix LOG-PWR, author J. Bin; LOG-PWR-002 entry) --
+    OK, loads.
+15. "`refdes check` still reports the old failure" after supersedes + status: superseded -- OK
+    (ERROR persists, exit 1).
+16. `refdes history capture LOG-PWR-002` -- OK ("captured LOG-PWR-002: manual capture"); edit
+    after capture -> WARNING "edited after captured" on every check -- OK.
+17. "`sealing: build` for the type ... editing it fails the build" -- OK: with
+    types.log.sealing: build, build->seal, edit, build -> ERROR "LOG-PWR-102 is append-only and
+    has been modified since it was sealed...". v1/v2 log carry append_only: true and no sealing
+    key (engine default build) -- the page's "as hardware@1 and hardware@2 did" is fine.
+18. check_severity without `default:` -> load refusal naming
+    "types.log.check_severity does not cover status 'proposed'" -- OK (exact text, plus the
+    "Add it, or add default: <level>." continuation).
+19. Mapping with default: error -> check exit 0; demoted failure on `refdes check -v` as INFO --
+    OK. "`log` ships check_severity: error" -- OK (v3 base.yaml:293). "component ships a mapping
+    like this already" -- OK (base.yaml:250 {candidate: info, selected: error, rejected: info,
+    obsolete: info}).
+20. "Open _site/index.html" -- OK (file exists; contents not browser-verified).
+
+STEP TABLE -- docs/authoring.md (continued in fresh5 = the same project)
+
+ 1. List file example (defaults + ids + status: draft override) -- OK.
+ 2. "prefix: is consumed by the ID allocator, not stored as a field" -- OK (allocator honored it;
+    no prefix field warnings).
+ 3. Bodies-in-list-files snippet (LOG-005) -- WRONG as printed: the snippet has no `type:` in
+    defaults, no section, so a user who creates exactly this file gets
+    "ERROR items/log/mid.yaml:2 -- item has no 'type'". FIX: added `defaults: {type: log}` to
+    the snippet (the file then loads; body calc block + {{P}} resolve -- verified: rendered page
+    shows "Computed loss: 3.96 W", calc table emitted).
+ 4. `.md` front-matter+body example -- OK. Filename irrelevant to identity -- OK.
+ 5. Several items in one .md: leading `defaults:` block applies to all items; items with no id
+    filled by `refdes id` "at its own item's fence" -- OK: LOG-PWR-102 written into the second
+    block's own fence at multi.md:14. Mid-file `defaults:` block -> error at the block
+    ("'defaults:' only applies as the very first block in a file...") -- OK, matches the page.
+    Literal `---` + prose stays body with <hr /> rendered -- OK.
+ 6. `prefix:` per item (LOG-MECH override) -- OK: allocated LOG-MECH-001 (item) + LOG-PWR-103
+    (rest) in one file.
+ 7. Sections, list form -- OK (interfaces.yaml loads; items typed by section). Markdown form --
+    OK (interfaces.md loads; `body:` in front-matter accepted).
+ 8. Section-conflict ERROR quote -- OK verbatim: "item declares type 'test' but sits inside a
+    'section: requirement' block (opened at line 2) -- ... Move the item out of the section, or
+    fix whichever of the two is wrong."
+ 9. defaults-vs-section ERROR quote -- OK verbatim: "'section: bound' conflicts with this file's
+    own 'defaults: {type: requirement}' -- ... Drop 'type:' from defaults:, or make it match."
+10. "There is no enforce_grouping: setting" -- OK (no match in src/).
+11. Fields snippet (requirement override) -- OK: loads as refdes-schema.yaml with no config
+    error. "already declares this for requirement and the other SIX starter types" -- WRONG:
+    hardware@3 ships SIX types total (requirement, bound, test, component, group, log). FIX:
+    six -> five.
+12. did-you-mean ERROR -- OK verbatim ("unknown field 'sorce' on requirement -- did you mean the
+    field 'source'? A misspelled field name silently drops it instead of erroring.").
+13. Far-field WARNING -- OK verbatim ("unknown field 'thermal_model' on component.").
+14. "Misspelled link verb (sattisfies:) has always failed the build" -- OK ("unknown field
+    'sattisfies' on log entry -- did you mean the link 'satisfies'?").
+15. Titles chain title/text/summary/name/body/ID -- OK (model.py Item.title: ("title","text",
+    "summary","name") then body truncated at 90, then id).
+16. source/note <- sets.provenance with on_change: timeline; rationale invalidate + required on
+    log when status: rejected; body invalidate -- OK (v3 base.yaml:111-116, 194/224/299,
+    requirement body {on_change: invalidate, required: true}).
+17. Reserved keys table + prefix/board exception clause -- OK (vocabulary.py RESERVED_KEYS;
+    no v3 type declares a board:/prefix: field).
+18. Folder layout -- OK (recursive scan; folders meaningless).
+
+NOT A BUG (retracted -- review P3): my earlier note claimed `refdes init` printed the
+"wrote .gitignore (...)" path list and the "candidate parts live in ..." hint on one
+overwritten stdout line ("...settings.jsoncommended-layout", seen in two runs). A fresh
+`refdes init > init.out 2> init.err` in .scratch/rawinit/ with `cat -A` shows the two
+messages on SEPARATE, complete lines (5 stdout lines, 0 stderr, each ending in `$`), and
+cli.py prints them in separate `print()` calls. The garbled single-line rendering was a
+display artifact of my read/bash-tool capture, not the CLI. No init defect; retracted.
+
+FIXES APPLIED (docs only):
+ - docs/getting-started.md:91  "four" -> "five" (init's .gitignore keeps five paths)
+ - docs/authoring.md ~264      "the other six starter types" -> "five" (hardware@3 ships six total)
+ - docs/authoring.md ~42       bodies-in-list-files snippet gains `defaults: {type: log}` (snippet
+                               as printed cannot load: "item has no 'type'")
+
+NO TEST SUITE CHANGE: docs-only task; no behavior fix -> no new pytest test (per TASK: docs only).
+Verification = the runs above; the docs pages' own test gates (tests/test_docs_anchors.py,
+test_docs_examples.py, test_standard_docs_complete.py, test_candidate_parts_doc.py,
+test_schema_doc_key.py: 31 passed) + docs-site/gen_examples.py --check (up to date) cover the
+pages.
+
+SABOTAGE (recorded): reverted the "five" fix -> doc line 91 reads "same four" while a fresh
+`refdes init` .gitignore has 5 non-comment path lines (counted: 5) -- the doc contradicts the
+observed init output; restored "five".
+
+GATES: ruff check --select E9,F src tests -> All checks passed! (exit 0).
+gen_examples.py --check -> schema-reference.md/vocabulary.md up to date (exit 0).
+Full suite FOREGROUND once: 3919 passed, 2 skipped in 339.10s, exit=0 (.scratch/suite.txt; no
+flake -- the known serve-token test passed in-line).
+
+No changelog fragment: changelog.d/README.md -- fragments describe changes a release ships to the
+project's users ("Each change that deserves a changelog entry", categories added/changed/fixed/
+removed/breaking). These edits correct documentation text only; no behavior changed, nothing for a
+user to do. No fragment.
+
+STATUS: finished. Committed (docs fixes + this log), pushed once, PR opened.
+
+=== CHANGES REQUESTED round (review on head 7334dbd, cross-model check) ===
+Reviewer ran full suite on head: 3919 passed, 2 skipped (matches mine). CI was pending at
+review time. Reproduced my sabotage claim: confirmed the "four"->"five" fix contradicts the
+parent doc (init writes 5 non-comment .gitignore lines) -- sabotage claim HOLDS. Reproduced
+the type count via clean `refdes schema` -- six hardware@3 types, so "five" (requirement + 5
+others) is right. All three doc fixes affirmed.
+
+Single finding, P3 -- AGREED:
+  in-prog-logs/docs-walkthrough-verify.txt:113-117 asserted init overlaps the `.gitignore`
+  write message with the candidate-parts hint on one stdout line ("seen in two runs"). Not
+  a real CLI defect: fresh `.scratch/rawinit/` `refdes init` -> `cat -A init.out` shows 5
+  clean stdout lines, the ".gitignore (...)" and "candidate parts live in ..." messages on
+  SEPARATE lines each ending `$`; cli.py prints them in separate `print()` calls. The garbled
+  single-line text was a display artifact of my read/bash-tool capture, not the CLI. Fixed by
+  rewriting that log entry to a retraction (NOT A BUG). No code/doc change needed; no new
+  test (no behavior fix). No finding rejected.
+
+Gates re-run on this round (docs-log-only change): docs tests 31 passed; gen_examples --check
+up to date; ruff --select E9,F clean; full suite re-run (see below).
+
