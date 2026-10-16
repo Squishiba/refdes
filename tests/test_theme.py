@@ -346,6 +346,98 @@ def test_a_shared_pair_does_not_emit_dark_blocks(tmp_path):
     assert "data-theme" not in css
 
 
+# --------------------------------------------------- routing: every light value
+#
+# A colour token set in BOTH palettes with different values used to be
+# excluded from `:root` altogether, so light mode showed the stylesheet's
+# default instead of the theme's light colour -- and every built-in theme
+# sets every colour token that way, so built-ins rendered unthemed in light
+# mode. The routing tests below pin each case's exact block.
+
+
+def _root_block(css: str) -> str:
+    """The generated plain `:root` block, exactly."""
+    return css.split("@media", 1)[0].rstrip("\n")
+
+
+def test_a_token_redefined_in_dark_keeps_its_light_value_in_root():
+    """The bug: `--bg` in both palettes with different values emitted its
+    dark value twice and its light value nowhere."""
+    css = theme_mod.render_theme_css(
+        {"light": {"--bg": "#fffdf5"}, "dark": {"--bg": "#101018"}}
+    )
+    assert _root_block(css) == ":root {\n  --bg: #fffdf5;\n}"
+    media = _media_block(css)
+    assert "--bg: #101018;" in media
+    assert "--bg: #fffdf5" not in media
+    data_block = css.split('[data-theme="dark"] {', 1)[1]
+    assert "--bg: #101018;" in data_block
+    assert "--bg: #fffdf5" not in data_block
+    # No light-only token here, so the light pin stays absent, as before.
+    assert '[data-theme="light"]' not in css
+
+
+def test_a_flat_pair_still_emits_exactly_one_root_block():
+    """Flat pairs route unchanged: one `:root`, no media, no attributes."""
+    css = theme_mod.render_theme_css(
+        {"light": {"--accent": "#b3541e"}, "dark": {"--accent": "#b3541e"}}
+    )
+    assert css == ":root {\n  --accent: #b3541e;\n}\n"
+
+
+def test_a_light_only_override_routes_to_root_and_the_light_pin():
+    css = theme_mod.render_theme_css({"light": {"--bg": "#fffdf0"}, "dark": {}})
+    assert _root_block(css) == ":root {\n  --bg: #fffdf0;\n}"
+    media = _media_block(css)
+    assert "--bg: #14171a;" in media  # the stylesheet's own dark value, no bleed
+    assert "--bg: #fffdf0" not in media
+    assert "--bg: #fffdf0;" in css.split('[data-theme="light"] {', 1)[1]
+
+
+def test_a_dark_only_override_never_touches_root():
+    css = theme_mod.render_theme_css({"light": {}, "dark": {"--bg": "#101018"}})
+    assert _root_block(css) == ":root {\n}"
+    media = _media_block(css)
+    assert "--bg: #101018;" in media
+    assert css.split('[data-theme="dark"] {', 1)[1].count("--bg: #101018;") == 1
+    assert '[data-theme="light"]' not in css
+
+
+def test_a_mixed_theme_routes_each_token_to_its_own_palette():
+    css = theme_mod.render_theme_css(
+        {
+            "light": {"--bg": "#fffdf5", "--accent": "#9a4b1f"},
+            "dark": {"--bg": "#101018", "--fg": "#ece3d3"},
+        }
+    )
+    root = _root_block(css)
+    assert "--bg: #fffdf5;" in root  # both-different: light value present
+    assert "--accent: #9a4b1f;" in root  # light-only
+    assert "--fg:" not in root  # dark-only: light mode keeps the default
+    media = _media_block(css)
+    assert "--bg: #101018;" in media  # the theme's dark value
+    assert "--fg: #ece3d3;" in media  # dark-only override
+    assert "--accent: #7fb0ff;" in media  # stylesheet dark, no light bleed
+    light_block = css.split('[data-theme="light"] {', 1)[1]
+    assert "--bg: #fffdf5;" in light_block
+    assert "--accent: #9a4b1f;" in light_block
+
+
+def test_a_builtin_theme_lights_up_light_mode(tmp_path):
+    """Every built-in sets every colour token in both palettes with
+    different values, so before the fix a built-in's whole light palette
+    was dropped and light mode rendered the stylesheet default."""
+    out = _build(_coverage_project(tmp_path, "\n  theme: paper\n"))
+    css = open(os.path.join(out, "assets", "theme.css"), encoding="utf-8").read()
+    root = _root_block(css)
+    paper = theme_mod.BUILTIN_THEMES["paper"]
+    for name, value in paper.light.items():
+        assert f"{name}: {value};" in root
+    media = _media_block(css)
+    for name, value in paper.dark.items():
+        assert f"{name}: {value};" in media
+
+
 # ---------------------------------------------------------------- contrast
 
 
