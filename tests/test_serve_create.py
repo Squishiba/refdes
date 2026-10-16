@@ -1115,6 +1115,95 @@ def test_a_workspace_field_suggests_a_file_already_in_that_workspace(tmp_path):
     assert read(items / "many-platform.yaml").count("id: REQ-1") == 3  # untouched
 
 
+def test_empty_selected_workspace_suggests_its_own_new_file(tmp_path):
+    """A new workspace must not borrow another workspace's file or prefix.
+
+    Preview and create use the same suggestion, both with and without a board.
+    A caller-supplied destination remains an override of that suggestion.
+    """
+    config = SCHEMA.replace(
+        'boards:\n  board-a:\n    label: "Board A"\n',
+        'item_layout: workspace\n'
+        'boards:\n  board-a:\n    label: "Board A"\n    path: power\n'
+        'workspaces:\n'
+        '  product-a: { path: pa }\n'
+        '  product-b: { path: pb }\n',
+    )
+    write_project_config(tmp_path, config)
+    other = tmp_path / "items" / "pa" / "power" / "requirements.yaml"
+    other.parent.mkdir(parents=True)
+    other.write_text(
+        "defaults: { type: requirement, board: board-a, workspace: product-a, prefix: REQ-PA }\n"
+        "items:\n"
+        "  - id: REQ-PA-001\n    text: Product A.\n"
+        "  - id: REQ-PA-002\n    text: Another product A.\n",
+        encoding="utf-8", newline="\n",
+    )
+    other_before = read(other)
+    app = EditorApp(str(tmp_path / "refdes-project.yaml"), poll_interval=60)
+    app.start()
+    try:
+        client = Client(app)
+        status, unscoped = client.api_get("/api/create/preview?type=requirement")
+        assert status == 200
+        assert unscoped["destination"] == "items/pa/power/requirements.yaml"
+        status, existing_scope = client.api_get(
+            "/api/create/preview?type=requirement&workspace=product-a"
+        )
+        assert status == 200
+        assert existing_scope["destination"] == unscoped["destination"]
+
+        status, preview = client.api_get(
+            "/api/create/preview?type=requirement&workspace=product-b"
+        )
+        assert status == 200
+        assert preview["destination"] == "items/pb/requirements.md"
+        assert not preview["id"].startswith("REQ-PA-")
+
+        status, made = client.api_post(
+            "/api/items/create",
+            {"type": "requirement", "fields": {"text": "Product B.", "workspace": "product-b"}},
+        )
+        assert status == 200 and made["kind"] == "created", made
+        assert made["path"] == preview["destination"]
+        assert made["id"] == preview["id"]
+        assert "workspace: product-b" in read(tmp_path / made["path"])
+        assert read(other) == other_before
+
+        status, with_board = client.api_get(
+            "/api/create/preview?type=requirement&workspace=product-b&board=board-a"
+        )
+        assert status == 200
+        assert with_board["destination"] == "items/pb/power/requirements.md"
+        status, made_board = client.api_post(
+            "/api/items/create",
+            {"type": "requirement", "fields": {
+                "text": "Product B on power.", "workspace": "product-b", "board": "board-a"
+            }},
+        )
+        assert status == 200 and made_board["kind"] == "created", made_board
+        assert made_board["path"] == with_board["destination"]
+        assert read(other) == other_before
+
+        status, overridden = client.api_get(
+            "/api/create/preview?type=requirement&workspace=product-b"
+            "&destination=items/pb/manual.md"
+        )
+        assert status == 200
+        assert overridden["destination"] == "items/pb/manual.md"
+        status, made_override = client.api_post(
+            "/api/items/create",
+            {"type": "requirement", "fields": {
+                "text": "Chosen file.", "workspace": "product-b"
+            }, "destination": "items/pb/manual.md"},
+        )
+        assert status == 200 and made_override["kind"] == "created", made_override
+        assert made_override["path"] == overridden["destination"]
+        assert read(other) == other_before
+    finally:
+        app.stop()
+
+
 def test_creating_into_an_undeclared_workspace_is_the_delta_gate_s_refusal(tmp_path):
     """`workspace` joins `board` as an accepted create field, so a value the
     project never declared must be refused the same way a value the schema
