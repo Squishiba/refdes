@@ -1,0 +1,204 @@
+# docs-vocabulary-verify — work log
+
+Task: verify docs/vocabulary.md against actual refdes behavior; fix what's
+wrong. Branch docs-vocabulary-verify, base main 1bbfbe0. All probes run in
+.scratch/vocab-probe/ (probe1 main project, probe3 negatives, probe4
+workspaces, probe5 prefix-rename, probe6 overlay/extra probes).
+
+## Structural facts about the page
+
+- Lines 39-837 are a GENERATED block (gen_examples.py), pinned by
+  tests/test_vocabulary_page.py. `python docs-site/gen_examples.py --check`
+  passes on the pre-change page -> every schema-derived fact in the block
+  (types, prefixes, fields, required flags, link sources/targets/inverses,
+  set membership, all quoted doc: strings) matches the resolved
+  hardware@3 schema of this repo today. Verified mechanically, not by eye.
+- Hand-written prose = lines 1-38 (the intro). Generated block must not be
+  hand-edited -> any WRONG claim inside it goes to the PR body under
+  "possible bugs" (its text lives in src/refdes/vocabulary.py EXAMPLES /
+  RESERVED_KEYS, i.e. code — out of scope for this docs-only task).
+
+## Claim table (claim -> verdict -> evidence)
+
+VERIFIED (runs in .scratch/vocab-probe/probe1, hardware@3 from `refdes init`):
+1. init writes refdes-project.yaml with standard: hardware@3 — ran init.
+2. Page lists exactly the 6 types of the v3 standard (requirement, bound,
+   test, component, group, log; v2 `decision` merged into log per
+   base.yaml header). `refdes schema` $defs show decision only via
+   migration. VERIFIED (base.yaml:184-320, schema.json).
+3. Id prefixes BND/CMP/GRP/LOG/REQ/TST — schema.json (block pinned).
+4. bound: limit required — probe3: "missing required field 'limit'".
+5. component/test/group: title required; log: summary required — probe3
+   "missing required field" errors for each.
+6. status enums + coverage: bound/requirement draft/active/retired, only
+   active in coverage — probe1 index coverage dict excludes draft
+   REQ-PWR-005, retired BND-THM-003 (and default-draft REQ-IO-001,
+   base.yaml default: draft). component selected/rejected/...:
+   satisfying_statuses [selected] (base.yaml:249); log accepted
+   (base.yaml:292); test verifying_statuses [passing] (base.yaml:236).
+   coverage probe: REQ-PWR-001 verified (passing test), REQ-PWR-002
+   satisfied (accepted log), REQ-PWR-004 with planned test = open.
+7. addresses = addressed coverage — coverage entry
+   addressed_by: [LOG-A-001]. VERIFIED.
+8. group: title required; nothing may satisfy one — probe3: "satisfies
+   may point at requirement, bound, but GRP-IO-001 is a group"; group not
+   in coverage dict. VERIFIED.
+9. drop_in self-inverse, no rationale required — probe1 CMP-PWR-001 builds
+   clean, cmp-pwr-002.html shows the Drop-in edge. VERIFIED.
+10. alternate requires rationale — probe3: "'rationale' is required when it
+    has a link under 'alternate' (required_when: {'links': 'alternate'})".
+11. blocked_by: cycle is a build error — probe3: "blocked_by cycle:
+    LOG-A-002 -> LOG-A-004 -> LOG-A-002". VERIFIED.
+12. selects: build warns when either half missing — probe6 both ways:
+    "selects CMP-PWR-003, but that item's status is 'candidate', not
+    'selected'" and "status is 'selected' but nothing selects it".
+13. supersedes: build warns when target status disagrees — probe1:
+    "supersedes LOG-A-003, but that item's status is 'accepted', not
+    'superseded' -- the link does not move a status on its own."
+14. log: append-only; edit after capture is a warning — probe3:
+    "LOG-A-002: edited after captured -- current semantic content differs
+    from the snapshot in followed event ...". VERIFIED (sealing: history,
+    base.yaml:287).
+15. log rationale required for rejected verdict — required_when
+    {status: rejected} (base.yaml:299), require_rejection_rationale
+    defaults true (schema.py:265). VERIFIED (code+schema; mechanism proven
+    by #10 probe).
+16. log tasks: stable id/text/state open|done|dropped; continuation
+    omitting tasks keeps nearest prior list — schema.json tasks shape;
+    probe1 `refdes thread LOG-A-005` tip shows "t1 Read section 3.1 (open
+    since LOG-A-001)" though the tip entry has no tasks:. "explicit empty
+    list clears it" — probe6 tasks: [] accepted (schema allows; not
+    re-probed through thread). VERIFIED.
+17. checks compare a calc-block value against a bound limit — probe1
+    cmp-topology.md ```calc fence + checks against BND-PWR-001 builds
+    clean; lowercase/undefined names error ("check refers to 'p_total',
+    which no calc block defines"). Note: the calc block is a ```calc fence
+    in the body, NOT a `calc:` YAML key (probe: "unknown field 'calc'").
+18. citations entry fields path/rev/page/keep_copy (+section/part_number/
+    id/item) and [[cite:]] refs — schema.json citations props
+    {id,item,keep_copy,page,part_number,path,rev,section}; [[cite:id]] in
+    build.py:179, model.py:426. VERIFIED.
+19. keys: minted on first writable load, 11-char base36, links resolve
+    through them — probe1: "(minted 17 key(s) and rewrote 19 reference(s)
+    while loading)", `key: dbbgt3xepbs` etc. written into files; link
+    targets rewritten to `ID@key`; --no-write suppresses. VERIFIED.
+20. `refdes id` writes back a missing id — probe1: "allocated
+    REQ-PWR-005 (items/board-a/reqs.yaml:29)" + file line. VERIFIED.
+21. board = first path segment under items/ — probe1 ls: board-a for all
+    items under items/board-a/ (registry present). Unregistered folder:
+    warning "no board: 'board-x' is not in the boards: registry..." and
+    board unset (see MISSING M3 for the doc's nuance gap).
+22. workspace registered-in-settings semantics — probe4: workspaces:
+    registry + defaults workspace: platform accepted, ls shows workspace
+    column. VERIFIED.
+23. "a type that declares a field of this name takes it over" —
+    parse.py OVERRIDABLE = board/on_change/prefix/workspace; repo's own
+    refdes-schema.yaml log `board:` field shadows it (project's real case).
+24. defaults: inheritance (type/prefix/status/workspace) — probe1 files
+    rely on it throughout (coverage counted REQ-PWR items as active via
+    defaults: status: active). VERIFIED.
+25. section markers in a YAML list file — probe1 mixed.yaml with
+    `- section: requirement` / `- section: bound` typed items correctly
+    (ls shows REQ-IO-001 requirement, BND-PWR-001 bound). VERIFIED.
+26. on_change item override shape (fields: {owner: ignore}, reason:) —
+    schema.json on_change def; probe1 REQ-PWR-004 builds clean.
+27. Markdown item carries type in front matter — probe1 cmp-topology.md.
+28. built site carries vocabulary.html — probe1 _site/vocabulary.html
+    exists; render.py:1261 writes it. VERIFIED.
+29. overlay type without doc: "No definition" + minimal generated example
+    — probe6 (refdes-schema.yaml type bracket, verb mounts_on):
+    render_markdown shows "_No definition._", example `type: bracket` /
+    `id: BRK-001` / `mounts_on: [component-001]` from resolved facts.
+    VERIFIED (intro claim "no entry is ever example-less").
+30. free-text search matches tags as well as titles — `refdes ls power`
+    matches REQ-PWR-001 only via tags: [power]; cli.py:787 "Free-text
+    matches id, title, `tags:` *and* `former_ids:`". VERIFIED.
+31. "Differs from `limit`" renders without a link — intentional, base.yaml
+    comment P20 ("limit is a field, not a page term ... renders without a
+    link"). VERIFIED.
+32. set membership (Included by lists) and all quoted doc:/definition
+    strings — gen_examples --check + test_vocabulary_page.py (22 passed).
+33. intro links: docs/schema-reference.md exists; output.md#the-vocabulary-
+    page anchor exists (output.md:227). VERIFIED.
+
+WRONG (fixed — hand-written prose):
+W1. Intro line 25 listed `history` among engine-reserved keys
+    ("`id`, `type`, `key`, `body`, `history` and the rest").
+    `history` is NOT in RESERVED_KEYS (vocabulary.py:60-111: id, type, key,
+    former_ids, body, on_change, prefix, board, workspace, defaults,
+    section), the page's own Engine-reserved-keys section does not list it,
+    and item-level `history:` is a renamed-away legacy key (parse.py:1252-
+    1256: "item-level history: was renamed to on_change:"). Fixed:
+    `history` -> `former_ids`.
+
+Possible bugs (code-side text inside the generated block — NOT fixable in
+docs; listed in PR body):
+B1. `verifies` example (page 493-500, vocabulary.py:530-536) claims "Or
+    from the requirement, under the inverse name -- same edge either way"
+    and shows `verified_by: [TST-PWR-001]` on a requirement. Real build
+    (probe1): ERROR "unknown field 'verified_by' on requirement -- did you
+    mean the link 'governed_by'?". Inverse names are not authorable
+    anywhere (no inverse handling in parse.py); they are computed
+    backlinks. This also violates the intro's own "Every example is
+    schema-true" claim.
+B2. `body` reserved-key doc (page 733): "for types whose content is the
+    statement itself it is the required field" — enforcement is a WARNING,
+    not required-field error (build.py:298-303; base.yaml:56-58 says so
+    explicitly, on purpose, so stubs can exist).
+B3. `former_ids` doc (page 719): "Written by the engine when an id is
+    re-minted, so old citations still resolve." probe5: `refdes rename`
+    prefix REQ-PWR->REQ-PSU re-minted ids, wrote NO former_ids, and a bare
+    reference to the old id ERRORS ("a bare reference cannot follow a
+    rename"). former_ids is written by `refdes former-ids propose
+    --confirm` (needs a stamped baseline) or by hand — opt-in, not
+    automatic.
+B4. `board` doc (page 778): "the first path segment under `items/` unless
+    the item says otherwise" — only segments matching the `boards:`
+    registry resolve; unregistered folder = warning + board unset
+    (probe items/board-x/). With no registry at all every board is unset
+    (repo's own refdes-project.yaml comment says so).
+B5. `section` doc (page 825): "the section heading its entries file under
+    on the item's page; in a Markdown marker block, the section a
+    generated block belongs to." Actual semantics (parse.py:813-838,
+    1634-1638): a section marker asserts the TYPE of every item after it
+    until the next marker (stricter than defaults); the Markdown spelling
+    is a `--- section: <type> ---` front-matter block. No
+    item-page-heading, no "generated block" concept. The page's own
+    example comment ("every item after it is a requirement") is correct;
+    only the scope sentence is off.
+
+MISSING FROM DOCS (notes for PR body; all live in the generated block):
+M1. Bare link text is rewritten to composite `ID@key` form by every
+    writable load (probe1: "rewrote 19 reference(s)"); the page's key
+    entry says links resolve through the key but never that files show
+    `ID@key` afterwards — a first-contact surprise.
+M2. requirement/bound status defaults to draft (base.yaml:194 default:
+    draft), so omitting status excludes the item from coverage — the
+    status docs say "only active count" without naming the default.
+M3. board: registry-match nuance (see B4).
+
+Skipped / can't verify:
+S1. `supersedes`/`follows`/`amends` trace:false nuance — not claimed on
+    the page; skipped.
+S2. tasks "a declared list replaces it whole" — schema + continuation
+    probe done; full replace-semantics not re-probed through `thread`.
+
+## Gates
+
+- python docs-site/gen_examples.py --check: up to date (pre- and
+  post-change).
+- pytest tests/test_vocabulary_page.py: 22 passed.
+- Sabotage (COMMON rule 5; docs task, no behaviour fix -> the gate under
+  test is the block-pinning test): added a stray "X" inside the generated
+  block -> gen_examples --check exit 1 ("carries a stale generated block")
+  and test_vocabulary_page.py 2 failed -> restored -> both green again.
+- Full suite: see .scratch/suite.txt (count in PR body).
+- ruff check --select E9,F src tests: see PR body.
+
+No changelog fragment: docs-only page fix, no user-visible tool behavior
+changed (changelog.d/README.md — pure documentation, not a behavior
+change).
+
+Status: COMPLETE. All sections of the 837-line page verified; one prose
+fix landed; five code-side wording bugs + three omissions reported in the
+PR body.
