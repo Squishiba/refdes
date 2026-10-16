@@ -125,7 +125,7 @@ fails the build:
 ```
 ERROR items/log/board-a.yaml:33 [LOG-A-003] — LOG-A-003 is append-only and has
       been modified since it was sealed. Append a new entry with
-      `amends: [LOG-A-003]` instead, or run with `refdes build --reseal` if the
+      `amends: [LOG-A-003]` instead, or run with refdes build --reseal if the
       edit is deliberate.
 ```
 
@@ -136,7 +136,7 @@ notebook is worse than one written over, so the two are reported alike:
 ERROR  LOG-A-003 is append-only and was sealed, but no item with that id is
        in the project any more. An append-only entry is corrected by appending
        one that `amends` it, never by deleting it -- restore it, or run with
-       `refdes build --reseal` if the removal is deliberate.
+       refdes build --reseal if the removal is deliberate.
 ```
 
 An id that is still in the project under a different board, or that another
@@ -377,13 +377,14 @@ amendment markers, and the requirements each entry addresses. Every entry also g
 its own page with full traceability.
 
 Entries that continue one another — a chain of entries linked by `follows:` —
-will additionally show a **Thread** section on their page: what the thread
-currently concludes, with each value attributed to the entry that concluded it,
-and the whole thread as a timeline. A thread that has forked would show no
-conclusion at all, only the open tips.
+also show a **Thread** section on their page: what the thread currently
+concludes, with each value attributed to the entry that concluded it, and the
+whole thread as a timeline. A thread that has forked shows no conclusion at
+all, only the open tips.
 
-The bundled standard declares `follows:`. The thread conclusion and timeline
-page described above are later threads work; see [threads](design/threads.md).
+The bundled standard declares `follows:`. The thread machinery behind this
+section is specified in [threads](design/threads.md), whose remaining panel
+work is later.
 
 ## Coverage
 
