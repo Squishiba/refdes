@@ -40,7 +40,7 @@ import yaml
 from . import keys as keys_mod
 from . import model
 from .model import SEALING_BUILD, SEALING_HISTORY, Item, Project, SchemaError
-from .parse import yaml_safe_load
+from .parse import read_store_text, yaml_safe_load
 
 SEAL_FILE = ".refdes/log-seal.yaml"
 RESEAL_ALL = "*"  # sentinel: --reseal with no board name means "every board"
@@ -149,11 +149,12 @@ def _with_seal_hash(value: SealValue, new_hash: str, hash_format: int) -> SealVa
 
 def _load_seal_data(project: Project, board: str = "") -> dict:
     path = seal_path(project, board)
-    if not os.path.isfile(path):
+    if not os.path.exists(path):
         return {}
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = yaml_safe_load(fh) or {}
+        data = yaml_safe_load(read_store_text(path)) or {}
+    except IsADirectoryError as exc:
+        raise SchemaError(f"{path}: seal file is a directory, not a file") from exc
     except UnicodeDecodeError as exc:
         raise SchemaError(f"{path}: seal file is not valid UTF-8 ({exc})") from exc
     except yaml.YAMLError as exc:

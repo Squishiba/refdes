@@ -1,0 +1,143 @@
+Task: verify docs/concepts.md against actual refdes behaviour; fix what's wrong.
+Branch: docs-concepts-verify (base main 185aa53).
+
+Setup:
+- Installed `refdes` CLI is editable at worktree run5-b4-b5-bugs; probes run THIS branch's
+  code via `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/refdes ...` (verified:
+  `import refdes` resolves to this worktree's src/ when PYTHONPATH is set).
+- Probe dir: .scratch/probe-concepts/ (gitignored).
+
+Claim table (concepts.md, line numbers as of 185aa53):
+(status: V=VERIFIED, W=WRONG, M=MISSING FROM DOCS, C=CAN'T VERIFY)
+
+All probes: `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/refdes <cmd>` from
+probe projects under .scratch/probe-concepts/ (p1..p15), hardware@3 unless noted.
+
+Items section:
+- V  item = id + type + fields + links + optional markdown body (model.py Item; probes).
+- V  ID "never changes" — matches ids.md framing (permanent, keyed-on; `refdes rename`
+     is the deliberate escape hatch, recorded in former_ids; not contradicting).
+- V  "The type is component, the world calls it a part" / parts.html indexes every
+     field literally named `part_number` + part numbers inside citations: —
+     citations.py by_part_number(); probe: component with part_number + citation
+     part_number both land in parts.html; no `part` type in standard.
+- V  "Item types are not hard-coded ... adding a thermal_zone type is a config
+     change" — p5: refdes-schema.yaml adds thermal_zone, check = 1 items, 0 errors.
+     Nuance noted (not fixed): base types come from the pinned standard;
+     refdes-schema.yaml is the project overlay on top. Page points to
+     schema-reference.md for that detail.
+
+Grouping table:
+- V  board = first items/ segment (flat), second (items/<ws>/<board>/) under
+     item_layout: workspace; unregistered item-level `board:` override = build error
+     ("board: 'nosuchboard' is not declared in refdes-project.yaml's boards:
+     registry" — p3); per-board coverage-brd-*.html exist; a board's conforms_to:
+     recomputes group members counting only that board's satisfiers (p2: global
+     coverage.html REQ-SPEC-002=satisfied, coverage-brd-a.html=open).
+- V  workspace registered in workspaces:; cross-workspace non-shared satisfies =
+     lint warning (exact text quoted in probe notes); coverage-<ws>.html filters rows;
+     workspaces: entry accepts only label/path/shared — conforms_to: there is a
+     config error, so no per-workspace recomputation.
+- V  group: coverable: false; `satisfies:` on a group = build error ("satisfies may
+     point at requirement, bound, but GRP-G-001 is a group"); conforms_to: names
+     groups only; members point at it via part_of:, group lists no members.
+- V  section: `- section: <type>` in list files AND `section:` marker blocks in
+     markdown both work; item disagreeing with its section = error naming both
+     ("item declares type 'test' but sits inside a 'section: requirement' block");
+     generated items.json carries no `section` key.
+- V  tag: `refdes ls --tag io`; free-text `refdes ls pwr` matches tags,
+     `refdes ls divider` matches titles; `tag=` on {{index}} and {{compare}}
+     (blocks.py); tags: is in provenance set with on_change: ignore (p9: tags change
+     leaves content_hash identical).
+- V  tree: tree.html exists; {{tree}} renders workspace→board→part_of-group→item
+     spine; tree.py docstring: same spine; no author declaration required.
+
+Links section:
+- V  declare one end, reverse computed: TST `verifies: [REQ]` → index.json REQ shows
+     backlink verified_by: [TST-PWR-001] (p1).
+- W  "Declaring both ends is allowed but redundant" (line 57) — FIXED. Real
+     behaviour (p1, re-run at sabotage): writing `verified_by:` on a requirement =
+     ERROR "unknown field 'verified_by' on requirement -- did you mean the link
+     'governed_by'? ... drops the edge", build red (2 items, 1 errors), REQ's own
+     links = {} — not allowed, not redundant. Inverse verbs (verified_by,
+     satisfied_by, ...) appear in no type's links: in hardware@3. New text: computed
+     half is not authorable; unknown-field diagnostic with the edge dropped.
+     Sabotage record: reverted fix (git checkout -- docs/concepts.md), re-ran p1
+     probe → ERROR output above contradicts reverted sentence, fixed text restored
+     from .scratch/sabotage/concepts.md.fixed (git diff --stat confirms 6+/3- back).
+-    Same stale sentence exists on main at docs/links.md:99-100; PR #280 owns that
+     page — NOT touched here, noted in PR body.
+
+Units / checks sections:
+- V  `3.3 V * 1.2 A | W` = 3.96 W; `3.3 V + 1.2 A` build error "cannot add V and A
+     — the units do not match"; `12 V ± 5%` propagates 11.4…12.6 V, ×2 → 22.8…25.2 V;
+     getting-started calc reproduces P_dens = 0.2366 W/in²; check detail "worst case
+     0.2366 W/in² vs <= 0.15 W/in^2"; `<=` uses upper bound, `>=` lower; a
+     nominal-pass/corner-fail requirement is reported as failing (p7).
+
+Coverage stages table:
+- V  addressed from log `addresses`; claimed from log/component satisfies with status
+     NOT in satisfying_statuses: (planned log, candidate component); satisfied from
+     accepted log / selected component satisfies; verified from passing test verifies
+     (p8, stage ladder).
+- M→FIXED `verified` row said "a test `verifies` it" with no status condition, while
+     the adjacent satisfied row carries one. Probe: a test with status: planned that
+     `verifies:` a requirement leaves it OPEN (REQ-C-007), not verified. Row now:
+     "a **test** `verifies` it, with a `status` in the type's `verifying_statuses:`".
+     coverage.md:14 table has the same omission (its prose qualifies later); not
+     touched (out of scope), noted in PR body.
+- M→FIXED `open` row "Nothing references it" — a planned-test/component reference
+     exists yet the stage is open, so the means column now reads "Nothing counts as
+     covering it" (intro line already says open = absence of all of them).
+
+Verdicts / log section:
+- V  narrating entry = summary + body; verdict adds status; accepted log closes
+     coverage on what it satisfies (REQ-C-005 → satisfied).
+- V  append-only is convention, not build-enforced: editing a captured log =
+     WARNING "edited after captured" (after `refdes history capture LOG-E-001`), not
+     an error; editing before capture = silent (p12).
+- V  hardware@1/@2 have a `decision` type; hardware@3 merged it into `log`
+     (v1/v2 base.yaml have decision, v3 does not).
+- V  anchors: standard-library.md#versioning-and-pinning, design-log.md#append-only
+     exist (also covered by tests/test_docs_anchors.py).
+
+Change classification section:
+- V  table exactly: invalidate = timeline yes / baseline diff yes / invalidates yes;
+     timeline = yes/no/no; ignore = no/no/no (p9: source: change → content_hash
+     identical, baseline diff "0 changed"; tags change → identical/0; body change →
+     hash changed, "1 changed"). timeline vs ignore indistinguishable in every
+     observable way (the Timeline column is the parked git layer) — confirmed.
+- V  content hash computed over invalidate fields only; owner/stewardship fields are
+     on_change: timeline → excluded.
+- V  anchor change-tracking.md#the-three-modes exists.
+
+Serializations section:
+- V  rich items in own .md, bulk in list files with shared defaults:; both parse to
+     identical items (probes use both for reqs/logs/components, 0 errors).
+- V  `refdes promote` not in CLI help — "not yet built" is accurate.
+- V  markdown file is not limited to one item: second front-matter after `---`
+     parses; leading `defaults:` block applies to all following items (p11).
+- V  anchor authoring.md#several-items-in-one-file exists.
+
+"Not here" section:
+- V  calc DSL refuses imports (__import__), conditionals, for-loops, attribute
+     access (a.real refused as cross-item ref) (p10); math.md:4 same framing.
+- V  no database (files = source of truth); no server: static HTML, app.js is
+     progressive enhancement, refs work with JS disabled (app.js, docs/output.md).
+
+
+Fixes: docs/concepts.md only — (1) links section: inverse verbs are not authorable
+(unknown-field error, edge dropped); (2) coverage table `verified` row: added the
+verifying_statuses: condition; (3) `open` row means-column: "Nothing counts as
+covering it". No other page touched (links.md:99-100 owned by PR #280;
+coverage.md:14 noted in PR body).
+
+Runs:
+- tests/test_docs_anchors.py test_docs_examples.py test_schema_doc_key.py
+  test_standard_docs_complete.py test_candidate_parts_doc.py: 31 passed.
+- python docs-site/gen_examples.py --check: up to date, exit 0.
+- ruff check --select E9,F src tests: All checks passed!
+- full suite (PYTHONPATH=$PWD/src venv python -m pytest -q -p no:cacheprovider):
+  exit=0, 3938 passed, 2 skipped in 330.91s (.scratch/suite.txt). Known serve_cli
+  flake did not fire.
+- Task finished: yes.

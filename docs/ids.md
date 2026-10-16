@@ -16,11 +16,14 @@ allocated REQ-PWR-005  (items/requirements/power.yaml:36) The unit shall tolerat
 allocated 1 id(s)
 ```
 
-The ID is written back into your source file, preserving comments and indentation:
+The ID is written back into your source file, preserving comments and
+indentation (the `key:` line is the item's surrogate key, minted on the same
+load — see [Surrogate keys](#surrogate-keys)):
 
 ```yaml
   # No id yet — refdes id will allocate one here.
   - id: REQ-PWR-005
+    key: k7f3m2q9x4a
     body: The unit shall tolerate a sustained 40 V input transient for 100 ms.
 ```
 
@@ -47,7 +50,8 @@ attach:
 
 ```yaml
 items:
-  - id: CAN-042
+  - key: m9q4t2w7c1e
+    id: CAN-042
     body: Bit-timing tolerance, matching the CAN transceiver datasheet's own
           numbering.
 ```
@@ -56,7 +60,10 @@ That's the whole mechanism — nothing is ever resolved live. The moment the
 number is expanded, the stored id is exactly as self-contained and move-safe
 as one you typed by hand in full; there is no ongoing lookup for `check` or
 `build` to perform, because by the time either runs, the shorthand no longer
-exists in the file.
+exists in the file. A hint left unexpanded is not a live reference either:
+`refdes check` reports the item as an error —
+`id: 042 has no prefix yet -- run 'refdes id' to expand it into a full id` —
+and fails until `refdes id` has run.
 
 **The value must be quoted, always** — even without a leading zero. YAML
 reads an unquoted leading zero as octal (`id: 042` parses to the number 34,
@@ -90,8 +97,10 @@ items:
     body: Second.
 ```
 
-Out of order in the file, stable forever. Display order comes from the file, not
-from the number.
+Out of order in the file, stable forever. Position in the file is not the
+display order either: `refdes ls` and the site's item lists sort by id (log
+entries by date), so the item inserted in the middle above lists after
+`REQ-TMP-002`, wherever its number puts it.
 
 ## Numbers are never reused
 
@@ -160,7 +169,8 @@ The prefix comes from, in order:
    markdown file — see [authoring](authoring.md#prefix-per-item))
 2. `defaults.prefix` in a list file or a markdown file's leading `defaults:`
    block (`REQ-PWR`)
-3. the type's `prefix` in `refdes-schema.yaml` (`REQ`)
+3. the type's own `prefix` — declared by the standard, in
+   `refdes-schema.yaml` for a type you define yourself (`REQ`)
 
 Prefixes may contain hyphens, which is how you get `REQ-PWR-001` and `BND-THM-001`
 from the same `requirement`/`bound` types.
@@ -178,7 +188,7 @@ is shown by `refdes check` as a nonblocking warning and is never silently
 rewritten:
 
 ```
-WARNING id 'CNA-001' does not match this item's prefix 'CAN' (from defaults:)
+WARNING items/can.yaml:6 [CNA-001] — id 'CNA-001' does not match this item's prefix 'CAN' (from defaults:)
 ```
 
 This is a pure comparison of two values the project already knows — no
@@ -188,7 +198,11 @@ make the project invalid. The warning remains useful because prefixes carry
 human meaning and the display id still appears in external citations. Fix
 whichever value is wrong; only you change it. A free-form suffix typed
 directly into the id (see below) is not a mismatch — the check only requires
-the id to *start with* the declared prefix, not equal it exactly.
+the id to *start with* the declared prefix, not equal it exactly. A type's
+`legacy_prefixes:` — the retired prefix a merged type inherits, hardware@3's
+`log` carrying `DEC` — count as declared here too, so ids migrated under the
+old prefix are not flagged, as long as the file declares no `prefix:` of its
+own.
 
 ## Width
 
@@ -303,7 +317,8 @@ REQ   -   PWR   -   AI   - 004
 TYPE      BOARD      CATEGORY  NNN
 ```
 
-- **Type** is the type's own prefix (`REQ`), from `refdes-schema.yaml`.
+- **Type** is the type's own prefix (`REQ`), declared by the standard — in
+  `refdes-schema.yaml` for a type the project defines itself.
 - **Board** is a token folded into `prefix:` — `REQ-PWR` — exactly as
   described above. It is expressed through `prefix:`, not derived from
   anything: there is no board- or workspace-aware id segment, and this is

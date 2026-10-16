@@ -623,6 +623,92 @@ def test_revise_still_accepts_every_section_it_documents(tmp_path, capsys):
     assert revise.load_mapping(mapping).is_empty()  # present but empty, not refused
 
 
+# ------------------------------------- a malformed section is a config error
+#
+# Every section used to be read as `raw.get(...) or {}).items()`, so any value
+# that isn't a mapping -- the flat `fields:` shorthand, a `types:` written as a
+# list, a scalar `links:` -- crashed with a raw AttributeError traceback past
+# cmd_rename's `except SchemaError` (docs check of troubleshooting.md, PR #288).
+
+
+def test_load_mapping_refuses_a_flat_fields_section(tmp_path):
+    """`fields:` is scoped per type, but the obvious shorthand for "rename
+    this field" is to write it flat -- `history: on_change` -- which used to
+    crash. Named error instead: the file, the section, the offending type
+    entry, and the shape that section wants."""
+    _, mapping = _revise_project_with_mapping(tmp_path, "fields:\n  history: on_change\n")
+    with pytest.raises(SchemaError) as exc:
+        revise.load_mapping(mapping)
+    message = str(exc.value)
+    assert message.startswith(f"{mapping}: fields: must map a type name to")
+    assert "{old_field: new_field}" in message
+    assert "the entry for type 'history' is a string" in message
+    assert "\n" not in message  # the module's one-line-error convention
+
+
+@pytest.mark.parametrize(
+    "mapping_text,section,shape",
+    [
+        ("types:\n  - constraint\n  - bound\n", "types:", "a list"),
+        ("merge_types: constraint\n", "merge_types:", "a string"),
+        ("links: refines\n", "links:", "a string"),
+        ("prefixes: 5\n", "prefixes:", "a number"),
+        ("citation_keys: true\n", "citation_keys:", "a boolean"),
+    ],
+)
+def test_load_mapping_refuses_a_section_that_is_not_a_mapping(
+    tmp_path, mapping_text, section, shape
+):
+    _, mapping = _revise_project_with_mapping(tmp_path, mapping_text)
+    with pytest.raises(SchemaError) as exc:
+        revise.load_mapping(mapping)
+    message = str(exc.value)
+    assert message.startswith(f"{mapping}: {section} must map ")
+    assert message.endswith(f" -- got {shape}")
+    assert "\n" not in message
+
+
+def test_load_mapping_refuses_a_fields_entry_that_is_not_a_mapping(tmp_path):
+    """The section is a mapping, the entry under one type is not -- same
+    crash, and the refusal has to name which type's entry is the problem."""
+    _, mapping = _revise_project_with_mapping(tmp_path, "fields:\n  bound:\n    - text\n")
+    with pytest.raises(SchemaError) as exc:
+        revise.load_mapping(mapping)
+    message = str(exc.value)
+    assert "fields: must map a type name to {old_field: new_field}" in message
+    assert "the entry for type 'bound' is a list" in message
+    assert "\n" not in message
+
+
+def test_load_mapping_still_accepts_a_section_header_with_nothing_under_it(tmp_path):
+    """The old code's `or {}` meant a bare `types:` section header (YAML null)
+    loaded as empty. The new check keeps that -- only a value that IS present
+    and ISN'T a mapping is refused."""
+    _, mapping = _revise_project_with_mapping(
+        tmp_path, "types:\nfields:\nlinks:\nprefixes:\nmerge_types:\ncitation_keys:\n"
+    )
+    assert revise.load_mapping(mapping).is_empty()
+
+
+def test_cli_rename_malformed_section_exits_2_naming_it_with_no_traceback(
+    tmp_path, capsys
+):
+    """The CLI-level claim: the raw AttributeError traceback out of
+    mapping_from_dict becomes the exit-2 configuration error the exit-code
+    table promises -- one line, through the same handler a missing mapping
+    file uses."""
+    path, mapping = _revise_project_with_mapping(tmp_path, "fields:\n  history: on_change\n")
+    before = path.read_bytes()
+    config = str(tmp_path / "refdes-project.yaml")
+
+    assert cli_mod.main(["-c", config, "rename", mapping]) == 2
+    err = capsys.readouterr().err
+    assert "fields: must map a type name to" in err
+    assert "Traceback" not in err
+    assert len([ln for ln in err.splitlines() if ln.strip()]) == 1
+    assert path.read_bytes() == before
+
+
 def _label_schema(tmp_path) -> None:
     write_project_config(
         tmp_path,

@@ -25,7 +25,7 @@ from .model import (
     destination_refusal,
     provisional_handle,
 )
-from .parse import FENCE_RE, yaml_safe_load
+from .parse import FENCE_RE, read_store_text, yaml_safe_load
 from .write_lock import project_write_lock
 
 ID_RE = re.compile(r"^([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*)-(\d+)$")
@@ -123,11 +123,12 @@ def ledger_path(project: Project) -> str:
 
 def load_ledger(project: Project) -> dict:
     path = ledger_path(project)
-    if not os.path.isfile(path):
+    if not os.path.exists(path):
         return {"burned": {}, "allocated": []}
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = yaml_safe_load(fh) or {}
+        data = yaml_safe_load(read_store_text(path)) or {}
+    except IsADirectoryError as exc:
+        raise SchemaError(f"{path}: id ledger file is a directory, not a file") from exc
     except UnicodeDecodeError as exc:
         raise SchemaError(f"{path}: id ledger file is not valid UTF-8 ({exc})") from exc
     except yaml.YAMLError as exc:
