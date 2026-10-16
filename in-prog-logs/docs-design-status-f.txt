@@ -57,8 +57,8 @@ are pure documentation status text).
   stub-tests, revision, release, keys adopt, standard upgrade; refuse list is
   fetch, init, standard add-preset/remove-preset, former-ids propose
   --confirm, history capture/redact/migrate-seals. `revise` renamed to
-  `rename` (a8b1327, P12); `standard upgrade` flipped from refuse-exit-2 to
-  forced dry-run (cli.py:2313, e22d1be; test
+  `rename` (4e29ff6, P12); `standard upgrade` flipped from refuse-exit-2 to
+  forced dry-run (cli.py:2313, 509a487; test
   test_standard_upgrade_under_no_write_reports_the_plan_like_dry_run).
   FIXED.
 - "§9 item 5 / §10: Resolved: Damm" (l.1485/1516) | DONE. | keys.py:40 Damm
@@ -130,7 +130,7 @@ keys.md:
 - §9 item 4: --no-write enumeration updated to the current,
   test_no_write.py-pinned lists (rename/calc-rewrite/revision/release/standard
   upgrade report; history capture/redact/migrate-seals refuse), with the P12
-  and e22d1be provenance.
+  (4e29ff6) and --dry-run (509a487) provenance.
 standard-library.md:
 - Doc-level header: shipped-in-0.4.0 / 0.5.0-released date fix; field_sets ->
   sets: rename (dc0c138) recorded.
@@ -145,3 +145,23 @@ standard-library.md:
   vocabulary.md up to date).
 - ruff not run: no src/tests files touched (docs-only change).
 Task finished: yes.
+
+== review round 1 (CHANGES REQUESTED on 9eeddde) ==
+Findings (from review of PR #318):
+- M1: keys.md:1483 cited e22d1be as the provenance of standard upgrade's
+  --no-write flip. e22d1be is docs-only ("No source or test changes"), not an
+  ancestor of HEAD (on unmerged origin/ao/refdes-176/docs-cli-stub-history),
+  and its own cli-reference table lists standard upgrade as REFUSE — the
+  opposite of the claim. True provenance: 509a487 "feat(cli): standard upgrade
+  gets --dry-run (F11) (#239)", reachable. ACCEPTED, fixed.
+- M2: keys.md:1481 cited a8b1327 for P12's revise->rename; a8b1327 is not an
+  ancestor of HEAD (on unmerged origin/vocab-p12-rename-p13-index-help).
+  Main's squash is 4e29ff6 (PR #200), reachable. ACCEPTED, fixed.
+- M3: same two stale hashes repeated in this log. ACCEPTED, fixed above.
+Verified: git merge-base --is-ancestor {a8b1327,e22d1be} HEAD -> false;
+{4e29ff6,509a487} HEAD -> true. Same failure class as 3226700 that this PR
+annotates — my own citation slip. Behavior claims unchanged (pinned by
+cli.py:2810-2818 / tests/test_no_write.py:559-571, re-verified unchanged).
+No code changes: no test/sabotage. Gates (re-run, docs-only change):
+  pytest tests -k "docs or anchor or link": exit 0, 382 passed, 3625 deselected
+  gen_examples.py --check: exit 0

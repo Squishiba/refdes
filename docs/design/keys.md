@@ -1478,9 +1478,9 @@ In rough order of how likely each is to change the design:
    `former-ids propose`, and the baseline stamp itself (`revision`/`release`
    report "would stamp" and write nothing). Explicit write commands either
    honor the flag by running their existing dry-run (`id`, `rename` — P12's
-   rename of `revise`, a8b1327 — `calc-rewrite`, `stub-tests`, `revision`,
+   rename of `revise`, 4e29ff6 — `calc-rewrite`, `stub-tests`, `revision`,
    `release`, `keys adopt`, `standard upgrade` — added to this list when it
-   grew a `--dry-run`, e22d1be) or refuse with exit 2 (`fetch`, `init`,
+   grew a `--dry-run`, 509a487) or refuse with exit 2 (`fetch`, `init`,
    `standard add-preset`/`remove-preset`,
    `former-ids propose --confirm`, `history capture`/`redact`/
    `migrate-seals`); `new` and `schema` write nothing to
