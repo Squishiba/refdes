@@ -85,3 +85,5 @@ Progress log follows (append as I go).
 - Changelog rule: no changelog.d fragment - report-only task, no user-visible
   change shipped (changelog.d/README.md scope).
 - Task finished: report + log committed together, one push, PR opened.
+- Post-PR (orchestrator): report renamed run8a.md -> run8b.md; the TASK.txt
+  path collides with run 8a, another worker's file. Title already said 8b.
