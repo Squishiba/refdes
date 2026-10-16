@@ -36,12 +36,16 @@ page (there is no "this" to compute against). The split is: item-scoped
 generation lives on items, project-scoped generation lives on pages. Neither
 kind of block is legal in the other kind of document.
 
-**Implemented**, as of v0.5.0 (unreleased) — `{{index}}` and `{{cascade}}`
-(`refdes/blocks.py`) and figure identity/numbering (`build.py`'s
-`_apply_figure_attrs`/`resolve_figures`, the `fig:` reference namespace).
-This header is stale from an earlier draft; the document's prose describes
-the landed shape accurately — verify specifics against `blocks.py`/`build.py`
-rather than assuming this file is current.
+**Implemented**, released in v0.4.0 (2026-08-18) — `{{index}}` and `{{cascade}}`
+(`refdes/blocks.py`, d82d59d) and figure identity/numbering (`build.py`'s
+`_apply_figure_attrs`/`resolve_figures`, 3d27398, the `fig:` reference
+namespace). The previous "as of v0.5.0 (unreleased)" header was stale twice
+over: v0.5.0 itself shipped (tagged 2026-08-21) and this work landed a
+release earlier. The prose describes the landed shape with one known drift:
+§2's three-knob table predates `{{index}}`'s later `tag=` parameter
+(recorded under `[Unreleased]`) and `subtypes=` (extends.md phase 2) —
+verify specifics against `blocks.py`/`build.py` rather than assuming this
+file is current.
 
 ---
 
@@ -926,6 +930,10 @@ a stale item reference already is, not a new severity tier.
 ---
 
 ## 10. Content-hashed asset filenames
+
+Status: **done** in 4b34238 (2026-08-18, released in v0.4.0) — `<img src>`
+destinations are hashed as shaped below, and `site.assets:` directories stay
+verbatim as scoped below.
 
 Deferred at the same time as the rest of the asset pipeline
 (`docs/markdown.md` §"Images and other local files") and worth closing now:
