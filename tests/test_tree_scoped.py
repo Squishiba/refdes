@@ -159,6 +159,25 @@ def test_tree_block_board_scope_narrows_the_forest(tmp_path):
     assert "GRP-T-001" in page.body_html
 
 
+def test_tree_block_board_and_workspace_together_is_a_build_error(tmp_path):
+    """docs/blocks.md: board=/workspace= are "at most one of the two".
+
+    Giving both used to intersect them silently -- a tree of board A inside
+    workspace alpha is a scope no report page has, so the page quietly showed
+    a set nobody asked for. Sabotage: drop the mutual-exclusion check in
+    `_render_tree` and this directive builds clean, so the assertion on
+    `project.errors` fails.
+    """
+    _write(tmp_path)
+    _page_with(tmp_path, '{{tree board="board-a" workspace="alpha"}}')
+    project = _build_at(tmp_path)
+    diag = [d for d in project.errors if "mutually exclusive" in d.message]
+    assert diag, [d.message for d in project.errors]
+    assert "board=" in diag[0].message and "workspace=" in diag[0].message
+    assert diag[0].file and diag[0].file.endswith("index.md")
+    assert diag[0].line == 3
+
+
 # ------------------------------------------------------------ scoped pages
 
 

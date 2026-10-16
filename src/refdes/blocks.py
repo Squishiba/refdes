@@ -505,6 +505,11 @@ def _render_tree(project: Project, params: dict[str, str], where: str = "") -> s
     """
     board = params.get("board")
     workspace = params.get("workspace")
+    if board is not None and workspace is not None:
+        raise _BlockError(
+            "board= and workspace= are mutually exclusive. "
+            "tree accepts: at most one of the two."
+        )
     if board is not None and board not in project.boards:
         raise _BlockError(f"unknown board {board!r}.{_suggest(board, project.boards)}")
     if workspace is not None and workspace not in project.workspaces:
