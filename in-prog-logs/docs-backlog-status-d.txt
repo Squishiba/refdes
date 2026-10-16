@@ -99,3 +99,12 @@ Suite run (docs-scoped, 2026-10-16):
   pytest -q -k "docs or anchor or link" -> 382 passed, 3589 deselected, exit=0 (.scratch/suite.txt)
   python docs-site/gen_examples.py --check -> exit=0 (schema-reference.md, vocabulary.md up to date)
 No sabotage step: docs-only change, no code, no tests added (per TASK.txt).
+
+--- Review round (head 35feffa, reviewer f7f5c27) ---
+Finding P2: heading "Living notes, history and task lists -- design
+draft" contradicted the added status ("no longer a draft"). AGREED —
+the heading label is itself the stale status line the ticket asks to
+correct; renamed to "landing in phases" (the status line's own words).
+No anchor references to the old heading exist (grep over
+docs/tests/src/docs-site: zero hits), so the rename breaks no links.
+No findings rejected. Docs-only fix -> no test/sabotage step.

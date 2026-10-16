@@ -2951,7 +2951,7 @@ picture had stopped matching the thing it pictures.
 
 ---
 
-### Living notes, history and task lists -- design draft
+### Living notes, history and task lists -- landing in phases
 
 See [living-notes.md](living-notes.md) for the draft exploring dynamic notes,
 captured history, and a task list that follows a thread tip.
