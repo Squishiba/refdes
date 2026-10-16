@@ -1,5 +1,9 @@
-Status: architecture decided (2026-09-16) — remaining work is v1 scope, not
-shape. See “Decisions” near the end.
+Status: architecture decided (2026-09-16); v1 scope has since shipped —
+Slices 0–3 are in the tree (serve editor, picker slices A/B/C and P-A/P-B/P-C,
+image upload), as did the VS Code adapter's Slices V−1/V0. The transaction
+journal of item 9 is the known exception: `serve/edit.py` implements the
+design's transaction model "minus the journal, which is a later slice".
+Remaining work is the “Later” list. See “Decisions” near the end.
 
 # Browser-based editor for refdes
 
@@ -166,8 +170,10 @@ only the code present while this document was written:
 At the baseline inspected for this proposal, composite expansion, display-half
 refresh, corruption lint Layers 1–5, and `refdes keys adopt` are all
 implemented (`docs/design/keys.md:17-30`; `src/refdes/adopt.py`); this
-repository is itself adopted. What remains design only is the §4 simplification
-of `revise.py` and `former_ids.py`, which the editor does not depend on. Rename
+repository is itself adopted. What was design only — the §4 simplification
+of `revise.py` and `former_ids.py` — has since landed (418e196, the subtractive
+cleanup: `revise` no longer rewrites bare references, relabels the id ledger,
+or remaps baseline/seal record ids). Rename
 is still deferred from v1 so the newly landed refresh path can be exercised
 before the editor depends on it; adoption remains a prerequisite where
 called out below.
@@ -458,7 +464,7 @@ part this document had not seen coming: a body naming an unpinned key is a new
 item error, so the diagnostic gate refuses the save, which means Accept has to
 write the item file and the lockfile as one operation.
 
-**Slice A landed 2026-09-25**: `GET /api/item/<ref>/sources`,
+**Slice A landed 2026-09-26**: `GET /api/item/<ref>/sources`,
 `…/sources/entries?path=&q=` and `…/sources/propose?path=&key=&unit=&name=`
 read, and the path-confinement rules are proven by tests.
 
@@ -471,13 +477,16 @@ point. What it pins is what the Python reader read from the live file, under
 `refdes fetch`'s non-`--update` policy: a file that moved since it was pinned is
 refused with the `fetch --update` command to run instead.
 
-There is no panel in the editor yet — that is Slice C, and from here it is
-composition: three reads, one widened save.
+**Slice C landed 2026-09-27** (07b20f5/#62): the picker panel —
+`sourcepicker.js` runs the file → key → confirm flow over the three reads and
+the one widened save. The PDF picker below added a fourth page-shaped read and
+reuses the same panel.
 
 #### PDF datasheet values
 
-**Raised by Jared on 2026-09-21. Status: NOT DECIDED IMPLEMENTATION / later
-slice** — the CSV/xlsx picker above is unchanged. Recorded in full in
+**Raised by Jared on 2026-09-21. Status: landed 2026-09-27** as slices
+P-A/P-B/P-C (1d796a7/#57, 8226b79/#67, bda7ab5/#71), as proposed below and in
+`editor-pdf-picker.md` — the CSV/xlsx picker above is unchanged. Recorded in full in
 `docs/design/calc-sources.md` §1.
 
 Jared's proposal: the picker **tries** to extract the number from a pinned PDF
@@ -765,7 +774,7 @@ an edit adjacent to a literal `---` in body prose.
 
 ## Validation, conflicts, and transactions
 
-### Side-effect-free loading is Slice 0 — and its hard half has landed
+### Side-effect-free loading is Slice 0 — and both halves have landed
 
 Editor GET, polling, conflict detection, and unsaved preview must never mint a
 key, expand a link, refresh a manifest, or seal an entry. `_load()` does mint
@@ -777,10 +786,12 @@ and, through `build(seal_write=...)`, the seal files and the membership manifest
 conclusion, and `tests/test_no_write.py` pins it by asserting a byte-identical
 `items/`, `.refdes/`, and config tree across commands.
 
-What remains for Slice 0 is the editor-specific half: one load/build entry point
-that accepts in-memory source overlays, so a candidate form can be built and
-validated before anything is written. The editor must consume that path, not
-create a second “mostly read-only” loader.
+The editor-facing half has since landed: `loader.load_readonly()` is the one
+side-effect-free load/build entry point, taking in-memory source overlays
+(`src/refdes/loader.py:186`), and the editor's save gate consumes it —
+`serve/edit.py` builds and validates the candidate with
+`loader.load_readonly(config, overlay={path: new_text})` before a byte
+changes, on both the edit and create paths.
 
 ### Drafts: what the editor holds before it saves
 
@@ -1059,9 +1070,11 @@ maintain.
 
 ### Slice 0 — truly read-only loading
 
-**Status: the `--no-write` coverage is done** (keys.md §9 item 4), and the
-byte-identical-tree proof is pinned by `tests/test_no_write.py`. What remains is
-the editor-facing half.
+**Status: done, both halves.** The `--no-write` coverage is done (keys.md §9
+item 4), the byte-identical-tree proof is pinned by `tests/test_no_write.py`
+— including the editor's own GET/preview paths — and the editor-facing half
+landed as `loader.load_readonly()` with source-overlay support
+(`src/refdes/loader.py:186`), consumed by the save gate in `serve/edit.py`.
 
 - ~~Complete global `--no-write` coverage for every incidental source/metadata
   write.~~ Done: minting, expansion, `schema.json`, seals, and the membership
@@ -1071,8 +1084,10 @@ the editor-facing half.
   byte-identical — already pinned for the CLI surface by
   `tests/test_no_write.py`; extend it to the editor's own GET/preview paths.
 
-This started as standalone keys work and landed as such; the remainder is
-editor-only plumbing.
+This started as standalone keys work and landed as such; the editor-only
+plumbing has since landed too — `loader.load_readonly()` with overlay support,
+and `tests/test_no_write.py:690` now pins the editor's own GET/preview paths
+byte-identical.
 
 ### Slice 1 — existing fields and bodies
 
@@ -1124,6 +1139,9 @@ editor-only plumbing.
   as a new *client* of the `refdes serve` API that already ships, never a second
   implementation; it works through the launch token, starts read-only, and puts
   a writable `CustomTextEditorProvider` outside its horizon (§3.5, §8).
+  **Slices V−1 and V0 have since landed** (da2e44b/#58 activation,
+  0f38619/#66 live-serve hover facts and one deep link); the writable
+  provider stays out of horizon.
 - Project/schema/defaults/section editing, only if real use shows forms need
   them.
 - Incremental build/render optimization, only if measured project size makes a

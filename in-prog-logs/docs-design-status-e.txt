@@ -1,0 +1,160 @@
+Work log — docs-design-status-e
+Task: audit implementation-status claims in docs/design/{calc-sources,threads,browser-editor,thread-workbench}.md
+against code + git history; correct stale ones. No code changes -> no test/sabotage step (per TASK.txt).
+No changelog fragment: internal design-doc status text, not user-visible (changelog.d/README.md rule: user-
+visible changes only). Full suite skipped per TASK.txt.
+
+== docs/design/thread-workbench.md ==
+Base: file unmodified since 1b0a77f (PR #314) audited it "12 claims, 0 wrong"; only aac1f43 (#315, docs
+markdown page) landed since and cannot affect it. Spot-checked its claims fresh:
+- Header "W1/W2/W3 landed" + named logs -> true: in-prog-logs/thread-workbench-w1.md, -w2.md,
+  wb-w3-values.md, -w3.md all exist; commits per #314: 8818df7/#19, 4ac9898/#23, 99eabcd/#31.
+- Header "H6 and H7 have landed" -> true: tasks: field in standards/hardware/v3/base.yaml:302;
+  cli.py:1185 cmd_thread, cli.py:1392 cmd_work (H7's two read commands).
+- Header/W5a "landed, log workbench-w5a-task-pane.txt" -> true: log exists; commit 7c72311/#197.
+- W5a status note "taskpane.js skips the observer entirely below two anchors" -> true:
+  templates/taskpane/taskpane.js:165 `if (anchors.length < 2) return;`.
+- "W5b not started" -> true: only plan docs (cb24891/#211, docs/design/thread-workbench-w5b-plan.md);
+  no tick/checkbox write path in serve/api.py.
+- "D1 half not shipped: dotted ITEM.NAME prose mentions undecorated" -> true: serve/server.py:226
+  decorates only `m.group(1) in item.calc_values` (bare {{name}}); dotted tails inert, per note under §5.
+- §2 machinery bullets, §5 INLINE_VALUE_RE note -> verified by #314 against build.py:78 / server.py:226
+  (file unchanged since).
+Edits: ONE — the mangled non-status sentence flagged by PR #314 (L243-244 cited, actual :245):
+"Derived, self-closing rows (living-notes §5 ...) appear in a second, collapsed section" — the comma
+appositive "Derived, self-closing rows" is mangled prose. Fixed to "Derived rows — self-closing, per
+living-notes §5 ... — appear in ..." preserving meaning, matching living-notes.md:465 rule 2 wording.
+It was introduced mangled in 75a5472 (#178, git log -S"self-closing rows"). Design content untouched.
+
+== docs/design/calc-sources.md ==
+Header (L1-3) "All section 11 questions answered" -> TRUE: all 8 Qs have Decision
+blocks (§11 L903-1002); Q2 decided 2026-09-21 = a6c662a.
+L23-24 "V1 CSV only; XLSX follow-on now implemented as optional openpyxl reader
+behind xlsx extra" -> TRUE: XlsxReader sources.py:516, pyproject.toml xlsx extra;
+ef7bed7/#170.
+L26-29 "EDA readers and schematic drift checks deferred" -> TRUE: no source_checks:/
+LTspice implementation in src (grep: no .py files).
+L101 "phase 4a landed, repo's own items still old spelling under refdes-schema.yaml
+bridge" -> TRUE: items/decisions/dec-pwr-001-regulator-topology.md:4 `type: decision`;
+refdes-schema.yaml has types: decision; d71c143/#176.
+L181-191 (picker note 2026-09-25) "Status: proposed, nothing implemented." -> STALE.
+CSV picker landed: Slice A 59d2915/#49 (2026-09-26), Slice B accept 197bc7c/#59
+(2026-09-27); endpoints live (api.py:360 /sources/propose, :435 registry). FIXED.
+L197-200 "PDF picker ... Status: NOT DECIDED IMPLEMENTATION / later slice." -> STALE.
+Landed 2026-09-27 as P-A/P-B/P-C (1d796a7/#57, 8226b79/#67, bda7ab5/#71). FIXED.
+L230-241 (note 2026-09-27) "Status: proposed, nothing implemented." -> STALE, same
+slices. FIXED. pdf.js rendering remains the later option (pyproject comment: pypdf
+only, no pdf.js) -- claim kept.
+§4 L428-433 "shipped in the follow-on XLSX slice; XlsxReader in sources.py; pyproject
+xlsx extra; coordinator in citations.py; picker xlsx listing separate" -> TRUE
+(sources.py:516, pyproject:58, citations.fetch_all:2650; serve/sources.py: xlsx has
+extractor, "no picker listing yet").
+§5 L537-544 "Open Question 1 for Jared's decision" -> Q1 decided 2026-09-19: A
+(§11 L917-918). FIXED to record decision.
+§10 V1-scope checklist all unchecked -> STALE: all 8 items implemented, V1 landed
+c7c01cb 2026-09-21 (finding 26; source() syntax calc.py:642, registry sources.py:1288,
+fetch --update cli.py:3176, lockfile-only citations.locked_source_value:1529 used by
+build.py:1448, drift warning citations.py:1721, hash format 4 entry in c7c01cb,
+provenance badge, write-back absent). FIXED: boxes checked + status line added;
+"decides otherwise in Open Question 1" clause updated to "decided A".
+§10 Later: xlsx [x] matches ef7bed7/#170; unchecked items (source_checks:, entry
+points, items.json export) all genuinely unbuilt (grep found none).
+Line-cite drift (NOT edited, not status): L540 citations.py:417-468 & 290-335,
+L550 fetch_all() 550-560, L556 cli.py:205-256, L562 cli.py:490-515 -- file/function
+exists (citations._resolve_local, fetch_all, cmd_fetch) but cited ranges stale; left
+per task rule (only status text edited).
+Decisions untouched throughout, incl. PR #250 (open, "inline calc evaluate-in-place
+math [OPEN]") territory.
+
+== docs/design/threads.md ==
+L17 "Status: Phase 4a implemented. H6-H9 and the Phase 4b thread panel remain
+later work." -> PARTIALLY STALE. 4a TRUE (d71c143/#176). H6 landed: tasks: on
+merged log = v3 base.yaml:302 (+ chains.fold_tasks chains.py:724). H7 landed:
+cmd_thread cli.py:1185, cmd_work cli.py:1392, index threads projection
+render.py:755-772 ("calcs"/"threads" export). H8 landed: lifecycle.py:659
+_rule_open_tasks, :731 _rule_captured_edits, registered in _RULES :763-764;
+plan's own "Landed." paragraph (living-notes-plan.md H8 section). H9 NOT
+landed: stamp() writes the compact baseline only (lifecycle.py:11,40-70; no
+baseline-event store, no site history disclosure -- plan's H9 section has no
+Landed para). Phase 4b NOT landed: repo items still type: decision under the
+bridge (items/decisions/dec-pwr-001-regulator-topology.md:4, refdes-schema.yaml
+types:). FIXED L17 to name H6/H7/H8 landed, H9+4b later.
+L121-131 Phase 2b "`hardware@3` still does not declare `follows:` (Phase 4), so
+this remains available only to projects that declare the ordinary link
+themselves" -> STALE: v3 base.yaml:166 declares link type follows
+{inverse: followed_by}, :305 follows: [log] on merged log -- landed with 4a
+(d71c143/#176). FIXED (reworded to past tense + pointer).
+L133-149 Phase 3b "`hardware@3` still does not declare `follows:` (Phase 4...)"
+-> same staleness. FIXED same way.
+Phase 1/2a/3a/3b "implemented" paragraphs -> TRUE (model.py:690
+provisional_handle, :962 items_by_id; links.py DISPLAY-ID@key machinery :1,313;
+chains.py; item.html.j2:68 Thread section; tests/test_threads*.py exist).
+Design-debate retirement + citations bullets (L54-63), 4a migration decisions
+(L65-97 incl. the records->follows implementation note vs
+migration.yaml:70 `records: follows`) -> TRUE, decisions untouched.
+"Today ..." design-pass framing throughout §1-§8 (L499 build.py:453-462 cite
+etc.) -> not status text, left; cited line ranges stale, logged only.
+
+== docs/design/browser-editor.md ==
+L1-2 header "remaining work is v1 scope, not shape" -> STALE: v1 shipped.
+Evidence: serve/ package (api.py /edit:46, /api/items/create:61, upload :59),
+static app js (list/controls/links/create/drafts/preview), picker slices
+A/B/C (#49/#59/#62) + P-A/P-B/P-C (#57/#67/#71), image upload #63, VS Code
+V-1/V0 (#58/#66), tests (test_serve_api, test_editor_create_*). FIXED header;
+exception recorded: journal of v1 item 9 NOT shipped (serve/edit.py:14
+"minus the journal, which is a later slice"; :607 "Bytes restored from memory,
+not a transaction journal"; no cmd_recover in cli.py).
+Deferred section L72-74 Display-ID rename "refresh landed, rename waits" ->
+TRUE: refresh landed (links.py _planned_target:323), no rename op in
+api.py (ops are set_field/set_body/add_link/remove_link, api.py:530).
+L75-84 image upload shipped bullet -> TRUE: serve/upload.py MAX 8 MiB :63,
+png/jpeg/gif/webp :71-83; client 79eaacf/#63.
+L152-173 surrogate-key end state: adopt.py + repo adopted -> TRUE
+(.refdes/keys-adopted.yaml); "What remains design only is the §4 simplification
+of revise.py/former_ids.py" -> STALE: landed 418e196 (2026-09-15,
+"keys.md §4 subtractive cleanup"; _rewrite_reference_ids/_relabel_ledger/
+_restore_ledger/burned gone from revise.py -- grep zero hits; _rename_prefix
+kept :570,:576; matches AGENTS.md). FIXED.
+L461 "Slice A landed 2026-09-25" -> STALE date: 59d2915 commit date
+2026-09-26T00:17-04:00 (same drift #314 fixed in editor-source-picker.md).
+FIXED to 2026-09-26.
+L465 Slice B landed 2026-09-27 -> TRUE (197bc7c 2026-09-27T18:21).
+L474-475 "There is no panel in the editor yet -- that is Slice C" -> STALE:
+Slice C landed 07b20f5/#62 2026-09-27; sourcepicker.js in static/. FIXED.
+L479-480 PDF picker "Status: NOT DECIDED IMPLEMENTATION / later slice" ->
+STALE: landed 2026-09-27 P-A/P-B/P-C. FIXED.
+L768 "hard half has landed" + L780-783 "What remains for Slice 0 is the
+editor-specific half: one load/build entry point that accepts in-memory source
+overlays" -> STALE: landed as loader.load_readonly (loader.py:186, overlay
+param) consumed by serve/edit.py:437,:1201; editor GET/preview tree-proof
+pinned by tests/test_no_write.py:690. FIXED heading + paragraph (both halves
+landed). Same fix at Phasing L1062-1064 status line and L1074-1075
+"remainder is editor-only plumbing".
+L1112 "Slices 0-3 together are the first shippable editor" -> planning
+statement, kept.
+v1-scope item 5 inline "(shipped -- the image half; [[ID]], [[fig:id]],
+calc-fence insertion helpers are still outstanding); no upload." -> marker
+TRUE (no [[ID]]/fig insertion in static/*.js -- grep; insertIntoBody/editor.js
+serves the image+source picker insertion only). "no upload" is the v1-scope
+definition, later amended by the shipped upload recorded in Deferred -- left
+(scope text, not status), logged.
+L1122-1126 VS Code adapter "Designed 2026-09-27" -> PARTIAL: Slices V-1/V0
+landed (da2e44b/#58, 0f38619/#66; adapter doc:1-2 says so; serveClient.js
+present). FIXED bullet with landed note.
+"What exists today" L145-150 (extension is index --compact client, no
+webview/custom editor) -> TRUE (extension.js:4,122 index; :838 no webview);
+cited line ranges (493-526) drifted (file now 988 lines), logged not edited.
+"refdes recover" L933/L1192/L1238 -> v1-scope/design prose for the journal
+slice; command does not exist (no cmd_recover) -- scope text + Decisions,
+untouched, exception recorded in header status.
+
+== checks ==
+- Full suite skipped per TASK.txt. `pytest -q tests -k "docs or anchor or link"`
+  -> 382 passed, 3625 deselected, exit 0 (.scratch/suite.txt). No load-flake
+  failure (test_serve_cli stale-token test not in the selection).
+- `python docs-site/gen_examples.py --check` -> schema-reference.md and
+  vocabulary.md up to date.
+- `ruff check --select E9,F src tests` -> All checks passed.
+- No code changes -> no test/sabotage step (per TASK.txt: docs-only task).
+- No changelog fragment: internal design-doc status text, not user-visible
+  (changelog.d/README.md rule applied: fragment only for user-visible changes).
