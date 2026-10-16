@@ -73,13 +73,16 @@ RESERVED_KEYS: dict[str, str] = {
         "it rather than through a display id."
     ),
     "former_ids": (
-        "Display ids this item used to have. Written by the engine when an id "
-        "is re-minted, so old citations still resolve."
+        "Display ids this item used to have, so old citations keep "
+        "resolving. Nothing writes it when ids are re-minted: add entries "
+        "by hand, or with `refdes former-ids propose --confirm` against a "
+        "baseline."
     ),
     "body": (
         "The item's prose, below the front matter. Its change policy comes "
         "from the type's `body:` setting; for types whose content is the "
-        "statement itself it is the required field."
+        "statement itself the type requires it -- an empty body is then a "
+        "warning, not an error, so a draft stub can still build."
     ),
     "on_change": (
         "This item's change-policy override, in place of the project's "
@@ -92,7 +95,10 @@ RESERVED_KEYS: dict[str, str] = {
     ),
     "board": (
         "Which board an item belongs to -- the first path segment under "
-        "`items/` unless the item says otherwise. Overridable by a type's own field."
+        "`items/`, resolved only against the `boards:` registry in "
+        "refdes-project.yaml; an unregistered segment warns and leaves the "
+        "board unset, unless the item says otherwise. Overridable by a "
+        "type's own field."
     ),
     "workspace": (
         "Which workspace an item belongs to, when the project registers them. "
@@ -103,9 +109,11 @@ RESERVED_KEYS: dict[str, str] = {
         "file inherits, before its own keys."
     ),
     "section": (
-        "In a YAML list file: the section heading its entries file under on "
-        "the item's page; in a Markdown marker block, the section a generated "
-        "block belongs to."
+        "The type asserted for the items that follow it: a `- section: "
+        "<type>` entry in a YAML list file, a `--- section: <type> ---` "
+        "marker block in Markdown. Stricter than `defaults:` -- an item "
+        "naming a different type inside the section is an error, not an "
+        "override."
     ),
 }
 
@@ -531,9 +539,8 @@ EXAMPLES: dict[tuple[str, str], str] = {
         "# Declared from the test:\n"
         "- id: TST-PWR-001\n"
         "  verifies: [REQ-PWR-001]\n"
-        "# Or from the requirement, under the inverse name -- same edge either way:\n"
-        "- id: REQ-PWR-001\n"
-        "  verified_by: [TST-PWR-001]"
+        "# REQ-PWR-001 gains verified_by: [TST-PWR-001] as the computed\n"
+        "# backlink -- the inverse name is not authorable on the requirement."
     ),
     ("links", "addresses"): (
         "- id: LOG-A-001\n"
@@ -679,8 +686,9 @@ EXAMPLES: dict[tuple[str, str], str] = {
     ),
     ("keys", "former_ids"): (
         "- id: BND-THM-001\n"
-        "  former_ids: [CON-THM-001]  # written when an id is re-minted, so old\n"
-        "                             # CON-THM-001 citations keep resolving"
+        "  former_ids: [CON-THM-001]  # proposed by `refdes former-ids\n"
+        "                             # propose --confirm`, or written by hand,\n"
+        "                             # so old CON-THM-001 citations keep resolving"
     ),
     ("keys", "body"): (
         "- id: REQ-PWR-001\n"
@@ -701,8 +709,8 @@ EXAMPLES: dict[tuple[str, str], str] = {
         "                   # a type declaring a field of this name takes it over"
     ),
     ("keys", "board"): (
-        "# The first path segment under items/ is the board; state it only\n"
-        "# when the folder is not a registered board:\n"
+        "# The first path segment under items/ resolves against the boards:\n"
+        "# registry; state it only when the folder is not a registered board:\n"
         "defaults:\n"
         "  board: board-a  # folder predates the boards: registry"
     ),

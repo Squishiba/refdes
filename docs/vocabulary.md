@@ -494,9 +494,8 @@ A test proves a requirement or bound. Counts toward coverage when the test's sta
 # Declared from the test:
 - id: TST-PWR-001
   verifies: [REQ-PWR-001]
-# Or from the requirement, under the inverse name -- same edge either way:
-- id: REQ-PWR-001
-  verified_by: [TST-PWR-001]
+# REQ-PWR-001 gains verified_by: [TST-PWR-001] as the computed
+# backlink -- the inverse name is not authorable on the requirement.
 ```
 
 ## Sets
@@ -716,7 +715,7 @@ The item's surrogate key: opaque, immutable, and the identity the engine actuall
 
 ### `former_ids`
 
-Display ids this item used to have. Written by the engine when an id is re-minted, so old citations still resolve.
+Display ids this item used to have, so old citations keep resolving. Nothing writes it when ids are re-minted: add entries by hand, or with `refdes former-ids propose --confirm` against a baseline.
 
 - **Scope:** every item; a type may not shadow it
 
@@ -724,13 +723,14 @@ Display ids this item used to have. Written by the engine when an id is re-minte
 
 ```yaml
 - id: BND-THM-001
-  former_ids: [CON-THM-001]  # written when an id is re-minted, so old
-                             # CON-THM-001 citations keep resolving
+  former_ids: [CON-THM-001]  # proposed by `refdes former-ids
+                             # propose --confirm`, or written by hand,
+                             # so old CON-THM-001 citations keep resolving
 ```
 
 ### `body`
 
-The item's prose, below the front matter. Its change policy comes from the type's `body:` setting; for types whose content is the statement itself it is the required field.
+The item's prose, below the front matter. Its change policy comes from the type's `body:` setting; for types whose content is the statement itself the type requires it -- an empty body is then a warning, not an error, so a draft stub can still build.
 
 - **Scope:** every item; a type may not shadow it
 
@@ -775,15 +775,15 @@ defaults:
 
 ### `board`
 
-Which board an item belongs to -- the first path segment under `items/` unless the item says otherwise. Overridable by a type's own field.
+Which board an item belongs to -- the first path segment under `items/`, resolved only against the `boards:` registry in refdes-project.yaml; an unregistered segment warns and leaves the board unset, unless the item says otherwise. Overridable by a type's own field.
 
 - **Scope:** every item, unless its type declares a field of that name
 
 **Example:**
 
 ```yaml
-# The first path segment under items/ is the board; state it only
-# when the folder is not a registered board:
+# The first path segment under items/ resolves against the boards:
+# registry; state it only when the folder is not a registered board:
 defaults:
   board: board-a  # folder predates the boards: registry
 ```
@@ -822,7 +822,7 @@ items:
 
 ### `section`
 
-In a YAML list file: the section heading its entries file under on the item's page; in a Markdown marker block, the section a generated block belongs to.
+The type asserted for the items that follow it: a `- section: <type>` entry in a YAML list file, a `--- section: <type> ---` marker block in Markdown. Stricter than `defaults:` -- an item naming a different type inside the section is an error, not an override.
 
 - **Scope:** a YAML list file, not an item
 
