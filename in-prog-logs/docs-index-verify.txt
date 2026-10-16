@@ -25,7 +25,7 @@ script: .scratch/navcheck/check_nav.py. All docs page headings dumped to
 | init → hardware@3 | VERIFIED | `refdes init` wrote `standard: hardware@3` |
 | "five coverage stages" (concepts row) | VERIFIED | concepts.md "## The five coverage stages"; build.py cov.stage "claimed" |
 | coverage row "Open → addressed → satisfied → verified" | WRONG — omits `claimed` | coverage.md + concepts.md tables: open/addressed/claimed/satisfied/verified |
-| cli-reference row "Every command and flag" | page gap: no `## refdes serve` section | `refdes --help` lists serve first; cli-reference.md headings have no serve. PR body note (other page). |
+| cli-reference row "Every command and flag" | VERIFIED (round 2 — initial claim WITHDRAWN) | `## \`refdes serve\`` exists at cli-reference.md:2042; all 22 `refdes --help` commands have sections (prefix grep, round 2). Initial finding came from a truncated headings dump (`head -40` per file cut cli-reference.md before line 2042) — false claim, corrected after PR #298 review. |
 | math row "brackets" | VERIFIED | math.md:276 "Brackets are the escape hatch" |
 | change-tracking row "auditing suppression" | VERIFIED | change-tracking.md:151,172 |
 | design-log row "amendments, sealing" | VERIFIED | design-log.md amends/sealing sections |
@@ -51,11 +51,15 @@ script: .scratch/navcheck/check_nav.py. All docs page headings dumped to
 2. Blocks row: added `{{tree}}` and `{{calcblock}}` (blocks.md sections).
 3. One-paragraph: hardware@3 merged decision into log (v3 base.yaml types +
    header + concepts.md:112). "requirements, bounds, decisions, tests, and
-   log entries as small files with YAML front-matter" -> "requirements,
-   bounds, tests, components, and log entries as small YAML files" (front-
-   matter phrasing missed the list-file format; authoring.md: "the two file
-   formats"); "Decisions can contain" -> "A log entry that reaches a verdict
-   can contain" (phrasing mirrors concepts.md). Kept closing "which
+   log entries as small files with YAML front-matter" -> (round 1)
+   "requirements, bounds, tests, components, and log entries as small YAML
+   files" -> (round 2, after review finding 3) "requirements, bounds,
+   tests, components, groups, and log entries as small files — a YAML list
+   file, or markdown with YAML front-matter" (round 1 mirrored the original
+   defect: it named only the list-file format; authoring.md: "the two file
+   formats"), and adds the omitted `group` type; "Decisions can contain" ->
+   "A log entry that reaches a verdict can contain" (phrasing mirrors
+   concepts.md). Kept closing "which
    decisions just stopped being true" — live run names LOG-PWR-001, the
    verdict entry, and "decision" as activity is still the page's title word.
 
@@ -79,9 +83,13 @@ script: .scratch/navcheck/check_nav.py. All docs page headings dumped to
 
 ## Changelog fragment: none
 
-changelog.d/README.md: fragments are for changes that deserve a changelog
-entry — this is docs prose only, no tool behavior changed, so "user-visible
-change" rule = no fragment.
+Round-2 correction: round 1 cited a "'user-visible change' rule" as if it
+were changelog.d/README.md's — it is not; README.md:5 says "Each change that
+deserves a changelog entry gets one fragment." The "user-visible changes"
+rule is from this task's own instructions (COMMON.txt line 6). Outcome
+unchanged and re-grounded: docs prose only, no tool behavior changed, so it
+does not deserve a changelog entry; sibling precedent is mixed — #288 (same
+series) added a fragment, #287 and #289 (closest siblings) did not.
 
 ## Other-page findings (PR body, not touched)
 
@@ -90,3 +98,30 @@ change" rule = no fragment.
 - schema-reference.md top-level list omits `sigfigs:` and `release_gate:`.
 - No "possible bugs" found: every verified behavior matched the docs.
 
+
+## Round 2 — PR #298 review (CHANGES REQUESTED) findings
+
+1. MEDIUM, ACCEPTED: the "cli-reference.md has no ## refdes serve section"
+   finding was FALSE. cli-reference.md:2042 has a full `## \`refdes serve\``
+   section (with options table); all 22 commands from `refdes --help` have
+   sections (verified by prefix grep, round 2). Root cause: the headings
+   dump piped each file through `head -40`, truncating cli-reference.md
+   before line 2042. Claim withdrawn in the claim table above and in the PR
+   body (gh pr edit). Deliverable never touched the page.
+2. LOW, ACCEPTED: changelog justification cited a rule not in README.md;
+   corrected above (rule is COMMON.txt's; README wording and sibling
+   precedent #287/#289-vs-#288 recorded).
+3. LOW, ACCEPTED with fix: docs/index.md one-paragraph round-1 phrasing
+   "small YAML files" under-described the markdown+front-matter format
+   (mirrored the defect it replaced) and omitted `group`. Reworded to
+   "small files — a YAML list file, or markdown with YAML front-matter"
+   and added `groups` to the type enumeration. checks-sentence kept naming
+   only log entries: reviewer judged it "acceptable as a paragraph"; the
+   component-checks v3 addition is recorded here and in round 1's table.
+4. INFORMATIONAL: closing "which decisions just stopped being true" kept —
+   reviewer agrees it is defensible.
+5. INFORMATIONAL: no action (mutation-test disclosure accepted).
+
+Round-2 gates: docs tests (8 files), gen_examples --check, ruff E9,F src
+tests, full suite — see below. No code changes, so no tests added (docs
+prose only, per task).

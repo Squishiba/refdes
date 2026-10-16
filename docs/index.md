@@ -45,8 +45,9 @@ build time.
 
 ## The one-paragraph version
 
-You write requirements, bounds, tests, components, and log entries as small
-YAML files. Each gets a stable ID and typed links to the others. A log entry
+You write requirements, bounds, tests, components, groups, and log entries
+as small files — a YAML list file, or markdown with YAML front-matter. Each
+gets a stable ID and typed links to the others. A log entry
 that reaches a verdict can contain `calc` blocks whose arithmetic carries real
 units and tolerances, and can declare `checks` against a bound's limit. `refdes build`
 validates everything, evaluates the math, verifies the checks at the worst-case
