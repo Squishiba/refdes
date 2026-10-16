@@ -1,0 +1,107 @@
+Task: verify docs/multi-board.md against real refdes behavior; fix the page
+(docs-only). Branch: docs-multi-board-verify, base main 185aa53.
+
+Method: probed with the real CLI (/home/jorb/work/venv-refdes/bin/refdes,
+refdes 0.5.0, standard hardware@3) in .scratch/mbv/p1,p2,p4,p5,p7,p8,p9,
+platform, board-a. No code, standard YAML, or other docs pages changed.
+
+Claim table (claim -> status -> evidence):
+
+One project, folders per board
+- items/ scanned recursively, board folders need no machinery -> VERIFIED (p1)
+- defaults.prefix per folder; links/checks/backlinks across folders -> VERIFIED (p1)
+- shared bound checked by two boards shows both in incoming links -> FIXED: the
+  example key is the inverse verb. Real (p1 _site/items.json):
+  IFC-CAN-001 backlinks: {'constrains': ['LOG-A-001', 'LOG-B-001']}
+  (doc said 'constrained_by', which is the source-side name)
+- tighten shared limit re-checks each board's arithmetic -> VERIFIED (p1)
+
+Naming the boards
+- boards: block shape label/token/path -> VERIFIED (p1, BOARD_KEYS in configcheck.py)
+- board = first path segment under items/ -> FIXED: added the workspaces
+  exception (second segment under item_layout: workspace; workspaces.md table).
+- unregistered segment gets no board, "not an error" -> FIXED: it also WARNS per
+  item. Real (p1): "WARNING items/shared/interfaces.yaml:4 [IFC-CAN-001] — no
+  board: 'shared' is not in the boards: registry and no board: key was set. Add
+  `board: <name>` to the file's defaults:, or move the file to
+  items/<registered-board>/."
+- no boards: block -> board unset, site unaffected, ids unchanged -> VERIFIED
+- duplicate path segment hard error at load -> VERIFIED verbatim (p2):
+  "configuration error: boards.board-b and boards.board-a both map to
+  items/board-a/ — path segments must be unique"
+- board: per-item override; precedence item > defaults.board > path; typo board
+  is a build error -> VERIFIED: "board: 'board-q' is not declared in
+  refdes-project.yaml's boards: registry"
+- token lint warning -> VERIFIED verbatim (p1)
+- per-board pages -> FIXED: list was missing tree-<board>.html (every board with
+  items gets document/coverage/log/summary/tree; log/references/parts are
+  conditional). Sidebar links the scoped set (p1/p4/p5 _site/index.html).
+- check --board: whole project parsed, only that board reported -> VERIFIED (p1)
+- seals per board: .refdes/log-seal-<board>.yaml, base file for unboarded,
+  build --reseal <board> scoping -> VERIFIED (seal.py seal_path, _reseal_hint)
+- drift warning + keys-adopt keyed shape + rename-and-move warns -> VERIFIED
+- adopted manifest example ordering -> FIXED to real output order (board: then
+  id:, keys sorted; p1 .refdes/boards.yaml)
+- audit "lists every accepted and outstanding move" -> FIXED: audit lists ONLY
+  outstanding moves ("Board moves since the manifest was last written:"); after
+  --accept-board-move the section is "(none)"; the accepting build itself prints
+  "WARNING ... board move accepted: REQ-A-PWR-005 was on board 'board-b', now on
+  'board-a'" (verified in p1)
+- keys adopt: re-keys live memberships, drops stale (reported), unidentified stay
+  display-keyed (report), check never writes, plain build prunes, dry-run/
+  --no-write don't -> VERIFIED (p1 adopt run + manifest inspection + code)
+
+Conforming to a shared contract
+- conforms_to list-of-strings; bare string config error -> FIXED: quoted message
+  now includes the "refdes-project.yaml: " prefix (real output).
+- missing-group build error -> VERIFIED verbatim
+- per-board recomputation + warning, coverage-board page "Conforming contracts"
+  incl. cross-board members, project-wide "not yet satisfied on boards: ..." ->
+  VERIFIED (p4)
+- unboarded satisfier discharges no board -> VERIFIED (p4)
+- board with no items: warning without the coverage-page pointer, no pages ->
+  VERIFIED (p4 board-c)
+
+Including a shared group
+- includes list-of-strings config error, non-group/missing-group build errors ->
+  VERIFIED verbatim (p5)
+- members displayed/listed on scoped pages labelled "shared, via GRP-...",
+  parts-<board>.html + nav appear for a parts-only-included board; {{index
+  board:}} shares them -> VERIFIED (p5 _site, blocks.py:161-267)
+- inclusion never counts: summary/coverage/release gate own-only; manifest,
+  seals, board-move, items.json untouched (included item keeps own board) ->
+  VERIFIED (p5: summary no CMP-LDO-001, coverage rows exclude it, items.json
+  board '')
+- "Same applies one report down" -> FIXED: added the parts-<board>.html
+  conditional (board with items but no part numbers gets no parts page; p4).
+
+Separate projects with imports
+- import shape, artifact-not-source, build order, version pin refusal,
+  cascading errors, upstream tightening fails board, id collision verbatim,
+  duplicate-key/malformed-key hard errors, key-loss message, writable-load
+  expansion, display-half refresh, keyless artifacts stay display-id-only (p9) ->
+  VERIFIED
+- imported items cannot be edited/renumbered -> VERIFIED (serve/edit.py:381,
+  api.py:187 reject external items)
+- "Be validated by your schema" -> VERIFIED (imports.py:110-116: unknown type
+  warns, fields not validated)
+- "Appear in your coverage" -> VERIFIED (p4/p7: imported item absent from
+  coverage)
+- table cell "Cannot: Show other projects' incoming links" -> FIXED: too broad.
+  The artifact carries upstream backlinks and the downstream reference page
+  shows them: board-a's imported IFC-CAN-002 page lists "Incoming: constrains
+  LOG-A-001, governs REQ-P-001" (REQ-P-001 is a platform item). Reworded to
+  "incoming links from outside the artifact".
+
+Changelog: NO fragment. Rule applied: fragments are for changes that "deserve a
+changelog entry" — user-visible product changes; this is a docs-page
+correction, not a behavior change.
+
+Tests/sabotage: N/A — docs-only change, no code behavior fixed, no new test
+added; nothing to sabotage (sabotage rule targets behaviour fixes).
+
+Checks run: ruff check --select E9,F src tests (no code touched);
+python docs-site/gen_examples.py --check; full suite per COMMON command,
+counts recorded in PR body.
+
+Finished: yes (docs-only verification pass complete).
