@@ -346,7 +346,7 @@ ten-module package (`api.py`, `edit.py`, `filters.py`, `preview.py`,
 routes, the editor, creation, link editing, image upload, and the source
 picker; `serve/edit.py` is the single write path (`apply_edit(project_root,
 request)`) behind it. `refdes serve` is registered in the CLI
-(`src/refdes/cli.py:1367-1368`). What is outstanding is no longer shape or
+(`cmd_serve` at `src/refdes/cli.py:547`, subparser at `:2800`). What is outstanding is no longer shape or
 architecture; it is the remaining v1 slices.
 
 **Local model: not suitable.** This one survives the revised rule unchanged:
@@ -363,15 +363,21 @@ A sealed, append-only `log` can never link to anything created after it
 with no `on_change` equivalent for links), so "write the log while
 deliberating, decide afterward" is unauthorable in that order today. No new
 verb needed — `schema.py` already resolves a link from either declared
-direction (verified: `records`/`recorded_by` already exist as an inverse
-pair at the `link_types:` level in every bundled version) — the fix is
+direction (verified at the time: `records`/`recorded_by` already exist as
+an inverse pair at the `link_types:` level in every bundled version —
+true of v1/v2 as they ship today; since `d71c143` hardware@3 is the
+version that carries neither `decision` nor `recorded_by`) — the fix is
 declaring `recorded_by: [log]` on `decision`'s own `links:` block, verified
 end-to-end against a real sealed log in the finding.
 
-**Status: done.** Shipped in `3c52c4e`. `decision.links` (hardware@3) now
-declares `recorded_by: [log]` alongside
+**Status: done, since superseded.** Shipped in `3c52c4e`: `decision.links`
+(hardware@3) declared `recorded_by: [log]` alongside
 `satisfies`/`constrained_by`/`supersedes`/`selects`/`blocked_by` — one line,
-no new verb, exactly as scoped.
+no new verb, exactly as scoped. Superseded by the Phase 4a merge of
+`decision` into `log` (`d71c143`, #176): hardware@3 declares no `decision`
+type and no `recorded_by` link type, and `log` carries the verdict itself
+(a status of `accepted` is a satisfying status) — the structural
+dissolution the flag below anticipated has landed.
 
 **Worth flagging: this may become moot.** `docs/design/threads.md` states
 explicitly that if the thread model ever lands, "the observation that
@@ -379,12 +385,13 @@ explicitly that if the thread model ever lands, "the observation that
 into one chained-item type removes the append-only-can't-point-forward
 problem structurally, rather than patching around it one verb at a time.
 **The thread model has since moved past design-only** — `threads.md`'s own
-header reads "**Status: Phase 3a implemented.**" (`threads.md:17`), verified
+header reads "**Status: Phase 4a implemented.**" (`threads.md:17`, verified
 against this tree, with `src/refdes/chains.py` (the `follows:` chain walk —
-tips, the per-field fold, fork and cycle diagnostics) as the landed slice.
-So the flag is live, not hypothetical: finding 16's one-line fix still ships
-independently, and the structural resolution is now the thread line of work
-rather than a someday maybe.
+tips, the per-field fold, fork and cycle diagnostics) as the landed slice).
+So the flag is no longer hypothetical: it has fired — Phase 4a (`d71c143`,
+#176) merged `decision` into `log`, removing finding 16's one-line fix along
+with the type it patched, and the structural resolution is now landed
+thread-line-of-work, not a someday maybe.
 
 **Local model (not decided — my read): suitable.** One line in a bundled
 standard file, with an end-to-end verification transcript already given in
@@ -416,8 +423,9 @@ mutable whole" to name, only entries, which already have identity the same
 way every item does under `docs/design/keys.md`.
 
 `threads.md` is no longer **design only** — its own header reads "**Status:
-Phase 3a implemented.**" (`threads.md:17`, verified against this tree; the
-landed slice includes `src/refdes/chains.py`). Finding 17 shouldn't be treated
+Phase 4a implemented.**" (`threads.md:17`, verified against this tree; the
+landed slice includes `src/refdes/chains.py`, and Phase 4a merged
+`decision` into `log`). Finding 17 shouldn't be treated
 as a live task distinct from that document; if this work happens, it happens
 as `threads.md`, not as a resurrection of finding 17's original per-item
 "folding" proposal.
