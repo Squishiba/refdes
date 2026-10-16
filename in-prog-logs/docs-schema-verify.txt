@@ -1,0 +1,144 @@
+# docs-schema-verify — work log
+
+Task: verify docs/schema-reference.md and the type/field/link tables in
+docs/standard-library.md against real `refdes schema` output (hardware@3,
+each preset), fix docs where WRONG/MISSING, mechanical diff script in
+.scratch/, no code/YAML changes.
+
+## Setup
+
+- Branch docs-schema-verify at 35c2304, tree clean.
+- The venv `refdes` entry point is an editable install pointing at
+  /home/jorb/work/refdes (main checkout) — COMMON forbids reading the main
+  checkout, so all probes run via .scratch/schema-verify/rf, a wrapper
+  setting PYTHONPATH=$PWD/src (this worktree) and invoking refdes.cli:main.
+  Verified: `rf --version` -> refdes 0.5.0.
+
+## Probe results (all via rf, i.e. this worktree's src)
+
+- `rf init` (fresh dir): pins standard: hardware@3, presets: [] (VERIFIED, output read).
+- `rf schema` (v3): JSON written to .scratch/schema-verify/schema-v3.json (59 KB), exit 0.
+- `rf schema --help`: views are --json (default) and --graph (SVG). Done --json;
+  --graph is diagrams, not a name source.
+- `rf standard add-preset design-debate` at v3:
+  "configuration error: preset 'design-debate' does not exist for hardware@3 (available: [])."
+  -> hardware@3 ships NO presets (matches standard-library.md "Presets" section).
+- v2 baseline + v2+design-debate + v1 probes: schema-v2.json / schema-v2dd.json +
+  ns-*.json (merged namespaces via refdes.standards.resolve_namespaces).
+- v3 facts: types requirement/bound/component/group/test/log (prefixes REQ/BND/CMP/GRP/LOG/TST);
+  15 link verbs; sets citations,claims,grouped,invalidate_body,named_title,provenance,
+  statement_title,stewardship; log include list has NO stewardship (log has no
+  owner/last_reviewed); component.check_severity={candidate:info,selected:error,
+  rejected:info,obsolete:info}; log: append_only, sealing: history, legacy_prefixes [DEC],
+  check_severity: error; bound extends requirement.
+- `rf new decision` at v3 prints "unknown type 'decision'." -- standard-library.md
+  L343-344 claims it prints "configuration error: unknown type 'decision'." -> WRONG,
+  but that text is prose, not a table (out of task scope; report in PR body).
+  Exit code: my `rf` probe wrapper called main() without sys.exit(main()), so it
+  swallowed the return code and showed exit 0; the real entry point exits 1
+  (src/refdes/cli.py:2063 `return 1`). Wrapper fixed in round 2.
+- Field types (configcheck.FIELD_TYPE_ORDER): text,person,limit,quantity,date,list,
+  options,checks,citations,tasks,enum == docs list (11, order-free) VERIFIED.
+- Reserved link verbs (parse.py RESERVED∪OVERRIDABLE): id,type,body,former_ids,key,
+  prefix,board,workspace,on_change == docs VERIFIED (schema-reference L308-310).
+- Type defaults VERIFIED in schema.py: prefix tname[:3].upper (983), label tname.title
+  (984), plural label+"s" (986), append_only False (993), sealing build (957),
+  preview [] (990), satisfying_statuses requires status field -> SchemaError (946-952).
+
+## Mechanical diff (final)
+Tool: .scratch/schema-verify/diff_docs_schema.py (run from repo root with the
+venv python; full table in .scratch/schema-verify/table.txt). It compares
+docs/schema-reference.md and docs/standard-library.md's vocabulary (types,
+fields, status choices/defaults, verbs, inverses, sets, presets, per-type
+GENERATED examples via gen_examples block parse) against the resolved
+hardware@3 namespace (ns-proj.json via refdes.standards.resolve_namespaces)
+plus the v2/v2dd namespaces for history claims.
+Final counts: VERIFIED=184, WRONG=0, MISSING FROM DOCS=0.
+As-found: VERIFIED=172, WRONG=2, MISSING=12, NOT-IN-SCHEMA=2 (triaged).
+
+WRONG found and fixed:
+1. docs/schema-reference.md (link_types, ~L315): trace:false list named
+   `records` and omitted `follows`. hardware@3 trace:false = addresses,
+   amends, follows, supersedes (ns-proj.json). `records` is v2-only.
+2. docs/standard-library.md (~L53): "Every type also carries
+   owner/last_reviewed (the stewardship set)" -- false for `log`, whose
+   include list is [provenance, citations, claims, invalidate_body]
+   (v3 base.yaml; no owner/last_reviewed in its fields). Reworded to
+   provenance-on-all, stewardship-on-all-except-log.
+
+MISSING found and fixed:
+- standard-library.md verb paragraph named the 15 verbs but no inverses;
+  added the inverse rule + the four irregular names (governs, constrains,
+  blocks, contains) -- matching ns-proj.json inverses exactly.
+- schema-reference.md sets section named only provenance/stewardship/
+  citations as the standard's internal sets; hardware@3 has eight
+  (adds claims, grouped, named_title, statement_title, invalidate_body).
+  Now names all eight.
+
+Triaged, NOT bugs (no doc change):
+- `constraint` in prose = v1 history (correct); `legacy_prefixes` = engine
+  key sweep artifact; `_by` = backtick in prose from the inverse rule.
+
+Sabotage record: this was a docs-only task, no behavior fixes/tests added.
+Sabotaged the generated-block guard instead: hand-changed `status: planned`
+-> `status: draft` in the test block of docs/schema-reference.md;
+`gen_examples.py --check` failed ("carries a stale generated block", exit 1);
+restored, check passes.
+
+Other observations for the PR body (prose, out of the tables' scope -- both
+fixed in round 2, see below):
+- standard-library.md's hand-written `refdes new log` example omits the
+  `# tasks:` line the real scaffold emits.
+- standard-library.md claims `refdes new decision` answers "configuration
+  error: unknown type 'decision'."; observed output is "unknown type
+  'decision'." on stderr, exit 1 (cli.py:2063), at hardware@3.
+
+## Round 2 (review on 475d201, CHANGES REQUESTED)
+Findings and dispositions:
+1. (accepted) exit-code claim in this log + PR body: `refdes new decision`
+   exits 1 (cli.py:2063), not 0. Root cause: probe wrapper swallowed
+   main()'s return; wrapper now sys.exit(main()). Log fixed; PR body
+   updated via gh pr edit.
+2. (accepted, reconciled) "MISSING FROM DOCS: 12, all fixed" vs the diff's
+   10 added backticked names: the 12 = 4 sets (grouped, named_title,
+   statement_title, invalidate_body -- all named by name in the diff) + 8
+   inverses, of which `constrains` is named by name and the 7 regular
+   `participle_by` names (addressed_by, amended_by, derived_by, followed_by,
+   refined_by, selected_by, superseded_by) are covered by the stated rule;
+   the diff tool counts rule coverage as naming. The diff's other added
+   names (`claims`, `governs`, `blocks`, `contains`, `follows`) resolved
+   the 2 WRONG/extra-name findings, not MISSING rows.
+3. (accepted) inverse-rule sentence now excludes the self-inverse pair
+   explicitly ("the self-inverse pair is its own inverse, and governs,
+   constrains, blocks and contains are the four that are neither").
+4. (accepted) the two disclosed out-of-scope prose items are now fixed, in
+   the same file, against facts verified by running the tool: L346-347 now
+   says `unknown type 'decision'.` on stderr, exit 1; the hand-written
+   `refdes new log` example gained the `# tasks:  # tasks` line (verified
+   position against real `refdes new log` scaffold output).
+No code changes this round -> no new tests (docs-only ticket).
+
+## Round 3 (review on 194f67d, CHANGES REQUESTED)
+Finding (P2, accepted): the round-2 sentence "refdes new decision answers
+`unknown type 'decision'.` on stderr and exits 1" is context-dependent --
+the scaffolder takes any type in the MERGED schema, and this repo's own
+refdes-schema.yaml declares a project `decision` (with records/supersedes
+link targets), so from this checkout the command prints a scaffold and
+exits 0. Verified both ways with the fixed wrapper: repo root -> scaffold,
+exit 0; bare hardware@3 probe project (.scratch/schema-verify/proj) ->
+"unknown type 'decision'." on stderr, exit 1. Sentence qualified to say
+"bare hardware@3 project" for the error and that an overlay-declared
+`decision` scaffolds like any project-defined type. No rejections.
+Docs-only round -> no new tests; gates rerun (gen_examples --check, docs
+tests, ruff E9,F, full suite).
+
+## Round 4 (review on 2eea072, CHANGES REQUESTED)
+Finding (P3, accepted): the PR description was stale -- it still said the
+`tasks` scaffold line and the `refdes new decision` output were "observed,
+not changed" after rounds 2-3 had changed them. No rejections; no content
+defect found in the diff itself (reviewer confirmed the docs edits against
+`refdes schema` for a bare hardware@3 project). Fixed by rewriting the PR
+body (gh api PATCH; gh pr edit hits the known projects-classic GraphQL
+deprecation error): the two items are now Fixes 5 with the overlay caveat,
+and the MISSING=12 reconciliation is in the body. No file changes this
+round; gates rerun over the unchanged tree for the record.

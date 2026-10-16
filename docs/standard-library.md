@@ -39,7 +39,10 @@ And fifteen link verbs, each declared on the type that would naturally author
 it — `refines`, `derives_from`, `governed_by`, `satisfies`, `constrained_by`,
 `verifies`, `addresses`, `follows`, `amends`, `supersedes`, `selects`,
 `blocked_by`, `part_of`, plus the self-inverse `drop_in`/`alternate` pair on
-`component`. See
+`component`. Each has an inverse the target sees — the verb's past
+participle with `_by` (`refined_by`, `addressed_by`, …); the self-inverse
+pair is its own inverse, and `governs`, `constrains`, `blocks` and
+`contains` are the four that are neither. See
 [links](links.md) for how declaring one end gives you the other for free.
 
 There is no `decision` type. `hardware@1` and `hardware@2` had one, and
@@ -50,8 +53,9 @@ entry so ids minted under the old type still load without a prefix warning.
 See [versioning and
 pinning](#versioning-and-pinning) below for the migration path.
 
-Every type also carries `owner`/`last_reviewed` (the `stewardship` set)
-and `source`/`note`/`tags` (`provenance`) — see [sets and
+Every type carries `source`/`note`/`tags` (`provenance`), and every type
+except the append-only `log` carries `owner`/`last_reviewed` (the
+`stewardship` set) — see [sets and
 `include:`](#sets-and-include) for how those are assembled without
 retyping five fields on every type, and [authoring: `source`, `note`,
 `rationale`, `body`](authoring.md#source-note-rationale-body) for what
@@ -340,8 +344,10 @@ real number — never the literal word `"latest"`.
 Scaffolds a starter item's front matter for any type in the merged schema —
 standard or project-defined — so "what fields does a log entry take again"
 never means a trip back to this page. On `hardware@3` that means one of the six
-types; `decision` is not one of them, and `refdes new decision` answers
-`configuration error: unknown type 'decision'.`
+types; `decision` is not one of them, and in a bare `hardware@3` project
+`refdes new decision` answers `unknown type 'decision'.` on stderr and
+exits 1. A project that declares its own `decision` in `refdes-schema.yaml`
+(as this repo does) scaffolds it like any other project-defined type.
 
 ```bash
 refdes new log > items/power/log-005.md
@@ -362,6 +368,7 @@ summary:  # required -- text
 # rationale:  # text; required when status is 'rejected'
 # options:  # options
 # checks:  # checks
+# tasks:  # tasks
 # satisfies: []  # target: requirement, bound
 # constrained_by: []  # target: bound
 # follows: []  # target: log
