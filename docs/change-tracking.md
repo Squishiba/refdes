@@ -75,7 +75,8 @@ on_change:
 
 A `reason:` is expected with a `fields:` override — omitting it is a warning
 (a `mode:`-only mapping is not warned on). An entry in `fields:` may also name
-`body`, which then follows the item's whole-item mode. One line, and every
+`body` — it is a field override, so it wins over the item's whole-item mode; a
+body left out of `fields:` follows that mode. One line, and every
 suppression is self-documenting. A type that declares its own field named
 `on_change` owns that key; the override applies to types without such a field.
 
@@ -135,9 +136,11 @@ under the entry's recorded format. If that recomputed hash matches what was
 stored, the item's content demonstrably hasn't changed — on a writable run the
 entry is rewritten in place to the current format (`carried`). If it doesn't
 match, the item genuinely changed since the stamp; the entry is left at the
-format it was stamped at. An item with no live counterpart (deleted, or renamed
-without `former_ids:`) is likewise left alone — that's the ordinary "removed"
-case.
+format it was stamped at — with one exception: rebasing a baseline onto keys,
+`refdes keys adopt` explicitly marks an uncomparable entry format 1 as it
+reports it (described below). An item with no live counterpart (deleted, or
+renamed without `former_ids:`) is likewise left alone — that's the ordinary
+"removed" case.
 
 This conditional carry-forward means a partially-migrated baseline stays
 precisely describable: some entries at format 3, some still at format 1. Those
