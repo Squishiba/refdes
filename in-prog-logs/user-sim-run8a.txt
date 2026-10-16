@@ -1,0 +1,100 @@
+# user-sim-run8a — work log (as I go)
+
+Branch: user-sim-run8a. HEAD f33efa4. Scope: non-serve fixes in 885e9e6..f33efa4,
+exercised as an author. NO code/docs changes — report only.
+
+## Setup / environment
+- CLI: `refdes` venv console script resolves to the MAIN checkout by default;
+  forcing `PYTHONPATH=$WT/src` re-points it to THIS worktree (verified:
+  `refdes.cli.__file__` = .../user-sim-run8a/src/refdes/cli.py). All probes run
+  with `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/refdes`.
+- PR numbers in TASK.txt are partly stale vs the real git log: patcher remove_link
+  is **#254** (not #261), imports non-UTF-8 is **#242** (not #262/#212), textio
+  umask is **#247** (not #253). `standard upgrade --dry-run` (#239) is NOT in this
+  range (merged before 885e9e6; run 7 §1.5/§2.1 tested it). The 15th real user-facing
+  fix in range is **#261 build image src** (IMAGE-ASSET-002). Out-of-scope (no user
+  CLI surface): #246 backlog sweep C (log-only), #251 chore sweep A (test/audit-log
+  nits), #263 schema-valid-009 (design-left, latent — render() CRLF loss, unfixed).
+
+## Daily-driver pass (proj/, = pristine) — DONE
+Layout per docs/getting-started.md. 8 items: REQ-PWR-001/002, BND-THM-001
+(limit "<= 0.15 W/in^2"), LOG-PWR-001 (regulator.md: calc id="losses", checks
+P_dens vs BND-THM-001, satisfies/constrained_by links), LOG-PWR-002/003/004
+(board.yaml: addresses/amends/satisfies/constrained_by links), TST-PWR-001 (verifies).
+- `refdes id` → minted 8 keys, rewrote 5 refs, allocated REQ-PWR-001/002. exit 0.
+- `refdes ls` → 8 rows; prints "(rewrote 4 reference(s) while loading)" — first
+  read command lazily expanded remaining link targets to composite `ID@key`.
+- `refdes check` → "1 requirement(s) satisfied but not verified" warning, 0 errors.
+- `refdes build` → green; _site written. log-pwr-001.html renders calc block "losses"
+  (P_diss→0.1224 W, P_dens→0.0972 W/in²), pass badge on P_dens vs BND-THM-001;
+  summary.html lists it with margin. Daily-driver flow CLEAN — no friction found.
+- Note: the "(rewrote N reference(s) while loading)" line prints on read commands
+  (ls) — a write-on-load side effect. Confusing-ish on a pure read; benign (once).
+
+## Sweeps (one copy of pristine per PR)
+
+## Sweeps results (as of mid-run)
+- #290 rename shape: FIXED. All 6 section shapes (fields/types/links/prefixes/
+  citation_keys as scalar/list/number) -> named `error:` exit 2, no traceback;
+  valid rename happy path works (dry-run + real).
+- #272 history redact rollback: author path (capture->redact->check) CLEAN. Fault
+  path (ENOSPC) not author-reproducible; _restore_atomically + os.replace confirmed
+  landed in history.py:917. Mark FIXED (author-visible intact + code landed).
+- #271 store dir-as-file (B9) + keys adopt marker (F12): FIXED. dir-as-*.yaml in
+  baselines -> `configuration error ... directory, not a file` exit2 (check+ls);
+  citations lockfile dir -> ERROR; history events dir -> graceful WARNING names path.
+  keys adopt: corrupt/list/dir marker all REFUSED naming file exit1, marker byte-
+  identical; --dry-run previews refusal; happy path writes marker.
+- #270 on_change fields shape (B8+F15): FIXED. fields: as list/string/number/null ->
+  clean load diagnostic (file:line, item, got, expected) on check/ls/build exit1,
+  no traceback (model.py:674 crash gone). F15: undeclared field in fields: -> ERROR
+  naming declared fields (was silent no-op).
+- #266 directory citation wording: FIXED. check AND fetch both say the ONE sentence
+  `cited local file 'X' is a directory, not a file` (fetch keeps cited-by). Absent
+  path keeps `does not exist` in both.
+- #259 parse repeat under flow defaults: FIXED. flow `defaults:{...}` line1 + top-level
+  `items:` dup -> NO false "(in this file's defaults)" clause; genuine dup INSIDE
+  inline-flow defaults STILL gets the clause (is_defaults structural identity).
+- #257 id prints load errors once: FIXED. 4 broken files + pending item -> each load
+  error printed EXACTLY once (grep -c=1), allocation runs, exit1. nothing-pending path
+  each once too.
+- #252 keys restore linked pair: FIXED. Restore LOG-PWR-001@old + REQ-PWR-002@old
+  together -> succeeds (owner NOT falsely refused), post-check clean. Owner-alone
+  (target keyless, not in batch) -> correctly REFUSED (keyless-target sentinel).
+- #254 patcher remove_link comment: FIXED (drove patch_item directly = editor per-op).
+  multiline flow entry w/ interior `#` + last target -> REFUSED (pre-fix destroyed).
+  trailing-comment control refused; quoted-target applies cleanly; two-target w/
+  adjacent-comment refused (separator not plain comma).
+- #242 imports non-UTF-8: FIXED. non-UTF-8 items.json artifact -> clean
+  `ERROR <project> — import 'platform': could not read <path>: 'utf-8' codec
+  can't decode byte 0xff...` exit1 no traceback; invalid JSON -> clean
+  `... Expecting value...`; artifact is a dir -> `no artifact at <path>. Build
+  the upstream project first`; idempotent history-capture no-op unaffected (exit0)
+  = PR's narrowed claim.
+- #247 textio umask: FIXED. New files get kernel-umask default: under umask 002
+  ids.yaml=664 (group-readable, was the lone 600); under subshell umask 022
+  ids.yaml/schema.json/refdes-project.yaml all 644, NOT 600.
+- #238 sealing note once: FIXED. writable check #1 prints, #2+ silent; state in
+  .refdes/sealing-optin.json; set change (remove->re-add) re-prints; corrupt
+  record self-heals. --no-write silent (DOCUMENTED design: read-only can't record;
+  design-log says pass -v; --no-write -v prints) = not a bug.
+- #243 ls --keys / thread: FIXED. ls --keys adds key col (plain ls unchanged);
+  thread --keys header shows composites; thread --json entries carry key. NOTE:
+  ls --keys zero-width (no-key) branch unreachable as author (key minting fires
+  on every load; ls minted 3 keys on a key-stripped project).
+- #261 build image src: FIXED. item body ![board](a&b.png) + real items/log/a&b.png
+  -> build 0 errors, publishes _site/assets/items/log/a&b.<digest>.png, rendered
+  <img src="...a&amp;b..."> (escaped spelling of the real & file). Missing image
+  still -> `image src 'a&b.png' does not exist (no site.assets...)` exit1.
+
+ALL 15 in-scope: FIXED. No new B (bug) findings. Friction notes F1/F2/F3 (see report).
+
+## Report + validation (final)
+- Wrote in-prog-logs/user-sim-release-gate-run8a.md (run7 shape: §0 summary,
+  §1 one section per PR w/ console evidence, §2 daily-driver, §3 findings
+  table F1/F2/F3, appendix).
+- Consolidated repro scripts .scratch/run8a/{repro,repro2,repro3}.sh reproduce
+  §1.1-1.15 from _pristine (gitignored; referenced in appendix).
+- Validation: full suite 3947 passed / 2 skipped (exit 0); ruff --select E9,F
+  src tests clean; gen_examples.py --check up to date.
+- ALL 15 in-scope FIXED. No B-class findings.
