@@ -1,0 +1,91 @@
+run7-onchange-fields — user-sim run 7 findings B8 + F15
+=========================================================
+
+Setup: branch run7-onchange-fields at main 35c2304, tree clean.
+
+Reproduced (both, before any change):
+- B8: items/r.yaml item with `on_change: {fields: [ ... ], reason: x}` →
+  `refdes check` dies with raw traceback, model.py:674
+  `AttributeError: 'list' object has no attribute 'get'` (via build.py:1937
+  _hash_payload). Verified the three neighbouring shapes too: `fields:` as a
+  string, a number, and null each crash the same line with the same class of
+  AttributeError ('str'/'int'/'NoneType' has no attribute 'get'). Project:
+  .scratch/run7-b8f15/cf-b8.
+- F15: `on_change: {fields: {bogusfield: invalidate}, reason: x}` loads
+  clean — 1 item, 0 errors, exit 0. Confirmed.
+
+Diagnostics (why it happens):
+- parse.py `_apply_change_override` (the #228 mapping validation) only
+  validates `fields:` when `isinstance(fields, dict)` (parse.py:1057); a
+  non-dict `fields:` passes validation untouched and lands in
+  `item.on_change_override`, where model.py:674
+  `(self.on_change_override or {}).get("fields", {}).get(field_name)`
+  crashes for list/str/int, and for null because the key exists with value
+  None so the `.get("fields", {})` default never applies (`None.get`).
+- Same non-dict list also crashes `refdes audit` (cli.py:1686
+  `.items()`), i.e. it's not hash-only once it survives the load.
+- F15: the loop validates each entry's MODE but never the field NAME; an
+  entry naming an undeclared field is silently inert (on_change_for is only
+  ever asked for declared fields + "body").
+
+Convention decision for F15 (task: warning vs error — follow the existing
+convention): the rest of on_change validation treats unknown NAMES as
+ERRORS — parse.py:1079 `on_change: unknown key ...` is project.error, as
+are all invalid mode values (parse.py:1049, 1070, 1024) and the
+configcheck project-level checks (configcheck.py `self.keys(...)` →
+SchemaError). The only warn in the area is the missing-`reason:` advisory
+(parse.py:1093), which is a style nudge, not an unknown name. So F15 is
+implemented as an ERROR, matching the unknown-key convention, with the entry
+dropped (same "bad entry is dropped" posture as invalid modes).
+
+B8 fix (parse.py `_apply_change_override`): a `fields:` key present with a
+non-mapping value is now a clean load diagnostic naming file, line, item,
+the received value, and the expected shape; the entry is dropped so the
+rest of the override (mode:, reason:) still works and every command runs.
+Covers list, string, number and null with the one shape check.
+Note (not changed, out of scope): `on_change:` itself as a top-level list
+is silently ignored (no crash) — pre-existing, untouched.
+
+F15 fix (parse.py): `_apply_change_override` now takes the item's ItemType
+`spec`; each `fields:` entry naming something outside `spec.fields` (plus
+the special `body` name, which build.py:1949 feeds to on_change_for) errors
+with the declared-field list and is dropped.
+
+Tests: tests/test_change_policy_on_change_key.py
+- B8: four shapes (list, string, number, null) each give exactly one clean
+  error, no crash, build completes; the item's declared-field override
+  behaviour is unaffected.
+- F15: undeclared name → clean load, error naming the field and the type's
+  declared fields, entry dropped, valid sibling entry (incl. `body`) kept.
+
+Sabotage: (record below)
+
+Changelog: user-visible for both (new/changed load diagnostics) — see
+changelog.d/.
+
+Status: IN PROGRESS
+
+Progress:
+- Fixes implemented in parse.py `_apply_change_override` (shape check +
+  declared-name check, spec param threaded from both call sites in
+  _build_item; TYPE_CHECKING import of ItemType to dodge the parse<->schema
+  cycle). Re-ran the CLI repros: all four non-mapping shapes and the F15
+  entry now give clean file:line item diagnostics, exit 1, commands run.
+- docs/schema-reference.md on_change paragraph extended to state the
+  enforced shape/name rules (gen_examples --check: up to date).
+- 3 new tests in tests/test_change_policy_on_change_key.py; file is 27/27
+  green.
+- Sabotage results (revert -> test -> restore):
+  * B8 shape check disabled -> both B8 tests fail with the original
+    AttributeError at model.py:674. Restored, 27 passed.
+  * F15 name check disabled -> the undeclared-field test fails. Restored,
+    27 passed. No SABOTAGE strings left (grep count 0).
+- changelog.d/on-change-fields-shape.fixed.md (B8: category `fixed`, it
+  was a crash) and changelog.d/on-change-fields-undeclared-name.changed.md
+  (F15: category `changed` — clean-load-and-ignore became an error; README
+  rule: behaviour change, non-breaking).
+- ruff check --select E9,F src tests: clean.
+- Full suite (foreground, once): 3919 passed, 2 skipped in 349.09s, exit 0
+  (.scratch/suite.txt). No serve-cli flake.
+
+Status: DONE — committed, pushed, PR opened.

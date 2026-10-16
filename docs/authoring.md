@@ -40,6 +40,9 @@ entry carries prose: a bare date-and-summary log entry is fine as a list entry,
 one with a paragraph to it belongs in `.md`, and `body:` covers the middle.
 
 ```yaml
+defaults:
+  type: log
+
 items:
   - id: LOG-005
     date: 2026-03-16
@@ -261,7 +264,7 @@ types:
 ```
 
 The [standard library](standard-library.md) already declares this for `requirement`
-and the other six starter types — this is what a custom type, or an override of
+and the other five starter types — this is what a custom type, or an override of
 a standard one, looks like.
 
 An unknown field whose spelling is close to one the type declares is a build

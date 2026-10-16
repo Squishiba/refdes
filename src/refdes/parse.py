@@ -13,7 +13,7 @@ from __future__ import annotations
 import difflib
 import os
 import re
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import yaml
 
@@ -28,6 +28,9 @@ from .model import (
     accepts_old_on_change_log,
     provisional_handle,
 )
+
+if TYPE_CHECKING:  # noqa: F401 - runtime schema import is circular (schema imports parse)
+    from .schema import ItemType
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
 # A candidate fence line: `---` alone on its line.
@@ -428,6 +431,34 @@ def yaml_safe_load(stream_or_text) -> Any:
         return yaml.load(text, Loader=_KeySafeLoader)
     except yaml.YAMLError:
         return yaml.load(text, Loader=_PurePythonKeySafeLoader)
+
+
+def read_store_text(path: str) -> str:
+    """One `.refdes/` store file, read as text; a directory is
+    `IsADirectoryError` on every platform.
+
+    `open()` on a directory raises `IsADirectoryError` on POSIX and
+    `PermissionError` on Windows (its `CreateFile` refuses directories
+    without backup semantics), so a store reader cannot rely on catching
+    the exception afterwards -- a catch-only fix is POSIX-only, and the
+    raw traceback the wrap was supposed to prevent survives on Windows
+    under a different errno. So the helper checks first, and converts the
+    race (a directory that appears between check and open, which on
+    Windows surfaces as `PermissionError`) into the same
+    `IsADirectoryError`: every caller keeps exactly one `except
+    IsADirectoryError` clause naming the path. A missing file is
+    `FileNotFoundError`, like `open()`; callers keep their own absent-file
+    posture. `UnicodeDecodeError` propagates from the read, as before.
+    """
+    if os.path.isdir(path):
+        raise IsADirectoryError(path)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return fh.read()
+    except PermissionError:
+        if os.path.isdir(path):
+            raise IsADirectoryError(path) from None
+        raise
 
 
 def yaml_safe_load_checked(stream_or_text) -> tuple[Any, list[DuplicateKey]]:
@@ -996,6 +1027,7 @@ def _apply_change_override(
     value: Any,
     rel: str,
     line: int,
+    spec: "ItemType",
 ) -> None:
     """Parse an item's `on_change:` front-matter override into `item`.
 
@@ -1006,9 +1038,11 @@ def _apply_change_override(
 
     Every mode value inside the mapping -- `mode:` and each `fields:`
     entry -- is checked against ON_CHANGE_MODES like the scalar form is,
-    and unknown mapping keys are named; a bad entry is dropped (like the
-    scalar form drops its whole override) so the invalid mode never
-    reaches the change-tracking layer.
+    unknown mapping keys and `fields:` entries naming a field the type
+    does not declare are named, and a `fields:` that is not a mapping at
+    all is reported instead of crashing the hash layer downstream; a bad
+    entry is dropped (like the scalar form drops its whole override) so
+    the invalid mode never reaches the change-tracking layer.
     """
     if isinstance(value, str):
         if value == ON_CHANGE_LOG_OLD:
@@ -1054,9 +1088,37 @@ def _apply_change_override(
             )
             del override["mode"]
         fields = override.get("fields")
+        if "fields" in override and not isinstance(fields, dict):
+            # B8: a non-mapping `fields:` (list, string, number, null) used to
+            # sail through -- this function only validated the dict shape --
+            # and crashed model.on_change_for's `.get("fields", {}).get(...)`
+            # in every command that computes a hash. Name it and drop it;
+            # the rest of the override (mode:, reason:) still applies.
+            project.error(
+                f"on_change fields: must be a mapping of field name to mode, "
+                f"got {fields!r} -- write it as fields: {{status: timeline}}",
+                file=rel,
+                line=line,
+                item_id=item.id,
+            )
+            del override["fields"]
+            fields = None
         if isinstance(fields, dict):
             for fname, fmode in list(fields.items()):
-                if fmode == ON_CHANGE_LOG_OLD:
+                if fname not in spec.fields and fname != "body":
+                    # F15: an entry naming a field the type does not declare
+                    # is inert -- on_change_for is only ever asked for
+                    # declared fields plus the special `body` name. Same
+                    # error-and-drop posture as an unknown mapping key.
+                    project.error(
+                        f"on_change fields.{fname}: type {item.type!r} has no field {fname!r}"
+                        f" -- declared fields: {', '.join([*spec.fields, 'body'])}",
+                        file=rel,
+                        line=line,
+                        item_id=item.id,
+                    )
+                    del fields[fname]
+                elif fmode == ON_CHANGE_LOG_OLD:
                     if not legacy_ok:
                         project.error(
                             f"on_change fields.{fname}: {_LEGACY_LOG_RENAMED}",
@@ -1198,7 +1260,7 @@ def _build_item(
             line=source_line,
             item_id=item.id,
         )
-        _apply_change_override(project, item, legacy_change_override, rel, source_line)
+        _apply_change_override(project, item, legacy_change_override, rel, source_line, spec)
 
     known_keys = set(spec.fields) | set(spec.links) | RESERVED | OVERRIDABLE
     for key, value in raw.items():
@@ -1218,7 +1280,7 @@ def _build_item(
                 # from `defaults:` is diagnosed at the defaults block's own
                 # line -- the key the author has to edit is up there.
                 source_line = (defaults_line or line) if key in inherited else line
-                _apply_change_override(project, item, value, rel, source_line)
+                _apply_change_override(project, item, value, rel, source_line, spec)
             continue
         if key in spec.links:
             item.links[key] = _link_targets(project, key, value, rel, line, item.id)

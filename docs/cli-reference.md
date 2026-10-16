@@ -530,8 +530,8 @@ than pretending both rows are fine.
 item whose `tags:` are entirely inherited from its file's `defaults:` — as
 hard to find later as having none, since a file-level tag set is identical
 across every item in the file and just re-encodes which file it's already
-in. Off by default: `tags:` is optional, and plenty of projects won't want
-the noise. Worth turning on once `refdes ls --tag`/free-text search is
+in — and, on the same switch, on an item with no `tags:` at all. Off by
+default: `tags:` is optional, and plenty of projects won't want the noise. Worth turning on once `refdes ls --tag`/free-text search is
 actually part of how the project finds things — flagging under-tagged items
 is only useful once something can act on the flag.
 

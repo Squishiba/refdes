@@ -35,7 +35,7 @@ from . import history as history_mod
 from . import keys as keys_mod
 from . import model, textio
 from .model import INFO, RELEASE_GATE_DEFAULTS, Item, Project, SchemaError
-from .parse import yaml_safe_load
+from .parse import read_store_text, yaml_safe_load
 
 BASELINES_DIR = ".refdes/baselines"
 
@@ -186,8 +186,9 @@ def _same_baseline_items(stored: dict[str, dict], current: dict[str, dict]) -> b
 
 def _load_baseline_file(path: str, project: Project) -> Baseline:
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = yaml_safe_load(fh) or {}
+        data = yaml_safe_load(read_store_text(path)) or {}
+    except IsADirectoryError as exc:
+        raise SchemaError(f"{path}: baseline file is a directory, not a file") from exc
     except UnicodeDecodeError as exc:
         raise SchemaError(f"{path}: baseline file is not valid UTF-8 ({exc})") from exc
     except yaml.YAMLError as exc:
@@ -213,7 +214,7 @@ def _load_baseline_file(path: str, project: Project) -> Baseline:
 
 def load_baseline(project: Project, name: str) -> Baseline | None:
     path = baseline_path(project, name)
-    if not os.path.isfile(path):
+    if not os.path.exists(path):
         return None
     return _load_baseline_file(path, project)
 
