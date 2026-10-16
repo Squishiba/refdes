@@ -95,6 +95,8 @@ series) added a fragment, #287 and #289 (closest siblings) did not.
 
 - cli-reference.md has no `## refdes serve` section though index.md says
   "Every command and flag" (serve is in `refdes --help`, first command).
+  WITHDRAWN (round 2) — false: `## \`refdes serve\`` is at
+  cli-reference.md:2042; see the round-2 section below.
 - schema-reference.md top-level list omits `sigfigs:` and `release_gate:`.
 - No "possible bugs" found: every verified behavior matched the docs.
 
@@ -125,3 +127,13 @@ series) added a fragment, #287 and #289 (closest siblings) did not.
 Round-2 gates: docs tests (8 files), gen_examples --check, ruff E9,F src
 tests, full suite — see below. No code changes, so no tests added (docs
 prose only, per task).
+
+## Round 3 — PR #298 review 2 (codex Luna, head 6cdcfc8)
+
+- One finding (low), ACCEPTED: the round-1 "Other-page findings" section
+  (log line 96) still asserted the withdrawn serve claim as current.
+  Annotated in place with WITHDRAWN + pointer to the round-2 section
+  (kept, not deleted, so the record shows what was claimed and retracted).
+- Review's suite result (3478/2/93F/376E) is its sandbox blocking loopback
+  binds (orchestrator: ignore; CI green — 3/3 pass). My gates re-run below.
+- No code changes: no tests added.
