@@ -193,7 +193,7 @@ rendered output, no new seal, no board or citation manifest, and no baseline is
 written. Loading the project can still write back surrogate `key:` fields and
 expand resolvable link and `check` targets to composite form, and
 `.refdes/schema.json` (the gitignored editor-completion schema) is refreshed by
-every command that loads the project, this one included. Run
+most commands that load the project, this one included. Run
 `refdes --no-write check` for a run that writes none of those either.
 
 ```bash
@@ -1171,8 +1171,15 @@ pattern already covers.
 ```bash
 refdes init
 refdes init --standard none
-refdes init --preset design-debate
 ```
+
+Presets ship with `hardware@1` and `hardware@2`; the `hardware@3` that `init`
+pins today (bundled, unreleased — see `CHANGELOG.md`'s `[Unreleased]`) declares
+no presets of its own, so `refdes init --preset design-debate` is a
+configuration error there: stderr prints `configuration error: preset
+'design-debate' does not exist for hardware@3 (available: []).`, exit 2,
+nothing written. Add a preset to a project
+after the fact with [`refdes standard add-preset`](#refdes-standard-add-preset-remove-preset).
 
 Refuses to run if `refdes-project.yaml` already exists in the current
 directory. It writes to the current directory and ignores the global `-c`.
@@ -1199,13 +1206,14 @@ refdes new component --list > items/power/candidates.yaml
 ```
 
 `decision` was retired in `hardware@3` — a verdict is a `log` entry now, so
-`refdes new decision` answers `configuration error: unknown type 'decision'.`
+`refdes new decision` answers `unknown type 'decision'.` on stderr and exits 1
+(no did-you-mean — no type is close to it).
 
 An unknown type exits 1 with a did-you-mean suggestion, the same as an
 unknown type anywhere else in the tool. Outside a project it still works,
 falling back to the bundled standard. `refdes new` writes nothing itself —
-every command that loads a project refreshes `.refdes/schema.json`, and this
-one deliberately does not.
+most commands that load a project refresh `.refdes/schema.json` (the list is
+in the `refdes schema --json` section below), and this one deliberately does not.
 
 ---
 
@@ -1213,10 +1221,12 @@ one deliberately does not.
 
 Print the project's merged JSON Schema to stdout. `--json` is the default, so
 a bare `refdes schema` prints the same document. The same document is written,
-byte for byte, to `.refdes/schema.json` by every command that loads the
-project — `build`, `check`, `index`, `ls`, `id`, `fetch`, `audit`, `revision`,
-`release`, `stub-tests`, and `former-ids`; this is the explicit, standalone
-form, for piping into something else or inspecting directly. See [editor
+byte for byte, to `.refdes/schema.json` by most commands that load the
+project in a writable tree — `build`, `check`, `index`, `ls`, `id`, `fetch`,
+`audit`, `thread`, `work`, `revision`, `release`, `stub-tests`, `former-ids`,
+and the `history` subcommands (`capture`, `redact`, `migrate-seals`); this is
+the explicit, standalone form, for
+piping into something else or inspecting directly. See [editor
 support](standard-library.md#editor-support-json-schema-emission).
 
 `refdes schema` itself is read-only: it writes nothing, not even the schema
@@ -1289,6 +1299,15 @@ standard add-preset'` names the way back.
 Both exit 2 without touching the config on a name that isn't a usable
 change: `add-preset` on a preset already selected, `remove-preset` on one
 that isn't, and either on a name that doesn't exist at the pinned version.
+`remove-preset` also exits 2 when `standard.presets:` is written in
+block-list style (one item per line) rather than `presets: [...]`: the edit
+is a text substitution on the flow list, and the tool refuses to guess at
+block structure — `configuration error: could not find a 'presets: [...]'
+list to edit in refdes-project.yaml -- if standard.presets: is written in
+block-list style, edit it by hand`. `add-preset` checks the name first (the
+two name-check messages above), and with the bundled standards — one preset
+per version, none at `hardware@3` — every add on a block-list project is
+stopped by a name check before the list edit is ever attempted.
 
 ---
 
@@ -1473,7 +1492,7 @@ above. Ignoring it instead used to make `ids:` a silent no-op:
 
 ```
 $ refdes rename rename.yaml
-error: rename.yaml: unknown top-level section 'ids'. A mapping file may have types:, fields:, links:, prefixes: or citation_keys:, and an unrecognised section is refused rather than ignored. To rename a single item, edit its `id:` by hand instead, after a writable `refdes check` has expanded references to composite form so they follow the rename -- see https://squishiba.github.io/refdes/troubleshooting.html#links.
+error: rename.yaml: unknown top-level section 'ids'. A mapping file may have types:, merge_types:, fields:, links:, prefixes: or citation_keys:, and an unrecognised section is refused rather than ignored. To rename a single item, edit its `id:` by hand instead, after a writable `refdes check` has expanded references to composite form so they follow the rename -- see https://squishiba.github.io/refdes/troubleshooting.html#links.
 ```
 
 `rename` has no single-item rename — it renames ids only as part of a
@@ -2225,7 +2244,7 @@ python -m http.server -d _site 8000
 | `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, kept-copy flag, resolved sections, the pinned document's page count and the digest that count was taken from); written by `refdes fetch`, and by `refdes serve` when an editor accept pins a source value (`docs/design/editor-source-picker.md` §4). Every write is a read-modify-write inside the project's cross-process write lock |
 | `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes rename`, `refdes calc-rewrite` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename or a spelling-only rewrite |
 | `.refdes/keys-adopted.yaml` | **yes** | Adoption marker written once by `refdes keys adopt`; its presence is what makes future stamps, seals and membership manifests use key-keyed storage |
-| `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project. `refdes init` puts it in the project's `.gitignore` |
+| `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by most commands that load the project in a writable tree (the list is in the `refdes schema --json` section of this page). `refdes init` puts it in the project's `.gitignore` |
 | `.refdes/sealing-optin.json` | **no, gitignored** | The set of opt-back-in types the `check`/`build` sealing note has already announced (run-6a F10); rewritten on writable runs whenever the announced set changes — including the run that removes the overlay, which prints no note. A refused write is silent and best-effort: unlike `schema.json`'s, whose refusal is a counted warning, this record's adds no warning (the note's no-count contract) — the note just prints again next run. Per-checkout state, like
 `schema.json`: the record is gitignored, so a fresh clone — CI included — starts
 unannounced and prints the note on its first writable run. `refdes init` puts it
