@@ -266,3 +266,19 @@ rounds in this log (3891/3923/3928/3937/3939) are round-local; the
 current head count is the one in the PR body.
 Gates this round: docs-anchor tests + focused image tests; docs/changelog
 text only, no code behavior change (comment text in build.py only).
+
+## Review round 8 (review 3d5e58d; main merged in as e2f6e48)
+
+Finding 1 (MEDIUM, accepted): check_registered_assets_readable ran
+between render_bodies and render_pages; pages resolve images too, so a
+page body's image reference to an unreadable registered file got BOTH
+the registration sentence (removal advice) and the reference's own --
+reproduced (4 errors). Fixed: the check runs after every render pass
+that resolves references (bodies and pages); docstring's "runs after
+render_bodies" updated. Test: pages/overview.md image -> unreadable
+registered file, check reports ONE item-side error, no removal advice,
+"1 items, 1 errors". Sabotage shown: call moved back before
+render_pages -> test fails on "remove it from" in the report; restored.
+Findings 2+3 (nits, accepted): docs/markdown.md double blank line
+removed; new paragraphs' `--` set to em dashes like the surrounding
+prose. No other changes. Full suite: 3969 passed / 2 skipped.

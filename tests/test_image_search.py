@@ -460,6 +460,42 @@ def test_a_referenced_unreadable_asset_is_reported_once_by_check_and_build(tmp_p
         assert "remove it from" not in report, report
 
 
+@needs_chmod
+def test_a_page_image_referencing_an_unreadable_registered_file_reports_once(
+    tmp_path, monkeypatch, capsys
+):
+    """Round-8 review (reproduced): the registration check ran BETWEEN
+    `render_bodies` and `render_pages`, and pages resolve images too --
+    so a PAGE body's image reference to an unreadable registered file
+    got BOTH the registration sentence (with the removal advice a page
+    author must not follow) and the reference's own. The check now runs
+    after every pass that resolves references. Sabotage: move the call
+    back before `render_pages`, and the pair is back with its
+    self-defeating advice."""
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "No image referenced here.\n")
+    (tmp_path / "shots").mkdir()
+    shot = tmp_path / "shots" / "locked.png"
+    shot.write_bytes(PNG)
+    shot.chmod(0o000)
+    (tmp_path / "pages").mkdir()
+    (tmp_path / "pages" / "overview.md").write_text(
+        "# Overview\n\n![locked](/shots/locked.png)\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    try:
+        status = cli_mod.main(["check"])
+    finally:
+        shot.chmod(0o644)
+
+    captured = capsys.readouterr()
+    report = captured.out + captured.err
+    assert status == 1, report
+    assert "image src '/shots/locked.png'" in report, report
+    assert "remove it from" not in report, report
+    assert "1 items, 1 errors, 0 warnings" in report, report
+
+
 def test_a_file_that_vanishes_between_gate_and_open_is_a_missing_image(tmp_path,
                                                                         monkeypatch):
     """The resolution gate (`os.path.isfile`) and the digest open are separate

@@ -3439,14 +3439,16 @@ def collect_static_assets(project: Project) -> None:
 def check_registered_assets_readable(project: Project) -> None:
     """Refuse every registered asset the build cannot read (IMAGE-ASSET-007).
 
-    Runs after `render_bodies`, and that order is the whole design: the
-    render pass has already named the *referenced* unreadable files at
-    their references (their single error, in the sentence that fits an
-    author whose body links the file), and `readable_probe` /
-    `unreadable_assets` record what it saw, so this pass adds a refusal
-    only for the files no reference gates -- the `site.assets:` bulk-copy
-    layout of the resweep probe, which `refdes check` renders and publishes
-    nothing, so a copy-time-only refusal would leave `check` passing a
+    Runs after every render pass that resolves image references --
+    `render_bodies` and `render_pages` -- and that order is the whole
+    design: the render passes have already named the *referenced*
+    unreadable files at their references (their single error, in the
+    sentence that fits an author whose body links the file), and
+    `readable_probe` / `unreadable_assets` record what they saw, so this
+    pass adds a refusal only for the files no reference gates -- the
+    `site.assets:` bulk-copy layout of the resweep probe, which `refdes
+    check` renders and publishes nothing, so a copy-time-only refusal
+    would leave `check` passing a
     project whose build cannot publish it. The probe is open-and-close, no
     content read. A file that vanished between the walk and here is dropped
     silently -- there is nothing to publish, and a reference to it already
@@ -3656,7 +3658,12 @@ def build(
     compute_board_coverage(project, chain_graph=chain_graph)
     citations_mod.verify(project, require=require_citations)
     render_bodies(project)
-    check_registered_assets_readable(project)
     render_pages(project)
+    # After EVERY render pass that can reference an asset (bodies and
+    # pages): the passes have named the referenced unreadable files at
+    # their references, so this adds a refusal only for files no
+    # reference gates (IMAGE-ASSET-007 review round 8 -- running it
+    # between the two passes double-reported page references).
+    check_registered_assets_readable(project)
     validate_figure_refs(project)
     return project

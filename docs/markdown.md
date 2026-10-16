@@ -143,13 +143,12 @@ ERROR items/log/dec-001.md:2 [LOG-001] — image src 'figures/locked.png' exists
 A mode-000 file inside a `site.assets:` directory is refused by every
 build: `refdes check` names the file and the build publishes the rest of
 the site, leaving that file out. A file an item's body references **as an
-image** gets its error at the reference above -- one per reference, like a
-missing image -- not the removal advice, which an item whose body links
+image** gets its error at the reference above — one per reference, like a
+missing image — not the removal advice, which an item whose body links
 the file must not follow. The gate is image-only: a *hyperlink*
 (`[the datasheet](/assets/locked.pdf)`) to an unreadable registered file
-gets the removal advice above, and the published page keeps the link --
+gets the removal advice above, and the published page keeps the link —
 dangling, to a file the site did not publish.
-
 
 ### A bare filename, found on the search path
 
