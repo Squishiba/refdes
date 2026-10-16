@@ -345,16 +345,22 @@ def test_an_out_of_range_page_is_reported_for_every_citer(tmp_path):
 def test_require_citations_help_lists_every_promotion(capsys):
     """The flag's help named only two of the five diagnostics it promotes
     (docs PR #294); it also turns `SOURCE FILE CHANGED` and every unresolvable
-    `section:`/`page:` into an error. `citations.verify` promotes exactly the
-    diagnostics routed through the two severity callables -- the three
-    always-error cases and the always-warn `inconsistent keep_copy:` are NOT
-    promoted, and the help says so. This test is the drift guard: adding a
-    `severity(...)`/`(error if require else warn)` call in verify() without
-    naming it in the help fails here."""
+    `section:`/`page:` into an error. And the help must not over-claim:
+    `citations.verify` keeps three soft citation warnings OUTSIDE the
+    promotion (inconsistent `keep_copy:`, the case-mismatch path warning, and
+    the `page:`-vs-resolved-`section:` disagreement all call `project.warn`
+    directly -- review of PR #305 flagged the help for calling the promoted
+    set "every soft citation-pin diagnostic" with only one of these named),
+    and the always-error cases are named as such. `citations.verify` promotes
+    exactly the diagnostics routed through the two severity callables -- this
+    test is the drift guard: adding a `severity(...)`/(error if require else
+    warn) call, or a direct `project.warn` in verify(), without naming it in
+    the help fails here."""
     with pytest.raises(SystemExit):
         cli_mod.main(["build", "--help"])
     help = " ".join(capsys.readouterr().out.split())
     clause = help[help.index("--require-citations") :]
+    assert "promote every soft citation-pin diagnostic" not in clause
     for promoted in (
         "unpinned citation",
         "cached blob is missing",
@@ -363,7 +369,13 @@ def test_require_citations_help_lists_every_promotion(capsys):
         "section:/page:",
     ):
         assert promoted in clause, promoted
-    for not_promoted in ("corrupt cache blob", "missing cited file"):
+    for not_promoted in (
+        "inconsistent keep_copy:",
+        "case differs",
+        "disagrees with its resolved section:",
+        "corrupt cache blob",
+        "missing cited file",
+    ):
         assert not_promoted in clause, not_promoted
 
 

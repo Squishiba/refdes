@@ -2893,14 +2893,16 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument(
         "--require-citations",
         action="store_true",
-        help="promote every soft citation-pin diagnostic to an error (CI): "
-        "an unpinned citation (info today), a keep_copy: citation whose "
-        "cached blob is missing (warning today), a local citation changed "
-        "since it was pinned, a SOURCE FILE CHANGED pin on a file feeding "
-        "source() values, and a section:/page: the lockfile cannot resolve "
-        "(all warnings today); a corrupt cache blob, missing cited file, or "
-        "inconsistent keep_copy: is not affected -- the first two are "
-        "already errors everywhere, the third stays a warning",
+        help="promote citation pin-state diagnostics to errors (CI): an "
+        "unpinned citation (info today), a keep_copy: citation whose cached "
+        "blob is missing (warning today), a local citation changed since it "
+        "was pinned, a SOURCE FILE CHANGED pin on a file feeding source() "
+        "values, and a section:/page: the lockfile cannot resolve (all "
+        "warnings today). Citation warnings outside this list stay warnings "
+        "-- inconsistent keep_copy:, a citation path whose case differs "
+        "from the file on disk, a page: that disagrees with its resolved "
+        "section: -- and a corrupt cache blob or missing cited file is "
+        "already an error everywhere",
     )
     p_build.add_argument(
         "-v", "--verbose",

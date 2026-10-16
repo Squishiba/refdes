@@ -141,7 +141,7 @@ Validate, evaluate, and render the site plus `items.json`.
 | `--keep-going` | Exit 0 even when there are errors |
 | `--reseal [BOARD]` | Accept edits to sealed append-only entries. Bare, accepts every board's; name one board to scope it, e.g. `--reseal power`. A `sealing: history` type has nothing to reseal: the flag is accepted, warns `sealing no longer applies to the '<type>' type; nothing was rewritten`, and rewrites nothing |
 | `--accept-board-move` | Accept a recorded [board](multi-board.md) or [workspace](workspaces.md) change for an item |
-| `--require-citations` | Promote every soft [citation](markdown.md#citing-a-datasheet)-pin diagnostic to an error: unpinned citation, missing cache blob, a local citation changed since pinned, a `SOURCE FILE CHANGED` source pin, and an unresolvable `section:`/`page:`. The always-error cases (corrupt blob, missing cited file) and the `inconsistent keep_copy:` warning are unaffected. Full table: [citation severities](markdown.md#citing-a-datasheet) |
+| `--require-citations` | Promote citation pin-state diagnostics to an error: unpinned citation, missing cache blob, a local citation changed since pinned, a `SOURCE FILE CHANGED` source pin, and an unresolvable `section:`/`page:`. Citation warnings outside that list stay warnings — `inconsistent keep_copy:`, a case-mismatched citation path, a `page:` that disagrees with its resolved `section:` — and a corrupt blob or missing cited file is already an error everywhere. Full table: [citation severities](markdown.md#citing-a-datasheet) |
 | `--dry-run` | Render the site without sealing |
 | `-v`, `--verbose` | Also show info-level diagnostics (routine states hidden by default) |
 

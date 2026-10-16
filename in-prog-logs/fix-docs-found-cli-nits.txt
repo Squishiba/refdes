@@ -130,3 +130,31 @@ no new test (gates: gen_examples --check + full suite).
 - Full suite: 3974 passed, 2 skipped, exit 0 (338.86s, .scratch/suite.txt).
 - ruff check --select E9,F on the five touched files: clean.
 - docs-site/gen_examples.py --check: up to date.
+
+## Review round 2 (head dedc283 -> new) — CHANGES REQUESTED, one P2
+
+Reviewer (codex cross-check) on `--require-citations` help: the help claimed
+it promotes "every soft citation-pin diagnostic" and named only 3
+exceptions, but the explicit `page:` vs resolved `section:` disagreement
+(citations.py:1857) calls project.warn directly and stays a warning under
+the flag -- the broad wording over-claimed and the exception list was not
+exhaustive. AGREED: verified in the code that verify() keeps exactly three
+soft citation warnings unpromoted -- inconsistent keep_copy: (1745),
+page:-vs-resolved-section: (1857), case-mismatched citation path (2077),
+all direct project.warn, never the promoted severity callables.
+
+Fix: help now scopes the verb to "citation pin-state diagnostics" (the
+promoted five, exactly the severity-callable routes) and names ALL unpromoted
+citation warnings as staying warnings (the three above) plus the
+always-errors (corrupt blob, missing cited file). docs/cli-reference.md flag
+row updated to the same content. The drift-guard test pins the full set
+(5 promoted + 3 stay-warnings + 2 always-errors) and asserts the over-claim
+sentence "promote every soft citation-pin diagnostic" is gone; docstring
+names the review as origin. Sabotage: restored the over-claim help -> drift
+guard fails; restored. No behavior change; changelog fragment wording still
+accurate (it never used the over-claim phrase).
+
+Nothing rejected: the reviewer also independently confirmed scope, suite
+(3974/2), CI, and the four sabotage claims. Item 4's test was named
+(tests/test_component_rejected.py::test_defaults_status_warning) -- confirmed
+present and passing on the head; no action needed.
