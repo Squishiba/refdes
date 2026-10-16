@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import difflib
+import errno
 import hashlib
 import html as html_entities
 import json
 import os
 import re
+import stat
 import threading
 from collections.abc import Iterator
 
@@ -2252,11 +2254,12 @@ def _image_inputs_hash_value(project: Project, item: Item, digest_cache: dict):
     the bare-name `site.assets:` search (`_search_image_matches`, the shared
     pure half of `_search_image_src`, so the two resolutions can never drift).
 
-    An unresolved or ambiguous src contributes ``[raw src, None]``: the render
-    pass reports both as build errors at the reference, this only has to be
-    deterministic and distinct from any real pair -- the posture of a ``None``
-    calc-ref value. URL-scheme srcs contribute nothing, same skip as
-    `_process_images`. The src set comes from the same markdown-it
+    An unresolved, ambiguous, or unreadable src contributes ``[path, None]``:
+    the render pass reports all three as build errors at the reference (the
+    unreadable file recorded here under its resolved path -- IMAGE-ASSET-007),
+    this only has to be deterministic and distinct from any real pair -- the
+    posture of a ``None`` calc-ref value. URL-scheme srcs contribute nothing,
+    same skip as `_process_images`. The src set comes from the same markdown-it
     configuration `render_bodies` uses, so the hash pass and the render pass
     see the identical set of images: code fences and escaped raw `<img>`
     (html is disabled) contribute none, link-wrapped images contribute theirs.
@@ -2852,9 +2855,14 @@ def _process_images(
     a content-hashed destination path, computed once per source and reused for
     every further reference to the same file) and rewritten to
     `assets/<hashed path>`, which is where `render_site` copies it. One that does
-    not resolve     is a build error, not a warning: unlike a dangling cross-reference,
+    not resolve is a build error, not a warning: unlike a dangling cross-reference,
     there is no sensible way to render a missing image, and now that a resolving
     src is actually made to work end to end, a broken one should stop the build.
+    One that resolves to a file the build cannot read (mode 000, EACCES from
+    any cause -- IMAGE-ASSET-007) is the same kind of build error at the same
+    place, naming the src, the file, and the OS's reason: "does not exist"
+    and "cannot be read" are kept as distinct sentences, and neither one
+    escapes as a PermissionError traceback.
 
     The scanned attribute carries markdown-it's HTML-escaped spelling of the
     src; it is canonicalised with `image_src_from_html` before any resolution,
@@ -2871,6 +2879,32 @@ def _process_images(
             project.image_results.setdefault(where_id, []).append(
                 {"src": src, "ok": ok, "rel": rel, "dest": dest}
             )
+
+    def refused(exc: OSError, src: str, rel: str, match: re.Match) -> str:
+        # The resolution gate is `os.path.isfile`, and the open happens
+        # after it. A file that changes in between -- a concurrent editor
+        # write, the serve poller (see in-prog-logs/concurrent-editing-
+        # serve.txt), a network mount going stale -- makes the open raise
+        # FileNotFoundError, and claiming it "exists ... but cannot be
+        # read" is self-contradictory with the wrong remediation. That race
+        # re-unifies with the gate's own "does not exist" sentence;
+        # everything the open can still refuse for (EACCES, EISDIR, EIO)
+        # gets the unreadable refusal (IMAGE-ASSET-007).
+        if isinstance(exc, FileNotFoundError):
+            project.error(
+                f"image src {src!r} does not exist",
+                file=where_file, line=where_line, item_id=where_id,
+            )
+        else:
+            project.error(
+                f"image src {src!r} exists at {rel!r} but cannot be "
+                f"read: {exc.strerror or exc}. Make the file readable, "
+                f"or point the reference at a readable file",
+                file=where_file, line=where_line, item_id=where_id,
+            )
+            project.unreadable_assets.add(rel)
+        record(False, src)
+        return match.group(0)
 
     def swap(match: re.Match) -> str:
         prefix, attr, suffix = match.group(1), match.group(2), match.group(3)
@@ -2900,10 +2934,61 @@ def _process_images(
             # Read once, on the path already being opened to confirm it
             # resolves -- not a second I/O pass. Cached by source path, so
             # the same image referenced from many items/pages hashes once.
-            with open(full_path, "rb") as fh:
-                digest = hashlib.sha256(fh.read()).hexdigest()[:16]
+            # A file that exists but will not open (IMAGE-ASSET-007: mode
+            # 000, EACCES from any cause) used to escape here as an
+            # unhandled PermissionError, crashing the whole render pass
+            # before this reference -- or any other diagnostic -- could be
+            # reported. It is a build error at the reference, same posture
+            # as "does not exist": the hash pass recorded the same
+            # `None`-digest sentinel the unresolved src contributes, and
+            # the reference is left unrewritten.
+            try:
+                with open(full_path, "rb") as fh:
+                    digest = hashlib.sha256(fh.read()).hexdigest()[:16]
+            except OSError as exc:
+                return refused(exc, src, rel, match)
             dest = _hashed_leaf(rel, digest)
             project.assets[rel] = dest
+            # The digest read *is* the readability probe for this file:
+            # record it, so a later reference -- and the registration
+            # check -- find the answer cached instead of opening again.
+            project.readable_probe.add(rel)
+        elif rel not in project.readable_probe:
+            # A file registered by `collect_static_assets` (a `site.assets:`
+            # directory) short-circuits the digest block above, so the
+            # readability gate there never sees it: a referenced mode-000
+            # asset recorded ok: True, `check` said 0 errors, and the
+            # published page pointed at a copy publish then refused
+            # (IMAGE-ASSET-007 review). Probe it here -- open and close,
+            # no content read -- so the reference carries the same named
+            # error as any other unreadable src; `readable_probe` keeps a
+            # heavily-referenced asset directory at one open per file.
+            # A successful open is the answer only for a *regular* file.
+            # The resolution gate's `os.path.isfile` turns a FIFO away
+            # with "does not exist" -- this branch sees a non-regular
+            # file only through the gate->probe shape swap, a race
+            # (round-7 review, F2, correcting this comment's first
+            # draft) -- and the copy loop's `isfile` then skips the
+            # file, so a probe that stopped at "opened" would record a
+            # reference publish will dangle (round 6, F2). `fstat` on
+            # the opened fd decides.
+            # O_NONBLOCK: the blocking O_RDONLY open of a FIFO waits for
+            # a writer, which hung the whole command on the very branch
+            # added to gate references -- base attempted no open here at
+            # all, so the guard is not optional (round 6, F1; the flag is
+            # Unix-only, hence the `getattr`).
+            try:
+                fd = os.open(full_path,
+                             os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+                try:
+                    if not stat.S_ISREG(os.fstat(fd).st_mode):
+                        raise OSError(errno.ENOTSUP, "not a regular file",
+                                      full_path)
+                finally:
+                    os.close(fd)
+            except OSError as exc:
+                return refused(exc, src, rel, match)
+            project.readable_probe.add(rel)
         record(True, src, rel, dest)
         # Re-escape on the way out: the published page must carry the src in
         # the same spelling markdown-it's renderer emits, so a browser
@@ -3323,6 +3408,11 @@ def collect_static_assets(project: Project) -> None:
     (IMAGE-ASSET-006) is refused rather than copied -- publishing it would
     ship bytes the repository does not contain -- with a warning naming the
     escaped entry, since silence would read as a working asset directory.
+
+    An unreadable file (IMAGE-ASSET-007) is *not* filtered here: the
+    registration is what a reference resolves through, and the readability
+    refusal belongs to `check_registered_assets_readable` (after the render
+    pass), which keeps a referenced file's single error at the reference.
     """
     root_real = os.path.realpath(project.root)
     for rel_dir in project.asset_dirs:
@@ -3344,6 +3434,50 @@ def collect_static_assets(project: Project) -> None:
             )
             continue
         project.assets[rel] = rel
+
+
+def check_registered_assets_readable(project: Project) -> None:
+    """Refuse every registered asset the build cannot read (IMAGE-ASSET-007).
+
+    Runs after every render pass that resolves image references --
+    `render_bodies` and `render_pages` -- and that order is the whole
+    design: the render passes have already named the *referenced*
+    unreadable files at their references (their single error, in the
+    sentence that fits an author whose body links the file), and
+    `readable_probe` / `unreadable_assets` record what they saw, so this
+    pass adds a refusal only for the files no reference gates -- the
+    `site.assets:` bulk-copy layout of the resweep probe, which `refdes
+    check` renders and publishes nothing, so a copy-time-only refusal
+    would leave `check` passing a
+    project whose build cannot publish it. The probe is open-and-close, no
+    content read. A file that vanished between the walk and here is dropped
+    silently -- there is nothing to publish, and a reference to it already
+    hit the reference gate's own "does not exist" sentence. The refused
+    file stays registered; the copy loop skips it, so the site publishes
+    the rest without it.
+    """
+    for rel in sorted(project.assets):
+        if rel in project.readable_probe or rel in project.unreadable_assets:
+            continue
+        try:
+            # O_NONBLOCK: the registration walk yields every entry
+            # `os.walk` finds, FIFOs included, and a blocking O_RDONLY
+            # open would hang the whole command until a writer appears
+            # (IMAGE-ASSET-007 review round 2). Non-regular files answer
+            # instantly and stay as base left them: registered, skipped
+            # at publish by the copy loop's `isfile` check.
+            os.close(os.open(os.path.join(project.root, *rel.split("/")),
+                             os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)))
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            project.unreadable_assets.add(rel)
+            project.error(
+                f"site.assets file {rel!r} cannot be read: {exc.strerror or exc}. "
+                "Make it readable, or remove it from the site.assets: "
+                "directory -- it is not published",
+                file="refdes-project.yaml",
+            )
 
 
 # ------------------------------------------------------------------------ entry point
@@ -3525,5 +3659,11 @@ def build(
     citations_mod.verify(project, require=require_citations)
     render_bodies(project)
     render_pages(project)
+    # After EVERY render pass that can reference an asset (bodies and
+    # pages): the passes have named the referenced unreadable files at
+    # their references, so this adds a refusal only for files no
+    # reference gates (IMAGE-ASSET-007 review round 8 -- running it
+    # between the two passes double-reported page references).
+    check_registered_assets_readable(project)
     validate_figure_refs(project)
     return project
