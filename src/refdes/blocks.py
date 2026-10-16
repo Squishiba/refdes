@@ -1,5 +1,6 @@
-"""Generated blocks in narrative pages: `{{index}}`, `{{cascade}}`, and
-whatever joins them later.
+"""Generated blocks in narrative pages: the five registered in `_REGISTRY`
+at the bottom of this module -- `{{index}}`, `{{cascade}}`, `{{tree}}`,
+`{{compare}}`, and `{{calcblock}}`.
 
 A small, **fixed** family. Every block takes a closed set of named
 parameters, each with one fixed meaning, validated against the resolved
@@ -24,9 +25,10 @@ have none.
 An unrecognized block name is left completely untouched -- literal text,
 not an error, on the theory it was never meant as a directive (`{{TBD}}`
 typed as a note to self keeps working). Once a name *does* match one of the
-two below, everything past that point is validated strictly: an unknown
-parameter or a missing required one is a build error naming the specific
-fix, matching every other diagnostic this tool already produces.
+five registered blocks below, everything past that point is validated
+strictly: an unknown parameter or a missing required one is a build error
+naming the specific fix, matching every other diagnostic this tool already
+produces.
 """
 
 from __future__ import annotations
