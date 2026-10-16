@@ -13,6 +13,7 @@ from helpers import COVERAGE_SCHEMA, _build_at
 
 from refdes import cli as cli_mod
 from refdes import render
+from refdes.blocks import CascadeCycleError, walk_cascade
 
 # --------------------------------------------------------------------- blocked_by
 
@@ -139,6 +140,68 @@ def test_blocked_by_self_loop_is_a_cycle(blocked_project):
     (blocked_project / "items" / "dec-001.md").write_text(text, encoding="utf-8")
     project = _build_at(blocked_project)
     assert any("blocked_by cycle: DEC-001 -> DEC-001" in d.message for d in project.errors)
+
+
+def test_blocked_by_diamond_is_not_a_cycle(blocked_project):
+    """DEC-004 blocked by both DEC-002 and DEC-003: DEC-002 is reached by
+    two paths -- directly, and via DEC-003 -> DEC-002. A reconverging DAG
+    is not a cycle: no error, and both paths resolve to the root."""
+    (blocked_project / "items" / "dec-004.md").write_text(
+        "---\nid: DEC-004\ntype: decision\ntitle: Blocked by DEC-002 and DEC-003.\n"
+        "status: proposed\nblocked_by: [DEC-002, DEC-003]\n---\n",
+        encoding="utf-8",
+    )
+    project = _build_at(blocked_project)
+    assert [d.message for d in project.errors if "blocked_by cycle" in d.message] == []
+    chains = {tuple(c.path) for c in project.blocked_chains if c.item_id == "DEC-004"}
+    assert chains == {
+        ("DEC-004", "DEC-002", "DEC-001"),
+        ("DEC-004", "DEC-003", "DEC-002", "DEC-001"),
+    }
+
+
+def test_blocked_by_two_cycle_still_raises(blocked_project):
+    text = (blocked_project / "items" / "dec-001.md").read_text(encoding="utf-8")
+    text = text.replace("status: on_hold", "status: on_hold\nblocked_by: [DEC-002]")
+    (blocked_project / "items" / "dec-001.md").write_text(text, encoding="utf-8")
+    project = _build_at(blocked_project)
+    errors = [d.message for d in project.errors if "blocked_by cycle" in d.message]
+    assert len(errors) == 1
+    assert "DEC-001 -> DEC-002 -> DEC-001" in errors[0]
+    assert project.blocked_chains == []
+
+
+def test_walk_cascade_error_mode_marks_a_reconverged_node(blocked_project):
+    """The primitive-level statement of the diamond fix: under
+    on_cycle="error" a node reached by two paths is a terminal
+    `already_shown` leaf (marked, not re-walked), not a raised cycle."""
+    (blocked_project / "items" / "dec-004.md").write_text(
+        "---\nid: DEC-004\ntype: decision\ntitle: Blocked by DEC-002 and DEC-003.\n"
+        "status: proposed\nblocked_by: [DEC-002, DEC-003]\n---\n",
+        encoding="utf-8",
+    )
+    project = _build_at(blocked_project)
+    nodes = walk_cascade(project, "DEC-004", "up", {"blocked_by"}, 10, on_cycle="error")
+
+    def flatten(ns):
+        for n in ns:
+            yield n
+            yield from flatten(n.children)
+
+    ids = [n.item_id for n in flatten(nodes)]
+    assert ids == ["DEC-002", "DEC-001", "DEC-003", "DEC-002"]
+    hits = [n.already_shown for n in flatten(nodes) if n.item_id == "DEC-002"]
+    assert hits == [False, True]  # expanded once, then marked as a leaf
+
+
+def test_walk_cascade_error_mode_raises_on_a_real_cycle(blocked_project):
+    text = (blocked_project / "items" / "dec-001.md").read_text(encoding="utf-8")
+    text = text.replace("status: on_hold", "status: on_hold\nblocked_by: [DEC-002]")
+    (blocked_project / "items" / "dec-001.md").write_text(text, encoding="utf-8")
+    project = _build_at(blocked_project)
+    with pytest.raises(CascadeCycleError) as excinfo:
+        walk_cascade(project, "DEC-001", "up", {"blocked_by"}, 10, on_cycle="error")
+    assert excinfo.value.path == ["DEC-001", "DEC-002", "DEC-001"]
 
 
 def test_stale_blocker_is_an_info_diagnostic(blocked_project):
