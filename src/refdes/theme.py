@@ -583,10 +583,14 @@ def render_theme_css(palettes: dict[str, dict[str, str]]) -> str:
 
     The routing is the whole point (section 4: dark mode stays refdes's):
 
-    * palette-independent tokens (type, spacing, radii) and any colour token
-      whose light and dark overrides agree (a flat `site: tokens:` pair) go in
-      one plain `:root` block -- that pair means "both palettes", so it may
-      win over the media query; it is meant to;
+    * palette-independent tokens (type, spacing, radii) and EVERY light
+      colour override go in one plain `:root` block -- including a token
+      the dark palette redefines to a different value, whose light value
+      light mode must therefore show; dark mode still wins, because the
+      media block below re-asserts the effective dark palette at the same
+      specificity and later in the sheet, and `[data-theme="dark"]`
+      out-specifies `:root`; a flat `site: tokens:` pair (light and dark
+      agree) is meant to win over the media query in both modes, and does;
     * light-only colour overrides go in `:root` too, and the effective dark
       value of every colour token is re-asserted inside
       `@media (prefers-color-scheme: dark)` -- without that, a light `--bg`
@@ -636,12 +640,12 @@ def render_theme_css(palettes: dict[str, dict[str, str]]) -> str:
 
     lines: list[str] = []
 
-    # :root: every override that is not dark-only.
-    root_names = [
-        name
-        for name in default_light
-        if name in light and (name not in color_names or not _differs_in_dark(name))
-    ]
+    # :root: every light override, including tokens whose dark value differs
+    # -- light mode must get the theme's own light colour, not the
+    # stylesheet's default. Dark mode still wins: the media block re-asserts
+    # the effective dark palette at the same specificity, later in the sheet,
+    # and [data-theme="dark"] out-specifies :root.
+    root_names = [name for name in default_light if name in light]
     lines.append(":root {")
     lines.extend(_lines_for(light, root_names))
     lines.append("}")
