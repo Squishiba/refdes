@@ -254,6 +254,12 @@ up as `claimed_by` on the requirement's coverage, and the requirement's stage
 caps at `claimed` instead of `satisfied`. Declaring `satisfying_statuses:`
 requires the type to have a `status` field; the project fails to load otherwise.
 
+The bundled `component`'s two non-satisfying statuses are not synonyms of each
+other — `rejected` records a decision this project made (considered the part,
+did not use it), `obsolete` a fact about the part (EOL, NRND) that can land on
+a part you did select — though both leave a `satisfies:` target at `claimed`,
+never `satisfied`.
+
 For a thread entry that declares `satisfies:` but not `status:`, coverage
 uses the thread's current status. A `status:` inherited from the file's
 `defaults:` block is likewise not a declaration. An unmerged fork has no

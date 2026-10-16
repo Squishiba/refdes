@@ -412,6 +412,15 @@ to reference while reviewing a PR diff. The workspace column appears only on a
 project that declares `workspaces:`, so a project without one gets the columns
 it has always got.
 
+The listing comes from the same writable load `build` does, so on a cold project
+the files can be edited before the first row prints: the load mints the
+[surrogate keys](ids.md#surrogate-keys) the items are missing and expands bare
+link references to composite `ID@key` form, and `ls` names what it wrote on the
+line above the listing — `(rewrote 1 reference(s) while loading)` on a project
+whose items already carry keys, `(minted 2 key(s) and rewrote 1 reference(s)
+while loading)` on one that started with none. The global `--no-write` keeps
+the listing from touching anything.
+
 | Option | Effect |
 |---|---|
 | `--type TYPE` | Only items of this type |

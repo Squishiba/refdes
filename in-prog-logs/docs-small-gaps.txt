@@ -1,0 +1,76 @@
+docs-small-gaps — fill three small, verified docs gaps
+
+Branch: docs-small-gaps. Task: .scratch/task/TASK.txt (overrides COMMON.txt:
+docs only, no full suite, no changelog fragment).
+
+All claims verified by running the tool on this branch's src
+(PYTHONPATH=$PWD/src, venv refdes entrypoint) against fresh probe projects
+under .scratch/ (hardware@3, `refdes init`).
+
+1. docs/index.md "Generated blocks" row omitted `{{compare}}`.
+   - Verified against src/refdes/blocks.py: `_REGISTRY["compare"]` requires
+     `type`, optional `against/board/columns/status/subtypes/tag`
+     (blocks.py:911-917); docs/blocks.md:110 documents the block; the
+     parameter table at docs/design/candidate-parts.md ~101-109 matches.
+   - Probe .scratch/probe1: `{{compare type="component" against="BND-PWR-001"
+     columns="part_number,calc:I_q"}}` renders the table (ID | part_number |
+     I_q | bound-limit | Checks; pass +100% / em-dash cells; legend line).
+   - Error case verified in the same probe:
+     `{{compare type="requirement" against="BND-PWR-001"}}` ->
+     ERROR pages/err.md:3 — type 'requirement' declares no 'checks' field,
+     so there is nothing to compare against BND-PWR-001. Drop against=, or
+     compare a type that declares checks. (plus a `⚠` block-error in the page)
+   - Fix: added `{{compare}}` to the nav row, in list order matching
+     docs/blocks.md's section order (index, cascade, compare, tree, calcblock).
+
+2. docs/coverage.md: one sentence on why `rejected` is not `obsolete`
+   (promised by docs/design/candidate-parts.md §8 line 810; meaning from §5.2).
+   - Verified on probe .scratch/probe2 (hardware@3, four active requirements,
+     each `satisfies:`-claimed by a component with status candidate / selected
+     / rejected / obsolete, `refdes build` + `_site/coverage.html`):
+       REQ claimed by selected  -> satisfied
+       REQ claimed by candidate -> claimed
+       REQ claimed by rejected  -> claimed   (matches #297: link still moves
+                                              the target to claimed)
+       REQ claimed by obsolete  -> claimed
+     Build warnings confirm: "claimed but not verified" for REQ-001/003/004,
+     none for REQ-002.
+   - Fix: one sentence appended to "Which statuses count as satisfying",
+     after the paragraph that already caps non-satisfying claims at `claimed`
+     — does not contradict #297; the distinction is for the reader, not the
+     coverage computation.
+
+3. docs/cli-reference.md `ls` section: the load-rewrite notice.
+   - Code path: cmd_ls -> _load(args, require_ids=False) ->
+     _announce_load_writes(project) (cli.py:848-849), stream=None = stdout,
+     printed ahead of the listing; notice built by _load_write_notice
+     (cli.py:105-120).
+   - Reproduced on probe .scratch/probe3 (fresh init):
+       cold project, bare `refines:` link:
+         (minted 2 key(s) and rewrote 1 reference(s) while loading)
+       project with keys, one new bare link:
+         (rewrote 1 reference(s) while loading)
+       after: `refines: [REQ-001@kgcgxgy50fn]` written into items/more.yaml.
+       `refdes --no-write ls`: no notice, file untouched (verified).
+   - Fix: one paragraph after the ls intro, quoting both real messages and
+     pointing at `--no-write`.
+
+Skipped items: none.
+
+Changelog fragment: none. changelog.d/README.md: a fragment is for a change
+that deserves a changelog entry (breaking/added/changed/fixed/removed —
+product behaviour); docs-only prose corrections change no behaviour, so no
+fragment.
+
+Tests: docs-only task per TASK.txt — no behaviour fix, so no new test and no
+sabotage (COMMON rule 5 applies to behaviour fixes; nothing here changes
+behaviour). Gates run:
+  - python docs-site/gen_examples.py --check -> "up to date" (schema-reference,
+    vocabulary) exit 0.
+  - PYTHONPATH=$PWD/src venv-python -m pytest -q -p no:cacheprovider tests
+    -k "docs or anchor or link or index_page or coverage" ->
+    408 passed, 3599 deselected, exit 0 (.scratch/suite.txt).
+  - Full suite skipped per TASK.txt (docs only).
+  - ruff not run: no .py files touched.
+
+Status: finished.
