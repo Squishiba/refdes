@@ -13,6 +13,7 @@ import stat
 import threading
 from collections.abc import Iterator
 
+import yaml
 from markdown_it import MarkdownIt
 from markdown_it.common.utils import escapeHtml
 
@@ -289,6 +290,42 @@ def _field_error(project: Project, item: Item, fname: str, message: str) -> None
         )
 
 
+# A fenced ```yaml/```yml block in a raw markdown body (fence run of 3+,
+# optional language attributes, closed by a matching fence) -- the shape
+# `declares_inert_keys` below scans. Mirrors blocks._RAW_FENCE_RE's fence
+# recognition, narrowed to the two yaml spellings.
+_YAML_FENCE_RE = re.compile(
+    r"^[ \t]*(`{3,}|~{3,})[ \t]*(?:yaml|yml)(?![\w-])[^\n]*\n(.*?)^[ \t]*\1[ \t]*$",
+    re.DOTALL | re.MULTILINE | re.IGNORECASE,
+)
+
+
+def declares_inert_keys(body: str, field_names) -> list[tuple[int, list[str]]]:
+    """(0-indexed line of the fence within `body`, declared-field keys) for
+    every ```yaml fence in an item body whose content parses as a mapping
+    naming a field the item's own type declares -- the inert-front-matter
+    trap (R9-F1): a `checks:` written as a body fence next to the calc fence
+    renders as literal prose, the check silently never runs, and `check`
+    reports 0 errors. A yaml fence of genuine example code (no declared field
+    key) is not a match; the body itself is never modified.
+
+    The caller turns each pair into a warning at the fence's absolute line
+    -- same `body_line + offset` shape as `calc.fence_errors`'s report in
+    `_run_item_calcs`."""
+    out: list[tuple[int, list[str]]] = []
+    for match in _YAML_FENCE_RE.finditer(body):
+        try:
+            parsed = yaml.safe_load(match.group(2))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        keys = [str(key) for key in parsed if str(key) in field_names]
+        if keys:
+            out.append((body.count("\n", 0, match.start()), keys))
+    return out
+
+
 def validate_items(project: Project) -> None:
     # Built once for the whole pass: `citations: - item:` resolves through the
     # same helper as every other target spelling, and `_key_index` is one dict
@@ -303,6 +340,27 @@ def validate_items(project: Project) -> None:
                 "substitute for the content itself. A warning, not an error, "
                 "so a stub can exist while it's still being drafted.",
                 file=item.source_file, line=item.source_line, item_id=item.id,
+            )
+
+        # R9-F1: a `checks:` (or any declared field) written as a ```yaml
+        # fence in the body is inert -- it renders as prose and the field
+        # silently never takes effect. Warning, not error: the item is valid,
+        # just not doing what the page shows; and a yaml fence of pure example
+        # code (no declared field key) never reaches this.
+        for fence_offset, inert_keys in declares_inert_keys(item.body, spec.fields):
+            fence_line = (
+                item.body_line + fence_offset
+                if item.body_line is not None else item.source_line
+            )
+            names = ", ".join(f"'{key}'" for key in inert_keys)
+            noun = "fields" if len(inert_keys) > 1 else "a field"
+            project.warn(
+                f"a ```yaml fence in this item's body declares {names} -- "
+                f"{noun} of type '{item.type}'. In the body a YAML fence is "
+                "prose: it renders as literal text and the field never takes "
+                "effect. Move it into the item's front matter (the '---' "
+                "block at the top of the file).",
+                file=item.source_file, line=fence_line, item_id=item.id,
             )
 
         for fname, fspec in spec.fields.items():

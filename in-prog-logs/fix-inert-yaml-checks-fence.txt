@@ -1,0 +1,73 @@
+fix-inert-yaml-checks-fence — R9-F1: a `checks:` written as a ```yaml fence in
+a markdown item body is silently inert — make that loud.
+
+## What the finding said (verified)
+
+Read `git show origin/user-sim-run9:in-prog-logs/user-sim-release-gate-run9.md`
+§2 / §3 table (R9-F1, moderate). The report: the docs example (calc fence +
+yaml `checks:` fence adjacent) invites writing `checks:` as a body fence; it
+renders as literal text, the bound check never runs, `refdes check` reports 0
+errors. Front matter works.
+
+Verified on this branch before changing anything: reproduced in
+`.scratch/r9f1-repro` (fresh `refdes init`, hardware@3). Inert body fence ->
+`2 items, 0 errors, 0 warnings`, exit 0, despite P_dens=0.2 W/in^2 against a
+`<= 0.15 W/in^2` bound. Same file with `checks:` in front matter ->
+`P_dens violates BND-THM-001`, exit 1. Not already fixed.
+
+## The diagnostic
+
+Placed in `src/refdes/build.py`, `validate_items` — the same place body
+warnings are raised (the `body: is empty` warning is two lines above;
+`calc.fence_errors` reports at `item.body_line + offset` the same way). New
+module-level `_YAML_FENCE_RE` (```yaml/```yml fences, fence run 3+, language
+attributes tolerated) and `declares_inert_keys(body, field_names)`:
+(0-indexed fence line, declared-field keys) for every yaml fence in the body
+whose content parses as a mapping naming a field the item's own type declares.
+`validate_items` turns each into a `project.warn` at the fence line naming the
+key, the type, and the fix ("move it into the item's front matter").
+
+Narrow by construction: non-mapping fences, unparseable fences, fences with no
+declared-field key, and keys that are fields of *other* types never fire. The
+body text is never modified (rendering unchanged).
+
+## Docs
+
+`docs/checks.md` "Declaring a check" now shows `checks:` inside a front-matter
+block (```yaml fence quoting the item's `---` region), and names the inert-body-
+fence trap explicitly. `docs-site/gen_examples.py --check` passes (docs/checks.md
+is a page, not an item, so the new warning never fires on the docs project —
+checked by running it).
+
+## Tests
+
+`tests/test_inert_yaml_fence.py`, 7 tests, hardware@3 project via
+`refdes check` (CLI end-to-end, reading BOTH stdout (warnings) and stderr
+(errors) — the first draft read only stdout and passed on an empty string):
+
+- inert fence warns, names 'checks' + the fix, check stays 0 errors (the R9-F1 repro)
+- warning line == the fence's own line in the file (not the front matter)
+- yaml fence without a field key: silent
+- field of a *different* type (`limit:` in a log body): silent
+- non-mapping yaml fence: silent
+- ```yml spelling fires
+- front-matter `checks:` still runs the check (violation reported, no warning)
+
+Sabotage (COMMON rule): replaced the `declares_inert_keys(...)` loop source
+with `[]` — the 3 "fires" tests failed, the 4 "does not fire" tests stayed
+green (correct: the sabotage removes the warning, not the guards). Restored;
+7/7 green again.
+
+## changelog.d
+
+`inert-yaml-checks-fence.added.md` — README rule: `added` = "a new feature or
+capability"; a new user-visible warning is a capability. Committed with the work.
+
+## Gates
+
+- Full suite once, foreground: `4012 passed, 2 skipped in 324.75s`, exit 0
+  (`.scratch/suite.txt`). No load flake this run.
+- `ruff check --select E9,F src tests`: All checks passed!
+- `python docs-site/gen_examples.py --check`: up to date, exit 0
+
+Status: DONE.

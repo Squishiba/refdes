@@ -106,15 +106,27 @@ needed — arithmetic is calc's job, and a `limit` only ever compares one value.
 ## Declaring a check
 
 In the item doing the work — usually the entry that reaches a verdict — name a calc
-value and the item to check it against:
+value and the item to check it against, **in the front matter**, alongside `type:`
+and `id:`:
 
 ```yaml
+---
+id: LOG-PWR-001
+type: log
+summary: Thermal analysis of the regulator
 checks:
   - value: eff
     against: BND-THM-002
   - value: P_dens
     against: BND-THM-001
+---
 ```
+
+`checks:` is a field of the item, so it lives in the item's front matter — the
+text between the opening `---` and the closing `---`. Writing it as a ` ```yaml `
+fence in the item's **body** (next to the ` ```calc ` fence) is inert: the fence
+renders as literal text on the page and the check silently never runs. The build
+warns on that shape and names the fix.
 
 `value` must be a variable defined by a `calc` block in the **same item**.
 `against` must be an item with a `limit`, and may be
