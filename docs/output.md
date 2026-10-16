@@ -64,7 +64,8 @@ ones, so reassigning them runs the contrast checks: every semantic pair
 `--panel`) must clear a 4.5:1 WCAG AA minimum, and `--bad` must stay
 distinguishable from `--good` — a 90-degree hue separation or 4.5:1 between
 them, so a colour-blind reader can tell a fail from a pass. A failing pair is a
-**warning** naming the pair, the two values and the measured ratio; the build
+**warning** naming the pair and the measured ratio (a `--bad`/`--good`
+failure also names the two values); the build
 still produces the site, because the threshold is a floor and not a law.
 Values the checker cannot parse — a named colour, `rgb()`, another `var()` —
 are skipped rather than guessed at. The built-in themes are held to the same
@@ -286,10 +287,10 @@ structure — there is nothing to hand-maintain and no `nav:` tree to write.
   instead of several hundred pixels down. It is a CSS-only toggle — no
   JavaScript is involved, and it works with JavaScript disabled.
 
-A page with more than two `##` headings additionally gets an on-page contents
-list built from those headings — an ordinary list of working anchors. The
-scroll-spy that highlights the section in view belongs to `document.html`'s own
-contents list, not this one.
+A page with more than two `##` or `###` headings additionally gets an on-page
+contents list built from those headings — an ordinary list of working anchors.
+The scroll-spy that highlights the section in view belongs to
+`document.html`'s own contents list, not this one.
 
 The print stylesheet hides all of this.
 
@@ -343,9 +344,10 @@ else is always present.
   "items": [
     {
       "id": "LOG-PWR-001",
+      "key": "m879n11wt01",
       "type": "log",
-      "summary": "3V3 rail regulator topology",
-      "fields": { "status": "accepted", "options": [ ... ] },
+      "title": "3V3 rail regulator topology",
+      "fields": { "summary": "3V3 rail regulator topology", "status": "accepted", "options": [ ... ] },
       "citations": {
         "citations": [
           { "path": "https://www.ti.com/lit/ds/symlink/tps62913.pdf",
@@ -354,7 +356,7 @@ else is always present.
             "local_path": "", "section_page": "14", "detail": "" }
         ]
       },
-      "links": { "satisfies": ["REQ-PWR-002"], "constrained_by": ["BND-THM-001"] },
+      "links": { "satisfies": ["REQ-PWR-002@vf52bz5cade"], "constrained_by": ["BND-THM-001@texqr3stjat"] },
       "backlinks": { "followed_by": ["LOG-A-004"] },
       "content_hash": "673e6ba11269f350",
       "external": false,
@@ -364,7 +366,7 @@ else is always present.
       "source": { "file": "items/log/log-pwr-001-regulator.md", "line": 2 },
       "calcs": [
         { "name": "P_diss", "expression": "P_out * (1/eff - 1)",
-          "result": "0.2981 W", "bounds": "", "error": null }
+          "result": "0.2981 W", "bounds": "", "error": null, "line": 32 }
       ],
       "checks": [
         { "value": "P_dens", "against": "BND-THM-001", "ok": false,
@@ -386,6 +388,10 @@ else is always present.
 | Field | Notes |
 |---|---|
 | `version` | From `site.version`; what downstream imports check |
+| `next_ids` | The next id number `refdes id` would hand out, per prefix |
+| `key` | The item's surrogate key (see [design/keys.md](design/keys.md)) — always present; `null` only in a `--no-write` load, before a key can be persisted |
+| `links` / `backlinks` | Outgoing `links` are the raw authored targets, so a key-expanded one reads `DISPLAY-ID@key` — strip the suffix to compare. `backlinks` are always bare display ids |
+| `items[].captured` / `items[].edited_after_captured` | Present only on log entries the history store has captured, the same absent-key convention as `boards` |
 | `coverage` | Local items only; imported items are excluded |
 | `content_hash` | Over `invalidate` fields only — see [change tracking](change-tracking.md) |
 | `external` / `origin` | True and named for imported items |
