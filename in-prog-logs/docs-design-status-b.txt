@@ -1,0 +1,83 @@
+Task: audit implementation-status claims in 4 design docs against code + git
+history (branch docs-design-status-b). Start: clean tree at 4502c58.
+Method per doc: grep -n status claims, read only needed ranges, verify vs
+src/ + git log -S/--grep. No code changes -> no test/sabotage step (per
+TASK.txt). No changelog fragment: internal design docs, changelog.d/README.md
+covers user-visible changes only.
+
+Log rows: doc | claim (line) | actual | evidence
+
+== docs/design/thread-workbench.md ==
+Status header L1-20 / §8 phasing claims all verified; NO edits needed.
+- WB | W1 landed (L3, §8 L270) | DONE in 8818df7 (#19) | in-prog-logs/thread-workbench-w1.md exists; serve/server.py:63 "W1 auto-reload probe"
+- WB | W2 landed (L3, §8 L272) | DONE in 4ac9898 (#23) | server.py:84 (D2 provenance), :146 (D3 diagnostics); in-prog-logs/thread-workbench-w2.md
+- WB | W3 landed for {{name}} refs (L3, §8 L274) | DONE in 99eabcd (#31), confirmed by 6948026 | server.py:202 _decorate_calc_values; model.py:591 calc_values
+- WB | W4 folded in, no speculative opt (L7-10, §8 L276-281) | matches §7.4 decision; no code claim to falsify | design text only
+- WB | H6/H7 landed (L11); CLI parity refdes thread/work stays (L264) | DONE | cli.py:1164 cmd_thread, :1371 cmd_work; items_json threads projection render.py (~692)
+- WB | W5a landed (L12-14, §8 L282-287) | DONE in 7c72311 (#197) | templates/taskpane/taskpane.{js,css} exist; in-prog-logs/workbench-w5a-task-pane.txt
+- WB | W5b not started (L14-15, §8 L288-289) | NOT BUILT (plan doc only, cb24891/#211) | no tick-write impl in serve/ (grep "tick" only poller/unrelated)
+- WB | §2 machinery bullets (L66-90) | all true today | cli.py:2811,2817 (serve desc); serve/state.py:318 Poller interval=1.0; api.py:558 "full rebuild after save"; filters.py:336 "~1s full build"; serve/__init__.py docstring toolbar; item.html.j2:68 Thread section
+- WB | D1 row: CalcLine.block tags rows (L145) | true | model.py CalcLine block field (~530) w/ named-calc-blocks §3.6 comment; server.py:207,232
+- WB | §5 note: {{DEC-001.P_diss}} not matched by INLINE_VALUE_RE; {{name|unit}} left plain in pane (L151-164) | true | build.py:76-78 regex name class excludes -/.; server.py:226 skips unit refs
+- WB | §7a W5a-status note: taskpane.js skips observer below 2 anchors; fixed = "follows the scroll" (L220-231) | true | taskpane.js:165 `if (anchors.length < 2) return;`; taskpane.css header comment
+- WB | D1 half not shipped, dotted ITEM.NAME undecorated (L18-20) | true | server.py:226 area only handles {{name}}; no dotted prose decoration
+EDITS: none. All claims verified true.
+NOTE (not fixed, not status text): L243-244 reads "Derived, self-\nlosing rows"
+— a mangled sentence ("self-calcu" dropped). Out of scope (task: status text only);
+flagged for a prose pass.
+
+== docs/design/editor-source-picker.md ==
+- SP | header: Slices A/B/C landed (L1) | DONE: A=59d2915/#49, B=197bc7c/#59, C=07b20f5/#62 | git log
+- SP | list_entries+SourceEntry+read endpoints ship (L1-2) | true, endpoints at api.py:325/342/360/393 | sources.py:107,309
+- SP | "the three read endpoints ship" (L1-2) | WRONG: four ship — sources/page added by P-A (1d796a7/#57) | api.py:393 -> FIXED (parenthetical)
+- SP | §4 accept ships: widened set_body + citations.yaml in one write-lock op w/ rollback (L3-6) | DONE | api.py:445-535 pin parsing, "pin is only accepted on op set_body" 400 at :535; tests/test_serve_sources_accept.py
+- SP | §9 Q2 decided A: no citation-write patcher ships (L17-23) | true — no patcher op in api.py | grep
+- SP | §10 "test_a_picked_value_survives_a_rebuild_and_drifts..." design-only (L8-10, §11 L586) | TRUE: not in tests/ | grep -rn over tests/
+- SP | Slice A "LANDED 2026-09-25" (L562) | WRONG date: merged 2026-09-26T04:17Z (gh pr view 49); local ad 2026-09-26 00:17 | -> FIXED to 2026-09-26 w/ commit note
+- SP | Slice B "LANDED 2026-09-27" (L568) | true | 197bc7c cd 2026-09-27
+- SP | Slice C "LANDED 2026-09-27" (L580) | true | 07b20f5 cd 2026-09-27
+- SP | §8 "xlsx. Deferred" (L413) | PARTIAL/SUPERSEDED: XlsxReader shipped ef7bed7/#170 2026-10-04 (refdes[xlsx]); list_entries listing still open (serve/sources.py:33 "extractor but no picker listing yet") | -> FIXED (Update note)
+- SP | §8 "PDF datasheet values. Deferred ... Now proposed in editor-pdf-picker.md" (L416-424) | SUPERSEDED: PDF picker landed P-A/P-B/P-C 2026-09-27 (1d796a7, 8226b79, bda7ab5) | -> FIXED (Landed note)
+- SP | §11 Later: citations row editor | NOT BUILT — no row editor in serve/static | grep
+- SP | §11 Later: xlsx reader behind list_entries | PARTIAL: reader landed #170, listing open | -> FIXED
+- SP | §11 Later: PDF datasheet picker | DONE: P-A/P-B/P-C landed | -> FIXED
+EDITS: header endpoint count; Slice A date; §8 xlsx Update; §8 PDF Landed note; §11 Later annotations.
+
+== docs/design/editor-pdf-picker.md ==
+- PP | status header: implemented, P-A/P-B/P-C landed 2026-09-27 (L1-2) | true | 1d796a7, 8226b79, bda7ab5 all cd 2026-09-27
+- PP | §1 "Slice A landed 2026-09-25" (L68) | WRONG date: 2026-09-26 (59d2915/#49) | -> FIXED
+- PP | "source() has shipped" (L67) | true | calc.py source() + citations
+- PP | P-A: page_candidates(), pypdf gated registration, page endpoint, page:/section: opening (L560-564) | true | sources.py:1381/813/1290, api.py:393
+- PP | P-B: sourcepicker.js browse:"pages", page_box/MediaBox, page/row/token/sha256 on propose, initially omitted key (L569-590) | true | sourcepicker.js:355-366, api.py:360-387
+- PP | P-C: PdfReader.extract re-location riding set_body/pin; stage_source_pins/_extract_source_values receive anchor; accept_supported true local / refusal reason remote (L592-615) | true | sources.py:827, citations.py:2226/2369, serve/sources.py:933
+- PP | tests named (L617-619) | true | tests/test_sources_pdf.py, test_serve_pdf_sources.py, test_serve_static.py all exist
+- PP | Later: pdf.js, rasterizer (L621; §5 L162), citations row editor, OCR (L621-624) | NOT BUILT | grep: no pdfjs/rasteriz in src; OCR refusal message sources.py:1037 says out of scope
+- PP | §6/§10 drafting-scoped statements (L283-289, L407-412 "Slice B not yet landed as of this drafting") | drafting-scoped, explicitly qualified "as of this drafting" — design reasoning, not current status | left per task rule 8
+EDITS: §1 Slice A date only.
+
+== docs/design/item-search-hover.md ==
+- IS | header: proposed; no slices scoped, no code written (L1) | true | no webview/QuickPick/search impl: editors/vscode (only negative mentions), no /api/search route
+- IS | §3.5 V-1/V0 landed; findRoot at extension.js:66-71 (L195) | true, cite exact | extension.js:66-71
+- IS | §3.5 activationEvents package.json:27 (L196) | true, cite exact | package.json:27
+- IS | §3.5 serveClient.js 337 lines, no vscode import (L199) | true, exact | wc -l 337; no require("vscode")
+- IS | §3.5 extension.js "is 946 lines ... added roughly 400" (L201) | WRONG: 988 lines (grew past 946 in later fixes) | wc -l -> FIXED (988 / roughly 450)
+- IS | §3.5 "ten Python contract tests and five extension-side tests" (L203) | half wrong: contract=10 ✓, extension-side=9 | grep -c def test_ -> FIXED (nine)
+- IS | §3.5 V1/V2 not built: no webview/WebviewViewProvider/customEditors (L206-207) | true | grep
+- IS | §3.5 hover "exactly one entry condition (extension.js:495-507)"; ID_RE at :28 (L211-218) | claim true (id-shape gate at 519-520, gate decides shape), cite drifted: provider now 516-530 | -> FIXED cite, named the gate
+- IS | §3.2 ls haystack "id+title+tags" formula (L117) | formula exact (cli.py:884) but ls also matches retired former_ids since 48f19ab/#150; cites drifted (449,465-468→878-886; filters.py:144-147→154; links.js:134-138→185) | -> FIXED (table re-pointed + former_ids note)
+- IS | §3.2 none of the three searches bodies | true | cli.py:884 has no body
+- IS | §5.2 "7 types, 40 fields, 16 enums" from live `refdes schema --json` (L404-405) | types 7 ✓ (incl. decision — v3 keeps it), enums 16 ✓; fields 45 now | ran refdes schema --json -> FIXED count+list (history→on_change 6b02fe0/#184; +defaults/follows/items/section/tasks, e.g. 5b07fb4/#183, d71c143/#176)
+- IS | §5.2 "63 domain terms" (L417) | 68 now (7+45+16) | -> FIXED
+- IS | §6 Q2 ls haystack id+title+tags (L495) | id+title+tags formula true; former_ids restatement left to §3.2's note (design reasoning) | cli.py:884
+- IS | §5.4/§10 deepLink shipped at serveClient.js:297-300 (L466, L676) | true, cite exact | serveClient.js:297
+- IS | §9.2 DEFAULT_LIMIT=500 (L611) | true | filters.py:52
+- IS | §6 Q? pinned by test_token_gates_reads_as_well_as_writes (L540) | true | tests/test_vscode_adapter_contract.py:353
+- IS | §9.4 CLI-native answer quote (L636) | true | cli.py:811-812 (split line; grep of one line misses it)
+- IS | §9.5 V1 sidebar webview not built (L632) | true | grep
+- IS | §3.2/§9/§10 drafting-scoped line cites (cli.py:425-432/437-468, filters.py:1-27/357-389/22,186-199, api.py:39-75, serveClient.js:240-252, links.js:28-36) | drifted (cmd_ls now 806+), header scopes them to "Verified while writing" — left per task rule 8, noted | git log shows doc drafted 2026-09-29/30 (a168979/#111, 15ecd58/#114)
+EDITS: §3.5 line count+test count; hover cite; §5.2 counts+fields list; §3.2 table cites+former_ids.
+
+No code changes -> no test/sabotage step (per TASK.txt).
+No changelog fragment: internal design-doc status text, not user-visible behavior
+(changelog.d/README.md rule: user-visible changes only).
+
