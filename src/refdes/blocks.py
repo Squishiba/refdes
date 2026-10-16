@@ -442,9 +442,13 @@ def _render_cascade(project: Project, params: dict[str, str], where: str = "") -
     depth_raw = params.get("depth", "3")
     via_raw = params.get("via")
 
-    root_item = project.item_by_id(root_id)
+    root_item = _item_target(project, root_id)
     if root_item is None:
         raise _BlockError(f"{root_id} does not exist.")
+    # The walk starts from the resolved item, not the raw text: a composite
+    # (`DISPLAY-ID@key`) is not a graph reference, and the walk reads
+    # `Item.resolved_links`/`backlinks`, which name the bare id/key.
+    root_ref = root_item.id or root_item.key
 
     if direction not in _DIRECTIONS:
         raise _BlockError(
@@ -469,17 +473,17 @@ def _render_cascade(project: Project, params: dict[str, str], where: str = "") -
     else:
         via = {name for name, spec in project.link_types.items() if spec.trace}
 
-    root_text = f"{_esc(root_id)} — {_esc(root_item.title)}"
+    root_text = f"{_esc(root_ref)} — {_esc(root_item.title)}"
 
     if direction == "both":
-        up_nodes = walk_cascade(project, root_id, "up", via, depth)
-        down_nodes = walk_cascade(project, root_id, "down", via, depth)
+        up_nodes = walk_cascade(project, root_ref, "up", via, depth)
+        down_nodes = walk_cascade(project, root_ref, "down", via, depth)
         branches = _render_branch("Upward", up_nodes, project, "up") + _render_branch(
             "Downward", down_nodes, project, "down"
         )
         return f'<ul class="cascade"><li>{root_text}<ul>{branches}</ul></li></ul>'
 
-    nodes = walk_cascade(project, root_id, direction, via, depth)
+    nodes = walk_cascade(project, root_ref, direction, via, depth)
     if not nodes:
         return (
             f'<ul class="cascade"><li>{root_text}'
@@ -798,11 +802,13 @@ def _render_compare(project: Project, params: dict[str, str], where: str = "") -
 # --------------------------------------------------------------- {{calcblock}}
 
 
-def _calcblock_target(project: Project, item_id: str) -> Item | None:
-    """`item=` resolved: a display id, or a `DISPLAY-ID@key` composite (§5.4).
+def _item_target(project: Project, item_id: str) -> Item | None:
+    """An item reference resolved: a display id, or a `DISPLAY-ID@key`
+    composite (calcblock §5.4, docs/design/keys.md).
 
     The composite is resolved by its key half, which is what a composite means
     everywhere else in this project (the label may be stale; the key resolves).
+    Shared by `{{calcblock}}`'s `item=` and `{{cascade}}`'s `from=`.
     """
     item = project.item_by_id(item_id)
     if item is None and "@" in item_id:
@@ -832,7 +838,7 @@ def _render_calcblock(project: Project, params: dict[str, str], where: str = "")
 
     item_id = params["item"]
     block = params["block"]
-    item = _calcblock_target(project, item_id)
+    item = _item_target(project, item_id)
     if item is None:
         raise _BlockError(f"{item_id} does not exist.{_suggest(item_id, project.items_by_id)}")
     if item.external:
