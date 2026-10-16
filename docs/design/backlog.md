@@ -797,7 +797,8 @@ it — so 26 is parked for the same reason, not because it was judged wrong.
 (Not in the finding — recorded from conversation, not from the document.)
 
 **Status: both parts done.** Part 1 shipped in `f8e7ee0`:
-hardware@3's `field_sets:` has a third entry `citations: {citations: {type:
+hardware@3's `sets:` (the block `field_sets:` was renamed to in `dc0c138`) has
+a third entry `citations: {citations: {type:
 citations, on_change: invalidate}}`, and both `component` and `decision` now
 `include: [provenance, stewardship, citations]`, with the `migration.yaml`
 rename above and this repo's own `items/components/power.yaml` moved over.
@@ -870,7 +871,7 @@ edits it) and changes the failure class from "the document is wrong" to
 **Status: implemented for CSV and XLSX; design reviewed.** The
 claim that no CSV reader exists in the package is no longer true —
 `src/refdes/sources.py` is the reader module (`extensions = (".csv",)` at
-`sources.py:230`, `csv.reader(fh, strict=True)` at `sources.py:465`), and
+`sources.py:232`, `csv.reader(fh, strict=True)` at `sources.py:472`), and
 `calc.py:643` documents the accepted line shape as
 `name = source("cited/file.csv", "key") | unit`. The lockfile still records
 hashes alongside the locked extracted values; the values are what calc
@@ -995,7 +996,9 @@ know which file `equations:` belongs in.
 triggers `LEGACY_CONFIG_ERROR` telling users to split and delete it. All
 project settings (including `site:`, `id:`, `boards:`, `units:`, `standard:`,
 `equations:`, etc.) live in `refdes-project.yaml`; the optional
-`refdes-schema.yaml` holds only `types:`/`link_types:`/`field_sets:` overlays.
+`refdes-schema.yaml` holds only `types:`/`link_types:`/`sets:` overlays
+(`field_sets:` was renamed to `sets:` in `dc0c138`; a project still writing it
+gets an error naming the rename).
 See also `changelog.d/config-split-two-files.breaking.md`.
 
 **Local model (not decided — my read): not suitable.** The fourteen rename sites
