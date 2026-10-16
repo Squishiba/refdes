@@ -173,6 +173,7 @@ def _same_baseline_items(stored: dict[str, dict], current: dict[str, dict]) -> b
         left = dict(stored_entry)
         right = dict(current_entry)
         left.pop("id", None)
+        right.pop("id", None)
         stored_identity = keys_mod.baseline_identity(record_id, stored_entry)
         if stored_identity is not None:
             left.pop("key", None)
@@ -814,6 +815,13 @@ class StampOutcome:
     # naming the file; nothing was stamped, so there is no `stamped_at` to
     # report either.
     refusal: str = ""
+    # The `OSError` behind that refusal (`BaselineUnwritable.cause`), when the
+    # refusal came from a caught write. The CLI's parenthetical follows it:
+    # `(read-only tree?)` is a claim only the permission errnos earn, and a
+    # full disk stamped as a permission hunt is DIAG-WORD-008's false hint
+    # (see model.destination_refusal). A refusal with no cause in hand keeps
+    # the marker.
+    refusal_cause: OSError | None = None
     # Older-format entries the existing baseline carries that the hash-format
     # migration could not verify (migrate_hash_format's `uncomparable`). The
     # stamp path never silently drops or silently re-stamps them: they keep
@@ -919,7 +927,7 @@ def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOu
         return StampOutcome(
             kind=kind, name=name, status="unwritable",
             path=baseline_path(project, name), item_count=len(items_map),
-            gate_results=gate_results, refusal=exc.rel,
+            gate_results=gate_results, refusal=exc.rel, refusal_cause=exc.cause,
         )
     return StampOutcome(
         kind=kind, name=name, status="stamped", path=path, item_count=len(items_map),

@@ -1,0 +1,93 @@
+# fix-blocked-by-diamond-cycle
+
+TASK: a blocked_by diamond (two paths that reconverge) must not be reported
+as a cycle.
+
+## Verification of task claims (all confirmed on this branch, main 6d6d633)
+
+- src/refdes/blocks.py `_walk` (~line 389): `if target_id in visited: if
+  on_cycle == "error": raise CascadeCycleError(path + [target_id])` —
+  `visited` is ONE global set (seeded in `walk_cascade`, line 342), so ANY
+  revisit raises under on_cycle="error", reconvergence included. Confirmed.
+- src/refdes/blocked.py:89-90 calls `walk_cascade(..., on_cycle="error")`
+  for every item declaring `blocked_by`. Confirmed.
+- blocked.py discards the walk's returned node tree — the walk is a pure
+  cycle check; root resolution is the separate `_paths_to_roots` recursion.
+  This drove the design decision below.
+
+## Repro (fresh project, hardware@3)
+
+`refdes init` in .scratch/diamond-repro (standard: hardware@3), then four log
+items in items/io/ (markdown front-matter, links as top-level keys):
+LOG-IO-004 (leaf), LOG-IO-003 blocked_by [LOG-IO-004], LOG-IO-005
+blocked_by [LOG-IO-003, LOG-IO-004] — the exact PR #291 shape. `refdes check`:
+
+    ERROR   items/io/log-005.md:2 [LOG-IO-005] — blocked_by cycle: LOG-IO-005 -> LOG-IO-004
+    (minted 2 key(s) and rewrote 3 reference(s) while loading)
+    4 items, 1 errors, 0 warnings
+    exit=1
+
+Confirmed: LOG-IO-004 is reached by two paths (005->004 and
+005->003->004) — no cycle, but reported as one.
+
+## Fix
+
+blocks.py `_walk`: under on_cycle="error", raise CascadeCycleError only when
+the target is on the CURRENT path (`target_id in path`) — a true cycle.
+A visited target not on the path (reconvergence) is marked
+`already_shown=True` as in mark mode and not re-walked.
+
+Decision on reconvergence (per task step 2): shown once as `already_shown`,
+NOT re-walked. blocked.py discards the tree entirely (it only needs the
+raise/don't-raise signal), so nothing there needs re-walking; and mark mode
+— what {{cascade}} renders — keeps its exact visited-set semantics (the
+tree.py header comment describes exactly this "expand once, reference
+everywhere" rule). Re-walking shared subtrees in "error" mode would also
+risk exponential blowup for no consumer's benefit.
+
+Docstrings updated to match: CascadeCycleError ("revisit" -> closing an edge
+back to a node on the CURRENT path; diamonds marked, never raised) and
+walk_cascade's on_cycle paragraph. on_cycle="mark" behavior unchanged.
+
+## Tests (tests/test_blocked.py)
+
+- test_blocked_by_diamond_is_not_a_cycle: DEC-004 blocked_by [DEC-001,
+  DEC-003] over the fixture's DEC-003->DEC-002->DEC-001 chain (DEC-001
+  reached by two paths). Asserts no errors AND both chains resolve.
+- test_blocked_by_two_cycle_still_raises: DEC-001 <-> DEC-002 mutual
+  blocked_by; asserts "blocked_by cycle: DEC-001 -> DEC-002 -> DEC-001".
+- Longer cycle: existing test_blocked_by_cycle_is_a_hard_error_naming_the_full_path
+  (DEC-001 -> DEC-003 -> DEC-002 -> DEC-001) unchanged and green.
+- Self loop: existing test_blocked_by_self_loop_is_a_cycle, green.
+- {{cascade}} rendering unchanged: existing
+  tests/test_blocks.py::test_cascade_marks_a_reconverged_node_already_shown
+  (diamond marked once, not an error) plus the rest of test_blocks.py.
+
+## Sabotage
+
+Reverted the fix in _walk (raise on any revisit under "error" again), ran
+`pytest tests/test_blocked.py -k "diamond or two_cycle or
+marks_a_reconverged"`: test_blocked_by_diamond_is_not_a_cycle and
+test_walk_cascade_error_mode_marks_a_reconverged_node both FAILED with
+CascadeCycleError (exactly the bug); test_blocked_by_two_cycle_still_raises
+passed (correct — real cycle, unaffected). Restored the fix, 3 passed.
+
+## Verification runs
+
+- Repro project .scratch/diamond-repro: pre-fix `refdes check` output pasted
+  above; post-fix: `4 items, 0 errors, 0 warnings`, exit=0, and `refdes
+  audit` shows both chains: `LOG-IO-005 <- LOG-IO-003 <- LOG-IO-004 (root)`
+  and `LOG-IO-005 <- LOG-IO-004 (root)`.
+- True-cycle probe .scratch/cycle-probe (004<->005, 003 points in):
+  `ERROR ... blocked_by cycle: LOG-IO-004 -> LOG-IO-005 -> LOG-IO-004` —
+  real cycle still raises. (Note: .scratch/diamond-repro itself mutated
+  mid-probe — the write-mode audit rewrote refs to keys; used a fresh dir.)
+- Full suite / ruff / gen_examples: `PYTHONPATH=$PWD/src ... -m pytest -q`
+  → `3942 passed, 2 skipped in 339.73s`, exit=0 (.scratch/suite.txt).
+  `ruff check --select E9,F` on src/refdes/blocks.py src/refdes/blocked.py
+  tests/test_blocked.py tests/test_blocks.py → All checks passed.
+  `python docs-site/gen_examples.py --check` → up to date.
+- Task finished. Files touched: src/refdes/blocks.py (fix + docstrings),
+  tests/test_blocked.py (4 new tests), changelog.d/
+  blocked-by-diamond-not-a-cycle.fixed.md (rule: user-visible bug fix ->
+  `fixed` category), in-prog-logs/fix-blocked-by-diamond-cycle.txt.

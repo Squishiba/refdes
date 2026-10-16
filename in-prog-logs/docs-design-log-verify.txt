@@ -1,0 +1,94 @@
+Task: verify docs/design-log.md claim-by-claim against actual refdes
+behavior; fix the page where wrong. Branch: docs-design-log-verify (base
+main @ 1bbfbe0). Completed 2026-10-16.
+
+Method
+- Installed refdes on PATH points at the main checkout
+  (/home/jorb/work/refdes/src), NOT this worktree, so every probe ran
+  through .scratch/dl1/refdes.sh (PYTHONPATH=worktree/src,
+  python -m refdes.cli). Scratch projects: .scratch/dl1 (hardware@3,
+  boards board-a/b, starter log example), dl2 (hardware@2, sealing
+  probes), dl3 (two boards), dl4 (read-only .refdes), dl5 (board
+  adoption), dl6/dl8 (follows/anchoring/fork), dl7 (board field vs
+  reserved key).
+- Each quoted CLI message was compared byte-for-byte against real output.
+
+Claim table (VERIFIED unless noted)
+- Writing entries: date/summary/author/status/citations/tasks/board/body
+  fields; dangling citation = build error (probed); addresses/follows/
+  amends/satisfies link targets (refdes schema + base.yaml).
+- "board is a plain field": starter schema declares log.board
+  (refdes-schema.yaml:29-34); field wins over reserved key -> no
+  scoping/linting (dl7, one "no board" warning per entry);
+  authoring.md#reserved-keys rule.
+- Task lists: ids unique, states limited to open/done/dropped (probed
+  errors); empty id accepted, gate names it "#1" (lifecycle.py:700-726);
+  fold keeps nearest list, [] clears, declared replaces, ambiguous
+  equidistant -> reconciliation-required (chains.fold_tasks); fork = one
+  list per tip; on_change: timeline tick = no capture warning.
+- Append-only / sealing:build: sealed on first build; edit/delete both
+  fail (exact messages probed); --reseal accepts+warns, board-scoped,
+  audit sections "Append-only entries edited after sealing:" /
+  "Accepted append-only reseals (durable history):", remove ->
+  "now (removed)", preview records neither seal nor event (md5 probe);
+  check verifies without writing; read-only tree = ERROR + exit 1,
+  --no-write silences (dl4).
+- Adopting boards: base-file lookup, move on build not check (dl5).
+- Corrections: amends keeps original, amended_by on page (probed).
+- History sealing (hardware@3 log): opt-in overlay note text, one-time,
+  per-checkout record .refdes/sealing-optin.json (gitignored by init,
+  scaffold.py:159-166), -v always prints, take-out/re-add;
+  edited-after-captured / edited-while-uncaptured warnings, silent
+  for unrecorded entries; bare follows: on seal-mentioned entry anchors
+  + captures; legacy-seal markers kept, build/check/--reseal/revise
+  never touch them (revise.py:2024 history_backed skip; seal.py),
+  shared-seal-file re-serialization exception (dl1: NOTE-001 sealed
+  alongside legacy records, records unchanged; seal.py:219 rewrites
+  header), keys adopt re-keys (adopt.py:87); deleting a mentioned entry
+  = warning (exact format incl. conditional "(key ...)" --
+  seal.py:736-745, probed); changed key under record = error
+  (seal.py:639-645); --reseal "nothing to do" message; audit
+  legacy-seal marker; retired unit spelling = history-backed build
+  ERROR vs sealed WARNING; calc-rewrite rewrites history entries,
+  clears it, seal file untouched, captured -> edited-after-captured
+  (probed); history migrate-seals (repo: 6 records -> 6 legacy-seal
+  events, seal file unchanged); sealing:history requires append_only
+  (schema.py:965), subtype cannot lift build lock (standards.py:
+  706-723, tests/test_history_seal.py); _run_item_calcs/calc_rewrite
+  read seal.is_sealed (build.py:1550, calc_rewrite.py:130).
+- Timeline: log.html oldest-first, dates/authors/board tags
+  (template tl-board = plain field value), amendment markers,
+  addresses; per-entry pages with traceability.
+- Coverage: addresses moves requirement open -> addressed (probed).
+- After a release: no auto-entry; nudge on successful release only,
+  not revision, not on failing release (probed); LOG-A-0NN/0MM
+  placeholders fail id check (split_id wants trailing -digits; the
+  copy-pasted citation fails build) -- verified.
+
+WRONG -> fixed (3 edits in docs/design-log.md)
+1. Timeline/Thread section was future tense ("will additionally show
+   a Thread section", "The thread conclusion and timeline page
+   described above are later threads work"). It is implemented and
+   renders (Phase 3b; docs/design/threads.md status "Phase 4a
+   implemented"): dl1 _site/log-a-002.html shows "Thread / Currently
+   concludes / status accepted from LOG-A-007" + thread timeline; a
+   real fork (dl8: two entries follows: LOG-001@key) shows "This
+   thread has forked, so nothing it concludes is settled yet." and
+   only the open tips, no conclusion -- matching the page's forked
+   sentence. Rewrote to present tense; closing pointer now says the
+   machinery is specified in threads.md, whose remaining panel work
+   is later.
+2. Quoted edit-violation block: doc had backticks around
+   `refdes build --reseal`; the real message has none ("... run with
+   refdes build --reseal if the edit is deliberate." -- the backticks
+   around `amends: [...]` in the same message are real). Removed.
+3. Same in the quoted delete-violation block. Removed.
+
+Notes / possible bugs (not doc defects, left alone)
+- log.html header says "Entries are sealed once built" even for a
+  history-backed log where nothing is sealed.
+- open_tasks release gate is disabled by default (model.py:113) --
+  the page never claims it is on, so no doc change.
+
+Verification of the fixes: git diff shows only the 3 intended hunks;
+docs tests + gen_examples --check run green (see below).

@@ -1,0 +1,111 @@
+# fix-rename-mapping-shape — malformed rename mapping: named error, not a crash
+
+Branch: fix-rename-mapping-shape (main c3ba012). Task: .scratch/task/TASK.txt.
+
+## Verification of the task's claims (COMMON rule: verify each first)
+
+- Task names `load_mapping_dict` at `src/refdes/revise.py:199`. That function
+  name does not exist on this branch (`grep -rn load_mapping_dict` → nothing);
+  the real function is `mapping_from_dict` (revise.py:169), reached from
+  `load_mapping` (revise.py:238). The crash site IS line 199 and every claim
+  about it is real — verified by running, see repro below. Fixing the real
+  function; the task's name is stale, its substance is accurate.
+- `cmd_rename` (cli.py:2207) already wraps `load_mapping` in
+  `except SchemaError: print("error: ..."); return 2` — confirmed by reading —
+  so raising SchemaError inside `mapping_from_dict` is the correct, minimal
+  fix; no CLI change needed.
+
+## Repro (fresh project, .scratch/repro-rename-shape)
+
+`refdes init`, then `fields:\n  history: on_change` in flat-fields.yaml, then
+`refdes rename flat-fields.yaml --dry-run` (PYTHONPATH=worktree src, venv
+refdes). Raw traceback, as claimed:
+
+```
+Traceback (most recent call last):
+  File "/home/jorb/work/venv-refdes/bin/refdes", line 8, in <module>
+    sys.exit(main())
+  File ".../src/refdes/cli.py", line 3507, in main
+    return args.func(args)
+  File ".../src/refdes/cli.py", line 2217, in cmd_rename
+    mapping = revise_mod.load_mapping(args.mapping)
+  File ".../src/refdes/revise.py", line 238, in load_mapping
+    return mapping_from_dict(loaded or {}, path)
+  File ".../src/refdes/revise.py", line 199, in mapping_from_dict
+    fields[str(tname)] = {str(k): str(v) for k, v in (frenames or {}).items()}
+AttributeError: 'str' object has no attribute 'items'
+```
+
+Other sections, same run (each a raw AttributeError out of the same function):
+- `types:` as a list → `'list' object has no attribute 'items'` (line 195)
+- `links:` as a scalar → `'str' object has no attribute 'items'` (line 200)
+- `prefixes:` as a number → `'int' object has no attribute 'items'` (line 201)
+- `fields: {constraint: [title]}` (list per-type entry) → line 199 again
+- NOT in scope (no crash, out of the task's scope): a non-mapping leaf value
+  inside a flat section, e.g. `citation_keys: {url: [a, b]}`, is str()-coerced
+  by the existing design — left alone.
+
+## Fix
+
+revise.py: new `_shape_name` + `_section_as_dict` helpers just above
+`mapping_from_dict`; every section is read through `_section_as_dict`, which
+refuses a non-mapping section value with SchemaError naming file + section +
+expected shape; `fields:` additionally checks each per-type entry is a mapping
+and names the offending type. `raw.get(section) is None` (an empty section
+header, `types:`) keeps its old "treated as empty" behavior. Deliberately NOT
+reformatting surrounding code (PR #273 also touches revise.py).
+
+Behavior note: a `fields:` type entry that is `null` (e.g. `bound:` with
+nothing under it) used to load as an empty per-type rename dict; it is now a
+named error, consistent with "fields: must map a type name to a mapping".
+
+## Standards migration.yaml files (task item 3)
+
+`src/refdes/standards/hardware/v2/migration.yaml` and `v3/migration.yaml`
+read by eye: every section a mapping, every fields: entry a mapping — both
+pass the new checks. The full suite covers them via `standard upgrade`.
+
+## After fix (same repro dir, all --dry-run)
+
+Each bad file now prints one `error: <file>: <section>: must map …` line and
+exits 2 (verified flat-fields exit code = 2 directly). No traceback.
+
+## Tests (tests/test_revise.py, after the unknown-section block)
+
+- test_load_mapping_refuses_a_flat_fields_section — the reported repro: names
+  file + section + type entry 'history' + expected shape, one line.
+- test_load_mapping_refuses_a_section_that_is_not_a_mapping — parametrised
+  list/scalar/number/boolean across types:/merge_types:/links:/prefixes:/
+  citation_keys:, asserts the message prefix and the "-- got <shape>" tail.
+- test_load_mapping_refuses_a_fields_entry_that_is_not_a_mapping — list under
+  a type name, names the type.
+- test_load_mapping_still_accepts_a_section_header_with_nothing_under_it —
+  pins the preserved `types:`-is-null behavior (loads empty, not refused).
+- test_cli_rename_malformed_section_exits_2_naming_it_with_no_traceback —
+  CLI level: exit 2, one `error:` line, no "Traceback", item file untouched.
+
+## Sabotage (COMMON rule)
+
+Removed the `isinstance(frenames, dict)` check from mapping_from_dict, kept
+everything else:
+  3 failed, 6 passed — flat-fields, fields-entry, and the CLI test all fail
+  with `AttributeError: 'str' object has no attribute 'items'` (the original
+  crash), proving they pin the fix. Restored from
+  .scratch/sabotage/revise.py.fixed.bak; the 9 tests pass again.
+
+## Gates
+
+- Full suite, foreground, once: 3947 passed, 2 skipped, exit=0
+  (.scratch/suite.txt; the known serve-token flake did not fire).
+- ruff check --select E9,F,E501,I src/refdes/revise.py tests/test_revise.py:
+  every finding is on a pre-existing line (revise.py 643/1109/1843/1874/1982/
+  2300, test lines 112/985+/1011/1040+, and the pre-existing I001 import
+  block); none in the added ranges. Not touched, per AGENTS.md.
+- python docs-site/gen_examples.py --check: up to date, exit 0.
+
+## Changelog
+
+changelog.d/rename-mapping-section-shape.fixed.md — README rule: a bug fix
+(crash traceback -> named error + exit 2) is user-visible -> `fixed` fragment.
+
+Status: finished.

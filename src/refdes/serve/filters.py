@@ -75,7 +75,16 @@ def _norm_file(value: str) -> str:
 
 
 def item_tags(item: Item) -> list[str]:
-    """The same tag read `refdes ls` uses (`cli._item_tags`)."""
+    """The tag read of the serve pages, mirroring `cli._item_tags`'s shape.
+
+    The *reads* mirror; the stringification does not: run-7 F13/F16 made
+    `cli._item_tags` string-only (a mapping `tags:` element is not a tag,
+    and `ls --tag` must not match its repr), while this read keeps the
+    lenient `str()` so a project's page still shows what its front-matter
+    says. The divergence is deliberate and recorded in
+    `in-prog-logs/run7-small-nits.txt`: #235 makes the mapping element a
+    load error, so a healthy project's reads agree; a project carrying the
+    load error sees the repr here and no match in `ls`."""
     tags = item.fields.get("tags")
     if not tags:
         return []

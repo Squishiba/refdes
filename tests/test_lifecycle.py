@@ -12,6 +12,7 @@ import pytest
 from conftest import write_project_config
 from helpers import LIFECYCLE_ITEMS, _check_severity_project, _lc_build, _pin_lifecycle_citation
 
+from refdes import adopt
 from refdes import build as build_mod
 from refdes import history, keys, lifecycle, parse
 from refdes.schema import SchemaError, load_project
@@ -282,6 +283,21 @@ def test_rerun_same_name_identical_content_is_a_noop(lifecycle_project):
     assert second.status == "unchanged"
     assert second.stamped_at == first.stamped_at
     assert os.path.getmtime(first.path) == mtime_before  # file untouched
+
+
+def test_rerun_same_name_identical_content_after_keys_adopt_is_a_noop(lifecycle_project):
+    project = _lc_build(lifecycle_project)
+    first = lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    adoption = adopt.apply(str(lifecycle_project))
+    assert adoption.ok, adoption.errors
+    mtime_after_adoption = os.path.getmtime(first.path)
+
+    project2 = _lc_build(lifecycle_project)
+    second = lifecycle.stamp(project2, kind="revision", name="rev-a")
+    assert second.status == "unchanged"
+    assert second.stamped_at == first.stamped_at
+    assert os.path.getmtime(first.path) == mtime_after_adoption  # file untouched
 
 
 def test_rerun_same_name_different_content_is_a_conflict(lifecycle_project):

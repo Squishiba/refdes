@@ -279,7 +279,9 @@ A type may override an included field with a spec whose **only** key is
 `doc:` — a patch that keeps the set's `type`, `required`, `choices`,
 `default` and `on_change` while replacing just the definition. Any other
 override must be a full field spec carrying `type:`. The standard is
-authored this way internally (`provenance`, `stewardship`, `citations`);
+authored this way internally — its eight sets are `provenance`,
+`stewardship`, `citations`, `claims`, `grouped`, `named_title`,
+`statement_title` and `invalidate_body`;
 a project declares its own in `refdes-schema.yaml` for structure repeated
 across its own custom types. See [the standard
 library](standard-library.md#sets-and-include) and
@@ -315,7 +317,7 @@ configuration error (exit 2) rather than a link that silently never exists.
 
 `trace: false` marks a link as describing process rather than "this item's
 correctness rests on that one" — the bundled standard sets it on `amends`,
-`records`, `supersedes`, and `addresses`. A `{{cascade}}` block with no
+`follows`, `supersedes`, and `addresses`. A `{{cascade}}` block with no
 explicit `via=` follows every link type where `trace` is still `true`.
 
 ---

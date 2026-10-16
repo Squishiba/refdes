@@ -166,6 +166,45 @@ class Mapping:
         return merged
 
 
+def _shape_name(value: Any) -> str:
+    """How to say a non-mapping YAML value in an error message, in words a
+    person who wrote it recognises ('a list', not 'a <class list>')."""
+    if isinstance(value, list):
+        return "a list"
+    if isinstance(value, bool):
+        return "a boolean"
+    if isinstance(value, (int, float)):
+        return "a number"
+    if isinstance(value, str):
+        return "a string"
+    if value is None:
+        return "empty"
+    return f"a {type(value).__name__}"
+
+
+def _section_as_dict(raw: dict[str, Any], section: str, source: str, shape: str) -> dict[str, Any]:
+    """One top-level section of a mapping file, refusing anything that isn't a
+    mapping as the configuration error it is.
+
+    Every section used to be read with `raw.get(...) or {}).items()`, which
+    assumes the value IS a mapping: a flat `fields:` (the obvious shorthand --
+    `history: on_change` -- for a rename that is in fact scoped under a type),
+    a `types:` written as a list, a scalar `links:` all reached `.items()` on a
+    str/list/int and escaped `cmd_rename`'s `except SchemaError` as a raw
+    AttributeError traceback (docs check of troubleshooting.md, PR #288). Same
+    exit-2 configuration error a missing or unparseable mapping file gets,
+    naming the file, the section, and the shape that section needs.
+    """
+    value = raw.get(section)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise SchemaError(
+            f"{source}: {section}: must map {shape} -- got {_shape_name(value)}"
+        )
+    return value
+
+
 def mapping_from_dict(raw: dict[str, Any], source: str) -> Mapping:
     """The shape both a hand-written mapping file and a bundled standard
     version's own migration.yaml share:
@@ -192,15 +231,63 @@ def mapping_from_dict(raw: dict[str, Any], source: str) -> Mapping:
 
     _refuse_unknown_sections(raw, source)
 
-    types = {str(k): str(v) for k, v in (raw.get("types") or {}).items()}
-    merge_types = {str(k): str(v) for k, v in (raw.get("merge_types") or {}).items()}
+    types = {
+        str(k): str(v)
+        for k, v in _section_as_dict(
+            raw, "types", source, "an old type name to its new name, e.g. `constraint: bound`"
+        ).items()
+    }
+    merge_types = {
+        str(k): str(v)
+        for k, v in _section_as_dict(
+            raw,
+            "merge_types",
+            source,
+            "an old type name to the type it merges into, e.g. `constraint: bound`",
+        ).items()
+    }
     fields: dict[str, dict[str, str]] = {}
-    for tname, frenames in (raw.get("fields") or {}).items():
+    for tname, frenames in _section_as_dict(
+        raw,
+        "fields",
+        source,
+        "a type name to {old_field: new_field}, e.g. `constraint: {title: text}`",
+    ).items():
+        if not isinstance(frenames, dict):
+            # The flat shorthand -- `fields: {history: on_change}` -- lands
+            # here: the section is a mapping, its per-type entry is not.
+            raise SchemaError(
+                f"{source}: fields: must map a type name to {{old_field: new_field}}, "
+                f"e.g. `constraint: {{title: text}}` -- the entry for type "
+                f"{str(tname)!r} is {_shape_name(frenames)}"
+            )
         fields[str(tname)] = {str(k): str(v) for k, v in (frenames or {}).items()}
-    links = {str(k): str(v) for k, v in (raw.get("links") or {}).items()}
-    prefixes = {str(k): str(v) for k, v in (raw.get("prefixes") or {}).items()}
+    links = {
+        str(k): str(v)
+        for k, v in _section_as_dict(
+            raw,
+            "links",
+            source,
+            "an old link verb to its new verb, e.g. `refines: narrows`",
+        ).items()
+    }
+    prefixes = {
+        str(k): str(v)
+        for k, v in _section_as_dict(
+            raw,
+            "prefixes",
+            source,
+            "an old id prefix to its new prefix, e.g. `CON: BND`",
+        ).items()
+    }
     citation_keys = {
-        str(k): str(v) for k, v in (raw.get("citation_keys") or {}).items()
+        str(k): str(v)
+        for k, v in _section_as_dict(
+            raw,
+            "citation_keys",
+            source,
+            "an old citation-entry key to its new key, e.g. `url: path`",
+        ).items()
     }
     return Mapping(
         types=types, fields=fields, links=links, prefixes=prefixes,
@@ -1975,11 +2062,23 @@ def _rewrite_baseline_file(
     try:
         lifecycle._save_baseline_file(project, data)
     except lifecycle.BaselineUnwritable as exc:
+        # The parenthetical and the remedy follow the reported cause, not a
+        # read-only guess (DIAG-WORD-008, the rule `id`'s write-back keeps):
+        # a full disk is no more a read-only tree than the advice is for it,
+        # so it is refused as a full disk.
+        remedy = (
+            "Make the tree writable and run it again"
+            if model.could_be_read_only(exc.cause)
+            else "Fix the reported failure and run it again"
+        )
         raise Refused(
-            f"cannot write {exc.rel} (read-only tree?) -- this baseline was not "
-            "carried forward, so the next build or diff would report every "
-            "entry this rename touched as changed. Make the tree writable and "
-            "run it again."
+            model.destination_refusal(
+                exc.rel,
+                "this baseline was not carried forward, so the next build or "
+                "diff would report every entry this rename touched as changed. "
+                f"{remedy}.",
+                exc.cause,
+            )
         ) from exc
 
 
