@@ -2,14 +2,17 @@ TASK: design doc -- evaluate-in-place math for engineering notes (inline-calc)
 Branch: design-inline-calc
 PR: #250
 Date: 2026-10-15
-Status: finished -- design doc written; review rounds addressed are listed below under "Fix round ..." headings.
+Status: finished -- design doc written; the review rounds addressed are listed
+below under the round headings.
 
 Owner decisions (as relayed by the orchestrator from the task brief)
 --------------------------------------------------------------------
-The three decisions below are the owner's constraints for this design. They were
-relayed in the task brief (`.scratch/task/TASK.txt`) and are reproduced here and
-in PR #250's description as the durable record; `TASK.txt` itself is gitignored
-and not part of the repo.
+The three decisions below are the owner's constraints for this design. The
+durable record is the "Decision recap" section of docs/design/inline-calc.md
+and PR #250's description, which reproduce them; they are reproduced here as
+well. They were originally relayed in the task brief (`.scratch/task/TASK.txt`),
+which is gitignored and not part of the repo, so it is not cited as a durable
+source.
 
 D1. Results are stored in the file text and verified by check/build.
     Vout = 0.8 V*(1+Rtop/Rbot) = 4.436 V: the "= 4.436 V" is real text the
@@ -189,7 +192,7 @@ Findings addressed in in-prog-logs/design-inline-calc.txt:
    the PR body).
 3. Made the test commands generic: "Run in the project venv" rather than naming
    a machine-specific interpreter path.
-4. (Corrected in the handoff round -- see "Handoff (round 9)".) This item
+4. (Corrected in the handoff round -- see "Handoff (round 8)".) This item
    originally said round 5 "added the exact command and output used to verify
    the E-series numbers"; that command and output were already recorded under
    round 3, item 1, and round 5 added nothing there.
@@ -230,17 +233,18 @@ Chunk 1 findings addressed in docs/design/inline-calc.md:
    clause from the mandatory-leading-marker alternative.
 
 Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
-1. Fixed the round-4 commit citation from the orphaned pre-amend `11ce4dc` to
-   `f738e7b` (the actual round-4 commit on the branch). This commit and all
-   future commits are added without amending, per reviewer instruction.
-2. Updated the header status line from "four review rounds addressed" to "five
+1. Updated the header status line from "four review rounds addressed" to "five
    review rounds addressed".
-3. Standardized round/chunk labels: round 1 = chunk 1, round 2 = chunks 1 and 2,
-   round 3 = chunk 1, round 4 = chunk 1 doc + chunk 2 log.
-4. Removed the duplicate "Tests run" block; tests are recorded once at the end.
 
-Fix round 7 (chunk 1 doc review and chunk 2 log review, addressed in commit 36c286b)
-------------------------------------------------------------------------------------
+(Round 10 correction: this section previously listed three more chunk-2 items
+-- the `11ce4dc` to `f738e7b` citation fix, standardized round/chunk labels,
+and removal of the duplicate "Tests run" block. Those repeat work recorded
+under rounds 5 and 4 and were not redone here; `git show fed44dc` shows the
+status-line update was this round's only chunk-2 change. The extras were
+copy-paste artifacts and have been removed.)
+
+Fix round 7 (chunk 1 doc review and chunk 2 log review, addressed in commits 36c286b and 46bc89c)
+----------------------------------------------------------------------------------------------------
 Chunk 1 findings addressed in docs/design/inline-calc.md:
 1. Grammar/§7.2/Q9 contradiction on solve brackets. Round 6 made the bracket
    required in the grammar, but that caused a missing-bracket solve to fall
@@ -271,7 +275,9 @@ Chunk 1 findings addressed in docs/design/inline-calc.md:
 
 Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
 1. Updated the header status line to remove the round count so it cannot go
-   stale; the round headings below now provide the count.
+   stale; the round headings below now provide the count. (Round 7's commit
+   36c286b set the count to "six" by grep; the removal itself landed in the
+   follow-up commit 46bc89c.)
 2. Rewrote the PR body from the current doc: short summary, D1-D3 verbatim from
    the doc's "Decision recap" section, and every open question with its
    recommended default copied from the doc. The rewrite was posted with
@@ -279,13 +285,13 @@ Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
    double-quoted argument, so the posted body was mangled -- stale Q5/Q8
    defaults and Q6/Q9/Q11/Q12 reduced to "Default: ." (caught by the round-8
    chunk-2 review). It was redone from a body file in the handoff round; see
-   "Handoff (round 9)", item 1.
+   "Handoff (round 8)", item 1.
 3. Moved "Difficulties / choices" to the end of the log so it covers all rounds.
 4. Recorded the exact counting command and output for the existing `NAME = value`
    spans figure.
 
-Handoff (round 9)
------------------
+Handoff (round 8, addressed in commit e24c913)
+-----------------------------------------------
 A new agent took over the PR at head 46bc89c, after the round-8 chunk-1 (doc)
 and chunk-2 (log) reviews. What it did:
 
@@ -322,6 +328,29 @@ and chunk-2 (log) reviews. What it did:
 4. Re-ran the docs tests with the same commands and got the same results (see
    "Tests run"). No code was changed; no sabotage applies to a docs-only
    round.
+
+Round 10 (log-only, Qwen, addressed in commit <pending>)
+---------------------------------------------------------
+Log-only round addressing the round-9 chunk-2 review of this log (reviewer
+938630a1). docs/design/inline-calc.md was approved and is not touched.
+1. Aligned round labels with the commit history: the handoff section is now
+   "Handoff (round 8)" (commit e24c913 is titled "address round-8 review
+   findings ... (handoff round)"); cross-references updated. All round
+   headings now cite the commits that did the work.
+2. Removed the copy-pasted duplicates from round 6's chunk-2 list (citation
+   fix, standardized labels, Tests-run dedup -- see the correction note there).
+3. Fixed the stale process claim in "Difficulties / choices" so it matches
+   "Handoff (round 8)", item 1: `gh pr edit 250 --body-file` failed with the
+   GraphQL Projects-classic deprecation error, so the body was posted with
+   `gh api -X PATCH ... -F body=@...`.
+4. Re-cited D1-D3: the durable record is the doc's "Decision recap" section
+   and PR #250's body; `.scratch/task/TASK.txt` is gitignored and is stated
+   as not a durable source.
+5. Recorded the exact test commands under "Tests run" and re-ran them:
+   `pytest tests/test_docs_anchors.py -q` -> 2 passed;
+   `docs-site/gen_examples.py --check` -> up to date.
+6. Noted in round 7, chunk 2, item 1 that the status-line count removal
+   landed in follow-up commit 46bc89c.
 
 Counted-spans methodology
 -------------------------
@@ -412,16 +441,19 @@ Difficulties / choices
   ordinary code.
 - This log is now committed without amending so that its commit citations remain
   stable.
-- PR-body edits go through `gh pr edit --body-file` fed by a quoted heredoc; an
-  inline `--body "..."` argument let the shell eat the backticks once (round
-  7), and the handoff round had to redo the body from a file.
+- PR-body edits are written to a body file with a quoted heredoc; in the
+  handoff round `gh pr edit 250 --body-file` failed with the GraphQL
+  Projects-classic deprecation error, so the body was posted with
+  `gh api -X PATCH repos/Squishiba/refdes/pulls/250 -F body=@...` (see
+  "Handoff (round 8)", item 1). The body is fed from a file because an inline
+  `--body "..."` argument let the shell eat the backticks once (round 7).
 
 Tests run
 ---------
-Run in the project venv (any recent CPython with the project's installed
-requirements):
-- `PYTHONPATH=$PWD/src python -m pytest tests/test_docs_anchors.py -q -p no:cacheprovider` -> 2 passed
-- `PYTHONPATH=$PWD/src python docs-site/gen_examples.py --check` -> up to date
+Exact commands (run from the repository root in the project venv
+`/home/jorb/work/venv-refdes/bin/python`, re-run in the round-10 pass):
+- `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest tests/test_docs_anchors.py -q` -> 2 passed
+- `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python docs-site/gen_examples.py --check` -> both files up to date
 
 No src/ or tests/ changes were made; this is a design-only PR.
 No changelog.d fragment is needed because the change is not user-visible yet.
