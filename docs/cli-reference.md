@@ -141,7 +141,7 @@ Validate, evaluate, and render the site plus `items.json`.
 | `--keep-going` | Exit 0 even when there are errors |
 | `--reseal [BOARD]` | Accept edits to sealed append-only entries. Bare, accepts every board's; name one board to scope it, e.g. `--reseal power`. A `sealing: history` type has nothing to reseal: the flag is accepted, warns `sealing no longer applies to the '<type>' type; nothing was rewritten`, and rewrites nothing |
 | `--accept-board-move` | Accept a recorded [board](multi-board.md) or [workspace](workspaces.md) change for an item |
-| `--require-citations` | Promote the unpinned-citation (info) and missing-cache-blob (warning) [citation](markdown.md#citing-a-datasheet) diagnostics to errors |
+| `--require-citations` | Promote citation pin-state diagnostics to an error: unpinned citation, missing cache blob, a local citation changed since pinned, a `SOURCE FILE CHANGED` source pin, and an unresolvable `section:`/`page:`. Citation warnings outside that list stay warnings — `inconsistent keep_copy:`, a case-mismatched citation path, a `page:` that disagrees with its resolved `section:` — and a corrupt blob or missing cited file is already an error everywhere. Full table: [citation severities](markdown.md#citing-a-datasheet) |
 | `--dry-run` | Render the site without sealing |
 | `-v`, `--verbose` | Also show info-level diagnostics (routine states hidden by default) |
 
@@ -477,15 +477,16 @@ An item in **no** workspace — here `BND-CAN-001`, sitting directly in
 naming its absence, exactly as an item with no board leaves the board column
 blank, and that is also what `--workspace` does with it: every real name
 excludes it, and there is no name to type for "no workspace" (`--workspace ''`
-is an empty flag value, not a wildcard — it filters nothing and lists
-everything). If a filter narrows the listing to rows that all have no
+is refused — blank is not a name, and the command that takes it errors with
+`--workspace '' is not a workspace declared …` and exit 1 rather than silently
+listing everything). If a filter narrows the listing to rows that all have no
 workspace, the column is dropped for the same reason the board column is.
 
 Every filter here combines as a plain AND, and `--workspace` is no exception —
 boards and workspaces are independent groupings (one level apart, per
 [workspaces](workspaces.md)), so `--workspace product-a --board board-a` is a
 meaningful narrowing rather than a contradiction. On a project with no
-`workspaces:` registry no item has a workspace, so `--workspace anything` is
+`workspaces:` registry no item has a workspace, so `--workspace <name>` is
 "no items match" — and, like `--board`, an unknown name is answered that way
 rather than with `check`'s registry error.
 

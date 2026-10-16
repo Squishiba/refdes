@@ -428,7 +428,11 @@ def cmd_check(args) -> int:
             f"--board {args.board!r} is not a board declared in refdes-project.yaml's "
             f"boards: registry.{hint}"
         )
-    if args.workspace and args.workspace not in project.workspaces:
+    # `is not None`, not truthiness: `--workspace ''` used to fall through
+    # the filter unvalidated and check the whole project in silence (docs
+    # PR #286). Blank is not a workspace name, so it is named like any
+    # other unknown one.
+    if args.workspace is not None and args.workspace not in project.workspaces:
         import difflib
 
         close = difflib.get_close_matches(
@@ -843,6 +847,23 @@ def cmd_ls(args) -> int:
     """
     project, _stale = _load(args, require_ids=False)
     _announce_load_writes(project)
+    # `--workspace ''` is falsy, and the filter below reads a falsy flag as
+    # "no filter": `ls --workspace $WS` with $WS unset listed the whole
+    # project and exited 0, answering the query with a lie (docs PR #286).
+    # Blank is not a name, so it is refused with check's named error rather
+    # than run as a filter. Unknown *names* keep the query posture below
+    # ("no items match", exit 0) -- that asymmetry with `check` is ls's
+    # documented design for every filter.
+    if args.workspace == "":
+        project.error(
+            "--workspace '' is not a workspace declared in refdes-project.yaml's "
+            "workspaces: registry. An empty value filters nothing and is refused "
+            "rather than silently listing everything; omit the flag to list "
+            "every item."
+        )
+        for d in project.errors:
+            print(str(d), file=sys.stderr)
+        return 1
     # Items in a file that failed to parse are not in the listing and never
     # can be -- say so, and don't let the listing pass for a complete answer.
     load_errors = project.errors
@@ -2872,8 +2893,16 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument(
         "--require-citations",
         action="store_true",
-        help="promote the unpinned-citation (info) and missing-cache-blob "
-        "(warning) diagnostics to errors (CI)",
+        help="promote citation pin-state diagnostics to errors (CI): an "
+        "unpinned citation (info today), a keep_copy: citation whose cached "
+        "blob is missing (warning today), a local citation changed since it "
+        "was pinned, a SOURCE FILE CHANGED pin on a file feeding source() "
+        "values, and a section:/page: the lockfile cannot resolve (all "
+        "warnings today). Citation warnings outside this list stay warnings "
+        "-- inconsistent keep_copy:, a citation path whose case differs "
+        "from the file on disk, a page: that disagrees with its resolved "
+        "section: -- and a corrupt cache blob or missing cited file is "
+        "already an error everywhere",
     )
     p_build.add_argument(
         "-v", "--verbose",
