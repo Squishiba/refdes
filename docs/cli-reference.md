@@ -1344,7 +1344,7 @@ from the version immediately before it (`hardware@2`'s renames
 `requirement.text`/`bound.text`/`test.method` to `body:`, merges the
 retired `decision` type into `log` under `merge_types:`, and rewrites
 every `records:` edge to `follows:` under `links:`). See [the
-versions shipped so far](standard-library.md#the-versions-shipped-so-far).
+versions bundled so far](standard-library.md#the-versions-bundled-so-far).
 Upgrading across several versions chains each intervening one's own
 migration, in order — `v1→v2`, then `v2→v3`, and so on — never merged into
 one combined rename, so a name a later version reuses (freed up by an

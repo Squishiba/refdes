@@ -273,9 +273,13 @@ refdes standard add-preset design-debate   # or later, on an existing project
 refdes standard remove-preset design-debate
 ```
 
-Each of the three names is checked against the version the project is pinned
-to, so all three refuse the same name on a `hardware@3` project with the same
-`does not exist for hardware@3 (available: [])` error.
+`init --preset` and `add-preset` check the name against the version the project
+is pinned to, so both refuse `design-debate` on a `hardware@3` project with the
+same `does not exist for hardware@3 (available: [])` error. `remove-preset` is
+the way *out* of that situation: it checks only that the name is currently
+listed — a hand-added `design-debate` on a `hardware@3` project (which makes
+every other command fail to load) is removed without rechecking the version,
+and an unlisted name is refused with `is not currently selected`.
 
 A `standard upgrade` that would land on a version without a preset you
 selected **refuses and rolls back** rather than dropping the preset for you —
@@ -289,7 +293,11 @@ refused:
 ```
 
 `refdes standard remove-preset design-debate` first, then upgrade, and both
-succeed — as do a hand-edit of `presets:` and the upgrade.
+succeed — as do a hand-edit of `presets:` and the upgrade. One caveat on
+"both": `remove-preset` exits 1 after reporting, and if any item still uses
+the preset's vocabulary (the `db-001.md` above), the upgrade then refuses with
+`project has existing build errors` until those items are migrated —
+`remove-preset` records the removal, it does not fix the fallout.
 
 Hand-editing `standard.presets:` directly and re-running `refdes build` does
 exactly the same thing as either command — they exist for the validation
@@ -303,7 +311,7 @@ accept it.
 
 ```
 $ refdes standard remove-preset design-debate
-ERROR   items/main-io/db-001.md:2 [DB-001] — unknown type 'debate' -- it was
+ERROR   items/main-io/db-001.md:2 — unknown type 'debate' -- it was
         provided by the 'design-debate' preset, which is not listed under
         standard.presets:. Add it back, or migrate this item to a declared type.
 1 error(s) above -- fix these, or add the preset back with 'refdes standard add-preset'
@@ -408,9 +416,15 @@ Covers field names and types per item type, legal `status` (and every other
 enum field's) values, link verb names with their allowed target types
 stated in each property's `description`, and reserved/overridable keys
 (`id`, `type`, `on_change`, and `prefix`/`board`/`workspace` where a type
-hasn't shadowed them with a same-named field). `additionalProperties:
-false` on every branch is what lights up an unknown key — `sattisfies:` —
-the moment it's typed, not the next time `refdes check` runs.
+hasn't shadowed them with a same-named field). Item branches deliberately
+ship `additionalProperties: true` — a field a type doesn't declare is only a
+warning in `refdes check`, never a rejected build, and the editor must not
+reject what the tool accepts — so an unknown key (`sattisfies:`) gets
+completion suggestions nearby but no hard flag; the misspelling surfaces on
+the next `refdes check`. A mistyped *value* of a known key is flagged the
+moment it's typed. The list-file envelope is the exception: `{defaults,
+items}` is a fixed shape, so that branch does declare `additionalProperties:
+false`.
 
 **What it can't check**: the allowed-target-type restriction on a link.
 Confirming a listed ID actually resolves to an item of an allowed type
@@ -481,7 +495,7 @@ change needed, the day that issue closes.
 naming a bundle that is byte-identical forever once shipped:
 `hardware@1` means exactly the same thing today as it will after any future
 `refdes` upgrade. The installed package carries every version it has ever
-shipped, so a project pinned to an old version keeps working unchanged; moving
+bundled, so a project pinned to an old version keeps working unchanged; moving
 to a newer one is a deliberate act, not something that happens under a
 project on an ordinary upgrade.
 
@@ -495,7 +509,7 @@ hand-edit `standard.version:` and read `refdes check`'s diagnostics for
 whatever changed — but the command does the rewrite for you when the change
 is one a `migration.yaml` already describes.
 
-### The versions shipped so far
+### The versions bundled so far
 
 **`hardware@1`** — the original six types. `constraint` carries a `title:`
 field.
@@ -546,8 +560,9 @@ the type is now `bound`, which is worth saying because `constraint` and
 `bound` share almost no letters, so a did-you-mean suggestion offers
 nothing.
 
-**`hardware@3`** — the changes below, arriving together for the same reason
-`@2`'s three did: none was ever published on its own.
+**`hardware@3`** — bundled with the current tool, not yet released (see
+`CHANGELOG.md`'s `[Unreleased]`). The changes below arrive together for the
+same reason `@2`'s three did: none was ever published on its own.
 
 1. **A new link verb, `governed_by`** (inverse `governs`), authored on
    `requirement`, targeting `[requirement, bound]`. Fills a gap `refines` and
@@ -581,7 +596,7 @@ nothing.
    against real authoring (issue #7 findings 7 and 22) surfaced both the
    missing `bound` target on `governed_by`/`component` and the fact that
    `constrained_by` was never wired into coverage in the first place. Since
-   `hardware@3` had not tagged yet, both are folded into the one version
+    `hardware@3` had not been tagged yet, both are folded into the one version
    rather than shipped narrow and corrected later as a breaking `@4`.
 
 3. **`requirement.text`/`bound.text` merge into `body:`, and `test.method`
@@ -661,15 +676,31 @@ nothing.
    verb (inverse `followed_by`, `trace: false`, `[log]` targets) is how an
    entry names the earlier entry it continues — the thread relation
    `records:` used to approximate — and `records`/`recorded_by` leave the
-   vocabulary with the retired type. The `design-debate` preset retires
-   too: enabling it at `version: 3` is a load error naming it.
+    vocabulary with the retired type. The `design-debate` preset retires
+    too: enabling it at `version: 3` is a load error naming it. The merged
+    `log` declares `sealing: history`: editing an entry is no longer a
+    sealed-content build error — a captured entry edited after capture gets
+    a warning (shown in the upgrade example below), an uncaptured one
+    nothing. Pre-merge `.refdes/log-seal*.yaml` files keep being read as
+    legacy-seal markers; a project that wants the old lock back writes
+    `sealing: build` for `log` in its overlay.
+
+8. **`citations` moves out of `component`'s hand-rolled field list into an
+   includable set**, under the one field name `citations:`, included by both
+   `component` and `log` — so an entry can cite the document its reasoning
+   came from, not just a component naming its datasheets.
+   `component.datasheets:` is renamed `component.citations:` (breaking, and
+   carried by `refdes standard upgrade --to 3`), and inside citation
+   entries the same upgrade renames `url:` to `path:` and `vendor:` to
+   `keep_copy:`.
 
 `hardware@1` and `@2` resolve exactly as they always have — including the
 verb, which those two still spell `equivalent`.
 
-`refdes standard upgrade --to 3` renames `text:`/`method:` to `body:` and the
-`equivalent` link verb to `drop_in:` in every item file that still writes
-them, and retypes `decision` items as `log` — `title:` renamed to
+`refdes standard upgrade --to 3` renames `text:`/`method:` to `body:`, the
+`equivalent` link verb to `drop_in:`, and `component`'s `datasheets:` to
+`citations:` (renaming `url:`/`vendor:` to `path:`/`keep_copy:` inside the
+entries) in every item file that still writes them, and retypes `decision` items as `log` — `title:` renamed to
 `summary:`, and every `records:` edge rewritten to `follows:`, kept a
 structured link because that is the spelling the surrogate-key machinery
 keeps current across a target rename. Changes 1 and 2 need no migration —
@@ -710,7 +741,8 @@ WARNING items/dec.yaml:5 [DEC-001] — DEC-001: edited after captured -- current
         semantic content differs from the snapshot in followed event
         067082b9-22c5-5ac9-b570-91ee96f00dae; captured when LOG-001 followed it.
         If the edit was a correction, revert it and append a new entry with
-        `amends: [DEC-001]` instead; otherwise there is nothing to do.
+        `amends: [DEC-001]` instead; otherwise there is nothing to do. See
+        https://squishiba.github.io/refdes/troubleshooting.html#the-design-log.
 ```
 
 `--no-write` never reaches the capture, so a read-only command in between the

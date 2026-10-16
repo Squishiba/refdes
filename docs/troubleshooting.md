@@ -136,7 +136,7 @@ The `hardware@2` rename. Either put `standard.version:` back where it was and
 run `refdes standard upgrade --to 2` (which rewrites the items and their ids
 for you), or rename by hand — the prefix moved from `CON` to `BND` too, and
 `title:` became `text:` in the same version. See [the standard
-library](standard-library.md#the-versions-shipped-so-far).
+library](standard-library.md#the-versions-bundled-so-far).
 
 **`'constraint.title' is now 'constraint.text' -- rename this key ...`**
 The same rename's field half, which you'll see on a hand-rolled schema that
