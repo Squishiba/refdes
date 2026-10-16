@@ -342,6 +342,31 @@ def test_an_out_of_range_page_is_reported_for_every_citer(tmp_path):
     )
 
 
+def test_require_citations_help_lists_every_promotion(capsys):
+    """The flag's help named only two of the five diagnostics it promotes
+    (docs PR #294); it also turns `SOURCE FILE CHANGED` and every unresolvable
+    `section:`/`page:` into an error. `citations.verify` promotes exactly the
+    diagnostics routed through the two severity callables -- the three
+    always-error cases and the always-warn `inconsistent keep_copy:` are NOT
+    promoted, and the help says so. This test is the drift guard: adding a
+    `severity(...)`/`(error if require else warn)` call in verify() without
+    naming it in the help fails here."""
+    with pytest.raises(SystemExit):
+        cli_mod.main(["build", "--help"])
+    help = " ".join(capsys.readouterr().out.split())
+    clause = help[help.index("--require-citations") :]
+    for promoted in (
+        "unpinned citation",
+        "cached blob is missing",
+        "changed since it was pinned",
+        "SOURCE FILE CHANGED",
+        "section:/page:",
+    ):
+        assert promoted in clause, promoted
+    for not_promoted in ("corrupt cache blob", "missing cited file"):
+        assert not_promoted in clause, not_promoted
+
+
 def test_cli_check_warns_and_cli_build_require_citations_fails(tmp_path, capsys):
     root = _project(tmp_path, _page_item("16"))
     _fetch(root)

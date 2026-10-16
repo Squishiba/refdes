@@ -1,0 +1,132 @@
+# fix-docs-found-cli-nits — work log
+
+Branch: fix-docs-found-cli-nits, base main fd8dcee. Task: 4 CLI/message nits
+found by docs verification PRs (#286, #294, #287).
+
+## Item 1 — empty `--workspace` silently disables the filter (PR #286)
+
+VERIFIED as still applying, reproduced in .scratch/ws-nits/proj (a fresh
+`item_layout: workspace` project with platform/product-a):
+- `refdes ls --workspace ''` listed every item, exit 0.
+- `refdes check --workspace ''` checked the whole project, exit 0.
+- `refdes check --workspace nosuch` → named ERROR, exit 1 (the good posture).
+
+Commands with `--workspace`: only `check` (cli.py ~431) and `ls` (cmd_ls
+filter loop + argparse ~3032) — grepped `add_argument.*--workspace` and
+`args.workspace` across src/.
+
+Fix (cli.py):
+- cmd_check: validation `if args.workspace and ...` → `if args.workspace is
+  not None and ...`. `''` now flows into the existing named-error branch
+  (difflib finds no hint for '').
+- cmd_ls: new guard before the listing: `--workspace ''` records a project
+  error naming the flag, prints all errors to stderr, returns 1 with NO
+  listing (a full listing under an empty filter is the lie; ls's
+  parse-error convention keeps the listing because there the listing is
+  intact — here it answers the wrong question).
+- Unknown *names* in ls deliberately unchanged: "no items match" exit 0 is
+  ls's documented query posture for --type/--board/--workspace (its own help
+  says so; test_ls_unknown_workspace_matches_nothing_rather_than_erroring
+  pins it as a "deliberate asymmetry"). Making ls error on typos is a design
+  decision beyond this nit — noted in the PR body, left alone.
+
+Docs: docs/cli-reference.md — the ls section claimed `--workspace ''` "is an
+empty flag value, not a wildcard — it filters nothing and lists everything"
+(now false; rewritten to the refusal) and "`--workspace anything` is 'no
+items match'" on a no-registry project (the empty value is the exception;
+reworded to `<name>`). docs/workspaces.md "blank is not a name you can pass
+to the filter" stays true, untouched.
+
+Tests (tests/test_workspaces.py): 3 new — ls-empty named error (+ no listing
+on stdout, registry project), check-empty named error, ls-empty refused on a
+NO-registry project. Updated the test that pinned the old no-op
+(test_ls_shows_an_item_in_no_workspace_as_a_blank_and_never_matches_it:
+dropped the `--workspace ''` lists-everything assertion, updated docstring).
+
+Sabotage: (1) reverted the check truthiness fix →
+test_check_empty_workspace_flag_is_a_named_error failed (0 == 1); restored.
+(2) removed the ls guard → test_ls_empty_workspace_flag_is_a_named_error and
+test_ls_empty_workspace_flag_is_refused_without_a_workspaces_registry both
+failed; restored. 34/34 green after restore.
+
+Changelog: changelog.d/empty-workspace-flag-named-error.fixed.md
+(changed-behavior/fixed: user-visible error where it used to silently pass).
+
+## Item 2 — (pending)
+
+## Item 3 — (pending)
+
+## Item 4 — (pending)
+
+## Item 2 — opaque XLSX defined-name destination message (PR #294)
+
+VERIFIED as applying (src/refdes/sources.py, top level — NOT serve/sources.py).
+Reproduced in .scratch/xlsx-nit/: a DefinedName whose attr_text tokenizes as a
+RANGE that openpyxl's SHEETRANGE_RE cannot match (bare `A1:B2`, no sheet) makes
+`DefinedName.destinations` raise AttributeError('NoneType' object has no
+attribute 'group') — openpyxl 3.1.5's own generator, confirmed by reading
+`inspect.getsource(DefinedName.destinations.fget)`. The reader's
+`except ... as exc` put the raw crash text in the message.
+
+Fix (sources.py:578): the except branch no longer interpolates the exception;
+it quotes `defined.attr_text` and says what a defined name must be (one cell,
+like Sheet1!$B$2). File + key were already in `prefix`; now the tail names the
+offending destination text.
+
+Test: test_sources_xlsx.py
+test_xlsx_malformed_destination_names_file_name_and_problem (file, key,
+destination text, "one cell"; asserts "NoneType" is NOT in the message).
+Sabotage: restored the raw-exc line → new test fails ("A1:B2" not in
+message); restored, 10/10 green.
+
+Changelog: changelog.d/xlsx-malformed-destination-message.fixed.md
+(user-visible error text — `fixed`).
+
+## Item 3 — --require-citations help terse (PR #294)
+
+VERIFIED: help listed only unpinned-citation + missing-cache-blob. Read the
+consumer: citations.verify(require=True) routes through two severity callables
+— promotes to error: unpinned (info→), missing cache blob, local citation
+changed since pinned, SOURCE FILE CHANGED source drift, section: unresolved/
+stale-bytes, page: past-end/never-checked/count-unlinked. NOT promoted:
+corrupt blob + missing cited file (always errors), inconsistent keep_copy:,
+case-mismatch, explicit-page conflict (always warnings). docs/markdown.md
+540-554 is the canonical table — help now matches it.
+
+Fix: cli.py p_build --require-citations help lists all five promoted groups +
+the unaffected set; docs/cli-reference.md flag row updated to match and point
+at the markdown.md table.
+
+Test: test_citation_pages.py
+test_require_citations_help_lists_every_promotion (drift guard: parses
+`build --help`, asserts every promoted group is named — a future severity(...)
+promotion omitted from help fails here). Escalation BEHAVIOR itself is pinned
+by pre-existing tests (test_calc_sources.py:336 SOURCE FILE CHANGED → error;
+test_citation_pages page-range → error under the gate). Sabotage: restored the
+terse help → drift guard fails; restored, 59/59 green.
+
+Changelog: changelog.d/require-citations-help.fixed.md (help text is
+user-visible — `fixed`; no behavior change, said so in the fragment).
+
+## Item 4 — candidate-parts.md:581 suppressibility claim (PR #287)
+
+VERIFIED as applying: parse.py `_warn_dead_defaults_status` (1497-1529) always
+calls project.warn(); no suppression path. Reproduced in
+.scratch/dead-defaults/proj (defaults: status: candidate, item overrides to
+selected): the warning fires verbatim with every config knob set. No
+project-level mechanism suppresses generic authoring warnings — the config's
+severity knobs are cross_workspace_severity (top level), check_severity (per
+type), lint_own_tags (bool); none reaches this warn. probe note: `check_severity`
+is NOT a top-level setting (configuration error proves it) — it lives under a
+type, per schema.py:705; the design-doc sentence worded accordingly.
+
+Fix (docs/design/candidate-parts.md:581): sentence now says the warning always
+warns and no project-level suppression exists for authoring warnings, citing
+#287's verification. No suppression built (per task). Docs-only → no fragment,
+no new test (gates: gen_examples --check + full suite).
+
+## Gates
+
+- Full suite: 3974 passed, 2 skipped, exit 0 (338.86s, .scratch/suite.txt).
+- ruff check --select E9,F on the five touched files: clean.
+- docs-site/gen_examples.py --check: up to date.
