@@ -530,14 +530,19 @@ def _render_tree(project: Project, params: dict[str, str], where: str = "") -> s
     if open_depth <= 0:
         raise _BlockError("depth must be a positive integer.")
 
-    markup = tree_mod.render_tree_html(
-        project, board=board, workspace=workspace, open_depth=open_depth
-    )
-    if markup == '<ul class="tree"></ul>':
+    # The forest decides emptiness, not the markup string: a scoped forest
+    # with nothing in scope still has its one scope node as a root, so
+    # `{{tree board="io"}}` on an empty board renders `<li>IO</li>` -- a bare
+    # label with no count and no explanation. `expanded` is the items the
+    # forest actually has, which is the question the empty note answers.
+    forest = tree_mod.build_forest(project, board=board, workspace=workspace)
+    if not forest.expanded:
         scope = board or workspace
         who = f"{scope}" if scope else "the project"
         return f'<p class="tree-empty">No items in {who}.</p>'
-    return markup
+    return tree_mod.render_tree_html(
+        project, board=board, workspace=workspace, open_depth=open_depth
+    )
 
 
 # -------------------------------------------------------------- {{compare}}
