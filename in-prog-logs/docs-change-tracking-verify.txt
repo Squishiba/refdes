@@ -1,0 +1,97 @@
+Task: verify docs/change-tracking.md claim by claim against real refdes
+behavior; fix the page (docs only, no code changes).
+
+Verification setup
+------------------
+- CLI run from THIS branch via
+  PYTHONPATH=$PWD/src <venv>/bin/python -m refdes.cli ...
+  (the venv's `refdes` binary resolves to /home/jorb/work/refdes, the main
+  checkout — not used).
+- Scratch project .scratch/ctv1: `refdes init` (standard: hardware@3, starter
+  refdes-project.yaml has NO on_change: block), added refdes-schema.yaml with
+  the page's example bound-field policy, items BND-PWR-001..004, REQ-PWR-001
+  (image body), LOG-PWR-001 (history capture), baselines rev-a..rev-h, keys
+  adopt, imports cross-check in .scratch/ctv2.
+
+Claim table (VERIFIED / FIXED / ADDED)
+--------------------------------------
+- Three modes, default invalidate, ignore/timeline excluded from hash;
+  timeline and ignore indistinguishable to the tracker: VERIFIED.
+- Table "Invalidates downstream?" = No in all rows (hash excludes invalidate
+  only): VERIFIED. "In the timeline" column is design, page says not
+  implemented: consistent.
+- revision/release stamp hash over invalidate fields only; audit "changed"
+  exactly when hash moves (owner edit -> changed 0; limit edit -> changed 1):
+  VERIFIED.
+- Captured-log digest covers every field; editing a captured entry's timeline
+  field -> "edited after captured" warning + audit
+  "Entries edited after captured:" section: VERIFIED.
+- The example schema yaml loads (build 0 errors): VERIFIED.
+- "falls back to on_change.default (`invalidate` in the starter schema)":
+  FIXED — starter writes no on_change: block; on_change.default is a project
+  setting in refdes-project.yaml (configcheck._on_change_default) with
+  built-in default invalidate.
+- Per-item fields: override works; missing reason warns
+  "item-level on_change override has no 'reason'; suppression should be
+  self-documenting": VERIFIED. FIXED scoping: the warning fires on fields:
+  overrides, not on a mode:-only mapping. ADDED: fields: entries may name
+  body (verified: item fields: {body: ignore} freezes body edits).
+- Whole-item scalar VERIFIED; ADDED the mode: mapping whole-item form (works;
+  audit prints "whole item -> ignore — <reason>"), the only way to attach a
+  reason to a whole-item suppression.
+- "A type that declares its own field named on_change owns that key": VERIFIED
+  in code (parse.py: key in OVERRIDABLE and key not in spec.fields).
+- Precedence item field -> whole-item mode -> schema field -> project default:
+  VERIFIED (model.py on_change_for + empirical cases for every level).
+- Content hash over invalidate fields + links + body(if invalidate) + image
+  bytes (format 5): VERIFIED. ADDED "its type," — the payload includes the
+  item type (build.py _hash_payload {"type": item.type, ...}).
+- Image-bytes sensitivity: swapping fig.png bytes flipped REQ-PWR-001's
+  hash/content_hash (changed 1): VERIFIED.
+- "appears at the foot of every item page and in items.json": VERIFIED
+  (footer "content hash"; items.json content_hash).
+- "a link records the hash of its target at review time": FIXED — hedged
+  "once suspect links exist" (code comment build.py: design intent, links do
+  not record target hash today; page's own not-built-yet list).
+- Imported items keep the upstream hash verbatim: VERIFIED empirically
+  (ctv2 imports ctv1's _site/items.json; hashes identical) and in code
+  (imports.py).
+- hash_format recorded per baseline/seal entry, currently 5: VERIFIED.
+- Migration on read: audit, revision, release, history check, keys adopt;
+  carried rewrite (stamped-1 entry rewritten to hash_format: 5 in place on
+  audit / former-ids propose --baseline): VERIFIED.
+- Uncomparable: audit prints "uncomparable N  <ids>", entry left in stamped
+  format, not counted as changed/unchanged (3/6 unchanged with 1 changed +
+  1 uncomparable): VERIFIED. revision prints "uncomparable N <ids>" on
+  re-stamp conflict: VERIFIED. keys adopt "uncomparable baseline entry
+  <name>: <id>": VERIFIED; seal form verified in code (cli.py
+  "uncomparable seal entry <file>: <id>").
+- "Ledger entries with no live item and no former_ids: ... removed": VERIFIED
+  (code + baseline diff output).
+- Audit output example: every section header and line shape reproduced; the
+  real output has more sections (e.g. "Entries edited after captured:",
+  "Since last revision/release") — excerpt is faithful, kept as is.
+- "Changing a field's on_change changes the hash of every item with that
+  field": VERIFIED (schema tags timeline->invalidate flipped exactly the item
+  carrying tags).
+
+Checks
+------
+- docs-site/gen_examples.py --check: up to date.
+- ruff check --select E9,F src tests: All checks passed.
+- Full suite: 3934 passed, 2 skipped (exit 0), .scratch/suite.txt.
+
+Changes made (docs only)
+------------------------
+docs/change-tracking.md:
+1. on_change.default wording (project setting, built-in invalidate).
+2. Whole-item mode: mapping form + yaml example.
+3. Reason-warning scoped to fields: overrides; fields: may name body.
+4. Content-hash payload includes the item's type.
+5. Link-records-target-hash hedged to "once suspect links exist".
+6. "The policy lives in refdes-schema.yaml" -> pinned standard for
+   standard-pinned projects, overlay for self-declaring projects.
+No code changed; no tests added (docs-only, sabotage N/A). No changelog
+fragment: docs-only change, no user-visible behavior change.
+
+Status: finished.
