@@ -329,3 +329,55 @@ def test_docs_site_page_defines_a_bundled_term():
     page = _page_text()
     assert "### `requirement`" in page
     assert "Something the design must achieve" in page
+
+
+# ------------------------------------------------------ wording fixes (sweep 3)
+
+
+def test_verifies_example_does_not_author_an_inverse_name():
+    """`verified_by:` is a computed backlink: a build rejects it on a
+    requirement (parse.py's unknown-field branch). The example must show the
+    verb declared from the test only, and name the inverse as computed."""
+    example = vocabulary.EXAMPLES[("links", "verifies")]
+    authored = [
+        line for line in example.splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+    assert not any("verified_by" in line for line in authored), example
+    assert "computed" in example
+
+
+def test_body_definition_says_the_enforcement_is_a_warning():
+    """build.validate_items warns on an empty required body (a draft stub
+    must still build) -- the text must not call it a hard required field."""
+    text = vocabulary.RESERVED_KEYS["body"]
+    assert "warning" in text
+    assert "it is the required field" not in text
+
+
+def test_former_ids_definition_says_it_is_not_written_automatically():
+    """A prefix rename re-mints ids without writing former_ids; entries
+    come from `former-ids propose --confirm` or the author's own keys."""
+    text = vocabulary.RESERVED_KEYS["former_ids"]
+    example = vocabulary.EXAMPLES[("keys", "former_ids")]
+    assert "Written by the engine" not in text
+    assert "former-ids propose" in text
+    assert "written when an id is re-minted" not in example
+
+
+def test_board_definition_names_the_registry_it_resolves_against():
+    """boards.py: the first segment resolves only against the `boards:`
+    registry; an unregistered one warns and leaves the board unset."""
+    text = vocabulary.RESERVED_KEYS["board"]
+    assert "boards:" in text
+    assert "unset" in text
+
+
+def test_section_definition_asserts_a_type_not_a_heading():
+    """parse._resolve_section_marker: the marker asserts the type of the
+    items after it; it is not an item-page heading."""
+    text = vocabulary.RESERVED_KEYS["section"]
+    assert "heading" not in text
+    assert "type" in text
+    example = vocabulary.EXAMPLES[("keys", "section")]
+    assert "requirement" in example
