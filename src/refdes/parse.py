@@ -38,6 +38,15 @@ FENCE_RE = re.compile(r"^---[ \t]*$")
 # A YAML mapping key opening a line at column 0 -- what has to follow a `---` for it
 # to be read as a new item's front-matter rather than a literal horizontal rule.
 KEY_LINE_RE = re.compile(r"^[A-Za-z_][\w.-]*\s*:(\s|$)")
+# A fenced code block's opening line (see _split_and_fences): up to 3 spaces of
+# indentation, then 3+ of one fence character; the rest of the line is the fence's
+# info string, which a backtick fence may not fill with backticks. A closing line
+# is the same character in a run at least as long, with nothing after it.
+_FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_FENCE_CLOSE_RES = {
+    "`": re.compile(r"^ {0,3}(`{3,})[ \t]*$"),
+    "~": re.compile(r"^ {0,3}(~{3,})[ \t]*$"),
+}
 # `body` is the markdown body, not a field. In a .md file it is the text after the
 # front-matter; in a list file it is a `body:` key. A .md file already holds many
 # items sharing one `defaults:` block, so the tradeoff is not file count but whether
@@ -1432,9 +1441,100 @@ def _yaml_mapping(text: str) -> tuple[dict | None, list[DuplicateKey]]:
     return (parsed, duplicates) if isinstance(parsed, dict) else (None, duplicates)
 
 
+def _split_and_fences(
+    lines: list[str], fence_idx: list[int]
+) -> tuple[list[int], list[tuple[str, int]]]:
+    """Walk the file once, in order, deciding which `---` fences split it.
+
+    A three-state machine -- front matter, body, fenced code -- starting
+    just after block 0's closing `---` (`fence_idx` is the raw `---` lines
+    with fence_idx[0] == 0; block 0 is a split by definition):
+
+      * front matter runs from a splitting `---` (a YAML key line follows)
+        through the next `---` line, and is OPAQUE to fence tracking: it is
+        YAML, where a ``` line is string content (a block scalar can carry
+        one) and must never open a fence -- reading one as a fence lets it
+        protect the item's own closing `---` and the item vanishes
+        (PR #331 review round 2).
+      * body lines open fences (CommonMark's rules narrowed to what
+        matters for splitting): up to 3 spaces of indent, then 3+ of one
+        fence character, and a backtick fence's info string carries no
+        backtick; the block closes at the next line of the same character
+        in a run at least as long with nothing after it. Fences do not nest.
+      * inside a fence, `---` lines are literal text: they never split.
+
+    An opener with no closing line before the end of the file opens
+    nothing -- the least-surprising fallback is the pre-fence behavior,
+    where every `---` after it keeps splitting as it always did. A fenced
+    `---` with a key line after it is the shape of an item, and
+    suppression cannot tell a pasted example from an item swallowed by an
+    unclosed fence (the two are structurally identical), so every
+    suppressed candidate is announced: a deliberate example costs one
+    warning, and an item hidden behind an unclosed fence can never vanish
+    without a word (PR #331 review: no item that loads today may silently
+    stop loading).
+
+    Returns (split_idx, fence_warnings): the fences that split -- block
+    0's pair and every item boundary -- in order, fenced `---` lines gone;
+    and (message, line) pairs (1-based) for the caller to *warn* (the
+    lowest severity, not an error).
+    """
+    fence_set = set(fence_idx)
+    split_idx = [0, fence_idx[1]]
+    warnings: list[tuple[str, int]] = []
+    n = len(lines)
+    # Block 0's closing `---` does double duty as item 1's opener when a key
+    # line follows it (the pairing loop checks the key itself); seed the walk
+    # inside front matter for exactly that case.
+    in_fm = bool(KEY_LINE_RE.match(lines[fence_idx[1] + 1] if fence_idx[1] + 1 < n else ""))
+    opener: tuple[str, int] | None = None
+    pending: list[int] = []  # `---` lines inside the currently open fence
+    for i in range(fence_idx[1] + 1, n):
+        line = lines[i]
+        is_fence_line = i in fence_set
+        if in_fm:
+            if is_fence_line:
+                split_idx.append(i)  # closes it (and may open the next item)
+                # A closing `---` does double duty as the next item's opener
+                # when a key line follows it (the pairing loop checks the key
+                # itself, and pairs consecutive fences).
+                in_fm = bool(KEY_LINE_RE.match(lines[i + 1] if i + 1 < n else ""))
+        elif opener is not None:
+            char, length = opener
+            cm = _FENCE_CLOSE_RES[char].match(line)
+            if cm is not None and len(cm.group(1)) >= length:
+                for j in pending:  # the fence closed: its `---` lines never split
+                    if KEY_LINE_RE.match(lines[j + 1] if j + 1 < n else ""):
+                        warnings.append((FENCED_FRONT_MATTER_WARNING, j + 1))
+                opener = None
+                pending = []
+            elif is_fence_line:
+                pending.append(i)
+        elif is_fence_line:
+            if KEY_LINE_RE.match(lines[i + 1] if i + 1 < n else ""):
+                split_idx.append(i)  # opens a new item's front matter
+                in_fm = True
+            # else: a literal horizontal rule in the body -- not a split
+        else:
+            mo = _FENCE_OPEN_RE.match(line)
+            if mo is not None and not (mo.group(1)[0] == "`" and "`" in mo.group(2)):
+                opener = (mo.group(1)[0], len(mo.group(1)))
+    # An unclosed opener protects nothing: the `---` lines under it split as
+    # they always did (all pending lines sit after every recorded split).
+    split_idx.extend(pending)
+    return split_idx, warnings
+
+
+FENCED_FRONT_MATTER_WARNING = (
+    "front matter inside a fenced code block is treated as example text; no "
+    "action is needed if this is an example; if a real item was meant here, "
+    "check for an unclosed earlier code fence."
+)
+
+
 def md_front_matter_blocks(
     lines: list[str],
-) -> tuple[list[tuple[int, int, dict]], list[tuple[str, int]], dict[int, list[DuplicateKey]]]:
+) -> tuple[list[tuple[int, int, dict]], list[tuple[str, int]], dict[int, list[DuplicateKey]], list[tuple[str, int]]]:
     """Split Markdown lines into front-matter blocks: (open_i, close_i, parsed).
 
     The single splitter shared by parse_markdown_file (which builds items
@@ -1442,19 +1542,35 @@ def md_front_matter_blocks(
     can never disagree about where an item's front matter is. A fence only
     opens a new item when the line right after it looks like a YAML key and a
     closing fence follows; otherwise it stays a literal horizontal rule in
-    the previous item's body. Returns (blocks, errors, duplicates) with errors
-    as (message, line) pairs for the caller to report and duplicates keyed by
-    the block's `open_i` -- each record's lines already shifted onto the
-    file's own numbering, since a block is parsed as text of its own. An empty
-    blocks list means no usable front matter at all (the conditions that abort
-    parsing).
+    the previous item's body. A `---` inside an open fenced code block (see
+    _split_and_fences) is literal text and is not a fence at all: a pasted
+    front-matter example in a ```yaml fence stays body prose of the item
+    that carries it, never a phantom item (R10-X1). Returns (blocks, errors,
+    duplicates, fence_warnings) with errors as (message, line) pairs for the
+    caller to report and duplicates keyed by the block's `open_i` -- each
+    record's lines already shifted onto the file's own numbering, since a
+    block is parsed as text of its own. An empty blocks list means no usable
+    front matter at all (the conditions that abort parsing).
+
+    fence_warnings -- (message, line) for the caller to *warn* (the lowest
+    severity, not an error) -- makes suppression loud, never silent: a
+    protected `---` with a key-shaped line after it is exactly the shape of
+    an item, and suppression cannot tell a pasted example from an item
+    swallowed by an unclosed fence (the two are structurally identical). So
+    every suppressed candidate is announced: a deliberate example costs one
+    warning, and an item hidden behind an unclosed fence can never vanish
+    without a word (PR #331 review: no item that loads today may silently
+    stop loading).
     """
     blocks: list[tuple[int, int, dict]] = []
     errors: list[tuple[str, int]] = []
     duplicates: dict[int, list[DuplicateKey]] = {}
+    fence_warnings: list[tuple[str, int]] = []
     fence_idx = [i for i, line in enumerate(lines) if FENCE_RE.match(line)]
     if len(fence_idx) < 2 or fence_idx[0] != 0:
-        return [], [("no YAML front-matter (file must start with '---')", 1)], duplicates
+        return [], [("no YAML front-matter (file must start with '---')", 1)], duplicates, fence_warnings
+
+    fence_idx, fence_warnings = _split_and_fences(lines, fence_idx)
 
     close0 = fence_idx[1]
     head_text = "\n".join(lines[1:close0])
@@ -1462,9 +1578,9 @@ def md_front_matter_blocks(
         parsed0, dups0 = _yaml_mapping(head_text)
     except yaml.YAMLError as exc:
         message, err_line = _yaml_error_report(exc, lines, offset=1)
-        return [], [(f"invalid YAML front-matter: {message}", err_line)], duplicates
+        return [], [(f"invalid YAML front-matter: {message}", err_line)], duplicates, fence_warnings
     if parsed0 is None:
-        return [], [("front-matter must be a mapping", 1)], duplicates
+        return [], [("front-matter must be a mapping", 1)], duplicates, fence_warnings
     if dups0:
         duplicates[0] = _shift_duplicates(dups0, 1)
     blocks.append((0, close0, parsed0))
@@ -1491,7 +1607,7 @@ def md_front_matter_blocks(
         if dups:
             duplicates[open_i] = _shift_duplicates(dups, open_i + 1)
         blocks.append((open_i, close_i, parsed))
-    return blocks, errors, duplicates
+    return blocks, errors, duplicates, fence_warnings
 
 
 def _warn_dead_defaults_status(
@@ -1583,9 +1699,11 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
     text = read_source(project, path)
     lines = text.split("\n")
 
-    blocks, errors, duplicates = md_front_matter_blocks(lines)
+    blocks, errors, duplicates, fence_warnings = md_front_matter_blocks(lines)
     for message, err_line in errors:
         project.error(message, file=rel, line=err_line)
+    for message, warn_line in fence_warnings:
+        project.warn(message, file=rel, line=warn_line)
     for open_i, records in duplicates.items():
         # Judged per block, because the block is what a repeat is a repeat
         # *of*: a `defaults:` or `section:` block is named for what it is

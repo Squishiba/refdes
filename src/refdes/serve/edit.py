@@ -1535,7 +1535,9 @@ def _resolve_destination(project: Project, request: CreateRequest):
     except (OSError, UnicodeDecodeError) as exc:
         return None, None, f"could not read {rel}: {exc}"
     if ext == ".md":
-        blocks, _errors, _duplicates = md_front_matter_blocks(text.split("\n"))
+        # `_fence_warnings` is the loader's to report; the server only edits
+        # files of the project it loaded, which split and announced them.
+        blocks, _errors, _duplicates, _fence_warnings = md_front_matter_blocks(text.split("\n"))
         return rel, {
             "kind": "append-md",
             "defaults": front_matter_defaults_block(blocks) or {},

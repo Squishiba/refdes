@@ -396,7 +396,7 @@ def test_front_matter_defaults_block_reads_only_the_first_and_only_a_defaults_bl
     more loosely would number that item from a series the loader never
     applies."""
     def defaults_of(text):
-        blocks, _errors, _dups = parse.md_front_matter_blocks(text.split("\n"))
+        blocks, _errors, _dups, _fence_warnings = parse.md_front_matter_blocks(text.split("\n"))
         return parse.front_matter_defaults_block(blocks)
 
     assert defaults_of(
