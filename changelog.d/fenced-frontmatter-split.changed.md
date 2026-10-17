@@ -8,7 +8,12 @@
   a run at least as long with nothing after it; fences do not nest) and treats
   their contents as body text. Every `---` outside a fence splits exactly as
   before; an unclosed fence opener protects nothing, so a file whose fence is
-  never closed parses as it does today. No item in this repo's `items/` and no
+  never closed parses as it does today. Suppression is never silent: a
+  front-matter-shaped `---` (a YAML key on the next line, a closing `---`
+  later) inside a fence warns once at its line, since the parser cannot tell
+  a pasted example from an item hidden behind an unclosed earlier fence —
+  a deliberate example now costs one warning, and an item can never vanish
+  from the load without a word. No item in this repo's `items/` and no
   test fixture carried a `---` inside a fence, so no existing file changes
   meaning; docs pages are rendered by their own front-matter rule and were
   never affected. `docs/authoring.md` §"Several items in one file" states the

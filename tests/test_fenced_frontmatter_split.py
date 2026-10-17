@@ -7,8 +7,14 @@ examples that check as real fields, and a `refdes ls` listing the phantom.
 The rule fixed here: a `---` inside an *open* fenced code block (``` or ~~~,
 closing fence same char and length >= the opener, opener indented at most 3
 spaces) is literal body text and never splits. A `---` outside any fence
-splits exactly as before; an unclosed fence opener protects nothing, so the
-rest of the file behaves as it does today.
+splits exactly as before; an unclosed fence opener protects nothing from
+splitting, so the rest of the file behaves as it does today.
+
+The second rule, from the PR #331 review: protection must never swallow an
+item silently. A `---`+key pair that only stopped being a front-matter
+candidate because a fence protects it reports one warning at that line --
+a pasted example costs one warning, and an item hidden behind an unclosed
+earlier fence can never vanish without a word.
 """
 
 from __future__ import annotations
@@ -41,17 +47,18 @@ def _project(tmp_path, name: str, text: str):
 
 def test_fenced_dashes_in_backtick_fence_do_not_split():
     """The R10-X1 shape: a front-matter example pasted as a ```yaml fence stays
-    body text -- one block, no phantom item."""
+    body text -- one block (and one warning, see the swallow tests)."""
     text = HEAD + "\nHere is the config I meant to add:\n\n```yaml\n---\nid: DEC-FENCE-002\ntitle: Phantom\n---\n```\n\nEnd.\n"
-    blocks, errors, _dups = parse.md_front_matter_blocks(text.split("\n"))
+    blocks, errors, _dups, warnings = parse.md_front_matter_blocks(text.split("\n"))
     assert errors == []
     assert len(blocks) == 1
     assert blocks[0][2]["id"] == "DEC-FENCE-001"
+    assert len(warnings) == 1  # the paste is announced, never silent
 
 
 def test_fenced_dashes_in_tilde_fence_do_not_split():
     text = HEAD + "\n~~~yaml\n---\nid: DEC-FENCE-002\ntitle: Phantom\n---\n~~~\n"
-    blocks, errors, _dups = parse.md_front_matter_blocks(text.split("\n"))
+    blocks, errors, _dups, _warnings = parse.md_front_matter_blocks(text.split("\n"))
     assert errors == []
     assert len(blocks) == 1
 
@@ -64,7 +71,7 @@ def test_longer_closing_fence_closes_and_inner_shorter_fence_is_literal():
         + "\n````markdown\n---\nid: PHANTOM\ntitle: no\n```\n---\n````\n"
         + "---\nid: DEC-FENCE-002\ntitle: Second\n---\nbody\n"
     )
-    blocks, _errors, _dups = parse.md_front_matter_blocks(text.split("\n"))
+    blocks, _errors, _dups, _warnings = parse.md_front_matter_blocks(text.split("\n"))
     assert len(blocks) == 2
     assert blocks[1][2]["id"] == "DEC-FENCE-002"
 
@@ -73,7 +80,7 @@ def test_indented_fence_still_protects_its_dashes():
     """A fence opener indented up to 3 spaces is a fence (CommonMark); the
     column-0 `---` inside it does not split."""
     text = HEAD + "\n   ```yaml\n---\nid: DEC-FENCE-002\ntitle: Phantom\n---\n   ```\n"
-    blocks, _errors, _dups = parse.md_front_matter_blocks(text.split("\n"))
+    blocks, _errors, _dups, _warnings = parse.md_front_matter_blocks(text.split("\n"))
     assert len(blocks) == 1
 
 
@@ -84,34 +91,38 @@ def test_four_space_indent_is_not_a_fence_opener():
         HEAD
         + "\n    ```yaml\n---\nid: DEC-FENCE-002\ntitle: Second\n---\nbody\n"
     )
-    blocks, _errors, _dups = parse.md_front_matter_blocks(text.split("\n"))
+    blocks, _errors, _dups, _warnings = parse.md_front_matter_blocks(text.split("\n"))
     assert len(blocks) == 2
     assert blocks[1][2]["id"] == "DEC-FENCE-002"
 
 
 def test_dash_outside_any_fence_still_splits():
     """The no-regression pin: fences live in the bodies, and the `---` between
-    the two items splits exactly as today."""
+    the two items splits exactly as today -- and no warning is fired for a
+    fence that protects no front-matter candidate."""
     text = (
         HEAD
         + "\n```calc\nx = 1\n```\n\n---\nid: DEC-FENCE-002\ntitle: Second\n---\n"
         + "\n```calc\ny = 2\n```\n"
     )
-    blocks, _errors, _dups = parse.md_front_matter_blocks(text.split("\n"))
+    blocks, _errors, _dups, warnings = parse.md_front_matter_blocks(text.split("\n"))
     assert len(blocks) == 2
     assert [blocks[k][2]["id"] for k in (0, 1)] == ["DEC-FENCE-001", "DEC-FENCE-002"]
+    assert warnings == []
 
 
 def test_unclosed_fence_opener_protects_nothing():
-    """Least-surprising rule for an unclosed fence: the file from the opener
-    on behaves as it does today, so the key-shaped `---` after it splits."""
+    """Least-surprising rule for an unclosed fence with nothing to pair with:
+    the file from the opener on behaves as it does today, so the key-shaped
+    `---` after it splits -- and the file is silent, as it is today."""
     text = (
         HEAD
         + "\n```yaml\nsome yaml with no closing fence\n\n---\nid: DEC-FENCE-002\ntitle: Second\n---\nbody\n"
     )
-    blocks, _errors, _dups = parse.md_front_matter_blocks(text.split("\n"))
+    blocks, _errors, _dups, warnings = parse.md_front_matter_blocks(text.split("\n"))
     assert len(blocks) == 2
     assert blocks[1][2]["id"] == "DEC-FENCE-002"
+    assert warnings == []
 
 
 def test_fence_body_line_with_info_string_does_not_close_the_fence():
@@ -121,7 +132,7 @@ def test_fence_body_line_with_info_string_does_not_close_the_fence():
         HEAD
         + "\n```markdown\n```python\n---\nid: DEC-FENCE-002\ntitle: Phantom\n---\n```\n"
     )
-    blocks, _errors, _dups = parse.md_front_matter_blocks(text.split("\n"))
+    blocks, _errors, _dups, _warnings = parse.md_front_matter_blocks(text.split("\n"))
     assert len(blocks) == 1
 
 
@@ -132,9 +143,93 @@ def test_backtick_in_info_string_is_not_a_fence_opener():
         HEAD
         + "\n``` use `x` inline\n---\nid: DEC-FENCE-002\ntitle: Second\n---\nbody\n"
     )
-    blocks, _errors, _dups = parse.md_front_matter_blocks(text.split("\n"))
+    blocks, _errors, _dups, _warnings = parse.md_front_matter_blocks(text.split("\n"))
     assert len(blocks) == 2
     assert blocks[1][2]["id"] == "DEC-FENCE-002"
+
+
+# ------------------------------------------------------------------- swallowing
+
+
+SWALLOW = (
+    "---\nid: A-1\ntype: log\n---\n"
+    "Body of A with an UNCLOSED fence by mistake:\n"
+    "```python\n"
+    "x = 1\n"
+    "\n"
+    "---\nid: B-1\ntype: log\n---\n"
+    "Body of B with a normal fence:\n"
+    "```text\n"
+    "hello\n"
+    "```\n"
+)
+
+
+def test_unclosed_fence_swallowing_a_later_item_warns():
+    """The PR #331 review repro: A's unclosed ``` pairs with the closer of
+    B's body fence, protecting B's front matter -- B is suppressed, and that
+    must be LOUD: one warning naming B's opening `---` line, saying fenced
+    front matter is example text and an earlier fence is probably unclosed.
+    (A phantom item is loud today via duplicate-id errors; a vanished item
+    must not be silent.)"""
+    blocks, errors, _dups, warnings = parse.md_front_matter_blocks(SWALLOW.split("\n"))
+    assert errors == []
+    assert [b[2]["id"] for b in blocks] == ["A-1"]
+    assert len(warnings) == 1
+    message, line = warnings[0]
+    assert line == 9  # B's opening `---`
+    assert "fenced code block" in message
+    assert "unclosed" in message
+
+
+def test_unclosed_fence_then_item_with_no_fence_loads_silently():
+    """Variant: B carries no fence at all, so A's opener has no closer,
+    protects nothing, and B splits -- exactly as on main, no warning."""
+    text = (
+        "---\nid: A-1\ntype: log\n---\n"
+        "Body of A with an UNCLOSED fence:\n"
+        "```python\n"
+        "x = 1\n"
+        "\n"
+        "---\nid: B-1\ntype: log\n---\n"
+        "Plain body, no fence.\n"
+    )
+    blocks, errors, _dups, warnings = parse.md_front_matter_blocks(text.split("\n"))
+    assert errors == []
+    assert [b[2]["id"] for b in blocks] == ["A-1", "B-1"]
+    assert warnings == []
+
+
+def test_unclosed_fence_with_two_later_items_warns_once_and_keeps_the_third():
+    """Variant: A's unclosed fence swallows B (which has a body fence, the
+    closer), and C behind it splits. B's suppression is warned once; C is
+    untouched -- nothing beyond the swallowed block changes."""
+    text = SWALLOW + "\n---\nid: C-1\ntype: log\n---\nPlain body C.\n"
+    blocks, errors, _dups, warnings = parse.md_front_matter_blocks(text.split("\n"))
+    assert errors == []
+    assert [b[2]["id"] for b in blocks] == ["A-1", "C-1"]
+    assert len(warnings) == 1
+    assert warnings[0][1] == 9  # B's opening `---`
+
+
+def test_unclosed_fence_swallowing_reports_through_the_loader(tmp_path):
+    """End to end: the swallowed item surfaces the warning on the normal
+    diagnostic channel (file:line), so `refdes check` says it out loud."""
+    project, _path = _project(
+        tmp_path,
+        "swallow",
+        "---\nid: DEC-FENCE-001\ntype: decision\ntitle: Solo\n---\n"
+        "Body of A with an UNCLOSED fence by mistake:\n"
+        "```python\nx = 1\n\n"
+        "---\nid: DEC-FENCE-002\ntype: decision\ntitle: Second\n---\n"
+        "Body of B with a normal fence:\n```text\nhello\n```\n",
+    )
+    assert [d.message for d in project.errors] == []
+    assert [item.id for item in project.items.values()] == ["DEC-FENCE-001"]
+    msgs = [d.message for d in project.warnings]
+    assert any("fenced code block" in m and "unclosed" in m for m in msgs), msgs
+    locs = [d.line for d in project.warnings if "fenced code block" in d.message]
+    assert locs == [10]  # the `---` opening the swallowed item's front matter
 
 
 # --------------------------------------------------------------------- end to end
@@ -143,7 +238,8 @@ def test_backtick_in_info_string_is_not_a_fence_opener():
 def test_r10_x1_repro_pasted_front_matter_example_stays_inert(tmp_path):
     """The exact R10-X1 repro: pasting the docs/checks.md front-matter example
     as a ```yaml fence in an item body must not mint a phantom item -- no
-    duplicate id, no fenced `checks:` read as a live field."""
+    duplicate id, no fenced `checks:` read as a live field -- and the paste
+    is announced with one warning."""
     project, _path = _project(
         tmp_path,
         "fenced",
@@ -158,6 +254,8 @@ def test_r10_x1_repro_pasted_front_matter_example_stays_inert(tmp_path):
     body = project.item_by_id("DEC-FENCE-001").body
     assert "id: DEC-FENCE-001" in body  # the fenced text is verbatim body prose
     assert project.item_by_id("DEC-FENCE-001").fields.get("checks") is None
+    msgs = [d.message for d in project.warnings]
+    assert sum("fenced code block" in m for m in msgs) == 1
 
 
 def test_only_the_later_section_has_a_fenced_example(tmp_path):
@@ -190,7 +288,8 @@ def test_load_does_not_rewrite_the_file(tmp_path):
 
 def test_list_file_body_is_unaffected(tmp_path):
     """The list-file spelling (`body: |` carrying a fenced front-matter
-    example) parses exactly as today: one item, body verbatim."""
+    example) parses exactly as today: one item, body verbatim, no warning
+    (the list parser never runs the Markdown splitter)."""
     shutil.copy(os.path.join(REPO, "refdes-project.yaml"), tmp_path / "refdes-project.yaml")
     shutil.copy(os.path.join(REPO, "refdes-schema.yaml"), tmp_path / "refdes-schema.yaml")
     items = tmp_path / "items" / "decisions"
@@ -208,3 +307,4 @@ def test_list_file_body_is_unaffected(tmp_path):
     assert [d.message for d in project.errors] == []
     assert [item.id for item in project.items.values()] == ["DEC-LIST-001"]
     assert "---" in project.item_by_id("DEC-LIST-001").body
+    assert [d.message for d in project.warnings] == []

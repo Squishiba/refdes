@@ -67,7 +67,36 @@ byte-for-byte round-trip after load, list-file `body: |` unaffected.
   delimiters-included shape, which previously split and went live. No
   statement made false.
 
+## Review round (PR #331, head b2785d2) — silent-swallow regression
+
+The reviewer's probe (.scratch-style, their x1probe): item A's body carries
+an UNCLOSED ` ```python ` fence; item B follows with real front matter and a
+closed ` ```text ` fence in its own body. A's opener pairs with B's fence's
+*closer* as its own close, so my protection swallowed B's whole item — main
+loads A+B, b2785d2 loaded only A, with no diagnostic. A phantom (the
+original bug) is loud; a vanished item is silent. Invariant adopted: no item
+that loads today may silently stop loading.
+
+Decision: a fix cannot tell a pasted example from a swallowed item (they are
+structurally identical), so suppression is made LOUD. `md_front_matter_blocks`
+gains a fourth return, `fence_warnings`: every fenced `---` with a key-shaped
+line after it (the pairing loop's opener range) reports
+`FENCED_FRONT_MATTER_WARNING` at its line; `parse_markdown_file` reports it
+via `project.warn` (lowest severity, file:line). A deliberate paste costs
+one warning — accepted, stated in docs/authoring.md and the changelog
+fragment. All 5 call sites unpack the 4-tuple (patcher/revise x2/serve-edit
+ignore warnings; the loader reports).
+
+New tests (red on b2785d2, 14 failing after the contract change): exact
+repro (1 block, 1 warning at B's `---`), B-with-no-fence (splits silently,
+unchanged), unclosed-in-A + two later items (B warned, C loads), e2e through
+`load_items` (warning on the normal channel, A loads, B suppressed), and the
+paste case asserts its one warning; the split-pins assert zero warnings.
+Scan re-run: items/ still 0 fenced `---` → repo's own project loads with 0
+new warnings (`refdes check`: 0 "fenced code block" lines). Full suite
+4038 passed, 2 skipped; ruff E9,F clean on all touched files.
+
 ## Status
 
-Finished. Full suite: 4034 passed, 2 skipped. `ruff check <touched> --select
+Finished. Full suite: 4038 passed, 2 skipped. `ruff check <touched> --select
 E9,F` clean. PR opened, not merged.

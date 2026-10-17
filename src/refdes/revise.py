@@ -913,7 +913,7 @@ def _parse_item_count(rel: str, text: str) -> int | None:
             # Same splitter parse_markdown_file uses, so body prose behind a
             # `---` thematic break is never mistaken for front matter and
             # multi-item files judge the way they load.
-            blocks, errors, _duplicates = parse.md_front_matter_blocks(lines)
+            blocks, errors, _duplicates, _fence_warnings = parse.md_front_matter_blocks(lines)
             if errors or not blocks:
                 return None
             return sum(
@@ -1082,7 +1082,7 @@ def _stale_mapped_names(rel: str, text: str, mapping: Mapping) -> list[str]:
 
     try:
         if rel.endswith(".md"):
-            blocks, errors, _duplicates = parse.md_front_matter_blocks(
+            blocks, errors, _duplicates, _fence_warnings = parse.md_front_matter_blocks(
                 text.replace("\r\n", "\n").split("\n")
             )
             if errors:

@@ -107,7 +107,11 @@ with nothing after it; a line inside it that looks like a fence with an info str
 (```python) does not close it. So pasting a front-matter example into an item's
 body as a ` ```yaml ` fence — delimiters included — stays exactly what it is: an
 example on the page, not a second live item. A fence opener that is never closed
-protects nothing; a `---` after it splits as usual.
+protects nothing; a `---` after it splits as usual. Front matter inside a fence is
+announced — one warning at the `---` line, naming the file — because the parser
+cannot tell a pasted example from an item hidden behind an unclosed earlier fence:
+an example you pasted on purpose costs one warning, and a swallowed item is never
+silent.
 
 An optional leading block whose only key is `defaults:` applies to every item that
 follows, the same way `defaults:` works in a list file:
