@@ -558,6 +558,218 @@ def test_init_explains_the_serve_write_lock_it_ignores(tmp_path):
     assert "per-machine" in comment
 
 
+# ---------------- init's coverage question inside a git repository (DOC-REMEDY-018)
+#
+# Inside a repository "does something already cover this path?" is git's
+# question, not ours: a `.gitignore` carrying `.vscode/*` then `!.vscode/*`
+# states the project's intent to TRACK the editor settings, and the literal
+# spelling set was blind to the glob pair, so init appended its own line and
+# git's last-match rule made it win. These tests pin git as the answer inside
+# a repository, and the unchanged literal set outside one.
+
+
+def _git_repo(path):
+    """`git init` a test directory, skipping the test where git is absent --
+    the same convention the existing check-ignore tests use."""
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not on PATH")
+    subprocess.run([git, "init", "-q", str(path)], check=True)
+    return git
+
+
+def test_init_writes_no_block_where_git_reads_the_negated_glob_as_the_project_having_decided(
+    tmp_path,
+):
+    """The reproduced finding: `.vscode/*` then `!.vscode/*` is an explicit
+    intent to track the editor settings. Git reports the negation as the
+    winning match, and appending our line after it would out-rank that
+    intent by the last-match rule -- so init must append nothing."""
+    git = _git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text(".vscode/*\n!.vscode/*\n", encoding="utf-8")
+    scaffold_mod.init(str(tmp_path))
+    assert ".vscode/settings.json" not in _gitignore_patterns(tmp_path / ".gitignore")
+    probe = subprocess.run(
+        [
+            git, "-C", str(tmp_path), "check-ignore", "--no-index", "-v", "--",
+            ".vscode/settings.json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 0 and "!.vscode/*" in probe.stdout, probe.stdout
+    # the author's position still wins in git's own terms: the file is not
+    # ignored, `git add` can stage it
+    add = subprocess.run(
+        [git, "-C", str(tmp_path), "add", "-n", "--", ".vscode/settings.json"],
+        capture_output=True,
+        text=True,
+    )
+    assert add.returncode == 0, add.stdout + add.stderr
+
+
+def test_init_adds_no_block_for_a_bare_basename_git_already_ignores(tmp_path):
+    """A bare `settings.json` line ignores the file at any depth -- git says
+    so, and the literal set, which only knows the whole path spelled out,
+    used to miss it and append a duplicate position."""
+    _git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text("settings.json\n", encoding="utf-8")
+    scaffold_mod.init(str(tmp_path))
+    assert ".vscode/settings.json" not in _gitignore_patterns(tmp_path / ".gitignore")
+
+
+@pytest.mark.parametrize(
+    "gitignore,appended",
+    [
+        # the directory ignored and then explicitly un-ignored: the file
+        # path alone matches nothing in this shape (git's `!dir/` rule), so
+        # init asks git about the parent directory too -- and the winning
+        # `!.vscode/` is the project having taken a position on the
+        # contents. Appending ours after it would re-ignore by the
+        # last-match rule exactly the file the author chose to track.
+        (".vscode/\n!.vscode/\n", False),
+        ("!.vscode/\n", False),
+        # the whole directory ignored: contents included, nothing to add
+        (".vscode/\n", False),
+    ],
+)
+def test_init_asks_git_about_the_negated_whole_directory(tmp_path, gitignore, appended):
+    _git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text(gitignore, encoding="utf-8")
+    scaffold_mod.init(str(tmp_path))
+    assert (".vscode/settings.json" in _gitignore_patterns(tmp_path / ".gitignore")) is appended
+
+
+def test_init_appends_every_block_in_a_repo_that_ignores_none_of_them(tmp_path):
+    """Repo control: git being authoritative is not an excuse to stop
+    appending -- a repository that has taken no position on the five paths
+    still gets all five blocks, in the same order, in its nested project."""
+    repo = tmp_path / "repo"
+    proj = repo / "hardware" / "board-a"
+    proj.mkdir(parents=True)
+    _git_repo(repo)
+    (proj / ".gitignore").write_text("_site/\nnode_modules/\n", encoding="utf-8")
+    scaffold_mod.init(str(proj))
+    assert _gitignore_patterns(proj / ".gitignore") == [
+        "_site/",
+        "node_modules/",
+        ".vscode/settings.json",
+        ".refdes/copies/",
+        ".refdes/schema.json",
+        ".refdes/sealing-optin.json",
+        ".refdes-write.lock",
+    ]
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permission bits: chmod 0o444 does not stop Windows (or root) "
+    "from writing the file, so the unwritable case cannot be produced that way",
+)
+def test_init_proceeds_with_a_readonly_gitignore_whose_positions_git_reads(tmp_path):
+    """The #231 refusal is for files that genuinely miss an entry. A
+    read-only `.gitignore` git itself reads as covering every wanted path
+    -- here by a negated glob (`!.vscode/*`, which the literal set never
+    read as covering, so main refused the init this test pins: exit 2 over
+    an append that is never needed) -- has nothing to append: init must
+    exit 0 with the file untouched, nothing half-created."""
+    _git_repo(tmp_path)
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text(
+        ".vscode/*\n!.vscode/*\n.refdes/\n.refdes-write.lock\n", encoding="utf-8"
+    )
+    before = gitignore.read_bytes()
+    gitignore.chmod(0o444)
+    try:
+        scaffold_mod.init(str(tmp_path))
+    finally:
+        gitignore.chmod(0o644)
+    assert (tmp_path / "refdes-project.yaml").exists()
+    assert gitignore.read_bytes() == before
+
+
+def test_init_refuses_cleanly_a_readonly_gitignore_missing_an_entry(tmp_path):
+    """And the other arm of the same preflight: a read-only file that
+    genuinely misses an entry still refuses with exit 2, the file and the
+    rest of the directory untouched -- git being the judge changed which
+    files are missing an entry, not what happens when one is."""
+    _git_repo(tmp_path)
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text("!.vscode/*\n.refdes/\n", encoding="utf-8")
+    before = gitignore.read_bytes()
+    gitignore.chmod(0o444)
+    try:
+        with pytest.raises(SchemaError, match="not writable"):
+            scaffold_mod.init(str(tmp_path))
+    finally:
+        gitignore.chmod(0o644)
+    assert not (tmp_path / "refdes-project.yaml").exists()
+    assert not (tmp_path / ".vscode").exists()
+    assert gitignore.read_bytes() == before
+
+
+def test_init_falls_back_to_the_literal_spellings_when_git_cannot_be_asked(
+    tmp_path, monkeypatch
+):
+    """A machine without git (or with one too old for the flag) must not
+    crash init and must keep today's answers: inside what WOULD be a
+    repository, with every entry spelled out literally, a git that cannot
+    run leaves the literal set in charge and the file untouched."""
+    _git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text(
+        ".vscode/settings.json\n.refdes/copies/\n.refdes/schema.json\n"
+        ".refdes/sealing-optin.json\n.refdes-write.lock\n",
+        encoding="utf-8",
+    )
+
+    def no_git(*args, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory: 'git'")
+
+    monkeypatch.setattr(scaffold_mod.subprocess, "run", no_git)
+    scaffold_mod.init(str(tmp_path))
+    assert (tmp_path / "refdes-project.yaml").exists()
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == (
+        ".vscode/settings.json\n.refdes/copies/\n.refdes/schema.json\n"
+        ".refdes/sealing-optin.json\n.refdes-write.lock\n"
+    )
+
+
+def test_init_does_not_treat_a_double_slash_spelling_as_covering(tmp_path):
+    """`.vscode//*` LOOKS like the glob pair's directory, and a spellings
+    list once treated it as covering, but git matches nothing to it: the
+    file stays unignored and init must say so by appending. (The
+    windows-latest CI failure of the replaced PR lived in exactly this
+    shape -- a spelling accepted that git does not accept.)"""
+    _git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text(".vscode//*\n", encoding="utf-8")
+    scaffold_mod.init(str(tmp_path))
+    assert ".vscode/settings.json" in _gitignore_patterns(tmp_path / ".gitignore")
+
+
+def test_init_asks_git_about_a_nested_project_path_built_from_parts(tmp_path):
+    """Windows-safety as a test, not a comment: every path here is built
+    from parts (no separator appears in a literal), the project sits at
+    depth inside a repository whose root names a space, and the question
+    init asks git must reach git with git's own slashes. The author's
+    negation must survive init on every platform CI runs."""
+    repo = tmp_path / "a repo with space"
+    proj = repo / "hardware" / "board-a"
+    proj.mkdir(parents=True)
+    git = _git_repo(repo)
+    (proj / ".gitignore").write_text(".vscode/*\n!.vscode/*\n", encoding="utf-8")
+    scaffold_mod.init(str(proj))
+    patterns = _gitignore_patterns(proj / ".gitignore")
+    assert ".vscode/settings.json" not in patterns
+    assert ".refdes/schema.json" in patterns
+    rel = "/".join([*proj.relative_to(repo).parts, ".vscode", "settings.json"])
+    probe = subprocess.run(
+        [git, "-C", str(repo), "check-ignore", "--no-index", "--", rel],
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 1, "the author's negation did not survive init"
+
+
 def test_init_adds_the_entry_for_an_unrelated_similar_pattern(tmp_path):
     """Guards the coverage check against matching on substring rather than
     on a whole pattern line."""
