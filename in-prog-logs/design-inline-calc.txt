@@ -356,8 +356,12 @@ inline-calc.md was approved and is not touched.
 
 Counted-spans methodology
 -------------------------
-The 39-span figure in §3.1/Q1 was produced by this command (run in the project
-venv from the repository root):
+The 39-span figure below was produced by this command (run in the project venv
+from the repository root). Historical note: it was cited by §3.1/Q1 of the
+pre-rescope draft (e24c913); the rescoped doc dropped the figure -- its trigger
+section rests on the probe instead, and old Q1 is now the slice's open question
+4, tagged "(was Q1)".
+
 
 ```bash
 python - <<'PY'
@@ -483,7 +487,9 @@ Progress:
 - Moved the fill command, live editor updates and undo, one-unknown solve,
   E-series suggestions, multi-output calculators and validity conditions,
   version lockfile, shipped library, form panel, deferred decisions, and old
-  P2-P4 direction into the 123-line docs/design/inline-calc-later.md. It is
+  P2-P4 direction into the 126-line docs/design/inline-calc-later.md. (Count
+  re-verified after the Polish 2 pass; it is 126, not 123, at the current
+  head -- the polish and polish-2 rounds each added table rows.) It is
   explicitly not under review.
 - Did not edit docs/index.md: it maps public docs, while both design pages
   live under docs/design/. Ran the requested docs checks: docs-anchor tests
@@ -532,3 +538,51 @@ Done in the commit that follows f4974bc on this branch.
    under "Tests run" is left as-is (reviewer rated it informational).
 5. Tests: the two commands under "Tests run", re-run for this pass, with
    the same results.
+
+Polish 2 (Qwen, 2026-10-16)
+---------------------------
+Second review-fix pass on head a79529b; two free-model reviewers requested
+changes. Each finding was verified against the cited file/command before
+acting; all four doc findings and both log findings checked out. Landed in
+the commit that follows a79529b (this section cannot cite its own sha).
+1. F1: section 1's malformed-trigger rule is now labelled "Recommended"
+   with a pointer to open question 4, matching section 2's "Recommended"
+   signalling; OQ4 records that the rule reverses the old draft's Q1(a)
+   (verified in e24c913: old Q1(a) left grammar-mismatched spans as
+   ordinary code). The slice keeps exactly four open questions, so the PR
+   body's "Open questions ... four ... each has a recommended default"
+   sentence stays true.
+2. F2: added the old Q3 (scope) and Q4 (calc_hash) rows to the later doc's
+   mapping table, marked "resolved into the first slice" (old Q3(a) =
+   section 1 source-order item-wide scope; old Q4(a) = section 3 calc_hash
+   row), following the existing Q5 row's pattern. The PR body's sentence
+   "All other earlier questions are deferred" is false for Q3/Q4; the
+   corrected paragraph is written to .scratch/pr250-body-fix.md, not
+   applied to the PR body (per instruction). That file also carries the
+   updated doc line counts (main doc 183, later doc 126) for the same
+   paragraph's "now 176 lines" claim, which this pass makes stale.
+3. F3: section 2 now states a recommended tie rule -- round the computed
+   nominal to the stored literal's last written decimal place on the
+   decimal text, halves away from zero, accept on equality. Stated inline
+   rather than as a fifth open question, keeping the count at four.
+4. F4: the unit-assertion paragraph now distinguishes label from assert
+   for source(): verified src/refdes/calc.py:1616-1618 ("The declared unit
+   LABELS the file's bare number ... this is not convert_value's
+   dimensionality assertion") and docs/math.md, "Reading a value from a
+   source file" ("It *labels* the file's bare number"), both re-read at
+   this head.
+5. This log: the "Counted-spans methodology" pointer no longer cites
+   §3.1/Q1 (sections the rescoped doc dropped) -- it now says the figure's
+   citing section existed only in the pre-rescope draft e24c913 and the
+   rescope dropped the figure in favour of the probe. The later-doc line
+   count at the rescope section is updated 123 -> 126, re-counted with
+   wc -l after item 2's two rows (head a79529b had it at 124; the count
+   appears at that one place only -- grep-verified; the task's "both
+   places" premise found no second occurrence). The rescope section's
+   "839 to 176 lines" is left as the historical figure for f4974bc; the
+   main doc is 183 lines after this pass.
+6. Tests: `PYTHONPATH=$PWD/src
+   /home/jorb/work/venv-refdes/bin/python -m pytest tests/test_docs_anchors.py
+   -q` and `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python
+   docs-site/gen_examples.py --check`, run for this pass; results recorded
+   in the final report.

@@ -110,6 +110,8 @@ their own review.
 
 | Earlier question | Direction recorded, still open |
 |---|---|
+| Q3, inline scope | Not deferred here: resolved into the first slice — its section 1 assigns inline `:=` into the item-wide calc scope in source order (old Q3(a)). |
+| Q4, `calc_hash` | Not deferred here: resolved into the first slice — its section 3 `calc_hash` row extends the probe over inline name, RHS and unit (old Q4(a)). |
 | Q5, severity | Not deferred here: resolved into the first slice — its section 2 severities and its open question Q2 (was Q5). |
 | Q6-Q7, command | `refdes inline-calc fill`; refuse historical edits and report them. |
 | Q8, editor undo | Try native text insertion, test undo in supported browsers; retain manual Fill fallback. |

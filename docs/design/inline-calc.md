@@ -44,13 +44,13 @@ Later directions are parked in [inline-calc-later.md](inline-calc-later.md).
 
 The first slice recognizes a single-backtick Markdown code span in a **local
 item body**, outside fenced code. It is inline calc if its content contains an
-unquoted `:=`. Once triggered, a malformed span is an error at its source line;
-it cannot fall back to ordinary code. A span without `:=`, such as
-`` `V_cl = 0.8 V` ``, remains ordinary code. Multi-backtick spans and page
-bodies are outside this slice. This trigger is proposed; the probe above shows
-it is not implemented today. Existing item-body examples that literally use
-`:=` in a single-backtick span need a multi-backtick span to stay ordinary
-code when this syntax lands.
+unquoted `:=`. **Recommended** (open question 4): once triggered, a malformed
+span is an error at its source line; it cannot fall back to ordinary code. A
+span without `:=`, such as `` `V_cl = 0.8 V` ``, remains ordinary code.
+Multi-backtick spans and page bodies are outside this slice. This trigger is
+proposed; the probe above shows it is not implemented today. Existing
+item-body examples that literally use `:=` in a single-backtick span need a
+multi-backtick span to stay ordinary code when this syntax lands.
 
 ```text
 span          = "`" name wsp ":=" wsp rhs [wsp "|" wsp unit]
@@ -82,7 +82,10 @@ The unit assertion belongs between the expression and stored result, mirroring
 `src/refdes/calc.py:evaluate_block`. It checks dimensionality and pins the
 evaluated value's display unit. The stored literal may use any compatible
 unit; verification converts it before comparing. For `source()` the assertion
-is mandatory, as in `src/refdes/calc.py:_evaluate_source_line`.
+is mandatory, as in `src/refdes/calc.py:_evaluate_source_line`; there, per that
+function's comment (`src/refdes/calc.py:1616-1618`) and `docs/math.md`
+("Reading a value from a source file"), the unit **labels** the file's bare
+number -- no dimensionality check runs on the file's value.
 
 An inline `:=` assigns into the same item-wide environment as calc fences, in
 **source order across spans and fences**. A later fence can use the inline
@@ -114,8 +117,10 @@ nominal within half one unit of that place after unit conversion. Thus
 Compare numerically, never by formatting text with `project.sigfigs`: that
 setting controls display formatting (`src/refdes/calc.py:format_value`) and
 must not change whether stored source is true. A malformed or nonfinite
-stored literal is an error. Boundary ties should use one documented rounding
-rule, with tests at the half-place boundary.
+stored literal is an error. **Recommended tie rule:** at a boundary tie, round
+the computed nominal to the stored literal's last written decimal place on the
+decimal text, rounding halves away from zero, and accept only when the rounded
+value equals the stored literal; carry tests at the half-place boundary.
 
 | Condition | Proposed severity and message shape |
 |---|---|
@@ -168,8 +173,10 @@ without that probe stay silent in the verdict-change signal
    stored presentation (`docs/math.md`, "Display units").
 4. **Triggered incomplete text (was Q1):** Should a span with `:=` but no valid result
    be an error? **Recommended default:** yes; D1 requires a verified stored
-   result. The editor may show this as an in-progress diagnostic, but no
-   editor behavior is specified here.
+   result. This reverses the old draft's Q1(a), which left spans not matching
+   the grammar as ordinary code; this slice treats `:=` as declared intent
+   that must never be silently ignored. The editor may show this as an
+   in-progress diagnostic, but no editor behavior is specified here.
 
 Implementation and review of solving, suggestions, fill/refresh tooling,
 live editor changes, calculator definitions and lockfiles, and the form panel
