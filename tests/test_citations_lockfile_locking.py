@@ -395,9 +395,10 @@ def test_the_lockfile_header_names_both_of_the_files_writers():
     # The header is comment bytes inside users' committed lockfiles, so what
     # it says about who writes the file is a claim that has to stay true: the
     # two are `refdes fetch` and the editor's accept (docs/design/
-    # editor-source-picker.md §4 -- `serve/edit.py`'s `_accept_pins` writes
-    # the whole file through `lockfile_text`, and `save_lockfile`'s docstring
-    # says so too), and the header used to read "Written only by
+    # editor-source-picker.md §4 -- `serve/edit.py`'s `_accept_pins` computes
+    # the whole file through `lockfile_text` and stages it in memory; the
+    # save's landing section writes it, and `save_lockfile`'s docstring
+    # names the accept as a writer), and the header used to read "Written only by
     # `refdes fetch`." Nothing else pinned the header text, so this pins it.
     header = citations_mod.lockfile_text({})
     assert "Written only by" not in header

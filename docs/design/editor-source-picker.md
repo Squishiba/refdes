@@ -200,9 +200,10 @@ The sequence, inside the existing per-project write lock
 3. For each `{path, key}` the request names: re-authorize with
    `citations.authorize_source_path()` against the **server's** copy of the
    item, then extract that key from the live file with the reader. The request
-   carries paths and keys only — never a value (§5, §6). Steps 3–4 read the
-   lockfile fresh and stage its new whole-file bytes **in memory**, under one
-   section of `write_lock.project_write_lock`.
+   carries paths and keys only — never a value (§5, §6). The lockfile read
+   and the staging of its new whole-file bytes **in memory** run under one
+   section of `write_lock.project_write_lock`; step 4 consumes the staged
+   bytes.
 4. Load the candidate with `overlay={item_path: new_text}` and
    `lockfile_overlay=` the staged bytes — the loader reads the lockfile the
    save is about to write, so the new `source()` line resolves and the delta

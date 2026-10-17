@@ -83,7 +83,7 @@ def load_tree(
     (see `Project.lockfile_overlay`).
     """
     if (overlay or lockfile_overlay is not None) and write:
-        raise ValueError("a source overlay can only be loaded with write=False")
+        raise ValueError("an overlay can only be loaded with write=False")
     project = load_project(config_path=config_path)
     if overlay:
         project.source_overlay = {

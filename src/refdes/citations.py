@@ -1409,8 +1409,10 @@ def save_lockfile(project: Project, records: dict[str, dict]) -> None:
     read-modify-write: `fetch_all` runs inside `cli.main`'s
     `with project_write_lock(...)`, which wraps every command but
     `serve`, `init`, `new` and `schema` and any read-only
-    run, and the editor's accept takes it around its own read and replace
-    (`serve/edit.py`'s `_accept_pins`). A caller that
+    run, and the editor's accept takes it in two sections -- one that reads
+    the file and stages the replacement bytes in memory
+    (`serve/edit.py`'s `_accept_pins`), one that writes them
+    (`_land_lockfile`). A caller that
     reads the file, decides from what it read, and then writes it here without
     that lock is racing whoever else is writing it.
     """
@@ -2681,7 +2683,8 @@ def fetch_all(
     project-wide `project_write_lock` that `cli.main` runs the command inside
     (its `with project_write_lock(...)`) -- so its
     read-modify-write is serialised against every other writer of the file,
-    including the editor's accept and its rollback. That lock is deliberately
+    including the editor's accept (its landing section restores inside the
+    same section as the write it undoes). That lock is deliberately
     wider than this function's own file
     update: it also covers the load's source rewrites and the id ledger, and it
     therefore spans the network wait for a remote citation. Narrowing it to
