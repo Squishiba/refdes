@@ -8,7 +8,7 @@ below under the round headings.
 Owner decisions (as relayed by the orchestrator from the task brief)
 --------------------------------------------------------------------
 The three decisions below are the owner's constraints for this design. The
-durable record is the "Decision recap" section of docs/design/inline-calc.md
+durable record is the "Owner decisions" section of docs/design/inline-calc.md
 and PR #250's description, which reproduce them; they are reproduced here as
 well. They were originally relayed in the task brief (`.scratch/task/TASK.txt`),
 which is gitignored and not part of the repo, so it is not cited as a durable
@@ -19,8 +19,9 @@ D1. Results are stored in the file text and verified by check/build.
     editor (or a fill command) writes. If inputs change later, check/build report
     the stale number ("says 4.436 V, now computes 4.52 V") instead of silently
     changing it.
-    (The design doc expresses this owner sketch as
-    `Vout := 0.8 V*(1+Rtop/Rbot) = 4.436 V` under the grammar in §3.2.)
+    (The design doc records this as D1 under "Owner decisions"; its section 1
+    example spells the sketch out with the unit slot:
+    `Vout := 0.8 V * (1 + Rtop/Rbot) | V = 4.436 V`.)
 D2. The preview pane stays, as an optional "as published" view.
 D3. No code execution. The existing restricted calc evaluator (src/refdes/calc.py)
     is the only evaluator. The editor gets live results from refdes serve (which
@@ -329,10 +330,11 @@ and chunk-2 (log) reviews. What it did:
    "Tests run"). No code was changed; no sabotage applies to a docs-only
    round.
 
-Round 10 (log-only, Qwen, addressed in commit <pending>)
+Round 10 (log-only, Qwen, addressed in commit e49035f)
 ---------------------------------------------------------
 Log-only round addressing the round-9 chunk-2 review of this log (reviewer
-938630a1). docs/design/inline-calc.md was approved and is not touched.
+938630a1, a Paseo reviewer agent id, not a git commit). docs/design/
+inline-calc.md was approved and is not touched.
 1. Aligned round labels with the commit history: the handoff section is now
    "Handoff (round 8)" (commit e24c913 is titled "address round-8 review
    findings ... (handoff round)"); cross-references updated. All round
@@ -458,10 +460,10 @@ Exact commands (run from the repository root in the project venv
 No src/ or tests/ changes were made; this is a design-only PR.
 No changelog.d fragment is needed because the change is not user-visible yet.
 
-Rescope (Sol, 2026-10-16)
--------------------------
+Rescope (Sol, 2026-10-16, commit f4974bc)
+------------------------------------------
 Status: finished for this design pass; PR #250 description updated by REST PATCH.
-The commit and push of this pass are its publication step.
+The commit and push of this pass were its publication step.
 
 Progress:
 - Started with a clean `design-inline-calc` worktree. Read
@@ -502,3 +504,31 @@ Difficulties and corrections:
 - The first PR read failed under sandbox network restrictions and succeeded
   with approved escalated access. The REST PATCH succeeded. No other branch
   or worktree was changed.
+
+Polish (Qwen, 2026-10-16)
+-------------------------
+Addressed the review of the rescoped docs: chunk 1 (the two design docs)
+approved with three minor findings, chunk 2 (this log) asked for changes.
+Done in the commit that follows f4974bc on this branch.
+1. Re-ran the baseline probe fresh under .scratch/inline-calc-probe-polish/
+   before writing anything: `refdes init` in an empty directory printed
+   `standard: hardware@3`; with one `log` item whose body is the
+   single-backtick span `Vout := 2 V * 2 = 5 V`, `refdes check` (this
+   worktree's src on PYTHONPATH) reported "1 items, 0 errors, 0 warnings",
+   exit 0. Replaced both `.scratch/inline-calc-probe/` citations in the
+   design docs with short inline probe descriptions.
+2. Tagged the slice's four open questions with their old-draft numbers
+   (1 was Q2, 2 was Q5, 3 was Q17, 4 was Q1; mapping read from the old
+   draft at e24c913), and added a later-doc table row noting old Q5
+   resolved into the slice's section 2 / its open question Q2. The later
+   doc's Q6-Q16 numbering is untouched.
+3. Re-wrapped the ragged paragraph ending the slice's section 3.
+4. This log: the header now points at the "Owner decisions" section and
+   the section 1 example (it cited "Decision recap" and §3.2, both gone
+   after the rescope); round 10 cites commit e49035f; 938630a1 is
+   labelled a Paseo reviewer agent id, not a git commit (verified absent
+   from the object store); the rescope heading cites f4974bc and its
+   publication sentence is past tense. The machine-specific venv path
+   under "Tests run" is left as-is (reviewer rated it informational).
+5. Tests: the two commands under "Tests run", re-run for this pass, with
+   the same results.

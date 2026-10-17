@@ -93,8 +93,8 @@ would use the current definition; pinned calls the recorded one. The `::`
 separator avoids the existing `DISPLAY-ID@key` spelling. The earlier draft
 suggested a shipped standard calculator library only after project-defined
 calculators prove the API. The current bundled standard is `hardware@3` and
-is unreleased (`CHANGELOG.md` [Unreleased]; `refdes init` in
-`.scratch/inline-calc-probe/` printed `standard: hardware@3`).
+is unreleased (`CHANGELOG.md` [Unreleased]; a fresh `refdes init` in an empty
+directory printed `standard: hardware@3`).
 
 ## Editor form panel
 
@@ -110,6 +110,7 @@ their own review.
 
 | Earlier question | Direction recorded, still open |
 |---|---|
+| Q5, severity | Not deferred here: resolved into the first slice — its section 2 severities and its open question Q2 (was Q5). |
 | Q6-Q7, command | `refdes inline-calc fill`; refuse historical edits and report them. |
 | Q8, editor undo | Try native text insertion, test undo in supported browsers; retain manual Fill fallback. |
 | Q9-Q10, solve | Require explicit bracket; keep E-series suggestions in UI/CLI. |

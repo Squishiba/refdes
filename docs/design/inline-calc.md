@@ -15,9 +15,9 @@ Later directions are parked in [inline-calc-later.md](inline-calc-later.md).
 
 ## Current baseline, verified for this proposal
 
-- `refdes check` on `.scratch/inline-calc-probe/` accepted a single-backtick
-  `` `Vout := 2 V * 2 = 5 V` `` despite the deliberately wrong result
-  (0 errors). Inline-calc
+- Probe: in a fresh `refdes init` project holding one `log` item whose body
+  is the single-backtick span `` `Vout := 2 V * 2 = 5 V` ``, `refdes check`
+  reported 0 errors despite the deliberately wrong result. Inline-calc
   evaluation is therefore **proposed**, not current behavior.
 - `src/refdes/build.py:_run_item_calcs` evaluates calc fences with one item
   environment and one duplicate-name registry. `src/refdes/calc.py:evaluate_block`
@@ -151,22 +151,22 @@ definition for affected items and needs a new hash-format version (current
 `HASH_FORMAT` is 5 in `src/refdes/build.py`). Reconstruct old hashes through
 `src/refdes/build.py:hash_payload_builder` and `src/refdes/lifecycle.py` when
 comparing existing baselines and seals. Existing no-inline items should retain
-their old item hash. The
-`calc_hash` extension is separate: old baselines without that probe stay
-silent in the verdict-change signal (`src/refdes/lifecycle.py:_stale_arithmetic`).
+their old item hash. The `calc_hash` extension is separate: old baselines
+without that probe stay silent in the verdict-change signal
+(`src/refdes/lifecycle.py:_stale_arithmetic`).
 
 ## Open questions for this slice
 
-1. **Precision:** Is half of the stored literal's last written place the right
+1. **Precision (was Q2):** Is half of the stored literal's last written place the right
    acceptance window, including coarse literals such as `4 V`? **Recommended
    default:** yes; authors choose visible precision, and `4.0 V` tightens it.
-2. **Freshness gate:** Should stale editable results fail release while old
+2. **Freshness gate (was Q5):** Should stale editable results fail release while old
    sealed or captured results only warn? **Recommended default:** yes, using
    `release_gate.inline_calc_results` with `{release: true, revision: false}`.
-3. **Unit slot:** Should `| unit` precede `= result`? **Recommended default:**
+3. **Unit slot (was Q17):** Should `| unit` precede `= result`? **Recommended default:**
    yes; it matches the landed calc line and keeps assertion independent of
    stored presentation (`docs/math.md`, "Display units").
-4. **Triggered incomplete text:** Should a span with `:=` but no valid result
+4. **Triggered incomplete text (was Q1):** Should a span with `:=` but no valid result
    be an error? **Recommended default:** yes; D1 requires a verified stored
    result. The editor may show this as an in-progress diagnostic, but no
    editor behavior is specified here.
