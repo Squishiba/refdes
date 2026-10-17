@@ -384,22 +384,75 @@ def _check_ignore_ignored_state(toplevel: str, relpath: str) -> str | None:
     return "tracked" if negated else "local-ignored"
 
 
-def vscode_settings_state(target_dir: str) -> str:
-    """Where `.vscode/settings.json` stands with the PROJECT's rules, for
-    `cmd_init`'s paren (R11-F2): one of `"project-ignored"`, `"tracked"`,
-    `"local-ignored"` (only the author's machine ignores it -- init's
-    line is what makes every clone ignore it), `"unaddressed"` (nothing
-    ignores it: init appends, so the announcement reads gitignored).
-    "unaddressed" also answers outside a repository and for a git that
-    cannot be asked: the literal set has no vscode line before init
-    writes one, and the answer the CLI prints is about the file as init
-    leaves it.
+def vscode_local_rule_ignores(target_dir: str) -> bool:
+    """True when the ONLY rule ignoring `.vscode/settings.json`'s file
+    path is machine-local -- the global `core.excludesFile`,
+    `.git/info/exclude`. `cmd_init` reads this BEFORE `scaffold.init`
+    runs, because init's own appended `.gitignore` line out-ranks the
+    local rule (git's precedence puts repository files above the
+    machine's) and masks it afterwards.
 
-    The probe is the path probe of `_git_covers` (realpath,
-    trailing-slash, parent-directory-for-`!dir/` rules), the answer
-    `_check_ignore_ignored_state`'s. No preflight: this reads state
-    after a successful init, whose preflight proved the `.gitignore`
-    readable."""
+    It is a file-path probe only: directory rules -- a global
+    `.vscode/` -- are invisible to `check-ignore` while the `.vscode/`
+    directory does not exist yet (the directory is init's own first
+    write, see `init`'s ordering), and such a rule lands on the
+    appended-line branch of `vscode_settings_state`, whose announcement
+    is true for it. False outside a repository, for a git that cannot
+    answer, and for a shared winner (which is no news: the project
+    itself stated the position)."""
+    toplevel = _repo_toplevel(target_dir)
+    if toplevel is None:
+        return False
+    root = os.path.realpath(toplevel)
+    base = os.path.realpath(target_dir)
+    entry = _VSCODE_SETTINGS_GITIGNORE
+    try:
+        rel = os.path.relpath(
+            os.path.join(base, *entry.pattern.strip("/").split("/")), root
+        )
+    except ValueError:
+        return False  # e.g. Windows: target on a different drive
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return False  # not inside the repository git answered for
+    win = _check_ignore_source(root, rel.replace(os.sep, "/"))
+    if win is None or win == "none":
+        return False
+    negated, shared = win
+    return not negated and not shared
+
+
+def vscode_settings_state(
+    target_dir: str, added: list[str], local_rule_pre: bool
+) -> str:
+    """Where `.vscode/settings.json` stands after a successful init, for
+    `cmd_init`'s paren (R11-F2, and #328 review's finding 2): one of
+    `"project-ignored"`, `"tracked"`, `"local-ignored"`, `"unaddressed"`.
+
+    `added` is `added_gitignore_patterns`' answer for init's write (the
+    patterns init added), and `local_rule_pre` is
+    `vscode_local_rule_ignores` read before init ran. When init appended
+    the entry there was no project position on the file path at all (the
+    append decision checked, in a directory init had just created, so
+    even a `dir/` rule was visible to it): the ignore is project-shared
+    from now on -- unless the only rule that was ignoring the file was
+    machine-local, which is `"local-ignored"`: true for this checkout,
+    invisible to every teammate until init's line ships.
+
+    When init appended nothing, the post-init world answers: the file
+    probe of `_git_covers`, and the parent-directory probe for `!dir/`
+    rules. A machine-local winner there means the project DID state its
+    position (a directory track that covered the entry, which is why
+    nothing was appended) and one checkout's rule now overrides it: the
+    clones follow the project, so the answer is `"tracked"` -- the
+    over-warn direction, the same one the literal fallback takes.
+    `"unaddressed"` (the gitignored paren) answers outside a repository
+    and for a git that cannot be asked: the file's not worth committing
+    is the safe paren when git's answer is unavailable, init having
+    appended when the literal set saw no line. No preflight: this reads
+    state after a successful init, whose preflight proved the
+    `.gitignore` readable."""
+    if _VSCODE_SETTINGS_GITIGNORE.pattern in added:
+        return "local-ignored" if local_rule_pre else "project-ignored"
     toplevel = _repo_toplevel(target_dir)
     if toplevel is None:
         return "unaddressed"
@@ -416,24 +469,29 @@ def vscode_settings_state(target_dir: str) -> str:
         return "unaddressed"  # not inside the repository git answered for
     probe = rel.replace(os.sep, "/")
     state = _check_ignore_ignored_state(root, probe)
+    if state == "project-ignored":
+        return "project-ignored"
+    if state == "tracked":
+        return "tracked"
+    if state == "local-ignored":
+        return "tracked"
     if state not in (None, "none"):
-        return state
+        return "unaddressed"
     # the file path matches nothing: a position on its parent directory
     # is a position on the contents (`_git_covers`' `!dir/` rule -- the
     # winning `!.vscode/` on the directory is invisible to a probe of the
-    # file path alone, and a `vscode/`-style ignore of the directory
-    # covers them the same way)
+    # file path alone, and a `.vscode/`-style ignore of the directory
+    # covers them the same way; the probe runs after init created the
+    # directory, which is exactly when git sees directory rules)
     parent, _, _ = probe.rpartition("/")
     if not parent:
-        return "unaddressed" if state == "none" else "local-ignored"
-    parent_state = _check_ignore_ignored_state(root, parent)
-    if parent_state == "none":
         return "unaddressed"
+    parent_state = _check_ignore_ignored_state(root, parent)
     if parent_state == "project-ignored":
         return "project-ignored"
     if parent_state == "tracked":
         return "tracked"
-    return "local-ignored" if state == "none" else state
+    return "unaddressed"
 
 
 def _literal_addresses(text: str, entry: _GitignoreEntry) -> bool:

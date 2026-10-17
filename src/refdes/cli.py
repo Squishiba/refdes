@@ -2054,10 +2054,11 @@ def cmd_init(args) -> int:
     # `scaffold.init` returns only the config path, so this pre-check is what
     # tells the two outcomes apart for the announcement below.
     vscode_settings_existed = scaffold_mod.vscode_settings_exists(cwd)
-    # Also asked before init runs, for the same reason -- and one more:
-    # init appends its own .gitignore line whenever the file is not
-    # covered, which would mask the pre-init world this paren is about.
-    vscode_state = scaffold_mod.vscode_settings_state(cwd)
+    # Also asked before init runs: init appends its own .gitignore line
+    # whenever the file is not covered, and that line out-ranks a
+    # machine-local rule (git's precedence), masking the pre-init world
+    # the third paren below is about.
+    vscode_local_rule = scaffold_mod.vscode_local_rule_ignores(cwd)
     # Read before init runs: `scaffold.init` returns only the config path, so
     # this is the only way the announcement below can say which ignore patterns
     # actually appeared -- including when the answer is none, because the
@@ -2072,6 +2073,14 @@ def cmd_init(args) -> int:
     path = scaffold_mod.init(cwd, standard=standard, presets=presets)
     rel = os.path.relpath(path, cwd).replace("\\", "/")
     print(f"wrote {rel}")
+    # ...and the `.gitignore` it wrote or appended to is a third thing that
+    # appeared, so it is named too -- by what it now ignores rather than by the
+    # act of writing it, which is accurate in both the wrote-a-new-file and the
+    # appended-to-an-existing-one case, and empty when nothing was needed.
+    added = scaffold_mod.added_gitignore_patterns(
+        gitignore_before,
+        textio.read_text(gitignore_path) if os.path.isfile(gitignore_path) else "",
+    )
     # init writes two files, so it names both: a second file that appears with
     # no word about it is invisible unless you list the directory (user-sim run
     # 2, "Lower severity" list). The skip case is named by the note below.
@@ -2086,6 +2095,9 @@ def cmd_init(args) -> int:
         # core.excludesFile, .git/info/exclude) ignores it only on this
         # checkout, which is a third true answer -- the project's .gitignore
         # line init added is what carries the ignore to every clone.
+        vscode_state = scaffold_mod.vscode_settings_state(
+            cwd, added, vscode_local_rule
+        )
         if vscode_state == "tracked":
             print(
                 "wrote .vscode/settings.json (NOT gitignored -- the "
@@ -2105,14 +2117,6 @@ def cmd_init(args) -> int:
                 "wrote .vscode/settings.json (gitignored -- the yaml.schemas "
                 "path in it names one checkout)"
             )
-    # ...and the `.gitignore` it wrote or appended to is a third thing that
-    # appeared, so it is named too -- by what it now ignores rather than by the
-    # act of writing it, which is accurate in both the wrote-a-new-file and the
-    # appended-to-an-existing-one case, and empty when nothing was needed.
-    added = scaffold_mod.added_gitignore_patterns(
-        gitignore_before,
-        textio.read_text(gitignore_path) if os.path.isfile(gitignore_path) else "",
-    )
     if added:
         print(f"wrote .gitignore ({', '.join(added)} -- not yours to commit)")
     if standard is not None:

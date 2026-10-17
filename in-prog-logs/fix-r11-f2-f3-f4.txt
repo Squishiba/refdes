@@ -109,4 +109,17 @@ the project having stated a position.
   global config is never consulted.
 - Changelog: the three init fragments updated to the shared/local line.
 
+Full-suite run caught what the targeted runs missed: a PRE-init state
+probe cannot see directory rules -- git matches a `.vscode/`-style
+pattern only when the directory exists on disk, and the directory is
+init's own first write (init writes .vscode/ before appending
+.gitignore, which is why the append decision sees dir rules). Rebuilt:
+`vscode_settings_state(cwd, added, local_rule_pre)` probes the
+POST-init world (file probe, dir probe for `!dir/`); init's appended
+line is read from `added` (vscode in added = no project position,
+gitignored; with a pre-init local-file-rule win = local-ignored); a
+local winner in the probe branch means the project covered the entry
+by dir-track, so clones follow the project = tracked. 105 scaffold
+tests green after the rebuild.
+
 Status: finished.
