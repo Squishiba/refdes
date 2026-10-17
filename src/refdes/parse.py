@@ -47,6 +47,13 @@ _FENCE_CLOSE_RES = {
     "`": re.compile(r"^ {0,3}(`{3,})[ \t]*$"),
     "~": re.compile(r"^ {0,3}(~{3,})[ \t]*$"),
 }
+# A line that looks like a fence closer carrying an info string: 3+ of one
+# fence character, then text. A closing fence cannot carry an info string
+# (CommonMark), so when a file ends with one of these after an unclosed
+# opener, the author almost certainly typed the closer as a mirror of the
+# opener (```yaml ... ```yaml) and that line is what the file is missing
+# (finding R11-F1).
+_FENCE_INFO_TAIL_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*\S")
 # `body` is the markdown body, not a field. In a .md file it is the text after the
 # front-matter; in a list file it is a `body:` key. A .md file already holds many
 # items sharing one `defaults:` block, so the tradeoff is not file count but whether
@@ -1465,7 +1472,13 @@ def _split_and_fences(
 
     An opener with no closing line before the end of the file opens
     nothing -- the least-surprising fallback is the pre-fence behavior,
-    where every `---` after it keeps splitting as it always did. A fenced
+    where every `---` after it keeps splitting as it always did. That
+    fallback is loud, not silent (finding R11-F1): the opener is warned at
+    its own line, because an unclosed fence renders the rest of the file as
+    code and lets a fenced front-matter example mint a live item; when the
+    file ends with a line that looks like a closer carrying an info string
+    (```yaml ... ```yaml -- a closing fence cannot carry one), that line is
+    named as the likely cause. A fenced
     `---` with a key line after it is the shape of an item, and
     suppression cannot tell a pasted example from an item swallowed by an
     unclosed fence (the two are structurally identical), so every
@@ -1477,7 +1490,8 @@ def _split_and_fences(
     Returns (split_idx, fence_warnings): the fences that split -- block
     0's pair and every item boundary -- in order, fenced `---` lines gone;
     and (message, line) pairs (1-based) for the caller to *warn* (the
-    lowest severity, not an error).
+    lowest severity, not an error): one per suppressed candidate, plus one
+    for an opener left unclosed at the end of the file.
     """
     fence_set = set(fence_idx)
     split_idx = [0, fence_idx[1]]
@@ -1487,7 +1501,7 @@ def _split_and_fences(
     # line follows it (the pairing loop checks the key itself); seed the walk
     # inside front matter for exactly that case.
     in_fm = bool(KEY_LINE_RE.match(lines[fence_idx[1] + 1] if fence_idx[1] + 1 < n else ""))
-    opener: tuple[str, int] | None = None
+    opener: tuple[str, int, int] | None = None  # (char, run length, 0-based line)
     pending: list[int] = []  # `---` lines inside the currently open fence
     for i in range(fence_idx[1] + 1, n):
         line = lines[i]
@@ -1500,7 +1514,7 @@ def _split_and_fences(
                 # itself, and pairs consecutive fences).
                 in_fm = bool(KEY_LINE_RE.match(lines[i + 1] if i + 1 < n else ""))
         elif opener is not None:
-            char, length = opener
+            char, length, _open_line = opener
             cm = _FENCE_CLOSE_RES[char].match(line)
             if cm is not None and len(cm.group(1)) >= length:
                 for j in pending:  # the fence closed: its `---` lines never split
@@ -1518,10 +1532,25 @@ def _split_and_fences(
         else:
             mo = _FENCE_OPEN_RE.match(line)
             if mo is not None and not (mo.group(1)[0] == "`" and "`" in mo.group(2)):
-                opener = (mo.group(1)[0], len(mo.group(1)))
+                opener = (mo.group(1)[0], len(mo.group(1)), i)
     # An unclosed opener protects nothing: the `---` lines under it split as
     # they always did (all pending lines sit after every recorded split).
     split_idx.extend(pending)
+    if opener is not None:
+        # The file ends inside an open fence. Name the opener; if the last
+        # non-blank line looks like a closer carrying an info string, say
+        # so (R11-F1: the closer typed as a mirror of the opener). An opener
+        # that is itself the last line gets the base warning only.
+        open_char, _length, open_line = opener
+        t = n - 1
+        while t > open_line and not lines[t].strip():
+            t -= 1
+        message = UNCLOSED_FENCE_WARNING
+        if t > open_line and _FENCE_INFO_TAIL_RE.match(lines[t]) is not None:
+            message += UNCLOSED_FENCE_CLOSER_CAUSE.format(
+                text=lines[t].strip(), line=t + 1, fence=open_char * 3
+            )
+        warnings.append((message + ".", open_line + 1))
     return split_idx, warnings
 
 
@@ -1529,6 +1558,16 @@ FENCED_FRONT_MATTER_WARNING = (
     "front matter inside a fenced code block is treated as example text; no "
     "action is needed if this is an example; if a real item was meant here, "
     "check for an unclosed earlier code fence."
+)
+UNCLOSED_FENCE_WARNING = (
+    "unclosed fenced code block: the rest of the file renders as code and any "
+    "`---` under this line splits as an item; close the fence with a line of "
+    "the same character, at least as long, with nothing after it"
+)
+UNCLOSED_FENCE_CLOSER_CAUSE = (
+    "; the file ends with {text!r} (line {line}), which carries an info "
+    "string after its {fence} run -- a closing fence carries no info string, "
+    "so that line is the closing fence this file is missing"
 )
 
 
@@ -1560,7 +1599,8 @@ def md_front_matter_blocks(
     every suppressed candidate is announced: a deliberate example costs one
     warning, and an item hidden behind an unclosed fence can never vanish
     without a word (PR #331 review: no item that loads today may silently
-    stop loading).
+    stop loading). The same channel carries R11-F1's warning for an opener
+    left unclosed at the end of the file, at the opener's line.
     """
     blocks: list[tuple[int, int, dict]] = []
     errors: list[tuple[str, int]] = []
