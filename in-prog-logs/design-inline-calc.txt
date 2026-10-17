@@ -1,0 +1,97 @@
+TASK: design doc -- evaluate-in-place math for engineering notes (inline-calc)
+Branch: design-inline-calc
+PR: #250
+Date: 2026-10-15 (this log rewritten 2026-10-17)
+Status: finished; the four open questions are DECIDED (2026-10-17)
+
+Review history
+--------------
+The design work started at c729fc3 (2026-10-15) and grew into a proposal far
+larger than the eventual slice, which went through about ten automated
+review rounds without converging. Sol then rescoped it to the first slice
+(f4974bc, 2026-10-16), and reviewers approved the design after that. The
+per-round history is deliberately not recorded here.
+
+Owner decisions
+---------------
+The durable record is the "Owner decisions" section of
+docs/design/inline-calc.md:
+- D1: the result is real text in the file; check/build verify it and report
+  a stale number, never silently rewrite it.
+- D2: the preview pane stays, as an optional "as published" view.
+- D3: no code execution; the restricted evaluator in src/refdes/calc.py is
+  the only evaluator.
+
+What the design docs contain
+----------------------------
+- docs/design/inline-calc.md: the first slice only -- trigger
+  and basic grammar (section 1), verification and diagnostics (section 2),
+  hashes, dependencies and historical entries (section 3), and the four
+  open questions.
+- docs/design/inline-calc-later.md: explicitly not under
+  review; the deferred ideas -- result-writing command, live editor
+  updates, one-unknown solve and E-series, reusable calculators and pins,
+  editor form panel, and the deferred-question mapping table.
+
+Verified against the running tool
+---------------------------------
+Fresh probe under .scratch/inline-calc-probe-rewrite/, re-run 2026-10-17
+with this worktree's src on PYTHONPATH and the project venv interpreter:
+- `refdes init` printed `standard: hardware@3` (among the files it wrote).
+- One `log` item (LOG-TST-001) whose body is the single-backtick span
+  `Vout := 2 V * 2 = 5 V`.
+- `refdes check` printed `1 items, 0 errors, 0 warnings`, exit 0. The
+  deliberately wrong result is not flagged, so inline-calc remains
+  design-only.
+
+E-series arithmetic (belongs to the deferred doc), recorded command re-run
+2026-10-17 from the repository root:
+
+    PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python - <<'PY'
+    from src.refdes.calc import parse_quantity, _binary
+    vref = parse_quantity('0.8 V')
+    rtop = parse_quantity('10 kohm')
+    target = parse_quantity('3.3 V')
+    rbot = _binary('/', rtop,
+        _binary('-', _binary('/', target, vref), parse_quantity('1 dimensionless')))
+    print('Rbot exact:', rbot.nom.to('kohm'))
+    for val in [3.16, 3.24, 3.30]:
+        r = parse_quantity(f'{val} kohm')
+        v = _binary('*', vref,
+            _binary('+', parse_quantity('1 dimensionless'), _binary('/', rtop, r)))
+        print(f'Rbot={val}k -> Vout={v.nom.to("V")}')
+    PY
+
+Output, matching the figures in inline-calc-later.md (exact Rbot = 3.200
+kohm; E96 neighbors 3.16 kohm -> 3.332 V and 3.24 kohm -> 3.269 V; E24
+3.30 kohm -> 3.224 V):
+
+    Rbot exact: 3.200000000000001 kiloohm
+    Rbot=3.16k -> Vout=3.331645569620253 volt
+    Rbot=3.24k -> Vout=3.2691358024691355 volt
+    Rbot=3.3k -> Vout=3.2242424242424246 volt
+
+Difficulties
+------------
+The main difficulties were process, not content: the review loop never
+converged on the full early proposal, and the log's practice of citing the
+commit that fixed each review round produced <pending> placeholders and
+follow-up "record sha" commits, which became a recurring source of small
+inaccuracies in the log itself. Both loops were cut: the doc was rescoped,
+and this log no longer records per-round history.
+
+Tests run (2026-10-17, repository root, project venv)
+------------------------------------------------------
+- `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest tests/test_docs_anchors.py -q` -> 2 passed
+- `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python docs-site/gen_examples.py --check` -> docs/schema-reference.md and docs/vocabulary.md up to date
+
+Design-only PR: no src/ or tests/ changes.
+
+Open questions (named here; all DECIDED 2026-10-17; see
+"Open questions for this slice" in docs/design/inline-calc.md)
+- Precision (was Q2)
+- Freshness gate (was Q5)
+- Unit slot (was Q17)
+- Triggered incomplete text (was Q1)
+
+Status: finished; the four open questions are DECIDED (2026-10-17)
