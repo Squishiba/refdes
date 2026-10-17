@@ -1224,7 +1224,7 @@ def compute_board_coverage(project: Project, chain_graph=None) -> None:
     A platform-wide contract -- "every board with an ARM MCU uses the standard
     debug header" -- is one requirement item, so per-item coverage reports it
     satisfied the moment *any* board complies (docs/design/backlog.md finding
-    24). This computes the same four stages again, once per (item, board) pair,
+    24). This computes the same five stages again, once per (item, board) pair,
     counting only that board's own satisfiers, and warns on any pair still short
     of `satisfied`.
 
