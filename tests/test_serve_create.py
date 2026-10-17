@@ -1357,6 +1357,60 @@ def test_http_preview_narrows_by_workspace_and_the_create_keeps_its_promise(serv
     assert any("ghost" in d["message"] for d in ghost["diagnostics"])
 
 
+def test_http_preview_refuses_an_unregistered_workspace(served_workspaces):
+    """R9-F3: `?workspace=` naming an unregistered workspace made the preview
+    answer with the *unscoped* suggestion -- a 200 carrying a file in some
+    other workspace's tree, with nothing said about the scope it ignored.
+    `/api/items?workspace=ghost` already refuses a facet value the project
+    does not have: 400, naming the value and the registered ones. The preview
+    now answers the same way, from the same check, and the neighbours are
+    pinned with it so the fix cannot widen: a registered workspace, the
+    board+workspace pair, and an absent/empty scope all preview as before."""
+    _app, client, root = served_workspaces
+    before = snapshot_tree(root)
+
+    status, prev = client.api_get("/api/create/preview?type=requirement&workspace=ghost")
+    assert status == 400, prev
+    assert prev == {
+        "error": "workspace: no such workspace 'ghost' in this project; "
+        "known workspaces: platform, product-a"
+    }
+
+    # the combination: a registered board does not license an unregistered workspace
+    status, paired = client.api_get(
+        "/api/create/preview?type=requirement&board=board-a&workspace=ghost"
+    )
+    assert status == 400 and "workspace 'ghost'" in paired["error"], paired
+
+    # the neighbours: registered workspace, board+workspace, no scope, empty scope
+    status, scoped = client.api_get("/api/create/preview?type=requirement&workspace=product-a")
+    assert status == 200 and scoped["destination"] == "items/few-product.yaml"
+    status, board_and_ws = client.api_get(
+        "/api/create/preview?type=requirement&board=board-a&workspace=product-a"
+    )
+    assert status == 200 and board_and_ws == scoped
+    status, plain = client.api_get("/api/create/preview?type=requirement")
+    assert status == 200 and plain["destination"] == "items/many-platform.yaml"
+    status, empty = client.api_get("/api/create/preview?type=requirement&workspace=")
+    assert status == 200 and empty == plain
+
+    # a refusal reserves and writes nothing, same as every other preview
+    assert not (root / ".refdes" / "ids.yaml").exists()
+    assert snapshot_tree(root) == before
+
+
+def test_http_preview_refuses_a_workspace_where_none_are_registered(served):
+    """The registry-less half of the same check: this project declares no
+    `workspaces:`, so no scope name is registered and any `?workspace=` is
+    refused -- with the list route's exact message, not a new one."""
+    _app, client, _root = served
+    status, items = client.api_get("/api/items?workspace=ghost")
+    assert status == 400, items
+    status, prev = client.api_get("/api/create/preview?type=requirement&workspace=ghost")
+    assert status == 400, prev
+    assert prev["error"] == items["error"]
+
+
 def test_http_create_reads_an_empty_id_as_auto_like_the_preview(served):
     """An empty id means "not given" on both create routes. The preview
     route has always collapsed `?id=` to the auto plan (api.py's `or None`

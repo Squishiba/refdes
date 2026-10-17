@@ -186,7 +186,7 @@ def parse_filters(project: Project, query: dict[str, list[str]]) -> Filters:
     """Build a `Filters` from a parsed query string. Unknown parameters are
     ignored (forward-compatible); known ones are validated here so a typo is a
     400 rather than an empty list. `type`, `board`, `workspace`, and `file`
-    must name values the built project actually has (see `_validate_facet`)."""
+    must name values the built project actually has (see `validate_facet`)."""
     values: dict[str, str] = {}
     for name in FILTER_PARAMS:
         value = _first(query, name)
@@ -204,7 +204,7 @@ def parse_filters(project: Project, query: dict[str, list[str]]) -> Filters:
             if not declared and value not in project.link_types:
                 raise FilterError(f"missing_verb: no link verb {value!r} in this project")
         if name in _KNOWN_FACETS:
-            _validate_facet(project, name, value)
+            validate_facet(project, name, value)
         values[name] = value
     filters = Filters(values=values)
     for name in ("links_to", "linked_from"):
@@ -310,10 +310,15 @@ def _known_values(project: Project, name: str) -> set[str]:
     return known
 
 
-def _validate_facet(project: Project, name: str, value: str) -> None:
+def validate_facet(project: Project, name: str, value: str) -> None:
     """A facet filter must name a value the built project actually has, or
     raise like every other bad filter. `file` compares slash-normalized, as
-    `matches` does."""
+    `matches` does.
+
+    Public because the create-preview route checks its `workspace` scope with
+    this same rule (api.py's `_create_preview`): a scope the project never
+    registered is the same 400 naming the same known values here as there,
+    never a silent fall back to the unscoped suggestion (run-9 R9-F3)."""
     candidate = _norm_file(value) if name == "file" else value
     known = _known_values(project, name)
     if candidate in known:
