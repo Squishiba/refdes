@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 from dataclasses import dataclass
 from typing import Any
 
@@ -92,7 +93,8 @@ def _vscode_settings_text(target_dir: str) -> str:
 @dataclass(frozen=True)
 class _GitignoreEntry:
     """One ignore pattern `init` ensures, with the comment block above it and
-    the patterns that already cover it."""
+    the literal spellings that cover it where git cannot be asked (see
+    `_gitignore_addresses`: inside a repository git answers first)."""
 
     pattern: str
     covers: frozenset[str]
@@ -108,8 +110,10 @@ def _covers(pattern: str, *whole_dirs: str) -> frozenset[str]:
     a file in there.
 
     A small literal set on purpose rather than a walk of git's pattern
-    language: `init` runs in directories that are not git repositories at all,
-    so this cannot ask git what it thinks.
+    language: inside a repository git itself answers the coverage question
+    (see `_gitignore_addresses`, which asks it first), and this is what
+    answers in a plain directory -- where nothing is ignored in the first
+    place -- and for a git that cannot be run.
     """
     forms = {pattern, "/" + pattern, "**/" + pattern}
     for directory in whole_dirs:
@@ -189,13 +193,127 @@ _REFDES_GITIGNORE = (
 )
 
 
-def _gitignore_addresses(text: str, entry: _GitignoreEntry) -> bool:
-    """Whether some pattern in `text` already states the project's position on
-    `entry.pattern` -- an ignore pattern or an explicit `!` negation.
+_GIT_TIMEOUT_SECONDS = 10
 
-    A negation counts: whoever wrote `!` + that pattern means to track the file,
-    and git takes the *last* matching pattern, so appending ours would quietly
-    out-rank a deliberate choice. Comments and blank lines do not."""
+
+def _git(args: list[str], cwd: str) -> subprocess.CompletedProcess[str] | None:
+    """Run `git` and hand back the completed process, or None when git
+    cannot answer at all: not installed, too old to know the flag, not a
+    repository, a timeout, a decode the console chose for us. Callers treat
+    None as "git has no opinion", which is exactly the state a plain
+    directory is in, and answer from the literal set there instead -- init
+    must never crash over a git it cannot talk to (DOC-REMEDY-018 review)."""
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=_GIT_TIMEOUT_SECONDS,
+        )
+    except (OSError, UnicodeError, subprocess.SubprocessError):
+        return None
+
+
+def _repo_toplevel(target_dir: str) -> str | None:
+    """The root of the git repository `target_dir` lives in, or None when
+    there is no repository (the probe is `rev-parse --show-toplevel`, not
+    `check-ignore`: in a non-repository `check-ignore` exits 1, the same
+    code it uses for "not ignored", so it cannot tell the two apart)."""
+    proc = _git(["rev-parse", "--show-toplevel"], target_dir)
+    if proc is None or proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def _check_ignore_verdict(toplevel: str, relpath: str) -> bool | None:
+    """Git's own answer for one repository-relative path, asked with
+    `check-ignore --no-index -v` from the repository root: True when a
+    pattern wins -- an ignore, *or* an explicit `!` naming the path, which
+    git reports with exit 0 and the negated pattern on stdout -- False when
+    nothing matches, None when git could not be asked.
+
+    A winning match of either polarity is the project having stated its
+    position: an ignore covers the path, and a negation means the author
+    chose to track it -- appending ours after that wins by git's
+    last-match rule, which is the whole of DOC-REMEDY-018. This function
+    is deliberately never allowed to second-guess the answer with the
+    literal set: inside a repository git IS the matcher, and a spelling we
+    would not have recognized (`.vscode/*` + `!.vscode/*`, a bare
+    `settings.json`) must read as covering exactly when git says it does.
+
+    `--no-index` because the file is not in the index (init has not
+    written it, and in the preflight nothing has been created yet);
+    a path absent from disk is matched by the patterns all the same."""
+    proc = _git(["check-ignore", "--no-index", "-v", "--", relpath], toplevel)
+    if proc is None:
+        return None
+    if proc.returncode == 0:
+        return True
+    if proc.returncode == 1:
+        return False
+    return None
+
+
+def _git_covers(target_dir: str, entry: _GitignoreEntry) -> bool | None:
+    """Git's verdict on one entry, in the repository `target_dir` lives in,
+    or None when git has none.
+
+    The entry is probed as a path relative to the repository root (realpath
+    on both sides: a symlinked temp directory, `/var` behind `/private/var`,
+    is the same tree to git as to us), with the trailing slash a directory
+    entry carries kept -- git matches a directory-only pattern like
+    `.refdes/copies/` against `.refdes/copies/`, and against nothing else.
+    When the path itself matches nothing, its parent directory is asked
+    too: a project that wrote `!.vscode/` stated its intent about the
+    directory's contents, and a negation on the directory is invisible to
+    a probe of the file path alone (git's own `!dir/` rule)."""
+    toplevel = _repo_toplevel(target_dir)
+    if toplevel is None:
+        return None
+    root = os.path.realpath(toplevel)
+    base = os.path.realpath(target_dir)
+    try:
+        rel = os.path.relpath(
+            os.path.join(base, *entry.pattern.strip("/").split("/")), root
+        )
+    except ValueError:
+        return None  # e.g. Windows: target on a different drive than the root
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return None  # the entry is not inside the repository git answered for
+    rel = rel.replace(os.sep, "/")
+    probe = rel + "/" if entry.pattern.endswith("/") else rel
+    verdict = _check_ignore_verdict(root, probe)
+    if verdict is None:
+        return None
+    if verdict:
+        return True
+    parent, _, _ = probe.rstrip("/").rpartition("/")
+    if not parent:
+        return False  # an entry at the repository root has no parent to ask
+    # Asked WITHOUT the trailing slash: a `!dir/` negation wins on the
+    # directory path (`check-ignore .vscode` exits 0 naming `!.vscode/`),
+    # while the same probe spelled `vscode/` exits 1 -- the shape this
+    # probe exists for, verified against git in .scratch/p018-redo/.
+    return _check_ignore_verdict(root, parent)
+
+
+def _literal_addresses(text: str, entry: _GitignoreEntry) -> bool:
+    """The literal answer: some pattern line in `text` spells out (in one of
+    the forms `_covers` accepts) the entry's position -- an ignore pattern
+    or an explicit `!` negation. Comments and blank lines do not.
+
+    This is the whole answer outside a git repository -- there is nothing
+    ignored in a plain directory in the first place, and no matcher to
+    consult -- and the fallback for a git that cannot be run. Inside a
+    repository git itself answers instead (see `_gitignore_addresses`);
+    the set is deliberately NOT widened for git's pattern language
+    (globs, character classes, basenames), because an approximation of
+    git's matcher here is exactly what out-ranked authors' negations in
+    DOC-REMEDY-018's first fix."""
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -203,6 +321,30 @@ def _gitignore_addresses(text: str, entry: _GitignoreEntry) -> bool:
         if stripped.lstrip("!") in entry.covers:
             return True
     return False
+
+
+def _gitignore_addresses(target_dir: str, text: str, entry: _GitignoreEntry) -> bool:
+    """Whether the project has already stated its position on
+    `entry.pattern` -- an ignore pattern that covers the path, or an
+    explicit `!` negation of it.
+
+    Inside a git repository the question is git's, and git answers it:
+    `check-ignore --no-index -v` decides, negation included, with the
+    entry's parent directory asked as well for the `!dir/` shape. The
+    literal set never overrides a repository git read as "nothing covers
+    this" (the project's position on the exact path is then absent, and
+    init appends), and a spelling the literal set does not know cannot
+    hide a covering line git reads.
+
+    Outside a repository -- and for a git that cannot be asked -- the
+    literal set answers, unchanged from before: there is no matcher whose
+    last-match rule we could out-rank, and today's spellings are today's
+    behavior.
+    """
+    verdict = _git_covers(target_dir, entry)
+    if verdict is not None:
+        return verdict
+    return _literal_addresses(text, entry)
 
 
 def _gitignore_patterns(text: str) -> list[str]:
@@ -278,7 +420,8 @@ def _refuse_unwritable_gitignore(target_dir: str, entries: list[_GitignoreEntry]
 
     The refusal is conditional on having something to write: an existing
     `.gitignore` that already states the project's position on every
-    wanted path (an ignore or a deliberate `!`) needs no append, and a
+    wanted path (an ignore or a deliberate `!` -- in a repository, with
+    git as the judge, per `_gitignore_addresses`) needs no append, and a
     read-only file holding exactly that is not a reason to refuse -- that
     project inits. Only a read-only file that is *missing* an entry
     cannot receive it, and that init refuses with nothing written.
@@ -293,7 +436,7 @@ def _refuse_unwritable_gitignore(target_dir: str, entries: list[_GitignoreEntry]
     text = read_existing_gitignore(target_dir)
     if text is None:
         return
-    if any(not _gitignore_addresses(text, entry) for entry in entries):
+    if any(not _gitignore_addresses(target_dir, text, entry) for entry in entries):
         path = os.path.join(target_dir, ".gitignore")
         if not os.access(path, os.W_OK):
             raise SchemaError(
@@ -309,15 +452,20 @@ def _ensure_gitignore_entries(target_dir: str, entries: list[_GitignoreEntry]) -
     Append-only and idempotent: `.gitignore` is hand-authored and hand-commented
     like refdes-project.yaml, so nothing outside the appended blocks moves, and
     when some existing pattern already covers a path nothing is written for that
-    path at all. Each block takes the file's own line ending (textio's
-    `append_ending` rule), so a CRLF gitignore does not grow an LF island.
+    path at all -- where "already covers" is git's answer inside a repository
+    (`_gitignore_addresses`), so an author's negated glob is never out-ranked
+    by a line init appends after it. Each block takes the file's own line
+    ending (textio's `append_ending` rule), so a CRLF gitignore does not grow
+    an LF island.
     """
     path = os.path.join(target_dir, ".gitignore")
     if not os.path.isfile(path):
         textio.write_text(path, _joined_blocks(entries, textio.LF))
         return
     existing = textio.read_text(path)
-    missing = [entry for entry in entries if not _gitignore_addresses(existing, entry)]
+    missing = [
+        entry for entry in entries if not _gitignore_addresses(target_dir, existing, entry)
+    ]
     if not missing:
         return
     ending = textio.append_ending(existing)

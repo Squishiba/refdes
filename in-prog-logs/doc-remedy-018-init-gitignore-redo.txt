@@ -1,0 +1,88 @@
+DOC-REMEDY-018 redo: init's gitignore coverage question, answered by git
+========================================================================
+
+Task: replace PR #262 (held after 3 non-converging rounds) from a fresh
+branch. Design direction from the orchestrator (reviews 565c2dc7,
+22f77c6f): inside a repository GIT is authoritative -- ask
+`git check-ignore --no-index -v` about the path, and its parent directory
+for the `!dir/` shape, and let the winning match decide; the literal set
+answers only outside a repository. Only the reproduced negation fix; no
+speculative spelling/root-probe expansion.
+
+Chunk 1 - reading. PR body, PROGRESS row 018, both blocking verdicts.
+Findings taken as requirements: (a) `.vscode//*` was treated as covering
+although git does not match it; (b) the literal fallback overrode git's
+"no"; (c) Windows CI red; (d) reproduced fix mixed with speculative
+expansion. Tree clean at branch start; a foreign stash (`stash@{0}`, the
+#262 branch) is present and left untouched per AGENTS.md.
+
+Chunk 2 - probes (.scratch/p018-redo/, run1..run4 + e2e runs). Empirical
+table for git 2.47.3 (`check-ignore --no-index -v`, exit code = verdict):
+  - file path, winner positive  -> 0  (covers)
+  - file path, winner a `!`      -> 0, -v prints the negation (covers)
+  - file path, nothing matches   -> 1 (append)
+  - dir-only pattern `.vscode/` matches the FILE path (inheritance) even
+    with the directory absent from disk; dir-only patterns are invisible
+    to a no-slash probe of a directory absent from disk; a trailing-slash
+    probe matches positive dir-only patterns (absent dir ok) but a
+    `!dir/` negation only wins on the bare directory path when the
+    directory IS on disk.
+  - non-repo: rev-parse --show-toplevel exits 128 (check-ignore exits 1,
+    the same code as "not ignored", so it cannot probe repo membership);
+    bare repo: rev-parse exits 128. git 2.47.3.
+Consequences designed in: probe the file path (dir entries keep their
+trailing slash), and on a no-match probe the parent directory WITHOUT a
+slash; a parent probe that exits 1 on an absent directory just means
+"append", which is git's own answer at that moment (init creates `.vscode/`
+before the append pass, so the `!dir/` shape is read there).
+
+Chunk 3 - tests first (red against unmodified main, run before touching
+scaffold.py): 7 red / 3 green (pins). Red: negated-glob pair, bare
+basename, negated-whole-directory (both shapes), read-only-with-positions
+gitignore, no-git fallback (main has no subprocess import at all -- the
+monkeypatch target itself is the red), nested-project Windows-shape.
+Green pins: repo control (all five blocks), `.vscode//*` must NOT cover,
+`.vscode/` covers.
+
+Chunk 4 - fix. scaffold.py: `_git` (subprocess runner; OSError/
+SubprocessError/UnicodeError -> None = "git has no opinion", 10 s
+timeout), `_repo_toplevel` (rev-parse, per design note), 
+`_check_ignore_verdict` (0 -> True, 1 -> False, anything else -> None),
+`_git_covers` (realpath both sides for symlinked temp dirs; relpath via
+os.path, forward slashes handed to git; `..`/cross-drive -> None),
+`_gitignore_addresses(target_dir, text, entry)` = git first, literal
+only when git cannot answer. Literal set untouched (main's spellings are
+all valid git spellings; the invalid ones were #262's additions, not
+main's). Preflight and append pass both go through the same question, so
+#231 stays intact.
+
+Chunk 5 - corrections found by running, not by reasoning: my first test
+expectations were wrong twice -- the parent probe DOES read `!dir/` at
+append time (the directory exists by then, so negated-whole-directory
+means "append nothing", pinned False for all dir shapes); and a read-only
+gitignore with a negated glob still covers only the paths git reads as
+covered, so the missing lock entry must keep refusing with exit 2 (the
+refusal test pins the untouched-file/clean-exit arm; the proceed test
+pins a file git reads as covering all five).
+
+Chunk 6 - verification. Full suite foreground (redirected): 4030 passed,
+2 skipped (pre-existing case-fs skips, same two as the #262 review
+identified), exit 0. Scoped ruff on the two touched files
+(--select E9,F): clean. E2E with the real CLI in .scratch/p018-redo/e2e3:
+negated-glob repo -> exit 0, init appends its four .refdes entries, does
+NOT append `.vscode/settings.json`, `git check-ignore` says the settings
+file is not ignored, `git add -n` stages it (the author's negation
+survives); control repo -> all five blocks appended, file ignored; plain
+directory -> unchanged literal append.
+
+Status: complete on this branch. Deliberately NOT included (scope of the
+replaced PR's failure): any widening of the literal set (no basename/glob
+spellings added), no temp-repo "root probe" (no `git init` in a temp
+dir), no quotePath/non-ASCII stdout parsing (exit codes are all we read,
+so quoting cannot change a verdict), no source-file attribution of the
+winning match (git is asked from the repo root; every exclude source git
+itself consults decides, per the design direction "let the winning match
+decide"). Git being the judge makes in-repo and out-of-repo answers
+diverge for spellings the literal set misses -- that divergence IS the
+fix (git is authoritative in a repo; the task keeps outside-repo
+behavior unchanged).
