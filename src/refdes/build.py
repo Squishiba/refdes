@@ -25,6 +25,7 @@ from . import chains as chains_mod
 from . import citations as citations_mod
 from . import docs_url as docs_url_mod
 from . import ids as ids_mod
+from . import inline_calc
 from . import keys as keys_mod
 from . import nav as nav_mod
 from . import pages as pages_mod
@@ -1516,6 +1517,74 @@ def _make_source_resolver(project: Project, item, records: dict, resolved: dict,
     return resolve
 
 
+def _run_inline_span(project: Project, item, span, env, origins) -> bool:
+    """Evaluate one triggered inline calc span and verify its stored result
+    (docs/design/inline-calc.md slice 1). Returns True when the span
+    reported an error.
+
+    The RHS runs through the existing evaluator as the fence line
+    `name = rhs | unit` -- same grammars, same restrictions, the same
+    item-wide `env` and `origins`, which is what makes an inline `:=`
+    assign into the fence scope and a duplicate name fire across the two
+    spellings. The stored result is verified numerically against the
+    evaluated value (section 2); a stale result is a warning, a missing
+    one a parse error, and neither ever edits the source (D1)."""
+    line_number = (
+        item.body_line + span.line_offset
+        if item.body_line is not None else item.source_line
+    )
+    label = span.name or span.raw.strip()
+
+    def report_error(message: str) -> None:
+        project.error(
+            f"inline calc {label}: {message}",
+            file=item.source_file, line=line_number, item_id=item.id,
+        )
+
+    if span.error:
+        report_error(span.error)
+        return True
+
+    expression = f"{span.name} = {span.rhs}"
+    if span.unit:
+        expression += f" | {span.unit}"
+
+    failed = False
+    for outcome in calc.evaluate_block(
+        expression, env, start_line=line_number, origins=origins
+    ):
+        if outcome.warning:
+            project.warn(
+                f"inline calc {label}: {outcome.warning}",
+                file=item.source_file, line=line_number, item_id=item.id,
+            )
+        if outcome.error:
+            report_error(outcome.error)
+            failed = True
+            continue
+        if outcome.value is None:
+            continue
+        try:
+            result = calc.format_value(outcome.value, project.sigfigs)
+        except Exception as exc:  # noqa: BLE001 -- pint raises many types
+            report_error(f"the value could not be formatted: {exc}")
+            failed = True
+            continue
+        item.calc_values[outcome.name] = result
+        try:
+            stale = inline_calc.compare_stored(outcome.value, span, result)
+        except calc.CalcError as exc:
+            report_error(str(exc))
+            failed = True
+            continue
+        if stale:
+            project.warn(
+                f"inline calc {label}: {stale}",
+                file=item.source_file, line=line_number, item_id=item.id,
+            )
+    return failed
+
+
 def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
     """Evaluate one item's calc blocks -- the per-item half of run_calcs,
     extracted so the scheduler can call it in dependency order. `item._env`
@@ -1580,8 +1649,30 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
             failed = True
         else:
             named_fences[block_id] = fence_line
-    for block, offset, block_id in calc.extract_blocks_with_lines(item.body):
-        start_line = item.body_line + offset if item.body_line is not None else None
+    # Inline calc spans and calc fences run as one source-ordered pass:
+    # an inline `:=` assigns into the same item-wide env, so a later
+    # fence sees the name and a later span sees a fence name, and the
+    # `origins` registry catches a duplicate across the two spellings
+    # (docs/design/inline-calc.md section 1). A span's line offset can
+    # never collide with a fence's first-content offset: every line
+    # between a fence's opener and its closer is fenced code, which the
+    # span walk never reads.
+    events = [
+        (offset, (block, block_id))
+        for block, offset, block_id in calc.extract_blocks_with_lines(item.body)
+    ]
+    events += [
+        (span.line_offset, span)
+        for span in inline_calc.triggered_spans(item.body)
+    ]
+    events.sort(key=lambda event: event[0])
+    for _offset, event in events:
+        if isinstance(event, inline_calc.InlineSpan):
+            if _run_inline_span(project, item, event, env, origins):
+                failed = True
+            continue
+        block, block_id = event
+        start_line = item.body_line + _offset if item.body_line is not None else None
         for outcome in calc.evaluate_block(block, env, start_line=start_line, origins=origins):
             line = CalcLine(
                 name=outcome.name,
