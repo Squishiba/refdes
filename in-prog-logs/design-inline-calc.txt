@@ -1,588 +1,97 @@
 TASK: design doc -- evaluate-in-place math for engineering notes (inline-calc)
 Branch: design-inline-calc
 PR: #250
-Date: 2026-10-15
-Status: finished -- design doc written; the review rounds addressed are listed
-below under the round headings.
+Date: 2026-10-15 (this log rewritten 2026-10-17)
+Status: finished, awaiting owner's decisions on the four open questions
 
-Owner decisions (as relayed by the orchestrator from the task brief)
---------------------------------------------------------------------
-The three decisions below are the owner's constraints for this design. The
-durable record is the "Owner decisions" section of docs/design/inline-calc.md
-and PR #250's description, which reproduce them; they are reproduced here as
-well. They were originally relayed in the task brief (`.scratch/task/TASK.txt`),
-which is gitignored and not part of the repo, so it is not cited as a durable
-source.
+Review history
+--------------
+The design work started at c729fc3 (2026-10-15) and grew into an 839-line
+proposal that went through about ten automated review rounds without
+converging. Sol then rescoped it to the first slice (f4974bc, 2026-10-16),
+and reviewers approved the design after that. The per-round history is
+deliberately not recorded here.
 
-D1. Results are stored in the file text and verified by check/build.
-    Vout = 0.8 V*(1+Rtop/Rbot) = 4.436 V: the "= 4.436 V" is real text the
-    editor (or a fill command) writes. If inputs change later, check/build report
-    the stale number ("says 4.436 V, now computes 4.52 V") instead of silently
-    changing it.
-    (The design doc records this as D1 under "Owner decisions"; its section 1
-    example spells the sketch out with the unit slot:
-    `Vout := 0.8 V * (1 + Rtop/Rbot) | V = 4.436 V`.)
-D2. The preview pane stays, as an optional "as published" view.
-D3. No code execution. The existing restricted calc evaluator (src/refdes/calc.py)
-    is the only evaluator. The editor gets live results from refdes serve (which
-    already runs calc for the preview), never from a JavaScript copy of the
-    evaluator.
+Owner decisions
+---------------
+The durable record is the "Owner decisions" section of
+docs/design/inline-calc.md:
+- D1: the result is real text in the file; check/build verify it and report
+  a stale number, never silently rewrite it.
+- D2: the preview pane stays, as an optional "as published" view.
+- D3: no code execution; the restricted evaluator in src/refdes/calc.py is
+  the only evaluator.
 
-What was done (initial round)
------------------------------
-- Read AGENTS.md, .scratch/task/COMMON.txt, and .scratch/task/TASK.txt.
-- Read the required source docs and code narrowly, and verified behavior by
-  running `refdes serve --help` and `refdes schema --json`.
-- Wrote docs/design/inline-calc.md and in-prog-logs/design-inline-calc.txt.
-- Confirmed docs/index.md does not list design/ docs, so no nav entry was added.
-- Ran docs tests (see "Tests run" below).
+What the design docs contain (line counts re-counted 2026-10-17)
+------------------------------------------------------------------
+- docs/design/inline-calc.md, 183 lines: the first slice only -- trigger
+  and basic grammar (section 1), verification and diagnostics (section 2),
+  hashes, dependencies and historical entries (section 3), and the four
+  open questions.
+- docs/design/inline-calc-later.md, 126 lines: explicitly not under
+  review; the deferred ideas -- result-writing command, live editor
+  updates, one-unknown solve and E-series, reusable calculators and pins,
+  editor form panel, and the deferred-question mapping table.
 
-Fix round 1 (chunk 1 review, addressed in commit 50028d0)
----------------------------------------------------------
-Findings addressed:
-1. Added an explicit trigger rule in §3.1: a code span is inline math only if
-   its content matches the §3.2 grammar (contains `:=` or trailing `= <quantity>`);
-   ordinary spans like `Rtop/Rbot` and `foo()` are untouched. Q1 is now about
-   the trigger rule, with a mandatory-prefix alternative.
-2. Fixed the D1 example to use `:=` and noted that D1's wording was the owner's
-   sketch, now expressed in the grammar.
-3. Changed `valid_if` from general boolean expressions to comparison
-   constraints (`expression op quantity`) using the existing `Limit.check` /
-   `parse_limit` logic. No general comparison operators are added to calc; no
-   control flow.
-4. Made §7.1/§7.2 consistent with Q9's default: explicit `from .. to ..`
-   bracket is required.
-5. Gave P1 an honest dependency list: Q1, Q2, Q4-Q7.
-6. Cited owner decisions durably in this log (above) and in PR #250; removed
-   the `.scratch/task/TASK.txt` citation from the design doc.
+Verified against the running tool
+---------------------------------
+Fresh probe under .scratch/inline-calc-probe-rewrite/, re-run 2026-10-17
+with this worktree's src on PYTHONPATH and the project venv interpreter:
+- `refdes init` printed `standard: hardware@3` (among the files it wrote).
+- One `log` item (LOG-TST-001) whose body is the single-backtick span
+  `Vout := 2 V * 2 = 5 V`.
+- `refdes check` printed `1 items, 0 errors, 0 warnings`, exit 0. The
+  deliberately wrong result is not flagged, so inline-calc remains
+  design-only.
 
-Orchestrator recommendation changes applied in round 1:
-- Q5 / §4.4: stale stored results are warnings by default; they become a
-  release-gate failure via a new `stale_inline_results` rule (default
-  `{release: true, revision: false}`).
-- Q8 / §6.3: default is live auto-update while typing using a native
-  text-insertion path (`document.execCommand('insertText')` or `setRangeText`)
-  to preserve browser undo; a browser test is required before P2 ships. The
-  explicit Fill button remains the fallback.
+E-series arithmetic (belongs to the deferred doc), recorded command re-run
+2026-10-17 from the repository root:
 
-Fix round 2 (chunks 1 and 2 review, addressed in commit c603d2c)
-----------------------------------------------------------------
-Findings addressed:
-1. Removed keyword-argument calculator examples. Calculator calls are now
-   positional-only, matching the current DSL which rejects keyword arguments
-   (`src/refdes/calc.py:436-438`).
-2. Excluded sealed/append-only entries from the `stale_inline_results` release
-   gate, because they cannot be rewritten without resealing and history-backed
-   resealing has not yet landed (`src/refdes/build.py:1505-1510`).
-3. Extended the §3.2 grammar to cover the doc's own examples: solve forms
-   (`:= ? where ... from ... to ...`), multi-output forms
-   (`Vout, ratio := divider(...) = ...`), and the rule that the stored result is
-   the value after the last `=`.
-4. Updated the `HASH_FORMAT` citation to the current value
-   (`src/refdes/build.py:1855`) instead of the stale number 4.
-5. Softened the message claim in §4.4: two diagnostic messages reuse existing
-   calc phrasing; the missing-result message is new.
-6. Added Q3 to P1's dependency list.
-7. Fixed the in-prog log's broken commit citation (replaced unresolvable
-   `84f391c` with `50028d0`).
-8. Restored the AGENTS.md-required "Difficulties / choices" section and an
-   explicit finished/not-finished status to this log.
+    PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python - <<'PY'
+    from src.refdes.calc import parse_quantity, _binary
+    vref = parse_quantity('0.8 V')
+    rtop = parse_quantity('10 kohm')
+    target = parse_quantity('3.3 V')
+    rbot = _binary('/', rtop,
+        _binary('-', _binary('/', target, vref), parse_quantity('1 dimensionless')))
+    print('Rbot exact:', rbot.nom.to('kohm'))
+    for val in [3.16, 3.24, 3.30]:
+        r = parse_quantity(f'{val} kohm')
+        v = _binary('*', vref,
+            _binary('+', parse_quantity('1 dimensionless'), _binary('/', rtop, r)))
+        print(f'Rbot={val}k -> Vout={v.nom.to("V")}')
+    PY
 
-Fix round 3 (chunk 1 review, addressed in commit 04ea034)
----------------------------------------------------------
-Findings addressed:
-1. Recomputed the E-series solve example from the divider's own numbers
-   (Vref = 0.8 V, Rtop = 10 kohm, target Vout = 3.3 V) and showed the arithmetic:
-   Rbot = 10 kohm / (3.3 V / 0.8 V - 1) = 3.200 kohm.
-   Nearest E24 = 3.3 kohm -> Vout = 3.224 V.
-   Nearest E96 = 3.16 kohm -> Vout = 3.332 V.
-   Verified the numbers with src/refdes/calc.py using this command (run in the
-   project venv):
+Output, matching the figures in inline-calc-later.md (exact Rbot = 3.200
+kohm; E96 neighbors 3.16 kohm -> 3.332 V and 3.24 kohm -> 3.269 V; E24
+3.30 kohm -> 3.224 V):
 
-   ```bash
-   PYTHONPATH=$PWD/src python - <<'PY'
-   from src.refdes.calc import parse_quantity, _binary
-   vref = parse_quantity('0.8 V')
-   rtop = parse_quantity('10 kohm')
-   target = parse_quantity('3.3 V')
-   rbot = _binary('/', rtop,
-       _binary('-', _binary('/', target, vref), parse_quantity('1 dimensionless')))
-   print('Rbot exact:', rbot.nom.to('kohm'))
-   for val in [3.16, 3.24, 3.30]:
-       r = parse_quantity(f'{val} kohm')
-       v = _binary('*', vref,
-           _binary('+', parse_quantity('1 dimensionless'), _binary('/', rtop, r)))
-       print(f'Rbot={val}k -> Vout={v.nom.to("V")}')
-   PY
-   ```
+    Rbot exact: 3.200000000000001 kiloohm
+    Rbot=3.16k -> Vout=3.331645569620253 volt
+    Rbot=3.24k -> Vout=3.2691358024691355 volt
+    Rbot=3.3k -> Vout=3.2242424242424246 volt
 
-   Output:
-   ```
-   Rbot exact: 3.200000000000001 kiloohm
-   Rbot=3.16k -> Vout=3.331645569620253 volt
-   Rbot=3.24k -> Vout=3.2691358024691355 volt
-   Rbot=3.3k -> Vout=3.2242424242424246 volt
-   ```
-2. Extended the §3.2 grammar so the solve form with `?` parses and the constraint
-   `=` is not mistaken for a stored result. solve-result is now `? | quantity`.
-3. Reconciled §4.1 with live update: stored results are rewritten explicitly by
-   the editor or the fill command; check/build only verify and never silently
-   rewrite them.
-4. Renamed the release gate rule concept from `stale_inline_results` to
-   `inline_calc_results` and made it cover both stale results and missing stored
-   results. Default stays `{release: true, revision: false}` for non-sealed
-   items.
-5. Fixed citations: calc_reference_snapshot is src/refdes/build.py:2085; the
-   content-hash payload that includes body text is src/refdes/build.py:1858-1907;
-   the block-rename content_hash behavior is cited from
-   docs/design/stale-arithmetic-signal.md:82-84.
-6. Resolved defaults vs positional-only calculator calls: calculator inputs use
-   positional arguments; trailing inputs with a default may be omitted, but you
-   cannot skip a positional argument in the middle. This keeps the DSL
-   keyword-free while allowing practical defaults.
-7. Changed calculator version pinning from `@1` to `::1` because `@` is already
-   the repo-wide DISPLAY-ID@key composite separator.
-8. Re-read the whole doc after edits: every inline math example matches the
-   §3.2 grammar and every number was checked against src/refdes/calc.py.
+Difficulties
+------------
+The main difficulties were process, not content: the review loop never
+converged on the 839-line doc, and the log's practice of citing the commit
+that fixed each review round produced <pending> placeholders and follow-up
+"record sha" commits, which became a recurring source of small
+inaccuracies in the log itself. Both loops were cut: the doc was rescoped,
+and this log no longer records per-round history.
 
-Fix round 4 (chunk 1 doc review and chunk 2 log review, addressed in commit f738e7b)
-------------------------------------------------------------------------------------
-Chunk 1 findings addressed in docs/design/inline-calc.md:
-1. Trigger rule. A grep of single-backtick spans in `docs/` found many existing
-   `NAME = value` spans (e.g. `docs/math.md`: `V_in = LOG-PWR-001.V_in | mV`,
-   `docs/design/backlog.md`: `V_cl = 0.8 V`, `docs/design/editor-image-upload.md`:
-   `MAX_BODY_BYTES = 1 MiB`) and 0 spans containing `:=` outside this design doc.
-   The trigger rule was changed to require `:=`; the old "trailing = <quantity>"
-   branch would have misclassified them. Q1 now recommends the `:=` rule,
-   with per-item opt-in and mandatory leading marker as alternatives.
-2. Grammar updated so that `result` is any calc quantity literal; dimensionless
-   values such as the `ratio` output (4.545) are explicitly allowed. The
-   anonymous basic form (`0.8 V * (...) = result`) was removed because it has no
-   `:=`.
-3. §8.5 example vs rule contradiction fixed. The original example omitted the
-   first defaulted input (`Vref`), violating the "trailing defaults only" rule.
-   The rule is kept, the full-call example now provides all three inputs, and a
-   second example shows how to reorder inputs so the defaulted input is last.
-4. E-series tie resolved. 3.200 kohm is exactly halfway between E96 3.16 kohm and
-   3.24 kohm. The doc now states the tie-break rule (prefer the value that keeps
-   Vout from undershooting the target for a supply rail) and shows both
-   candidates (3.16 kohm -> 3.332 V, 3.24 kohm -> 3.269 V) before giving the E24
-   nearest.
-5. Citation to `src/refdes/build.py:3095` fixed to `src/refdes/build.py:3091-3121`
-   (the `{{name}}` replacer `_inline_value_replacer` and its `replace_inline`
-   helper).
-
-Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
-1. Fixed the round-3 commit citation from the unreachable `ff23782` (pre-amend)
-   to `04ea034` (the actual round-3 commit on the branch).
-2. Updated the header status line from "two review rounds addressed" to "four
-   review rounds addressed".
-3. Standardized round/chunk labels: round 1 = chunk 1, round 2 = chunks 1 and 2,
-   round 3 = chunk 1, round 4 = chunk 1 doc + chunk 2 log.
-4. Removed the duplicate "Tests run" block; tests are recorded once at the end.
-
-Fix round 5 (chunk 2 log review only, addressed in commit 4cd076c)
---------------------------------------------------------------------
-Findings addressed in in-prog-logs/design-inline-calc.txt:
-1. Fixed the round-4 commit citation from the orphaned pre-amend `11ce4dc` to
-   `f738e7b` (the actual round-4 commit on the branch). This commit and all
-   future commits are added without amending, per reviewer instruction.
-2. Updated the owner-decisions header to state that D1-D3 are the owner's
-   decisions as relayed by the orchestrator from the task brief, and pointed at
-   PR #250's description as the durable record (the decisions are also now in
-   the PR body).
-3. Made the test commands generic: "Run in the project venv" rather than naming
-   a machine-specific interpreter path.
-4. (Corrected in the handoff round -- see "Handoff (round 8)".) This item
-   originally said round 5 "added the exact command and output used to verify
-   the E-series numbers"; that command and output were already recorded under
-   round 3, item 1, and round 5 added nothing there.
-
-Fix round 6 (chunk 1 doc review and chunk 2 log review, addressed in commit fed44dc)
-------------------------------------------------------------------------------------
-Chunk 1 findings addressed in docs/design/inline-calc.md:
-1. setRangeText undo claim (§6.3 and Q8). The doc previously listed
-   `setRangeText` alongside `document.execCommand('insertText')` as preserving
-   native undo in Chromium and Firefox. Updated to say that
-   `document.execCommand('insertText')` is the documented undo-preserving path
-   (deprecated but functional), while `setRangeText` does not reliably preserve
-   undo across browsers and is not asserted to do so. The "browser test before P2
-   ships" gate is kept, and the explicit Fill button remains the fallback. Q8's
-   recommended default stays (a) but its rationale now rests on execCommand,
-   not on setRangeText.
-2. Grammar agreement with §7.2/Q9 on solve brackets. Added an explicit
-   semantic-invalidity rule: a solve span that omits the required `from .. to ..`
-   bracket produces a build error, even though the grammar allows the clause to
-   be optional for parsing. (The grammar was later simplified to keep the
-   bracket optional; see round 7.)
-3. Semantic invalidity. Added an explicit rule: a span that matches the grammar
-   but is semantically invalid (e.g. a solve with no bracket, or a calculator
-   call to an undefined equation) produces a build error, not an ordinary code
-   span.
-4. Undefined `equation-name` / version pinning not in grammar. Extended `call` to
-   define `equation-name` and an optional `[ "::" version ]` suffix, so the
-   pinned-call example `divider::1(...)` now parses under the grammar.
-5. Missing result-list on multi-out. `multi-out` now allows an optional
-   `= result-list`, and a missing result is warned/filled the same way a basic
-   missing result is, closing the silent-ignore gap.
-6. Diagnostic wording. Changed "no calc value named 'Rtop'" to the evaluator's
-   actual phrasing "unknown name 'Rtop'".
-7. Span count methodology. Clarified that the count excludes this design doc,
-   fenced code blocks, and spans with more than one `=`; the direction of the
-   argument (many existing `NAME = value` spans, none with `:=`) is unchanged.
-8. Q1(c) wording. Removed the self-contradictory "unless the marker is required"
-   clause from the mandatory-leading-marker alternative.
-
-Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
-1. Updated the header status line from "four review rounds addressed" to "five
-   review rounds addressed".
-
-(Round 10 correction: this section previously listed three more chunk-2 items
--- the `11ce4dc` to `f738e7b` citation fix, standardized round/chunk labels,
-and removal of the duplicate "Tests run" block. Those repeat work recorded
-under rounds 5 and 4 and were not redone here; `git show fed44dc` shows the
-status-line update was this round's only chunk-2 change. The extras were
-copy-paste artifacts and have been removed.)
-
-Fix round 7 (chunk 1 doc review and chunk 2 log review, addressed in commits 36c286b and 46bc89c)
-----------------------------------------------------------------------------------------------------
-Chunk 1 findings addressed in docs/design/inline-calc.md:
-1. Grammar/§7.2/Q9 contradiction on solve brackets. Round 6 made the bracket
-   required in the grammar, but that caused a missing-bracket solve to fall
-   through to "ordinary code span" instead of matching the grammar and then
-   erroring as §7.2 requires. Fixed by making the bracket optional in the grammar
-   again and relying on the semantic-invalidity rule (and §7.2) to require it.
-   Re-read §3.2, §3.3, and §7.2 together to confirm no sentence contradicts this.
-2. Undefined-name diagnostic. Completed the round-6 fix: removed the trailing
-   "in this item" suffix so the message is now exactly `unknown name 'Rtop'`,
-   matching the evaluator (`src/refdes/calc.py:615`).
-3. Span count. Replaced the unrecorded "57 spans" figure with a reproducible
-   count: 39 single-backtick spans in existing docs (excluding this design doc,
-   fenced code blocks, and spans with more than one `=`). The exact command and
-   output are recorded below under "Counted-spans methodology".
-4. valid_if vs parse_limit. The doc previously claimed `parse_limit` parses the
-   whole `expression op quantity` entry. Fixed to say the entry is split at the
-   operator; the left-hand expression is evaluated and the right-hand limit is
-   parsed by `parse_limit` (operator-first, as `src/refdes/calc.py:834-859`
-   requires).
-5. §4.1 vs Q8/§6.2 tension. Added explicit text that in Q8(a) live mode the
-   editor rewrites results automatically as the author types, while in explicit-
-   button mode it rewrites only when asked; `check`/`build` never rewrite.
-6. Cross-item reference hashing. Corrected the attribution: resolved values are
-   captured in the baseline snapshot via `calc_reference_snapshot`
-   (`src/refdes/build.py:2085`) and contribute to the content hash via
-   `_calc_refs_hash_value` (`src/refdes/build.py:2103-2116`), not via
-   `calc_reference_snapshot` directly.
-
-Chunk 2 findings addressed in in-prog-logs/design-inline-calc.txt:
-1. Updated the header status line to remove the round count so it cannot go
-   stale; the round headings below now provide the count. (Round 7's commit
-   36c286b set the count to "six" by grep; the removal itself landed in the
-   follow-up commit 46bc89c.)
-2. Rewrote the PR body from the current doc: short summary, D1-D3 verbatim from
-   the doc's "Decision recap" section, and every open question with its
-   recommended default copied from the doc. The rewrite was posted with
-   `gh pr edit 250 --body "..."`, and the shell ate the backticks in the
-   double-quoted argument, so the posted body was mangled -- stale Q5/Q8
-   defaults and Q6/Q9/Q11/Q12 reduced to "Default: ." (caught by the round-8
-   chunk-2 review). It was redone from a body file in the handoff round; see
-   "Handoff (round 8)", item 1.
-3. Moved "Difficulties / choices" to the end of the log so it covers all rounds.
-4. Recorded the exact counting command and output for the existing `NAME = value`
-   spans figure.
-
-Handoff (round 8, addressed in commit e24c913)
------------------------------------------------
-A new agent took over the PR at head 46bc89c, after the round-8 chunk-1 (doc)
-and chunk-2 (log) reviews. What it did:
-
-1. PR body. The round-7 body rewrite had been posted with `gh pr edit 250
-   --body "..."` and the shell ate the backticks, leaving mangled question
-   defaults (stale Q5/Q8; Q6/Q9/Q11/Q12 reading "Default: ."). The body was
-   rewritten from the current doc to .scratch/pr250-body.md with a quoted
-   heredoc (`cat > ... <<'EOF'`). `gh pr edit 250 --body-file ...` failed with
-   a GraphQL Projects-classic deprecation error, so it was posted with
-   `gh api -X PATCH repos/Squishiba/refdes/pulls/250 -F body=@...`, then
-   re-fetched and checked against the doc question by question: short
-   summary, D1-D3 verbatim from the doc's "Decision recap", and every open
-   question (Q1-Q17) with its recommended default copied from the doc.
-2. Design gaps from the round-8 chunk-1 review. Added four open questions to
-   the doc, each with 2-3 options, a neutral note, and a suggested default:
-   Q14 (solve spans and source order), Q15 (calculators vs the existing
-   params:/expr: equation shape), Q16 (binding fewer names than a calculator
-   has outputs), Q17 (the `| unit` assertion in a basic span). Fixed the §4.1
-   stale-result example to use the §4.4 message shape
-   (`WARNING inline-calc Vout at DEC-PWR-001.md:23: ...`). Added pointers to
-   the new questions from §2, §3.2, §7.2, §8.1, and §8.5, and extended the
-   §11 phasing table's dependency lists (Q17 -> P1, Q14 -> P3, Q15/Q16 -> P4).
-   Code claims were verified by reading the code: `EQUATION_KEYS` and the
-   per-key rejection (src/refdes/configcheck.py:121, 215-248;
-   src/refdes/schema.py:393-457), the `unknown name` error
-   (src/refdes/calc.py:613-615), the statement-level `| unit` split
-   (src/refdes/calc.py:1349-1357), and the docs/math.md citations (30-32,
-   336-354, 351-354, 413-461, 456-457).
-3. Log accuracy from the round-8 chunk-2 review. Corrected the round-5
-   E-series misattribution (round 5, item 4) and the round-7 body-rewrite item
-   (round 7, chunk 2, item 2) to record the mangling. The claims that D1-D3
-   are reproduced in PR #250's description (header, round 1 item 6, round 5
-   item 2) are true again now that the body carries D1-D3 verbatim.
-4. Re-ran the docs tests with the same commands and got the same results (see
-   "Tests run"). No code was changed; no sabotage applies to a docs-only
-   round.
-
-Round 10 (log-only, Qwen, addressed in commit e49035f)
----------------------------------------------------------
-Log-only round addressing the round-9 chunk-2 review of this log (reviewer
-938630a1, a Paseo reviewer agent id, not a git commit). docs/design/
-inline-calc.md was approved and is not touched.
-1. Aligned round labels with the commit history: the handoff section is now
-   "Handoff (round 8)" (commit e24c913 is titled "address round-8 review
-   findings ... (handoff round)"); cross-references updated. All round
-   headings now cite the commits that did the work.
-2. Removed the copy-pasted duplicates from round 6's chunk-2 list (citation
-   fix, standardized labels, Tests-run dedup -- see the correction note there).
-3. Fixed the stale process claim in "Difficulties / choices" so it matches
-   "Handoff (round 8)", item 1: `gh pr edit 250 --body-file` failed with the
-   GraphQL Projects-classic deprecation error, so the body was posted with
-   `gh api -X PATCH ... -F body=@...`.
-4. Re-cited D1-D3: the durable record is the doc's "Decision recap" section
-   and PR #250's body; `.scratch/task/TASK.txt` is gitignored and is stated
-   as not a durable source.
-5. Recorded the exact test commands under "Tests run" and re-ran them:
-   `pytest tests/test_docs_anchors.py -q` -> 2 passed;
-   `docs-site/gen_examples.py --check` -> up to date.
-6. Noted in round 7, chunk 2, item 1 that the status-line count removal
-   landed in follow-up commit 46bc89c.
-
-Counted-spans methodology
--------------------------
-The 39-span figure below was produced by this command (run in the project venv
-from the repository root). Historical note: it was cited by §3.1/Q1 of the
-pre-rescope draft (e24c913); the rescoped doc dropped the figure -- its trigger
-section rests on the probe instead, and old Q1 is now the slice's open question
-4, tagged "(was Q1)".
-
-
-```bash
-python - <<'PY'
-import re
-from pathlib import Path
-
-root = Path('.')
-
-def strip_fenced(text: str) -> str:
-    lines = text.splitlines(keepends=True)
-    out = []
-    in_fence = False
-    fence_marker = None
-    for line in lines:
-        m = re.match(r'^(```+|~~~+)', line)
-        if m:
-            if not in_fence:
-                in_fence = True
-                fence_marker = m.group(1)
-            elif line.startswith(fence_marker):
-                in_fence = False
-                fence_marker = None
-            continue
-        if not in_fence:
-            out.append(line)
-    return ''.join(out)
-
-pattern = re.compile(r'`([^`\n]*?)`')
-name_eq = re.compile(r'^[A-Za-z_][A-Za-z0-9_]* = [^=]+$')
-
-for sub, exclude_this_doc in [('docs', True), ('tests', False)]:
-    total = 0
-    examples = []
-    for p in sorted((root / sub).rglob('*.md')):
-        if exclude_this_doc and p.name == 'inline-calc.md' and 'design' in p.parts:
-            continue
-        txt = p.read_text(encoding='utf-8', errors='ignore')
-        txt = strip_fenced(txt)
-        for m in pattern.finditer(txt):
-            content = m.group(1)
-            if name_eq.match(content):
-                total += 1
-                if len(examples) < 5:
-                    examples.append((str(p.relative_to(root)), content))
-    print(f'--- {sub}: {total} ---')
-    for path, content in examples:
-        print(f'{path}: `{content}`')
-PY
-```
-
-Output:
-```
---- docs: 39 ---
-docs/design/backlog.md: `V_cl = 0.8 V`
-docs/design/backlog.md: `CLR = 3.3 kohm`
-docs/design/backlog.md: `extensions = (".csv",)`
-docs/design/backlog.md: `name = source("cited/file.csv", "key") | unit`
-docs/design/backlog.md: `PROJECT_SETTINGS_NAME = "refdes-project.yaml"`
---- tests: 0 ---
-```
-
-(The examples list is truncated to the first five matches per directory.)
-
-Difficulties / choices
-----------------------
-- The write tool failed on large JSON payloads containing triple backticks and
-  quotes, so the design doc and this log were written via Python scripts in
-  bash. This is a tooling workaround, not a content change.
-- Deciding how to handle stale results in sealed entries required checking the
-  current reseal state; history-backed resealing is still pending, so the gate
-  excludes sealed items.
-- The grammar had to be extended carefully so that `? where Vout = 3.3 V` does
-  not treat the constraint `=` as a stored result.
-- Requiring `:=` as the trigger means anonymous inline evaluation is not
-  supported. The trade-off is justified by the 39 existing `NAME = value` spans
-  that would otherwise be misclassified.
-- The E-series tie-break could have gone either way depending on whether the
-  application cares more about overshoot or undershoot; the doc picks the common
-  "do not undershoot a supply rail" rule and still shows both candidates.
-- Keeping the solve bracket optional in the grammar while requiring it
-  semantically is slightly unusual, but it lets the build report a clear error
-  ("missing bracket") instead of silently treating a malformed solve span as
-  ordinary code.
-- This log is now committed without amending so that its commit citations remain
-  stable.
-- PR-body edits are written to a body file with a quoted heredoc; in the
-  handoff round `gh pr edit 250 --body-file` failed with the GraphQL
-  Projects-classic deprecation error, so the body was posted with
-  `gh api -X PATCH repos/Squishiba/refdes/pulls/250 -F body=@...` (see
-  "Handoff (round 8)", item 1). The body is fed from a file because an inline
-  `--body "..."` argument let the shell eat the backticks once (round 7).
-
-Tests run
----------
-Exact commands (run from the repository root in the project venv
-`/home/jorb/work/venv-refdes/bin/python`, re-run in the round-10 pass):
+Tests run (2026-10-17, repository root, project venv)
+------------------------------------------------------
 - `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest tests/test_docs_anchors.py -q` -> 2 passed
-- `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python docs-site/gen_examples.py --check` -> both files up to date
+- `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python docs-site/gen_examples.py --check` -> docs/schema-reference.md and docs/vocabulary.md up to date
 
-No src/ or tests/ changes were made; this is a design-only PR.
-No changelog.d fragment is needed because the change is not user-visible yet.
+Design-only PR: no src/ or tests/ changes.
 
-Rescope (Sol, 2026-10-16, commit f4974bc)
-------------------------------------------
-Status: finished for this design pass; PR #250 description updated by REST PATCH.
-The commit and push of this pass were its publication step.
+Open questions (named here; see "Open questions for this slice" in
+docs/design/inline-calc.md)
+- Precision (was Q2)
+- Freshness gate (was Q5)
+- Unit slot (was Q17)
+- Triggered incomplete text (was Q1)
 
-Progress:
-- Started with a clean `design-inline-calc` worktree. Read
-  docs/design/named-calc-blocks.md and docs/math.md before editing, then
-  checked cited functions in src/refdes/calc.py, build.py, lifecycle.py,
-  seal.py, history.py, citations.py, and schema.py. Ran `refdes schema` and
-  `refdes check/build/release/revision/init/calc-rewrite --help` as relevant.
-- Made `.scratch/inline-calc-probe/` with `refdes init`; its hardware@3 project
-  has an item containing `Vout := 2 V * 2 = 5 V`. `refdes check` reported
-  0 errors despite the deliberately wrong result, confirming that inline-calc
-  is still design-only. The probe and schema output remain under .scratch/.
-- Rewrote docs/design/inline-calc.md from 839 to 176 lines. It now covers
-  only the trigger and basic grammar, mandatory stored result, precision
-  comparison, diagnostic severity, source-order scope, calc_hash and item
-  hashing, cross-item/source inputs, and sealed/captured history. Four
-  first-slice questions remain, each with a default.
-- Moved the fill command, live editor updates and undo, one-unknown solve,
-  E-series suggestions, multi-output calculators and validity conditions,
-  version lockfile, shipped library, form panel, deferred decisions, and old
-  P2-P4 direction into the 126-line docs/design/inline-calc-later.md. (Count
-  re-verified after the Polish 2 pass; it is 126, not 123, at the current
-  head -- the polish and polish-2 rounds each added table rows.) It is
-  explicitly not under review.
-- Did not edit docs/index.md: it maps public docs, while both design pages
-  live under docs/design/. Ran the requested docs checks: docs-anchor tests
-  passed (2), and docs-site/gen_examples.py --check reported both files current.
-- Wrote the replacement PR body to .scratch/pr250-body-sol.md and updated
-  PR #250 with `gh api -X PATCH repos/Squishiba/refdes/pulls/250
-  -F body=@.scratch/pr250-body-sol.md`. The API returned PR number 250.
-
-Difficulties and corrections:
-- The previous design cited line numbers and current behavior that had drifted.
-  In particular, `release_gate.inline_calc_results` is not a current rule,
-  so the new doc labels it proposed. `calc_hash_for` currently reads only
-  fenced block contents; `_calc_reference_values` and fetch discovery also
-  scan fences only. The first slice names the extensions those paths need.
-- Historical entries now have both build seals and history-backed capture
-  paths. The gate proposal exempts protected history while keeping stale
-  warnings visible; no automatic rewriting is part of this slice.
-- The first PR read failed under sandbox network restrictions and succeeded
-  with approved escalated access. The REST PATCH succeeded. No other branch
-  or worktree was changed.
-
-Polish (Qwen, 2026-10-16)
--------------------------
-Addressed the review of the rescoped docs: chunk 1 (the two design docs)
-approved with three minor findings, chunk 2 (this log) asked for changes.
-Done in the commit that follows f4974bc on this branch.
-1. Re-ran the baseline probe fresh under .scratch/inline-calc-probe-polish/
-   before writing anything: `refdes init` in an empty directory printed
-   `standard: hardware@3`; with one `log` item whose body is the
-   single-backtick span `Vout := 2 V * 2 = 5 V`, `refdes check` (this
-   worktree's src on PYTHONPATH) reported "1 items, 0 errors, 0 warnings",
-   exit 0. Replaced both `.scratch/inline-calc-probe/` citations in the
-   design docs with short inline probe descriptions.
-2. Tagged the slice's four open questions with their old-draft numbers
-   (1 was Q2, 2 was Q5, 3 was Q17, 4 was Q1; mapping read from the old
-   draft at e24c913), and added a later-doc table row noting old Q5
-   resolved into the slice's section 2 / its open question Q2. The later
-   doc's Q6-Q16 numbering is untouched.
-3. Re-wrapped the ragged paragraph ending the slice's section 3.
-4. This log: the header now points at the "Owner decisions" section and
-   the section 1 example (it cited "Decision recap" and §3.2, both gone
-   after the rescope); round 10 cites commit e49035f; 938630a1 is
-   labelled a Paseo reviewer agent id, not a git commit (verified absent
-   from the object store); the rescope heading cites f4974bc and its
-   publication sentence is past tense. The machine-specific venv path
-   under "Tests run" is left as-is (reviewer rated it informational).
-5. Tests: the two commands under "Tests run", re-run for this pass, with
-   the same results.
-
-Polish 2 (Qwen, 2026-10-16)
----------------------------
-Second review-fix pass on head a79529b; two free-model reviewers requested
-changes. Each finding was verified against the cited file/command before
-acting; all four doc findings and both log findings checked out. Landed in
-the commit that follows a79529b (this section cannot cite its own sha).
-1. F1: section 1's malformed-trigger rule is now labelled "Recommended"
-   with a pointer to open question 4, matching section 2's "Recommended"
-   signalling; OQ4 records that the rule reverses the old draft's Q1(a)
-   (verified in e24c913: old Q1(a) left grammar-mismatched spans as
-   ordinary code). The slice keeps exactly four open questions, so the PR
-   body's "Open questions ... four ... each has a recommended default"
-   sentence stays true.
-2. F2: added the old Q3 (scope) and Q4 (calc_hash) rows to the later doc's
-   mapping table, marked "resolved into the first slice" (old Q3(a) =
-   section 1 source-order item-wide scope; old Q4(a) = section 3 calc_hash
-   row), following the existing Q5 row's pattern. The PR body's sentence
-   "All other earlier questions are deferred" is false for Q3/Q4; the
-   corrected paragraph is written to .scratch/pr250-body-fix.md, not
-   applied to the PR body (per instruction). That file also carries the
-   updated doc line counts (main doc 183, later doc 126) for the same
-   paragraph's "now 176 lines" claim, which this pass makes stale.
-3. F3: section 2 now states a recommended tie rule -- round the computed
-   nominal to the stored literal's last written decimal place on the
-   decimal text, halves away from zero, accept on equality. Stated inline
-   rather than as a fifth open question, keeping the count at four.
-4. F4: the unit-assertion paragraph now distinguishes label from assert
-   for source(): verified src/refdes/calc.py:1616-1618 ("The declared unit
-   LABELS the file's bare number ... this is not convert_value's
-   dimensionality assertion") and docs/math.md, "Reading a value from a
-   source file" ("It *labels* the file's bare number"), both re-read at
-   this head.
-5. This log: the "Counted-spans methodology" pointer no longer cites
-   §3.1/Q1 (sections the rescoped doc dropped) -- it now says the figure's
-   citing section existed only in the pre-rescope draft e24c913 and the
-   rescope dropped the figure in favour of the probe. The later-doc line
-   count at the rescope section is updated 123 -> 126, re-counted with
-   wc -l after item 2's two rows (head a79529b had it at 124; the count
-   appears at that one place only -- grep-verified; the task's "both
-   places" premise found no second occurrence). The rescope section's
-   "839 to 176 lines" is left as the historical figure for f4974bc; the
-   main doc is 183 lines after this pass.
-6. Tests: `PYTHONPATH=$PWD/src
-   /home/jorb/work/venv-refdes/bin/python -m pytest tests/test_docs_anchors.py
-   -q` and `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python
-   docs-site/gen_examples.py --check`, run for this pass; results recorded
-   in the final report.
+Status: finished, awaiting owner's decisions on the four open questions
