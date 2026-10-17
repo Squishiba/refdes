@@ -2054,11 +2054,13 @@ def cmd_init(args) -> int:
     # `scaffold.init` returns only the config path, so this pre-check is what
     # tells the two outcomes apart for the announcement below.
     vscode_settings_existed = scaffold_mod.vscode_settings_exists(cwd)
-    # Also asked before init runs: init appends its own .gitignore line
-    # whenever the file is not covered, and that line out-ranks a
-    # machine-local rule (git's precedence), masking the pre-init world
-    # the third paren below is about.
-    vscode_local_rule = scaffold_mod.vscode_local_rule_ignores(cwd)
+    # Also asked before init runs (when the announcement can use it): init
+    # appends its own .gitignore line whenever the file is not covered, and
+    # that line out-ranks a machine-local rule (git's precedence), masking
+    # the pre-init world the third paren below is about.
+    vscode_local_rule = (
+        False if vscode_settings_existed else scaffold_mod.vscode_local_rule_ignores(cwd)
+    )
     # Read before init runs: `scaffold.init` returns only the config path, so
     # this is the only way the announcement below can say which ignore patterns
     # actually appeared -- including when the answer is none, because the

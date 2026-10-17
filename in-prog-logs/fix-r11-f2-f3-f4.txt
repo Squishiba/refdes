@@ -1,125 +1,52 @@
-# fix R11-F2, F3, F4 (user-sim run 11)
+Task: fix R11-F2, F3, F4 from user-sim run 11 (branch fix-r11-f234, PR #336),
+then the #328-review follow-up: machine-local git rules must not count as
+project coverage.
 
-Three low findings from `in-prog-logs/user-sim-release-gate-run11.md`
-(branch `origin/user-sim-run11`), one PR. Tests first: each new test was
-run against a detached worktree of HEAD with the new tests copied in
-(`.scratch/red-main`, removed after) — red there, green after the change.
-Full suite: 4116 passed, 2 skipped. `ruff check <touched> --select E9,F`
-clean.
+F2 (cli.py, scaffold.py): the paren in `wrote .vscode/settings.json
+(gitignored -- ...)` keyed on "init wrote the file", never on git's answer,
+so it lied exactly in DOC-REMEDY-018's shape (an author's negation tracks
+the file). The paren now asks: scaffold.vscode_settings_state splits git's
+answer into who ignores the file -- project-ignored / tracked /
+local-ignored -- and the CLI prints a third paren for a file ignored only
+by a machine-local rule (the .gitignore line init added is what carries the
+ignore to every clone). The who-check for local rules runs BEFORE init
+(init's appended line out-ranks the local rule and masks the pre-init
+world); the rest is probed post-init, because git reports the winning
+`!.vscode/` only once the directory exists on disk, and the directory is
+init's own first write (probed on git 2.47.3: a directory ignore matches
+the file path even absent; a directory negation is invisible until the
+directory exists).
 
-## F2 — init's "gitignored" paren was hardcoded (cli.py, scaffold.py)
+F3 (scaffold.py): the new-file path of `_ensure_gitignore_entries` never
+asked the coverage question, so a project nested in a repo whose root
+.gitignore covers init's entries got them all anyway. It asks the same
+question the append path asks now; fully covered means no file and no
+`wrote` line.
 
-`cmd_init` printed `wrote .vscode/settings.json (gitignored -- ...)` on
-"init wrote the file" alone, never on git's answer. The key subtlety:
-#328's helper `_gitignore_addresses` answers "has the project stated a
-position" — a winning `!` negation is exit 0 there, so reusing it for the
-announcement would have printed "gitignored" in exactly the report's
-negation shape. The announcement needs the *ignored* answer, which is
-git's `check-ignore -v` exit code plus the winning pattern read from the
-source line (`!`-prefixed = tracked). Added `scaffold.vscode_settings_ignored`:
-`_git_ignores` mirrors `_git_covers`' path probe with a new
-`_check_ignore_ignored` verdict (parses `source:line:pattern<TAB>path`,
-quotes stripped for git-quoted patterns); outside a repo the literal
-`_literal_ignores` answers (a negated line is not ignored). NOT-branch
-message names what a commit ships. The gitignored wording is byte-equal
-to the old one, so `test_cli_announces_the_vscode_settings_file_it_wrote`
-(non-repo tmp_path — init appends there, gitignored is true) pins it
-unchanged. Parametrized CLI test covers `.vscode/*`+`!.vscode/*`, bare
-`!.vscode/settings.json`, `.vscode/`+`!.vscode/` (all NOT) and `.vscode/`,
-`/.vscode` (gitignored), each asserted against a hand-run
-`git check-ignore` exit code.
+F4 (serve/api.py): `_create_preview` accepted any board string; the list
+route validates it against the project's registered boards. The preview now
+gates `board` with the same `validate_facet` call, message, and 400 mapping.
 
-## F3 — new `.gitignore` skipped the coverage question (scaffold.py)
+Follow-up (#328 review, finding 2): git's `check-ignore` also consults the
+global `core.excludesFile` and `.git/info/exclude`, and init had been
+counting their wins as coverage -- an author whose global config ignores
+`.refdes/` got no project .gitignore, and teammates' clones came up
+untracking (then `git add -A`-committing) refdes outputs. Only the
+project's own .gitignore files travel to every clone, so
+`_check_ignore_verdict` counts a win only when check-ignore's source is
+one of them (relative path, basename `.gitignore`, not under `.git/`);
+a local win reads as the project's silence.
 
-`_ensure_gitignore_entries` wrote all entries when the file did not exist
-(`if not os.path.isfile(path): write_text(all)`). Reproduced the report's
-case: project nested in a repo whose root ignores `.refdes/` →
-`check-ignore` says the `.refdes/*` entries are covered, init wrote them.
-Chose to fix the write (not just the message): git can answer for a
-path not on disk (`--no-index`), and the patterns that cover a fresh
-project's files live above it — repo-root `.gitignore`s and
-`core.excludesFile` (verified: check-ignore reports the global file as
-source, and reads repo-local `core.excludesFile` config). New-file path
-now runs the same `entries -> missing` comprehension as the append path,
-with `""` as the text the project has: outside a repo the literal set
-over no file writes everything, as before; a fully-covered project gets
-no file at all (an empty `.gitignore` announces nothing) and the CLI
-prints no `wrote .gitignore` line — the announcement diff
-(`added_gitignore_patterns`) covers this with no change. No docs change:
-cli-reference.md already promises "skipped for a path an existing pattern
-already covers"; F3 makes the create path keep that promise. Tests: root
-`.gitignore` covers `.refdes/*` only (vscode + lock still written, ground
-truth probed by hand), full coverage → no file, `core.excludesFile` → no
-file, and the CLI announcement line lists exactly the written entries.
+Tests: red-first tests in tests/test_scaffold.py for each finding (F2 paren
+cases incl. the local-rule paren, F3 create-path coverage, CLI announces),
+and tests/test_serve_create.py for F4; local-rule tests set
+GIT_CONFIG_GLOBAL/GIT_CONFIG_COUNT so the real global config is never
+consulted. Full suite and ruff (E9,F on touched files) run per commit.
 
-## F4 — create/preview gated `workspace` but not `board` (serve/api.py)
-
-`_create_preview` ran `validate_facet(project, "workspace", ...)` only;
-`?board=nosuchboard` answered 200 while `/api/items?board=` refuses it
-from `parse_filters`. Added the same `validate_facet(project, "board",
-...)` call with the same `FilterError` → status/message mapping, docstring
-updated. No client change needed (create.js offers only registered
-values). Tests: preview's 400 byte-equal to the list route's (fixture
-knows `board-a`), workspace+ghost-board pairing refused, neighbours
-pinned (board alone == unscoped preview — all fixture items are on
-board-a — board+workspace pair, absent, empty), nothing reserved/written
-per `snapshot_tree`. A second test pins message parity on the `served`
-fixture.
-
-## Scope notes
-
-- POST /api/items/create is untouched: its board/workspace validation
-  runs in the create service under the write gate (422 `invalid`), and
-  run 11 filed nothing there.
-- Two commits: F2+F3 share scaffold's git-asking helpers; F4 is the serve
-  lane. Changelog fragments `changelog.d/{init-vscode-announcement-asks-git,
-  init-new-gitignore-asks-git,create-preview-board-gate}.fixed.md`.
-
-Status: finished (R11-F2..F4), then reopened by the #328-review follow-up below.
-
-## Follow-up: machine-local git rules are not coverage (#328 review, finding 2)
-
-Design flaw in the F3/#328 helper: `git check-ignore` consults the
-machine's global `core.excludesFile` and the clone's `.git/info/exclude`
-too, and init counted their wins as coverage -- so an author whose global
-config ignores `.refdes/` got NO project `.gitignore`, and teammates'
-clones came up untracking (then `git add -A`-committing) refdes outputs.
-Only rules in the project's own `.gitignore` files are shared; they are
-the project having stated a position.
-
-- scaffold: new `_source_is_shared_gitignore` (check-ignore's source is
-  shared iff relative to the toplevel, basename `.gitignore`, not under
-  `.git/`; git prints repo sources relative, the excludesFile absolute)
-  and `_check_ignore_source` (winning pattern + source). The append-path
-  `_check_ignore_verdict` now returns True only on a SHARED win; a
-  local win is False (project text silent -- repo rules outrank local
-  ones, git precedence). F2's trio
-  (`vscode_settings_ignored`/`_git_ignores`/`_check_ignore_ignored`)
-  became `vscode_settings_state`/`_check_ignore_ignored_state` with four
-  states: project-ignored / tracked / local-ignored / unaddressed.
-- cli: reads the state BEFORE `scaffold.init` runs (init's own appended
-  line masks the local-rule case); a new third paren
-  "(gitignored by a machine-local rule only -- the .gitignore line init
-  added makes it ignored for every clone; ...)".
-- Tests: 5 new (append path and create path under a global-excludes and
-  under an info/exclude rule; CLI local-rule paren), all red on the
-  branch tip before the fix, green after. A 6th guards project-negation
-  beats local-rule (green both sides). Tests set GIT_CONFIG_GLOBAL to an
-  empty throwaway under tmp_path (GIT_CONFIG_COUNT for the key) so real
-  global config is never consulted.
-- Changelog: the three init fragments updated to the shared/local line.
-
-Full-suite run caught what the targeted runs missed: a PRE-init state
-probe cannot see directory rules -- git matches a `.vscode/`-style
-pattern only when the directory exists on disk, and the directory is
-init's own first write (init writes .vscode/ before appending
-.gitignore, which is why the append decision sees dir rules). Rebuilt:
-`vscode_settings_state(cwd, added, local_rule_pre)` probes the
-POST-init world (file probe, dir probe for `!dir/`); init's appended
-line is read from `added` (vscode in added = no project position,
-gitignored; with a pre-init local-file-rule win = local-ignored); a
-local winner in the probe branch means the project covered the entry
-by dir-track, so clones follow the project = tracked. 105 scaffold
-tests green after the rebuild.
+Difficulty: the first rebuild of the paren's probe moved everything
+pre-init, which broke the dir-negation case and was caught only by the
+full suite -- a lesson in not reporting before the suite exits. The
+reviewer's check also caught a false git claim in this log's earlier
+revision; the mechanism above is the probed one.
 
 Status: finished.

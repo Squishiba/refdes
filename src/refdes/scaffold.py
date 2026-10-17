@@ -392,14 +392,19 @@ def vscode_local_rule_ignores(target_dir: str) -> bool:
     local rule (git's precedence puts repository files above the
     machine's) and masks it afterwards.
 
-    It is a file-path probe only: directory rules -- a global
-    `.vscode/` -- are invisible to `check-ignore` while the `.vscode/`
-    directory does not exist yet (the directory is init's own first
-    write, see `init`'s ordering), and such a rule lands on the
-    appended-line branch of `vscode_settings_state`, whose announcement
-    is true for it. False outside a repository, for a git that cannot
-    answer, and for a shared winner (which is no news: the project
-    itself stated the position)."""
+    It is a file-path probe: a directory ignore -- a global `.vscode/` --
+    matches the file path even while the directory is absent (git reports
+    it, verified on git 2.47.3), so this reads such a rule as the local
+    win it is; what a pre-init probe cannot see is a directory
+    NEGATION -- git reports the winning `!.vscode/` only once the
+    directory exists on disk (the probe of the directory path exits 1
+    absent, 0 present, verified the same way), and the directory is
+    init's own first write, so a project tracking it reads as silence
+    here -- which is no harm: silence means False, and
+    `vscode_settings_state`'s probe branch runs post-init, in the world
+    where the directory exists and the negation is visible. False outside
+    a repository, for a git that cannot answer, and for a shared winner
+    (which is no news: the project itself stated the position)."""
     toplevel = _repo_toplevel(target_dir)
     if toplevel is None:
         return False
@@ -512,24 +517,6 @@ def _literal_addresses(text: str, entry: _GitignoreEntry) -> bool:
         if stripped.startswith("#") or not stripped:
             continue
         if stripped.lstrip("!") in entry.covers:
-            return True
-    return False
-
-
-def _literal_ignores(text: str, entry: _GitignoreEntry) -> bool:
-    """The literal *ignored* answer: a pattern line states an ignore of the
-    entry's path. A `!` negation line states the opposite position and is
-    not ignored -- the split R11-F2 is, with the same reasoning as
-    `_check_ignore_ignored_state`'s git side. Outside a repository there is no
-    matcher whose last-match rule a negation could lose to, so this reads
-    the lines as written: an author who negates a pattern in a plain
-    directory is not tracked by anything (git does not exist there), and
-    the plain answer is what the announcement gets."""
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("#") or not stripped:
-            continue
-        if not stripped.startswith("!") and stripped in entry.covers:
             return True
     return False
 
