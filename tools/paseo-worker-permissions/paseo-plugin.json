@@ -1,0 +1,9 @@
+{
+  "id": "refdes-worker-permissions",
+  "name": "refdes worker permissions",
+  "description": "Auto-answers only Sol-dispatched OpenCode workers' external_directory requests for the shared PROGRESS.md file and read-only in-prog-logs evidence commands; everything else stays pending.",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.11.2"
+  }
+}

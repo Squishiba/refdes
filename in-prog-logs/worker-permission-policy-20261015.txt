@@ -1,0 +1,76 @@
+Task: reduce repeated external_directory approval prompts from Sol's Qwen
+refdes fix workers (PROGRESS.md row "Automatic review of Sol Qwen
+external-directory permissions"). Branch fix/worker-permission-policy-20261015,
+worktree-only. Finished: plugin + tests + docs committed, PR open. NOT
+deployed, NOT merged.
+
+Progress:
+
+1. Verified the config route is unsafe, per instruction:
+   - Installed opencode 1.18.32; docs (opencode.ai/docs/permissions) confirm
+     `external_directory` gates every tool touching external paths
+     (read/edit/glob/grep/bash) and `edit` deny constrains only the file
+     tools -- NOT bash redirections, `sed -i`, Python writes. A project
+     `opencode.json` rule that allows the shared PROGRESS.md directory scope
+     therefore grants bash write access to the main checkout. REJECTED;
+     repo opencode.json left untouched (its existing rm/tmp denies stay).
+   - Reproduced the worker pain with a controlled probe (`opencode run
+     --pure --dir <worktree> -m opencode-go/claude-haiku-5-5`): reading
+     /home/jorb/work/refdes/src/refdes/model.py emitted
+     `permission requested: external_directory (...); auto-rejecting`
+     (headless auto-reject; in the TUI/Paseo this is the blocking prompt).
+     Bash `wc -l .../PROGRESS.md` runs under the current config only because
+     bash "*" is already allow -- confirming read/write cannot be split by
+     config for bash. Probe logs: .scratch/permprobe/.
+
+2. Implemented tools/paseo-worker-permissions/ (server-only Paseo plugin,
+   scaffolded via `paseo plugin init`, SDK @getpaseo/plugin 0.11.2 pinned to
+   daemon 0.11.2):
+   - shared/classifier.ts: pure fail-closed classifier. Gates: agent
+     provider "opencode", request provider "opencode", parentAgentId ==
+     Sol dispatcher d86b9967-5a0c-41e5-8635-fca6170fdeaa, kind "tool", name
+     "external_directory". Allow only (a) metadata filepath/file/path string
+     (incl. nested input) EXACTLY /home/jorb/work/refdes/.scratch/PROGRESS.md
+     (globs rejected), or (b) command text (input.command / metadata
+     command|cmd|shellCommand, incl. nested) matching a character allowlist
+     that excludes all shell metachars/quotes/globs/newlines, program exactly
+     cat|head|rg, per-program flag allowlists (rg --pre/-f/--config/
+     --hostname-bin rejected), every path argument under
+     /home/jorb/work/refdes/in-prog-logs/ (root ok) or the exact progress
+     file, no ".." segments, rg requires pattern+explicit path. Everything
+     else pending; nothing auto-denied.
+   - index.server.ts: server.on("agent.permission_requested") per the
+     documented hook API (paseo.sh/docs/plugins/reference.md); answers with
+     paseo.agents.ref(id).respondToPermission({requestId, behavior: "allow"})
+     on allow; human wins races (failure logged).
+   - Payload sufficiency: verified in the RUNNING daemon 0.11.2
+     (@getpaseo/server providers/opencode-agent.js) that permission.asked
+     maps to request {name: <permission>, kind: "tool", input: {patterns,
+     metadata, tool, command}} -- OpenCode raw metadata (carries the file
+     tool's filepath) and parsed command text reach the hook; hook agent
+     carries parentAgentId (documented PluginHookAgent). Classifier fails
+     closed if a payload ever lacks these.
+   - README.md: policy table, test list, exact install/reload/logs/remove
+     commands, known limits. NOT installed on any daemon; global
+     opencode.json and Claude's /home/jorb/work/paseo-pr-review-plugin
+     untouched.
+
+3. Verification: `npm run typecheck` (tsc --noEmit) clean; `npm test`
+   17/17 pass (positives: exact-file read/edit incl. nested metadata,
+   cat/head/rg evidence incl. numeric flags, -e pattern, progress file as
+   rg path arg, nested command; negatives: null/foreign parent, other
+   providers/permissions/kinds, missing metadata, non-progress filepaths,
+   glob filepath, redirection/pipe/chain/$()/backtick/newline/&, quotes,
+   bash -c/env wrappers, exec flags, --help, head -n -5, out-of-root paths,
+   ".." traversal, no-path invocations).
+
+Difficulties: one real grammar bug caught by tests (rg -e PATTERN path:
+all positionals are paths when pattern came from -e) -- fixed; Node 22
+native TS type-stripping runs the node--test files directly (no loader
+needed). Shared PROGRESS.md row edit was denied by policy (orchestrator
+owns it) -- row text supplied in the final report instead.
+
+Limits reported: hard-coded Sol parent id (one-line edit if it rotates);
+no read/write split is expressible in opencode.json for bash, so config was
+NOT the vehicle; plugin install is a human act (pluginsEnabled switch,
+Settings -> Plugins).
