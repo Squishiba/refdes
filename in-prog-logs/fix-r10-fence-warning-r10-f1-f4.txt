@@ -1,0 +1,73 @@
+# fix: body-fence warning covers link verbs, type/id, nested fences, blockquotes (R10-F1..F4)
+
+Task: the four gaps in #322's inert-body-fence warning, found by user-sim
+run 10 (report: in-prog-logs/user-sim-release-gate-run10.md on
+origin/user-sim-run10, section 1). Worked one finding per chunk, tests
+first (red on main), in src/refdes/build.py + tests/test_inert_yaml_fence.py.
+
+## Repro
+
+Throwaway projects under .scratch/r10-fence/ (p1 verbs+meta, p2
+blockquote+nested), run with
+`PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli`.
+All four reproduced on main exactly as the report describes: F1/F2 silent,
+F3 renders `<blockquote><pre><code class="language-yaml">` yet silent, F4
+warns on `status: draft` inside a ```text fence.
+
+## Findings, fixes, decisions
+
+- F1 (medium): `declares_inert_keys` is keyed on `spec.fields`; verbs live
+  in `spec.links`. The scan now takes `link_names` too; a fence naming a
+  verb the item's type declares warns "a link of type 'log'". Remedy
+  (move to front matter) verified by following it: `satisfies: [REQ-PWR-001]`
+  in front matter -> index links non-empty, coverage REQ-PWR-001 moves to
+  `claimed` (a proposed log claims, not satisfies, per docs/coverage.md;
+  docs/links.md "Declaring links" authors verbs in front matter exactly
+  like fields, so the remedy text is correct unchanged).
+- F2 (low): front matter *does* read `id`/`type` (parse.py RESERVED), so
+  they warn the same way, phrased "keys only the front matter reads".
+  Scope kept to the two named keys; the rest of RESERVED (body/former_ids/
+  key) and OVERRIDABLE are not matched.
+- F3 (low): the fence scan now strips `^[ \t]*(?:>[ \t]?)+` line-wise first
+  (one line in, one line out, so reported line numbers are the fence's
+  own). Caveat: a non-quoted fence containing a column-0 `> ` yaml line is
+  seen stripped; that shape is not valid yaml mapping syntax at root, so
+  the risk is nil.
+- F4 (low): the regex that matched yaml openers anywhere is replaced by
+  `iter_yaml_fences`, a line-walking fence scanner mirroring
+  blocks._RAW_FENCE_RE's closer rule: inside an open fence (any language)
+  every line is content, so a nested ```yaml opener -- terminated *or*
+  unterminated outer -- is literal text. The old finditer could match an
+  opener nested in an outer fence; the scanner consumes outer fences
+  first. An unterminated fence swallows the rest of the body, as markdown
+  renders it.
+
+Warning text: only the "declares ..." clause changed (it now names fields,
+links, and meta keys as groups joined by "; "; consequence clause picks per
+group kind; multiple kinds -> "nothing in the fence takes effect"). Pure
+field fences keep #322's exact sentence, so docs/checks.md's "The build
+warns on that shape and names the fix" stays true. No troubleshooting.md
+entry quotes the warning, so no docs statements were made false.
+
+## Tests
+
+tests/test_inert_yaml_fence.py: F1 warn + inertness (`links: {}` in index)
++ remedy-lands; F2 warn + verb-of-another-type silent; F3 blockquote warn
+at the fence's own line; F4 nested-terminated and nested-unterminated
+silent; run-10 regression table (18 spellings, fires vs silent, asserting
+the exact key names); component `checks:` / bound `limit:` / list-file
+`body: |` still fire. Red on main: exactly the 10 new findings/spellings;
+green after: 35 passed in the file.
+
+One test-side correction: I first asserted `selects:` is not a log verb --
+it is (verified `Project.types['log'].links` = addresses, amends, blocked_by,
+constrained_by, follows, satisfies, selects, supersedes); the test switched
+to `refines:` (a requirement verb).
+
+## Verification
+
+Full suite: 4049 passed, 2 skipped. `ruff check src/refdes/build.py
+tests/test_inert_yaml_fence.py --select E9,F` clean. Changelog fragment:
+changelog.d/inert-yaml-fence-verbs-meta-nesting.fixed.md.
+
+Finished.

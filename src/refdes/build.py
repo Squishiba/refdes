@@ -290,40 +290,140 @@ def _field_error(project: Project, item: Item, fname: str, message: str) -> None
         )
 
 
-# A fenced ```yaml/```yml block in a raw markdown body (fence run of 3+,
-# optional language attributes, closed by a matching fence) -- the shape
-# `declares_inert_keys` below scans. Mirrors blocks._RAW_FENCE_RE's fence
-# recognition, narrowed to the two yaml spellings.
-_YAML_FENCE_RE = re.compile(
-    r"^[ \t]*(`{3,}|~{3,})[ \t]*(?:yaml|yml)(?![\w-])[^\n]*\n(.*?)^[ \t]*\1[ \t]*$",
-    re.DOTALL | re.MULTILINE | re.IGNORECASE,
-)
+# One fenced code block in a raw markdown body (fence run of 3+, any info
+# string, closed by a line that is just the opening fence run again) --
+# `iter_yaml_fences` walks these. Scanning fence-by-fence (not regex-matching
+# yaml openers) is the point: a fence *inside* an open fence is that fence's
+# content, never a fence of its own, so a ```yaml example escaped by an outer
+# ```text fence is literal text and not scanned (R10-F4). An unterminated
+# fence likewise swallows the rest of the body, exactly as markdown renders
+# it. Mirrors blocks._RAW_FENCE_RE's fence recognition (same closer rule).
+_FENCE_LINE_RE = re.compile(r"^[ \t]*(`{3,}|~{3,})([^\n]*)$")
+# The fence's language tag, narrowed to the two yaml spellings -- a tag that
+# continues into a word character or hyphen (`yaml-lens`) is not yaml.
+_YAML_TAG_RE = re.compile(r"(?:yaml|yml)(?![\w-])", re.IGNORECASE)
+# A markdown blockquote marker (R10-F3): `> ```yaml ... > ``` in an item body
+# renders as a *real* code block (the build emits
+# `<blockquote><pre><code class="language-yaml">`), so markers are stripped
+# line-wise before the fence walk. One line in, one line out: line numbers
+# are untouched, so a match's offset is still the source line.
+_QUOTE_MARKER_RE = re.compile(r"^[ \t]*(?:>[ \t]?)+")
+
+# `id`/`type` are meaningful front-matter keys (parse.py's RESERVED: the
+# front matter is what picks an item's identity and type), so a body fence
+# declaring them is the same inert trap as a field fence (R10-F2).
+_INERT_META_KEYS = ("id", "type")
 
 
-def declares_inert_keys(body: str, field_names) -> list[tuple[int, list[str]]]:
-    """(0-indexed line of the fence within `body`, declared-field keys) for
-    every ```yaml fence in an item body whose content parses as a mapping
-    naming a field the item's own type declares -- the inert-front-matter
-    trap (R9-F1): a `checks:` written as a body fence next to the calc fence
-    renders as literal prose, the check silently never runs, and `check`
-    reports 0 errors. A yaml fence of genuine example code (no declared field
-    key) is not a match; the body itself is never modified.
+def iter_yaml_fences(body: str) -> list[tuple[int, str]]:
+    """(0-indexed opener line, fence content) for every top-level
+    ```yaml/```yml fence in a raw markdown body, blockquote markers
+    stripped. Content of an open fence is never re-scanned as a fence."""
+    lines = [
+        _QUOTE_MARKER_RE.sub("", line, count=1) for line in body.split("\n")
+    ]
+    fences: list[tuple[int, str]] = []
+    i = 0
+    while i < len(lines):
+        opener = _FENCE_LINE_RE.match(lines[i])
+        if opener is None:
+            i += 1
+            continue
+        run, rest = opener.group(1), opener.group(2)
+        tag = rest.strip().split(maxsplit=1)[0] if rest.strip() else ""
+        is_yaml = bool(_YAML_TAG_RE.fullmatch(tag))
+        # Same closer rule as blocks._RAW_FENCE_RE: a line that is just the
+        # opening fence run again (whitespace around it, nothing after).
+        closer = re.compile(r"^[ \t]*" + re.escape(run) + r"[ \t]*$")
+        j = i + 1
+        while j < len(lines) and not closer.match(lines[j]):
+            j += 1
+        if j < len(lines):
+            if is_yaml:
+                fences.append((i, "\n".join(lines[i + 1:j])))
+            i = j + 1
+        else:
+            i = len(lines)  # unterminated fence: the rest is its content
+    return fences
+
+
+def declares_inert_keys(
+    body: str, field_names, link_names=()
+) -> list[tuple[int, dict[str, list[str]]]]:
+    """(0-indexed line of the fence within `body`, {kind: keys}) for every
+    ```yaml fence in an item body whose content parses as a mapping naming a
+    key the front matter reads and the body never will -- the
+    inert-front-matter trap (R9-F1): a `checks:` written as a body fence next
+    to the calc fence renders as literal prose, the check silently never
+    runs, and `check` reports 0 errors. Kinds are 'field' (a field of the
+    item's type), 'link' (a link verb the item's type declares, R10-F1 --
+    `satisfies:` in a body fence lands in no `links:` at all) and 'meta'
+    (`id`/`type`, R10-F2). A yaml fence of genuine example code (no such key,
+    including a fence escaped inside an outer fence) is not a match; the body
+    itself is never modified.
 
     The caller turns each pair into a warning at the fence's absolute line
     -- same `body_line + offset` shape as `calc.fence_errors`'s report in
     `_run_item_calcs`."""
-    out: list[tuple[int, list[str]]] = []
-    for match in _YAML_FENCE_RE.finditer(body):
+    out: list[tuple[int, dict[str, list[str]]]] = []
+    for fence_line, content in iter_yaml_fences(body):
         try:
-            parsed = yaml.safe_load(match.group(2))
+            parsed = yaml.safe_load(content)
         except yaml.YAMLError:
             continue
         if not isinstance(parsed, dict):
             continue
-        keys = [str(key) for key in parsed if str(key) in field_names]
-        if keys:
-            out.append((body.count("\n", 0, match.start()), keys))
+        groups: dict[str, list[str]] = {}
+        for key in parsed:
+            name = str(key)
+            if name in field_names:
+                kind = "field"
+            elif name in link_names:
+                kind = "link"
+            elif name in _INERT_META_KEYS:
+                kind = "meta"
+            else:
+                continue
+            groups.setdefault(kind, []).append(name)
+        if groups:
+            out.append((fence_line, groups))
     return out
+
+
+def inert_fence_message(type_name: str, groups: dict[str, list[str]]) -> str:
+    """The R9-F1 warning text, naming each declared key by what it is: a
+    field of the item's type, a link verb of it, or a front-matter key --
+    the remedy is the same for all three (docs/links.md authors links in
+    front matter exactly like fields)."""
+    def quoted(names: list[str]) -> str:
+        return ", ".join(f"'{name}'" for name in names)
+
+    parts, kinds = [], []
+    if fields := groups.get("field"):
+        kinds.append("field")
+        noun = "fields" if len(fields) > 1 else "a field"
+        parts.append(f"{quoted(fields)} -- {noun} of type '{type_name}'")
+    if links := groups.get("link"):
+        kinds.append("link")
+        noun = "links" if len(links) > 1 else "a link"
+        parts.append(f"{quoted(links)} -- {noun} of type '{type_name}'")
+    if meta := groups.get("meta"):
+        kinds.append("meta")
+        noun = "keys" if len(meta) > 1 else "a key"
+        parts.append(f"{quoted(meta)} -- {noun} only the front matter reads")
+    consequence = (
+        {"field": "the field never takes effect",
+         "link": "the link never takes effect",
+         "meta": "the key never takes effect"}[kinds[0]]
+        if len(kinds) == 1
+        else "nothing in the fence takes effect"
+    )
+    return (
+        f"a ```yaml fence in this item's body declares {'; '.join(parts)}. "
+        "In the body a YAML fence is prose: it renders as literal text and "
+        f"{consequence}. Move it into the item's front matter (the '---' "
+        "block at the top of the file)."
+    )
 
 
 def validate_items(project: Project) -> None:
@@ -342,24 +442,21 @@ def validate_items(project: Project) -> None:
                 file=item.source_file, line=item.source_line, item_id=item.id,
             )
 
-        # R9-F1: a `checks:` (or any declared field) written as a ```yaml
-        # fence in the body is inert -- it renders as prose and the field
-        # silently never takes effect. Warning, not error: the item is valid,
-        # just not doing what the page shows; and a yaml fence of pure example
-        # code (no declared field key) never reaches this.
-        for fence_offset, inert_keys in declares_inert_keys(item.body, spec.fields):
+        # R9-F1: a `checks:` (or any field the type declares, any link verb
+        # it declares, or `id`/`type`) written as a ```yaml fence in the body
+        # is inert -- it renders as prose and never takes effect. Warning,
+        # not error: the item is valid, just not doing what the page shows;
+        # and a yaml fence of pure example code (no such key, including a
+        # fence escaped inside an outer fence) never reaches this.
+        for fence_offset, inert_groups in declares_inert_keys(
+            item.body, spec.fields, spec.links
+        ):
             fence_line = (
                 item.body_line + fence_offset
                 if item.body_line is not None else item.source_line
             )
-            names = ", ".join(f"'{key}'" for key in inert_keys)
-            noun = "fields" if len(inert_keys) > 1 else "a field"
             project.warn(
-                f"a ```yaml fence in this item's body declares {names} -- "
-                f"{noun} of type '{item.type}'. In the body a YAML fence is "
-                "prose: it renders as literal text and the field never takes "
-                "effect. Move it into the item's front matter (the '---' "
-                "block at the top of the file).",
+                inert_fence_message(item.type, inert_groups),
                 file=item.source_file, line=fence_line, item_id=item.id,
             )
 
