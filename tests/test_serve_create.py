@@ -834,7 +834,7 @@ def test_a_new_file_whose_unlink_fails_says_it_was_not_rolled_back(
     assert isinstance(result, Refused), result
     assert unlinks == [True], f"the seam saw {unlinks}; the rollback's unlink must fault"
     assert "was rolled back and" not in result.reason, result.reason
-    assert "could not be restored" in result.reason, result.reason
+    assert "was not removed" in result.reason, result.reason
     assert path.exists(), "a failed unlink leaves the created file; the reason must say so"
     assert b"Unreservable." in path.read_bytes()
 

@@ -1,0 +1,37 @@
+Task: wording-only cleanup of stale rollback prose left by the serve-lane
+merges (#244, #253). No behavior change. Findings read from the plugin
+reviews of #253 (869a3034, 8daf3772, a92bbeb3) and #244 (018bb92a,
+b0cb1c1e); each verified true on the branch head before touching.
+
+tests/test_serve_sources_accept.py
+- test_a_diagnostic_gate_refusal_rolls_the_lockfile_back_too ->
+  ..._never_writes_the_lockfile; docstring now says the pin is staged in
+  the overlay and a gate refusal writes nothing (assertions untouched;
+  a92bbeb3 LOW #2 -- the file's header docstring already states the shape).
+- test_a_conflicting_accept_does_not_unpin_a_save_that_already_landed's
+  header comment now describes the pair-landing topology, not the removed
+  write-gate-restore window (a92bbeb3 LOW #1, prose half only; the
+  writer-without-lock structural note is not wording).
+- Same-class stale message in the preceding test, "a refusal wrote the
+  lockfile and put it back" -> "the refusal wrote the lockfile".
+- Probe-1 parenthetical "so the write is a no-op" reworded: the loser
+  never writes on the conflict path (the revision check precedes
+  _land_lockfile); byte-identity is the winner's property (NIT #4).
+- Blank line added before monkeypatch.setattr after the nested writer in
+  the already-pinned probe (NIT #3).
+
+src/refdes/serve/edit.py
+- _restore/_rollback docstrings: the "must say so" contract now names its
+  one non-reporting caller -- _restore_lockfile swallows the bool by
+  design and makes no claim (018bb92a NIT #2, docstring fix as preferred).
+- The failed-reservation reason split by shape: new-md says "{rel} was
+  not removed: the file the create wrote stands, the failed rollback
+  touched nothing"; append shapes keep "could not be restored ... left as
+  it was found", pinned by the restore-shape tests and the #244 changelog
+  fragment (018bb92a NIT #3; authorized because the pinning test,
+  test_serve_create.py:837, updates in this same commit).
+
+Not touched: reviewers' in-prog-log/docs items (other scope), merged
+changelog fragments (historical). Verified: targeted pytest -> 108
+passed; full suite -> 4105 passed, 2 skipped; ruff --select E9,F on the
+touched files clean. No changelog fragment (no behavior). Finished.
