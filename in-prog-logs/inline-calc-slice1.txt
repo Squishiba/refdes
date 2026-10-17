@@ -35,7 +35,25 @@ Chunk 2 (evaluation + tests): DONE.
   tree bde63a7 (collected before integration); full file fails at
   import on base cbcd22e. 25/25 + 200 neighbor tests green.
 
-Next: chunk 3 -- stored-result verification diagnostics (severity table:
-errors for missing/malformed/eval-failure/incompatible-unit, warning for
-stale, silence in-window), half-place boundary tests, unit conversion in
-the literal, nonfinite/malformed literal, source untouched, check==build.
+Chunk 3 (severity table + verification): DONE.
+- 17 more tests: design probe warns (not fails) with the exact design
+  message shape, coarse/fine windows, both window edges, half-place
+  ties (halves away from zero, incl. negatives), trailing zeros,
+  decimal exponent, dimensionless, compatible-unit literal,
+  incompatible-unit error, unit-assertion mismatch, eval failure,
+  nonfinite + unknown-unit literals, source bytes unchanged by the
+  check path, check==build diagnostics.
+- One real bug found this chunk: compare_stored double-applied the
+  decimal exponent of literals like 1.2e3 (Decimal("1.2e3").scaleb(3)).
+  Fixed to scale the mantissa only; the exponent test pinned it.
+- Full suite green: 4063 passed, 2 skipped.
+
+Next: chunk 4 -- docs/math.md "Inline calc" section (run every example),
+changelog.d fragment, gen_examples --check, grep items/ and docs/ for
+spans containing := and report the count, push branch, open PR.
+
+Known slice-1 gaps for the PR body (design section 3 is deliberately
+out of scope): the scheduler's cross-item reference scan reads calc
+fences only, so a cross-item reference from a span depends on the
+other item having been evaluated first; refdes fetch's source()
+discovery likewise misses spans. Single-item projects unaffected.

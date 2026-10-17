@@ -279,7 +279,7 @@ def compare_stored(value: calc.Value, span: InlineSpan, computed_text: str) -> s
     exp = int(exp_text) if exp_text else 0
     with localcontext() as ctx:
         ctx.prec = 60
-        stored_dec = Decimal(num.lstrip("+")).scaleb(exp)
+        stored_dec = Decimal(mantissa.lstrip("+")).scaleb(exp)
         computed_dec = Decimal(str(computed.magnitude))
         half = Decimal(5).scaleb(exp - decimals - 1)
         diff = computed_dec - stored_dec

@@ -281,3 +281,173 @@ def test_span_value_renders_in_prose(tmp_path):
     assert project.errors == []
     assert "Dissipation: <code>3.96 W</code>" in _item(project).body_html
     assert "<code>P := 3.3 V * 1.2 A | W = 3.96 W</code>" in _item(project).body_html
+
+
+# -------------------------------------------------- the severity table
+
+
+def _inline_warnings(project):
+    return [d for d in project.warnings if d.message.startswith("inline calc ")]
+
+
+def test_the_design_probe_item_warns_and_check_stays_clean_of_errors(tmp_path):
+    # The design's probe: a deliberately wrong stored result. It is a
+    # warning, not a build failure (D1: report it, never rewrite it).
+    project = _build(tmp_path, "`Vout := 2 V * 2 = 5 V`\n")
+    assert project.errors == []
+    warns = _inline_warnings(project)
+    assert len(warns) == 1
+    assert warns[0].message == (
+        "inline calc Vout: stored result says 5 V, now computes 4 V"
+    )
+
+
+def test_the_design_example_message_shape(tmp_path):
+    project = _build(
+        tmp_path,
+        "`Vout := 0.8 V * (1 + 10 kohm/2.2 kohm) | V = 4.52 V`\n",
+    )
+    warns = _inline_warnings(project)
+    assert len(warns) == 1
+    assert warns[0].message == (
+        "inline calc Vout: stored result says 4.52 V, now computes 4.436 V"
+    )
+    assert warns[0].line == 6
+    assert project.errors == []
+
+
+def test_coarse_literal_accepts_within_half_its_last_place(tmp_path):
+    # Design: `4.4 V` accepts 4.436 V -- half-place is 0.05 V.
+    project = _build(
+        tmp_path,
+        "`Vout := 0.8 V * (1 + 10 kohm/2.2 kohm) | V = 4.4 V`\n",
+    )
+    assert project.errors == []
+    assert _inline_warnings(project) == []
+
+
+def test_fine_literal_rejects_the_same_drift(tmp_path):
+    # Design: `4.436 V` rejects 4.52 V -- half-place is 0.0005 V.
+    project = _build(tmp_path, "`x := 4.52 = 4.436`\n")
+    warns = _inline_warnings(project)
+    assert len(warns) == 1
+    assert "stored result says 4.436, now computes 4.52" in warns[0].message
+
+
+def test_window_edges_both_sides(tmp_path):
+    project = _build(tmp_path, "`x := 4.449999 = 4.4`\n")  # 0.049999 < 0.05
+    assert _inline_warnings(project) == []
+    project = _build(tmp_path, "`x := 4.450001 = 4.4`\n")  # 0.050001 > 0.05
+    assert len(_inline_warnings(project)) == 1
+
+
+def test_boundary_tie_rounds_halves_away_from_zero(tmp_path):
+    # computed 4.45 with stored 4.5: exactly half a place; rounding the
+    # computed nominal to the stored place gives 4.5 == 4.5 -> accepted.
+    project = _build(tmp_path, "`x := 4.45 = 4.5`\n")
+    assert project.errors == [] and _inline_warnings(project) == []
+    # stored 4.4: the rounded 4.5 is not 4.4 -> stale.
+    project = _build(tmp_path, "`x := 4.45 = 4.4`\n")
+    assert len(_inline_warnings(project)) == 1
+    # Negative halves go away from zero as well: -4.5 rounds to -5.
+    project = _build(tmp_path, "`x := -4.5 = -5`\n")
+    assert _inline_warnings(project) == []
+    project = _build(tmp_path, "`x := -4.5 = -4`\n")
+    assert len(_inline_warnings(project)) == 1
+
+
+def test_trailing_zeros_tighten_the_window(tmp_path):
+    project = _build(tmp_path, "`x := 4.04 = 4.0`\n")  # half-place 0.05
+    assert _inline_warnings(project) == []
+    project = _build(tmp_path, "`x := 4.06 = 4.0`\n")
+    assert len(_inline_warnings(project)) == 1
+
+
+def test_decimal_exponent_scales_the_window(tmp_path):
+    # `1.2e3`: last written place 100, half-window 50.
+    project = _build(tmp_path, "`x := 1230 = 1.2e3`\n")
+    assert _inline_warnings(project) == []
+    project = _build(tmp_path, "`x := 1300 = 1.2e3`\n")
+    assert len(_inline_warnings(project)) == 1
+
+
+def test_dimensionless_results_use_the_same_rule(tmp_path):
+    project = _build(tmp_path, "`k := 0.54 = 0.5`\n")
+    assert _inline_warnings(project) == []
+    project = _build(tmp_path, "`k := 0.56 = 0.5`\n")
+    assert len(_inline_warnings(project)) == 1
+
+
+def test_stored_literal_may_use_a_compatible_unit(tmp_path):
+    # Not named `V` here: the fence evaluator's ambiguity warning fires
+    # when a variable shares a unit symbol's name, span or fence.
+    project = _build(tmp_path, "`Vout := 4.4 V = 4400 mV`\n")
+    assert project.errors == []
+    assert _inline_warnings(project) == []
+
+
+def test_incompatible_unit_in_the_stored_literal_is_an_error(tmp_path):
+    project = _build(tmp_path, "`I := 1.2 A = 1.2 V`\n")
+    errs = _inline_errors(project)
+    assert len(errs) == 1
+    assert "not compatible with the calculated units" in errs[0].message
+    assert errs[0].line == 6
+
+
+def test_unit_assertion_mismatch_is_an_error(tmp_path):
+    project = _build(tmp_path, "`V := 1.2 A | V = 1.2 V`\n")
+    errs = _inline_errors(project)
+    assert len(errs) == 1
+    assert "declared as V" in errs[0].message
+
+
+def test_evaluation_failure_is_an_error_at_the_span(tmp_path):
+    project = _build(tmp_path, "`P := Rtop * 1 A = 1 W`\n")
+    errs = _inline_errors(project)
+    assert len(errs) == 1
+    assert "unknown name 'Rtop'" in errs[0].message
+    assert errs[0].line == 6
+
+
+def test_nonfinite_stored_literal_is_an_error(tmp_path):
+    project = _build(tmp_path, "`x := 1 V = 1e999 V`\n")
+    errs = _inline_errors(project)
+    assert len(errs) == 1
+    assert "not a finite quantity" in errs[0].message
+
+
+def test_unknown_unit_in_the_literal_is_an_error(tmp_path):
+    project = _build(tmp_path, "`x := 1 V = 1 glorp`\n")
+    errs = _inline_errors(project)
+    assert len(errs) == 1
+    assert "not a valid quantity" in errs[0].message
+
+
+def test_source_untouched_after_check_and_build(tmp_path):
+    project = _build(tmp_path, "`Vout := 2 V * 2 = 5 V`\n")
+    item_file = tmp_path / "items" / "dec.md"
+    before = item_file.read_bytes()
+    # The check path: cmd_check calls build(seal_write=False).
+    build_mod.build(project, seal_write=False, reseal=False)
+    assert item_file.read_bytes() == before
+    assert "5 V" in item_file.read_text()  # the stale value stays as authored
+
+
+def test_check_and_build_report_the_same_thing(tmp_path):
+    body = "`Vout := 2 V * 2 = 5 V`\n\n`I := 1.2 A = 1.2 V`\n"
+
+    def diags(project):
+        return sorted(
+            (d.level, d.message, d.line)
+            for d in project.diagnostics
+            if d.message.startswith("inline calc ")
+        )
+
+    built = _build(tmp_path, body)  # the build path
+    checked = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(checked)
+    build_mod.build(checked, seal_write=False, reseal=False)  # the check path
+    assert diags(checked) == diags(built)
+    levels = [d[0] for d in diags(checked)]
+    assert levels.count("error") == 1  # the incompatible stored unit
+    assert levels.count("warning") == 1  # the stale value
