@@ -1,0 +1,103 @@
+fix-calc-label-capture-and-anchor-hint — sweep-3, user-sim run 9 findings
+Started: 2026-10-16. Agent: Qwen3.8-Flash-Next.
+
+## Task
+
+R9-F4 (nit, FIX): `[[ID#calc]]` (anchor name left off) warns as a field
+reference with no hint of the `#calc:<name>` spelling. R9-F2 (low,
+INVESTIGATE FIRST): adding a calc-fence `id="…"` to an item already captured
+by a `follows` trips the "edited after captured" warning; find what the
+semantic hash covers and fix only if contained (unlabelled items' digests
+byte-identical).
+
+## Verification of the findings on this branch (per COMMON.txt)
+
+- R9-F4: reproduced with a probe project (.scratch/probe-r9, project/schema
+  split per the two-file config): build of `[[LOG-A-001#calc]]` warns
+  "reference to 'LOG-A-001' names field 'calc', which type 'log' does not
+  declare" — no hint. Still applies.
+- R9-F2: reproduced programmatically (.scratch/probe-f2/probe.py, via
+  loader.load_tree so the follows-edge capture runs): capture LOG-001 with an
+  unlabelled ```calc fence, add `id="thermal"`, reload →
+  history.edited_after_captured names LOG-001. The captured digest
+  (56ac18d3744c97d5…) moved to 057d734f9630771d…. Still applies.
+
+## What the semantic hash covers (R9-F2 investigation)
+
+- history.semantic_payload (src/refdes/history.py) hashes
+  {history_format, type, fields, links, body} with the body whitespace-
+  collapsed. item.body is the raw markdown body, fence lines included, so the
+  ```calc info string (and its id=) is hashed. capture_index
+  (history.py:728-731) compares the live semantic_digest against each capture
+  event's stored object digest; a mismatch is the warning (build.py
+  warn_edited_after_captured).
+- The digest is history's own (independent of build.HASH_FORMAT; module
+  docstring §2 and the "not item.content_hash" paragraph). The label is also
+  in build._hash_payload's normalized body (content_hash, HASH_FORMAT 5),
+  which drives baselines/seals/uncaptured_edits — NOT touched here.
+
+## R9-F2 decision: fix, per the task's gate
+
+- The strip is contained: one regex in history.py normalizing every calc
+  fence's opening line to the bare ```calc before the whitespace collapse
+  (same line-start anchor as calc.CALC_BLOCK_RE, so indented fences stay
+  prose). Only semantic_payload consumes it; nothing outside history.py
+  computes the digest.
+- Unlabelled items are byte-identical: for a body with no labelled calc fence
+  the regex rewrites nothing (a trailing space after ```calc is absorbed by
+  the collapse, which follows). Pinned by
+  test_the_label_strip_leaves_unlabelled_digests_byte_identical, which
+  rebuilds the PRE-strip payload formula ({..., _collapse_ws(body)}) in the
+  test and asserts semantic_digest equals it for both the fence item and a
+  plain one. Probe: captured digest 56ac18d3744c97d5… is the same value the
+  pre-change code minted for the unlabelled body.
+- No hash-format bump (HISTORY_FORMAT stays 1), no sealing/baseline touch.
+- Known cost (recorded in the changelog fragment): an item captured *with* a
+  labelled fence under the old digest shows one warning-only "edited after
+  captured" line after upgrading; recapturing settles it. Inherent to any
+  change that makes label edits invisible.
+
+## Changes
+
+- src/refdes/history.py: _CALC_FENCE_OPEN_RE + _strip_calc_fence_labels,
+  used in semantic_payload's body; module docstring §2 and semantic_payload's
+  docstring updated.
+- src/refdes/build.py (field_anchor): field miss on exactly "calc" appends
+  "did you mean #calc:<name>?" — with "it names: …" when the target has
+  named blocks (fence order, same source as calc_anchor), the id="..." fix
+  when its fences are unnamed, and no hint when it computes nothing (§7's
+  third shape's posture). Other field misses: byte-identical message.
+- tests/test_history_edited.py: 4 tests (name-after-capture quiet, rename
+  quiet, row edit inside named fence still warns, unlabelled digests
+  byte-identical vs pre-strip formula).
+- tests/test_calc_block_refs.py: 3 tests (hint with names listed + other
+  field miss stays plain, unnamed-fences hint, no-blocks stays plain).
+- docs/links.md: one sentence documenting the new hint (existing page, same
+  paragraph as the bare-fragment rule — no new page per AGENTS.md).
+- changelog.d/calc-fence-label-not-semantic.changed.md (behaviour changed,
+  non-breaking → `changed`) and changelog.d/bare-calc-fragment-anchor-hint.
+  fixed.md (diagnostic improved → `fixed`), per changelog.d/README.md.
+
+## Sabotage
+
+- R9-F2: reverted the strip in semantic_payload →
+  test_naming_a_captured_calc_fence_draws_no_diagnostic and
+  test_renaming_a_captured_calc_fence_label_draws_no_diagnostic FAILED (2
+  failed, row-edit and digest-pin tests pass, as expected — the strip is
+  what they pin); restored, 3 passed.
+- R9-F4: git-checkout'd build.py (fix saved to .scratch/r9f4-fix.patch,
+  re-applied) → test_bare_calc_fragment_hints_the_anchor_spelling and
+  test_bare_calc_fragment_on_unnamed_blocks_hints_the_fence FAILED; the
+  no-blocks test passes (it pins the unchanged base sentence). Restored.
+
+## Gates
+
+(append results below)
+
+- Full suite (foreground, end of task): 4012 passed, 2 skipped in 322.50s,
+  exit=0 (.scratch/suite.txt). No known load flake seen.
+- ruff check --select E9,F src tests: All checks passed!
+- python docs-site/gen_examples.py --check: schema-reference.md and
+  vocabulary.md up to date.
+- Status: DONE. Both findings fixed on-branch, committed together with this
+  log, branch pushed once, PR opened against main.

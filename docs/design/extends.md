@@ -1,8 +1,10 @@
 Status: decided (Jared, 2026-09-19) — all five §9 questions answered as
 recommended, with one overturn of this document's own recommendation: coverage
 grouping is the default for every project, new and existing (§4.1, §10).
-Implemented (phases 1-4, ao/refdes-113); see "Implementation notes" at the end
-for where the build differs from or settles this text.
+Implemented (phases 1-4; the branch `ao/refdes-113` was rebased away, the work
+landed as the engine `ab55e27` with follow-ups `cd05c4b`, `4d421af`, `7305402`;
+see "Implementation notes" at the end for where the build differs from or
+settles this text).
 
 # `extends:` — single-level type inheritance
 

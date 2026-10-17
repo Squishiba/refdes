@@ -346,7 +346,7 @@ ten-module package (`api.py`, `edit.py`, `filters.py`, `preview.py`,
 routes, the editor, creation, link editing, image upload, and the source
 picker; `serve/edit.py` is the single write path (`apply_edit(project_root,
 request)`) behind it. `refdes serve` is registered in the CLI
-(`src/refdes/cli.py:1367-1368`). What is outstanding is no longer shape or
+(`cmd_serve` at `src/refdes/cli.py:547`, subparser at `:2800`). What is outstanding is no longer shape or
 architecture; it is the remaining v1 slices.
 
 **Local model: not suitable.** This one survives the revised rule unchanged:
@@ -363,15 +363,21 @@ A sealed, append-only `log` can never link to anything created after it
 with no `on_change` equivalent for links), so "write the log while
 deliberating, decide afterward" is unauthorable in that order today. No new
 verb needed — `schema.py` already resolves a link from either declared
-direction (verified: `records`/`recorded_by` already exist as an inverse
-pair at the `link_types:` level in every bundled version) — the fix is
+direction (verified at the time: `records`/`recorded_by` already exist as
+an inverse pair at the `link_types:` level in every bundled version —
+true of v1/v2 as they ship today; since `d71c143` hardware@3 is the
+version that carries neither `decision` nor `recorded_by`) — the fix is
 declaring `recorded_by: [log]` on `decision`'s own `links:` block, verified
 end-to-end against a real sealed log in the finding.
 
-**Status: done.** Shipped in `3c52c4e`. `decision.links` (hardware@3) now
-declares `recorded_by: [log]` alongside
+**Status: done, since superseded.** Shipped in `3c52c4e`: `decision.links`
+(hardware@3) declared `recorded_by: [log]` alongside
 `satisfies`/`constrained_by`/`supersedes`/`selects`/`blocked_by` — one line,
-no new verb, exactly as scoped.
+no new verb, exactly as scoped. Superseded by the Phase 4a merge of
+`decision` into `log` (`d71c143`, #176): hardware@3 declares no `decision`
+type and no `recorded_by` link type, and `log` carries the verdict itself
+(a status of `accepted` is a satisfying status) — the structural
+dissolution the flag below anticipated has landed.
 
 **Worth flagging: this may become moot.** `docs/design/threads.md` states
 explicitly that if the thread model ever lands, "the observation that
@@ -379,12 +385,13 @@ explicitly that if the thread model ever lands, "the observation that
 into one chained-item type removes the append-only-can't-point-forward
 problem structurally, rather than patching around it one verb at a time.
 **The thread model has since moved past design-only** — `threads.md`'s own
-header reads "**Status: Phase 3a implemented.**" (`threads.md:17`), verified
+header reads "**Status: Phase 4a implemented.**" (`threads.md:17`, verified
 against this tree, with `src/refdes/chains.py` (the `follows:` chain walk —
-tips, the per-field fold, fork and cycle diagnostics) as the landed slice.
-So the flag is live, not hypothetical: finding 16's one-line fix still ships
-independently, and the structural resolution is now the thread line of work
-rather than a someday maybe.
+tips, the per-field fold, fork and cycle diagnostics) as the landed slice).
+So the flag is no longer hypothetical: it has fired — Phase 4a (`d71c143`,
+#176) merged `decision` into `log`, removing finding 16's one-line fix along
+with the type it patched, and the structural resolution is now landed
+thread-line-of-work, not a someday maybe.
 
 **Local model (not decided — my read): suitable.** One line in a bundled
 standard file, with an end-to-end verification transcript already given in
@@ -416,8 +423,9 @@ mutable whole" to name, only entries, which already have identity the same
 way every item does under `docs/design/keys.md`.
 
 `threads.md` is no longer **design only** — its own header reads "**Status:
-Phase 3a implemented.**" (`threads.md:17`, verified against this tree; the
-landed slice includes `src/refdes/chains.py`). Finding 17 shouldn't be treated
+Phase 4a implemented.**" (`threads.md:17`, verified against this tree; the
+landed slice includes `src/refdes/chains.py`, and Phase 4a merged
+`decision` into `log`). Finding 17 shouldn't be treated
 as a live task distinct from that document; if this work happens, it happens
 as `threads.md`, not as a resurrection of finding 17's original per-item
 "folding" proposal.
@@ -797,7 +805,8 @@ it — so 26 is parked for the same reason, not because it was judged wrong.
 (Not in the finding — recorded from conversation, not from the document.)
 
 **Status: both parts done.** Part 1 shipped in `f8e7ee0`:
-hardware@3's `field_sets:` has a third entry `citations: {citations: {type:
+hardware@3's `sets:` (the block `field_sets:` was renamed to in `dc0c138`) has
+a third entry `citations: {citations: {type:
 citations, on_change: invalidate}}`, and both `component` and `decision` now
 `include: [provenance, stewardship, citations]`, with the `migration.yaml`
 rename above and this repo's own `items/components/power.yaml` moved over.
@@ -870,7 +879,7 @@ edits it) and changes the failure class from "the document is wrong" to
 **Status: implemented for CSV and XLSX; design reviewed.** The
 claim that no CSV reader exists in the package is no longer true —
 `src/refdes/sources.py` is the reader module (`extensions = (".csv",)` at
-`sources.py:230`, `csv.reader(fh, strict=True)` at `sources.py:465`), and
+`sources.py:232`, `csv.reader(fh, strict=True)` at `sources.py:472`), and
 `calc.py:643` documents the accepted line shape as
 `name = source("cited/file.csv", "key") | unit`. The lockfile still records
 hashes alongside the locked extracted values; the values are what calc
@@ -995,7 +1004,9 @@ know which file `equations:` belongs in.
 triggers `LEGACY_CONFIG_ERROR` telling users to split and delete it. All
 project settings (including `site:`, `id:`, `boards:`, `units:`, `standard:`,
 `equations:`, etc.) live in `refdes-project.yaml`; the optional
-`refdes-schema.yaml` holds only `types:`/`link_types:`/`field_sets:` overlays.
+`refdes-schema.yaml` holds only `types:`/`link_types:`/`sets:` overlays
+(`field_sets:` was renamed to `sets:` in `dc0c138`; a project still writing it
+gets an error naming the rename).
 See also `changelog.d/config-split-two-files.breaking.md`.
 
 **Local model (not decided — my read): not suitable.** The fourteen rename sites
@@ -2012,7 +2023,13 @@ it moved from and to; the `HASH_FORMAT` number stays coordinated with finding
 ordering and second-scope reasons given there; published-exports (§2); and
 recompute-silently or mark-suspect-only (§4), the latter because suspect links
 do not exist yet and a correctness guarantee cannot be built on machinery that
-has not been built.
+has not been built. **This has since shipped, exactly as decided, in four
+commits: `cabd9e1` (the `V_in = DEC-PWR-001.V_in` reference itself),
+`3078c45` (reference values enter the content hash, `HASH_FORMAT` 4 — since
+bumped to 5 for an unrelated reason), `89c6383` (the baseline diff names the
+moved reference), `1dbfd77` (docs). Covered by
+`tests/test_calc_cross_refs.py` and `tests/test_calc_cross_ref_hash.py`; see
+`changelog.d/calc-cross-item-refs.added.md`.**
 
 **Local model (not decided — my read): not suitable.** The parser change and the
 scheduler are small, but the correctness claim is "every item whose arithmetic
@@ -2562,6 +2579,20 @@ are — shared, project-level items, which docs/multi-board.md:46-49 says
 legitimately belong to no board — rather than what they lack, and it
 matches how refdes already names its project-wide pages.
 
+**Status: v1 shipped, pending release (`b33da1b` chunk 1, `91ea881`
+chunk 2).** `tree.html` lands in every built site as the containment
+forest (workspace → board → `part_of` group → item), `tree-<board>.html`
+and `tree-<workspace>.html` joined the scoped report set, and `{{tree}}`
+ships with `board=`/`workspace=`/`depth=` (`blocks.py`, `tree.py`,
+`nav.py`'s `REPORT_LABELS`/`scope_reports`). Once-expanded-plus-reference
+and the `Project-wide` bucket ship with the mechanical totality test
+(expanded count == `len(project.local_items)`, `tests/test_tree.py`),
+`<details>` collapse, no JavaScript. One v1-scope item was deliberately
+not shipped: `via=` is not a tree parameter — the tree's identity is the
+one fixed spine, and a `via` is reported as the unknown-parameter check
+error it is (`blocks.py`'s `_render_tree` docstring). Unreleased
+fragments: `tree-view.added.md`, `tree-scoped.added.md`.
+
 **Local model (not decided — my read): suitable, IF the task specifies the
 totality tests.** The rendering is composition of things that exist —
 `NavNode`'s recursive template macro, `walk_cascade`'s visited rule,
@@ -2903,6 +2934,26 @@ output rather than adding a second generator: no Mermaid (§2). What is left is
 implementation detail — the lint's wording, the layer assignment for the bundled
 graph — not design.
 
+**Status: done, pending release (`9c48e99` docs, `7d1a2c6` page, `2565387`
+diagram, `09baee8` per-term diagrams, `4c1cd32` examples).** `doc:` is accepted
+in the recognised key sets (`configcheck.py`'s type/field/link-type/`sets:`
+key sets) and is a `SchemaError` with a did-you-mean when misspelled, as §3/§4
+required; every bundled `hardware@3` term carries one, gated by
+`tests/test_standard_docs_complete.py` — §4's term-without-definition
+direction shipped as that pytest gate over the bundled standard plus a plain
+"no definition" rendering on the page (`vocabulary.py`), not as a project
+build failure (`doc:` stays optional in project overlays). `vocabulary.html`
+renders in every built site (`nav.py`, `render.py`) and `docs/vocabulary.md`
+is generated by `docs-site/gen_examples.py` under the existing `--check` gate.
+`refdes schema --graph` emits SVG (`schema_json.build_graph`, "It used to
+print Mermaid source"). Layout is hand-rolled, as decided — `diagram.py` with
+"no layout algorithm at all", no graph library in `pyproject.toml`. One shape
+superseded: §6's single whole-project layered diagram shipped as chunk 3b
+(`2565387`), was rejected as unreadable, and was replaced by per-type diagrams
+plus a coverage-spine overview (`09baee8`; `schema_json.py:365-366` records
+the replacement). Unreleased fragments: `vocabulary-page.added.md`,
+`vocabulary-diagram.added.md`, `schema-doc-key.added.md`.
+
 **Local model: partly suitable, and the split is worth naming.** The generator,
 the lint and the SVG emitter are the shape this project delegates: every
 failure mode in §8 except the last is loud (a failed `--check`, an unparseable
@@ -2917,7 +2968,19 @@ picture had stopped matching the thing it pictures.
 
 ---
 
-### Living notes, history and task lists -- design draft
+### Living notes, history and task lists -- landing in phases
 
 See [living-notes.md](living-notes.md) for the draft exploring dynamic notes,
 captured history, and a task list that follows a thread tip.
+
+**Status: no longer a draft; landing in phases, direction under Jared's
+decision — not done.** The decisions are ratified (living-notes.md is
+"Decided"; the plan's eight open questions were ratified 2026-09-19 in
+`cb9180d`), the plan is `living-notes-plan.md`, and phases H1-H8 are landed
+(store `d84e123`, capture `47a5300`, diagnostic `506842c`, history commands
+`1981f9e`, history-backed sealing #157, `tasks:` #183, thread view +
+`refdes thread`/`refdes work` #187/#191/#194, gate rules #193); threads
+phase 4a landed in `d71c143` (#176) — threads.md records "Phase 4a
+implemented. H6-H9 and the Phase 4b thread panel remain later work", and
+the optional H9 (baseline snapshot events, site history disclosure) has
+not landed. Recorded as-is; no decision made here.

@@ -1,5 +1,6 @@
-"""Generated blocks in narrative pages: `{{index}}`, `{{cascade}}`, and
-whatever joins them later.
+"""Generated blocks in narrative pages: the five registered in `_REGISTRY`
+at the bottom of this module -- `{{index}}`, `{{cascade}}`, `{{tree}}`,
+`{{compare}}`, and `{{calcblock}}`.
 
 A small, **fixed** family. Every block takes a closed set of named
 parameters, each with one fixed meaning, validated against the resolved
@@ -24,9 +25,10 @@ have none.
 An unrecognized block name is left completely untouched -- literal text,
 not an error, on the theory it was never meant as a directive (`{{TBD}}`
 typed as a note to self keeps working). Once a name *does* match one of the
-two below, everything past that point is validated strictly: an unknown
-parameter or a missing required one is a build error naming the specific
-fix, matching every other diagnostic this tool already produces.
+five registered blocks below, everything past that point is validated
+strictly: an unknown parameter or a missing required one is a build error
+naming the specific fix, matching every other diagnostic this tool already
+produces.
 """
 
 from __future__ import annotations
@@ -297,11 +299,15 @@ class CascadeNode:
 
 
 class CascadeCycleError(Exception):
-    """Raised by walk_cascade() when on_cycle="error" and a revisit occurs --
-    the seam the blocked_by cascade report (docs/design/standard-library.md
-    §9) reuses instead of `{{cascade}}`'s own graceful "already shown"
-    marker, since a blocked_by graph is specifically asserted acyclic and a
-    cycle in it is a real authoring bug, not a legitimate reconvergence.
+    """Raised by walk_cascade() when on_cycle="error" and the walk closes an
+    edge back to a node already on the CURRENT path -- a true cycle. A node
+    reached by two different paths (a diamond) is a legitimate
+    reconvergence, not a cycle: it is marked `already_shown` in both modes,
+    never raised. This is the seam the blocked_by cascade report
+    (docs/design/standard-library.md §9) reuses instead of `{{cascade}}`'s
+    own graceful "already shown" marker, since a blocked_by graph is
+    specifically asserted acyclic and a cycle in it is a real authoring bug,
+    not a legitimate reconvergence.
 
     `path` is the full walk from the root down to the closing edge, e.g.
     `["DEC-IO-003", "DEC-IO-001", "DEC-IO-003"]` -- enough to report the
@@ -335,9 +341,12 @@ def walk_cascade(
 
     `on_cycle="mark"` (default, what `{{cascade}}` uses) renders a
     re-visited node once more as a terminal leaf, annotated by the caller.
-    `on_cycle="error"` raises `CascadeCycleError` instead -- the option a
-    future blocked_by implementation wants, since it treats a cycle as a
-    hard build error rather than a legitimate reconvergence.
+    `on_cycle="error"` raises `CascadeCycleError` instead -- but only for a
+    target on the current path, a true cycle; a reconvergence that is not on
+    the path (a diamond: two paths reaching one node) is marked just as
+    `"mark"` does. This is the option the blocked_by cascade report uses,
+    since it treats a cycle as a hard build error while a legitimate
+    reconvergence is not one.
     """
     visited = {root_id}
     via_inverses = (
@@ -387,7 +396,12 @@ def _walk(
 
         for target_id in sorted(edges[link_name]):
             if target_id in visited:
-                if on_cycle == "error":
+                # `visited` is global, so a hit is a revisit of ANY
+                # previously-seen node -- most of them legitimate
+                # reconvergences (a diamond), not cycles. Only a target that
+                # is on the CURRENT path closes a real cycle; anything else
+                # is marked, exactly as on_cycle="mark" treats it.
+                if on_cycle == "error" and target_id in path:
                     raise CascadeCycleError(path + [target_id])
                 children.append(CascadeNode(target_id, label, already_shown=True))
                 continue
@@ -430,9 +444,13 @@ def _render_cascade(project: Project, params: dict[str, str], where: str = "") -
     depth_raw = params.get("depth", "3")
     via_raw = params.get("via")
 
-    root_item = project.item_by_id(root_id)
+    root_item = _item_target(project, root_id)
     if root_item is None:
         raise _BlockError(f"{root_id} does not exist.")
+    # The walk starts from the resolved item, not the raw text: a composite
+    # (`DISPLAY-ID@key`) is not a graph reference, and the walk reads
+    # `Item.resolved_links`/`backlinks`, which name the bare id/key.
+    root_ref = root_item.id or root_item.key
 
     if direction not in _DIRECTIONS:
         raise _BlockError(
@@ -457,17 +475,17 @@ def _render_cascade(project: Project, params: dict[str, str], where: str = "") -
     else:
         via = {name for name, spec in project.link_types.items() if spec.trace}
 
-    root_text = f"{_esc(root_id)} — {_esc(root_item.title)}"
+    root_text = f"{_esc(root_ref)} — {_esc(root_item.title)}"
 
     if direction == "both":
-        up_nodes = walk_cascade(project, root_id, "up", via, depth)
-        down_nodes = walk_cascade(project, root_id, "down", via, depth)
+        up_nodes = walk_cascade(project, root_ref, "up", via, depth)
+        down_nodes = walk_cascade(project, root_ref, "down", via, depth)
         branches = _render_branch("Upward", up_nodes, project, "up") + _render_branch(
             "Downward", down_nodes, project, "down"
         )
         return f'<ul class="cascade"><li>{root_text}<ul>{branches}</ul></li></ul>'
 
-    nodes = walk_cascade(project, root_id, direction, via, depth)
+    nodes = walk_cascade(project, root_ref, direction, via, depth)
     if not nodes:
         return (
             f'<ul class="cascade"><li>{root_text}'
@@ -493,6 +511,11 @@ def _render_tree(project: Project, params: dict[str, str], where: str = "") -> s
     """
     board = params.get("board")
     workspace = params.get("workspace")
+    if board is not None and workspace is not None:
+        raise _BlockError(
+            "board= and workspace= are mutually exclusive. "
+            "tree accepts: at most one of the two."
+        )
     if board is not None and board not in project.boards:
         raise _BlockError(f"unknown board {board!r}.{_suggest(board, project.boards)}")
     if workspace is not None and workspace not in project.workspaces:
@@ -509,14 +532,19 @@ def _render_tree(project: Project, params: dict[str, str], where: str = "") -> s
     if open_depth <= 0:
         raise _BlockError("depth must be a positive integer.")
 
-    markup = tree_mod.render_tree_html(
-        project, board=board, workspace=workspace, open_depth=open_depth
-    )
-    if markup == '<ul class="tree"></ul>':
+    # The forest decides emptiness, not the markup string: a scoped forest
+    # with nothing in scope still has its one scope node as a root, so
+    # `{{tree board="io"}}` on an empty board renders `<li>IO</li>` -- a bare
+    # label with no count and no explanation. `expanded` is the items the
+    # forest actually has, which is the question the empty note answers.
+    forest = tree_mod.build_forest(project, board=board, workspace=workspace)
+    if not forest.expanded:
         scope = board or workspace
         who = f"{scope}" if scope else "the project"
         return f'<p class="tree-empty">No items in {who}.</p>'
-    return markup
+    return tree_mod.render_tree_html(
+        project, board=board, workspace=workspace, open_depth=open_depth
+    )
 
 
 # -------------------------------------------------------------- {{compare}}
@@ -781,11 +809,13 @@ def _render_compare(project: Project, params: dict[str, str], where: str = "") -
 # --------------------------------------------------------------- {{calcblock}}
 
 
-def _calcblock_target(project: Project, item_id: str) -> Item | None:
-    """`item=` resolved: a display id, or a `DISPLAY-ID@key` composite (§5.4).
+def _item_target(project: Project, item_id: str) -> Item | None:
+    """An item reference resolved: a display id, or a `DISPLAY-ID@key`
+    composite (calcblock §5.4, docs/design/keys.md).
 
     The composite is resolved by its key half, which is what a composite means
     everywhere else in this project (the label may be stale; the key resolves).
+    Shared by `{{calcblock}}`'s `item=` and `{{cascade}}`'s `from=`.
     """
     item = project.item_by_id(item_id)
     if item is None and "@" in item_id:
@@ -815,7 +845,7 @@ def _render_calcblock(project: Project, params: dict[str, str], where: str = "")
 
     item_id = params["item"]
     block = params["block"]
-    item = _calcblock_target(project, item_id)
+    item = _item_target(project, item_id)
     if item is None:
         raise _BlockError(f"{item_id} does not exist.{_suggest(item_id, project.items_by_id)}")
     if item.external:

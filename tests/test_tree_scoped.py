@@ -159,6 +159,43 @@ def test_tree_block_board_scope_narrows_the_forest(tmp_path):
     assert "GRP-T-001" in page.body_html
 
 
+def test_tree_block_board_and_workspace_together_is_a_build_error(tmp_path):
+    """docs/blocks.md: board=/workspace= are "at most one of the two".
+
+    Giving both used to intersect them silently -- a tree of board A inside
+    workspace alpha is a scope no report page has, so the page quietly showed
+    a set nobody asked for. Sabotage: drop the mutual-exclusion check in
+    `_render_tree` and this directive builds clean, so the assertion on
+    `project.errors` fails.
+    """
+    _write(tmp_path)
+    _page_with(tmp_path, '{{tree board="board-a" workspace="alpha"}}')
+    project = _build_at(tmp_path)
+    diag = [d for d in project.errors if "mutually exclusive" in d.message]
+    assert diag, [d.message for d in project.errors]
+    assert "board=" in diag[0].message and "workspace=" in diag[0].message
+    assert diag[0].file and diag[0].file.endswith("index.md")
+    assert diag[0].line == 3
+
+
+def test_tree_block_scope_with_no_items_renders_the_empty_note(tmp_path):
+    """A scoped tree with nothing in scope says so, like the unscoped case.
+
+    Board C is registered but empty: the block used to emit the bare scope
+    node (`<li>Board C</li>`), a label with no count and no explanation.
+    Sabotage: restore the `markup == '<ul class="tree"></ul>'` emptiness
+    check and this scoped case never matches it, so the note disappears.
+    """
+    _write(tmp_path)
+    _page_with(tmp_path, '{{tree board="board-c"}}')
+    project = _build_at(tmp_path)
+    assert not project.errors
+    page = next(p for p in project.pages if p.slug == "index")
+    assert '<p class="tree-empty">No items in board-c.</p>' in page.body_html
+    assert "<li>Board C</li>" not in page.body_html
+    assert '<ul class="tree">' not in page.body_html
+
+
 # ------------------------------------------------------------ scoped pages
 
 

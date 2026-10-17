@@ -56,10 +56,10 @@ what it could not write, or refuses:
 |---|---|---|
 | `.refdes/` (seal file, membership manifest, `schema.json`) | `build`, `revision`, `release` | An error naming the file and what was therefore not recorded, and **exit 1**. The site is still rendered if its own directory is writable. |
 | the `site.out` directory | `build` | Refuses: `error: cannot write the site to <dir> …`, **exit 2**. There is no partial "site written to" to print. |
-| `.refdes/baselines/<name>.yaml` | `revision`, `release` | Refuses: `error: cannot write .refdes/baselines/<name>.yaml …`, **exit 2**. A stamp that did not happen is never reported as one that did. |
+| `.refdes/baselines/<name>.yaml` | `revision`, `release` | Refuses: `error: cannot write .refdes/baselines/<name>.yaml (read-only tree?) …`, **exit 2** — with the operating system's own reason in the parenthetical when the reported failure cannot be a read-only tree, as with `id` below. A stamp that did not happen is never reported as one that did. |
 | a baseline's stored-hash format rewrite | `audit`, `former-ids propose` | Names the file and carries on, **exit 0**. A baseline already on disk holds correct content; only its format lags the current hash definition, and the diff is computed in memory either way. |
 | the `.refdes/history/` store | `history capture`, `history redact`, `history migrate-seals` | Refuses: `error: cannot write .refdes/history/… (read-only tree?) -- nothing was captured`, **exit 1**. A snapshot that was not taken is never announced as one that was. |
-| a seal hash or baseline entry carried forward, or an item file rewritten | `rename`, `calc-rewrite`, `standard upgrade` | `refused:` naming the file, **exit 1**, and the whole operation is rolled back. The carried hash is the only record that the rename was not an edit to a sealed entry or a stamped baseline, and a rename that lands in some item files and not others is not a rename. |
+| a seal hash or baseline entry carried forward, or an item file rewritten | `rename`, `calc-rewrite`, `standard upgrade` | `refused:` naming the file — a carried baseline entry's refusal naming the operating system's own reason where the failure cannot be a read-only tree, as with `id` below; the seal-carry refusal carrying the marker for every failure, its writer reporting a plain yes/no with no OS error in hand — **exit 1**, and the whole operation is rolled back. The carried hash is the only record that the rename was not an edit to a sealed entry or a stamped baseline, and a rename that lands in some item files and not others is not a rename. |
 | an id written back into its source file, or `.refdes/ids.yaml` | `id` | `cannot write <file> (read-only tree?) -- …`, **exit 1**; when the reported errno shows the cause is not a permission, the parenthetical is the operating system's own reason instead — `cannot write .refdes/ids.yaml (No space left on device) -- …` on a full disk. An id that never reached its source file is not allocated and its number stays free; the ledger is what stops a deleted item's number being reused, so a refusal to record it is reported too. |
 | a `stub-tests.md` | `stub-tests` | `refused:` naming the file, **exit 1**. The files are independent (one per workspace/board, holding only their own scope's stubs) and a written stub is the author's, so what landed stays and what was refused is named; re-running picks up exactly the missed ones. |
 | `refdes-project.yaml` | `standard add-preset`, `standard remove-preset` | `error: cannot write refdes-project.yaml (read-only tree?) -- …`, **exit 2** — the code these two already use for "your config is not what you asked for it to be". |
@@ -104,12 +104,15 @@ refusals in the table that name a *specific destination* the user asked for
 put the path first and so do not contain that longer string; they carry
 `(read-only tree?)` for every failure a read-only tree could produce (a
 permission denial, a read-only filesystem), which is why that is the substring
-to write against. Three exceptions. The destination refusals of `id` report
-the operating system's own reason for failures that cannot be a read-only
+to write against. Three exceptions. The destination refusals of `id`, and of
+`revision`/`release` stamping `.refdes/baselines/` (the stamp refusal and the
+revision engine's carried-baseline refusal both report the cause the operating
+system gave, not a read-only guess), report the operating system's own reason
+for failures that cannot be a read-only
 tree — a full disk is refused as `(No space left on device)`, not as a
-permission — so a filter on the marker sees the tree-write refusals of `id`
-when the tree is read-only and not when the disk is full; the rule is the
-same one this section states for the two commands named next: the marker is
+permission — so a filter on the marker sees the tree-write refusals of those
+commands when the tree is read-only and not when the disk is full; the rule is
+the same one this section states for the two commands named next: the marker is
 a claim refdes only makes where a read-only tree could be the cause. `build`'s
 refusal for the site directory reports the operating system's own reason,
 because that write can be refused for reasons that have nothing to do with a
@@ -117,7 +120,11 @@ read-only tree (a file sitting at the `site.out` path is refused as
 `File exists`), so the marker would be a claim refdes cannot make there; and
 `keys adopt` / `keys restore` report the `OSError`'s own errno for the same
 kind of reason — their write is deliberately left outside the refusal
-machinery — so a filter on the marker will miss those two commands.
+machinery — so a filter on the marker will miss those two commands. The
+seal-carry refusal of `rename`/`calc-rewrite`/`standard upgrade` keeps the
+marker for every failure: the seal writer reports a plain yes/no, with no
+operating-system error in hand to read a cause from, and the rule above is
+the rule for refusals that carry one.
 
 The full rationale, and what an explicit write (`rename`, `keys adopt`)
 does instead, is in [keys §2](design/keys.md#a-tree-that-will-not-take-the-write).
@@ -134,7 +141,7 @@ Validate, evaluate, and render the site plus `items.json`.
 | `--keep-going` | Exit 0 even when there are errors |
 | `--reseal [BOARD]` | Accept edits to sealed append-only entries. Bare, accepts every board's; name one board to scope it, e.g. `--reseal power`. A `sealing: history` type has nothing to reseal: the flag is accepted, warns `sealing no longer applies to the '<type>' type; nothing was rewritten`, and rewrites nothing |
 | `--accept-board-move` | Accept a recorded [board](multi-board.md) or [workspace](workspaces.md) change for an item |
-| `--require-citations` | Promote the unpinned-citation (info) and missing-cache-blob (warning) [citation](markdown.md#citing-a-datasheet) diagnostics to errors |
+| `--require-citations` | Promote citation pin-state diagnostics to an error: unpinned citation, missing cache blob, a local citation changed since pinned, a `SOURCE FILE CHANGED` source pin, and an unresolvable `section:`/`page:`. Citation warnings outside that list stay warnings — `inconsistent keep_copy:`, a case-mismatched citation path, a `page:` that disagrees with its resolved `section:` — and a corrupt blob or missing cited file is already an error everywhere. Full table: [citation severities](markdown.md#citing-a-datasheet) |
 | `--dry-run` | Render the site without sealing |
 | `-v`, `--verbose` | Also show info-level diagnostics (routine states hidden by default) |
 
@@ -193,7 +200,7 @@ rendered output, no new seal, no board or citation manifest, and no baseline is
 written. Loading the project can still write back surrogate `key:` fields and
 expand resolvable link and `check` targets to composite form, and
 `.refdes/schema.json` (the gitignored editor-completion schema) is refreshed by
-every command that loads the project, this one included. Run
+most commands that load the project, this one included. Run
 `refdes --no-write check` for a run that writes none of those either.
 
 ```bash
@@ -405,6 +412,15 @@ to reference while reviewing a PR diff. The workspace column appears only on a
 project that declares `workspaces:`, so a project without one gets the columns
 it has always got.
 
+The listing comes from the same writable load `build` does, so on a cold project
+the files can be edited before the first row prints: the load mints the
+[surrogate keys](ids.md#surrogate-keys) the items are missing and expands bare
+link references to composite `ID@key` form, and `ls` names what it wrote on the
+line above the listing — `(rewrote 1 reference(s) while loading)` on a project
+whose items already carry keys, `(minted 2 key(s) and rewrote 1 reference(s)
+while loading)` on one that started with none. The global `--no-write` keeps
+the listing from touching anything.
+
 | Option | Effect |
 |---|---|
 | `--type TYPE` | Only items of this type |
@@ -470,15 +486,16 @@ An item in **no** workspace — here `BND-CAN-001`, sitting directly in
 naming its absence, exactly as an item with no board leaves the board column
 blank, and that is also what `--workspace` does with it: every real name
 excludes it, and there is no name to type for "no workspace" (`--workspace ''`
-is an empty flag value, not a wildcard — it filters nothing and lists
-everything). If a filter narrows the listing to rows that all have no
+is refused — blank is not a name, and the command that takes it errors with
+`--workspace '' is not a workspace declared …` and exit 1 rather than silently
+listing everything). If a filter narrows the listing to rows that all have no
 workspace, the column is dropped for the same reason the board column is.
 
 Every filter here combines as a plain AND, and `--workspace` is no exception —
 boards and workspaces are independent groupings (one level apart, per
 [workspaces](workspaces.md)), so `--workspace product-a --board board-a` is a
 meaningful narrowing rather than a contradiction. On a project with no
-`workspaces:` registry no item has a workspace, so `--workspace anything` is
+`workspaces:` registry no item has a workspace, so `--workspace <name>` is
 "no items match" — and, like `--board`, an unknown name is answered that way
 rather than with `check`'s registry error.
 
@@ -1135,15 +1152,23 @@ what says its bytes are wrong.
 A row whose document's pages could not be counted, or whose recorded count/error
 is not trusted as belonging to the pinned bytes, **and which cites a `page:` of
 that document**, reads `pages unchecked` instead of `ok`, with the reason the
-lockfile or provenance check supplies on the line below it. The pin is fine — a
+lockfile supplies on the line below it. The pin is fine — a
 cited `page:` simply has nothing trustworthy to be compared against, and an `ok`
-that meant "recorded" was read as "checked". `refdes check` warns about the same
-fact, and about the same set of citations: a citation citing no page has no
-unchecked page number, even when the lockfile still records a failed count for
-the path from before the `page:` was deleted. `page_count_error:` and
-`page_count_sha256:` in `.refdes/citations.yaml` are where both read it, and
-`refdes fetch --update --path <path>` is what replaces a failed or untrusted
-record with a count tied to the freshly pinned bytes.
+that meant "recorded" was read as "checked". The three reasons name their own
+repair: a failed or untrusted count is replaced by
+`refdes fetch --update --path <path>`, a PDF with no count on record yet is
+counted by a plain `refdes fetch --path <path>`, and a document that is not a
+PDF has no page count for any command to record — its cited `page:` is checked
+by nothing, and the row says so. `refdes check` warns about the same facts
+among the same citations — a citation citing no page has no unchecked page
+number, even when the lockfile still records a failed count for the path from
+before the `page:` was deleted — with one silence, for the one state its own
+next fetch repairs: a PDF whose bytes are on this machine with no count on
+record yet, which is counted by the plain fetch the audit row names. The two
+states no fetch can fill — the remote pin kept hash-only, and the document
+that is not a PDF — are warned about, in `check`'s own words.
+`page_count:`, `page_count_error:` and `page_count_sha256:` in
+`.refdes/citations.yaml` are where both read it.
 
 An import declared with a `version:` reads `pinned to 2026.3`; one declared
 without one reads `unpinned`, and its items still count toward the
@@ -1171,8 +1196,15 @@ pattern already covers.
 ```bash
 refdes init
 refdes init --standard none
-refdes init --preset design-debate
 ```
+
+Presets ship with `hardware@1` and `hardware@2`; the `hardware@3` that `init`
+pins today (bundled, unreleased — see `CHANGELOG.md`'s `[Unreleased]`) declares
+no presets of its own, so `refdes init --preset design-debate` is a
+configuration error there: stderr prints `configuration error: preset
+'design-debate' does not exist for hardware@3 (available: []).`, exit 2,
+nothing written. Add a preset to a project
+after the fact with [`refdes standard add-preset`](#refdes-standard-add-preset-remove-preset).
 
 Refuses to run if `refdes-project.yaml` already exists in the current
 directory. It writes to the current directory and ignores the global `-c`.
@@ -1199,13 +1231,14 @@ refdes new component --list > items/power/candidates.yaml
 ```
 
 `decision` was retired in `hardware@3` — a verdict is a `log` entry now, so
-`refdes new decision` answers `configuration error: unknown type 'decision'.`
+`refdes new decision` answers `unknown type 'decision'.` on stderr and exits 1
+(no did-you-mean — no type is close to it).
 
 An unknown type exits 1 with a did-you-mean suggestion, the same as an
 unknown type anywhere else in the tool. Outside a project it still works,
 falling back to the bundled standard. `refdes new` writes nothing itself —
-every command that loads a project refreshes `.refdes/schema.json`, and this
-one deliberately does not.
+most commands that load a project refresh `.refdes/schema.json` (the list is
+in the `refdes schema --json` section below), and this one deliberately does not.
 
 ---
 
@@ -1213,10 +1246,12 @@ one deliberately does not.
 
 Print the project's merged JSON Schema to stdout. `--json` is the default, so
 a bare `refdes schema` prints the same document. The same document is written,
-byte for byte, to `.refdes/schema.json` by every command that loads the
-project — `build`, `check`, `index`, `ls`, `id`, `fetch`, `audit`, `revision`,
-`release`, `stub-tests`, and `former-ids`; this is the explicit, standalone
-form, for piping into something else or inspecting directly. See [editor
+byte for byte, to `.refdes/schema.json` by most commands that load the
+project in a writable tree — `build`, `check`, `index`, `ls`, `id`, `fetch`,
+`audit`, `thread`, `work`, `revision`, `release`, `stub-tests`, `former-ids`,
+and the `history` subcommands (`capture`, `redact`, `migrate-seals`); this is
+the explicit, standalone form, for
+piping into something else or inspecting directly. See [editor
 support](standard-library.md#editor-support-json-schema-emission).
 
 `refdes schema` itself is read-only: it writes nothing, not even the schema
@@ -1289,6 +1324,15 @@ standard add-preset'` names the way back.
 Both exit 2 without touching the config on a name that isn't a usable
 change: `add-preset` on a preset already selected, `remove-preset` on one
 that isn't, and either on a name that doesn't exist at the pinned version.
+`remove-preset` also exits 2 when `standard.presets:` is written in
+block-list style (one item per line) rather than `presets: [...]`: the edit
+is a text substitution on the flow list, and the tool refuses to guess at
+block structure — `configuration error: could not find a 'presets: [...]'
+list to edit in refdes-project.yaml -- if standard.presets: is written in
+block-list style, edit it by hand`. `add-preset` checks the name first (the
+two name-check messages above), and with the bundled standards — one preset
+per version, none at `hardware@3` — every add on a block-list project is
+stopped by a name check before the list edit is ever attempted.
 
 ---
 
@@ -1309,7 +1353,7 @@ from the version immediately before it (`hardware@2`'s renames
 `requirement.text`/`bound.text`/`test.method` to `body:`, merges the
 retired `decision` type into `log` under `merge_types:`, and rewrites
 every `records:` edge to `follows:` under `links:`). See [the
-versions shipped so far](standard-library.md#the-versions-shipped-so-far).
+versions bundled so far](standard-library.md#the-versions-bundled-so-far).
 Upgrading across several versions chains each intervening one's own
 migration, in order — `v1→v2`, then `v2→v3`, and so on — never merged into
 one combined rename, so a name a later version reuses (freed up by an
@@ -1473,7 +1517,7 @@ above. Ignoring it instead used to make `ids:` a silent no-op:
 
 ```
 $ refdes rename rename.yaml
-error: rename.yaml: unknown top-level section 'ids'. A mapping file may have types:, fields:, links:, prefixes: or citation_keys:, and an unrecognised section is refused rather than ignored. To rename a single item, edit its `id:` by hand instead, after a writable `refdes check` has expanded references to composite form so they follow the rename -- see https://squishiba.github.io/refdes/troubleshooting.html#links.
+error: rename.yaml: unknown top-level section 'ids'. A mapping file may have types:, merge_types:, fields:, links:, prefixes: or citation_keys:, and an unrecognised section is refused rather than ignored. To rename a single item, edit its `id:` by hand instead, after a writable `refdes check` has expanded references to composite form so they follow the rename -- see https://squishiba.github.io/refdes/troubleshooting.html#links.
 ```
 
 `rename` has no single-item rename — it renames ids only as part of a
@@ -2225,7 +2269,7 @@ python -m http.server -d _site 8000
 | `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, kept-copy flag, resolved sections, the pinned document's page count and the digest that count was taken from); written by `refdes fetch`, and by `refdes serve` when an editor accept pins a source value (`docs/design/editor-source-picker.md` §4). Every write is a read-modify-write inside the project's cross-process write lock |
 | `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes rename`, `refdes calc-rewrite` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename or a spelling-only rewrite |
 | `.refdes/keys-adopted.yaml` | **yes** | Adoption marker written once by `refdes keys adopt`; its presence is what makes future stamps, seals and membership manifests use key-keyed storage |
-| `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project. `refdes init` puts it in the project's `.gitignore` |
+| `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by most commands that load the project in a writable tree (the list is in the `refdes schema --json` section of this page). `refdes init` puts it in the project's `.gitignore` |
 | `.refdes/sealing-optin.json` | **no, gitignored** | The set of opt-back-in types the `check`/`build` sealing note has already announced (run-6a F10); rewritten on writable runs whenever the announced set changes — including the run that removes the overlay, which prints no note. A refused write is silent and best-effort: unlike `schema.json`'s, whose refusal is a counted warning, this record's adds no warning (the note's no-count contract) — the note just prints again next run. Per-checkout state, like
 `schema.json`: the record is gitignored, so a fresh clone — CI included — starts
 unannounced and prints the note on its first writable run. `refdes init` puts it

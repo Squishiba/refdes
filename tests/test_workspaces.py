@@ -524,6 +524,66 @@ def test_ls_unknown_workspace_matches_nothing_rather_than_erroring(workspace_pro
     assert "no items match" in capsys.readouterr().out
 
 
+def test_ls_empty_workspace_flag_is_a_named_error(workspace_project, capsys):
+    """`ls --workspace ''` used to be falsy and filter nothing: `ls
+    --workspace $WS` with $WS unset printed the whole project and exited 0,
+    answering "what's in this workspace?" with every workspace in the project
+    (docs PR #286). Blank is not a name, so it gets a named error like
+    `check`'s, and the listing is not printed -- a full listing under an
+    empty filter is the lie this refuses to tell."""
+    status = cli_mod.main(
+        [
+            "-c",
+            str(workspace_project / "refdes-project.yaml"),
+            "ls",
+            "--workspace",
+            "",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "--workspace '' is not a workspace declared" in captured.err
+    assert "REQ-A-001" not in captured.out
+
+
+def test_check_empty_workspace_flag_is_a_named_error(workspace_project, capsys):
+    """Same posture as `check --workspace nope` (test_check_unknown_workspace_flag_is_a_clear_error):
+    `--workspace ''` used to skip validation and check the whole project in
+    silence (docs PR #286)."""
+    status = cli_mod.main(
+        [
+            "-c",
+            str(workspace_project / "refdes-project.yaml"),
+            "check",
+            "--workspace",
+            "",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "--workspace '' is not a workspace declared" in captured.err
+
+
+def test_ls_empty_workspace_flag_is_refused_without_a_workspaces_registry(
+    board_project, capsys
+):
+    """The empty value is not a name on any project, registry or not, so the
+    refusal does not depend on `workspaces:` existing -- unlike an unknown
+    *name*, which stays query posture ("no items match") on such a project."""
+    status = cli_mod.main(
+        [
+            "-c",
+            str(board_project / "refdes-project.yaml"),
+            "ls",
+            "--workspace",
+            "",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "--workspace '' is not a workspace declared" in captured.err
+
+
 # ------------------------------------------------- the ls workspace column (N5)
 
 
@@ -591,11 +651,12 @@ def test_ls_shows_an_item_in_no_workspace_as_a_blank_and_never_matches_it(
     """What the column shows for an item in no workspace has to agree with what
     `--workspace` does with it. `item.workspace` is "" for such an item and
     cmd_ls filters on `if args.workspace and item.workspace != args.workspace`
-    -- so every real name excludes it, and `--workspace ''` is a falsy flag that
-    filters nothing at all and lists the whole project. There is no name to type
-    for "no workspace", which is why the column is blank padding rather than a
+    -- so every real name excludes it. There is no name to type for "no
+    workspace", which is why the column is blank padding rather than a
     placeholder: a marker there would name something `--workspace` cannot be
-    asked for."""
+    asked for. (`--workspace ''` used to be a falsy flag that filtered nothing
+    and listed the whole project; it is now refused by name -- see
+    test_ls_empty_workspace_flag_is_a_named_error below.)"""
     # The fixture's schema declares requirement and decision only, so this is a
     # requirement -- and it sits directly in items/, outside every workspace
     # folder, which is how an item ends up in no workspace under
@@ -626,12 +687,12 @@ def test_ls_shows_an_item_in_no_workspace_as_a_blank_and_never_matches_it(
         "REQ-CAN-001   requirement                      The CAN bus shall carry 1 Mbit/s."
     )
 
-    # Every declared workspace excludes it, and an empty --workspace is a no-op
-    # that lists everything rather than selecting the no-workspace items.
+    # Every declared workspace excludes it. An empty --workspace is now refused
+    # by name (see test_ls_empty_workspace_flag_is_a_named_error), so it no
+    # longer lists everything -- there is no value that selects the no-workspace
+    # items, which is the whole point of the blank column.
     for name in ("platform", "product-a", "product-b"):
         assert "REQ-CAN-001" not in _steady_state_ls(capsys, cfg, "--workspace", name)
-    listed = _steady_state_ls(capsys, cfg, "--workspace", "")
-    assert "REQ-CAN-001" in listed and "REQ-PLAT-001" in listed
 
 
 def test_ls_help_says_the_workspace_column_is_conditional(capsys):

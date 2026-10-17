@@ -242,9 +242,9 @@ Sub-decisions:
    copied-and-updated list and never mutates the tip.
 3. **Forks get tabs, never a union.** A thread with an unmerged fork shows one
    tab per open tip, never a union (living-notes §5 fold rule 4).
-4. **Derived rows in a second, collapsed section.** Derived, self-closing rows
-   (living-notes §5 "Generated worklist" and its binding rules) appear in a
-   second, collapsed section of the same pane. That section is explicitly
+4. **Derived rows in a second, collapsed section.** Derived rows —
+   self-closing, per living-notes §5 "Generated worklist" and its binding
+   rules — appear in a second, collapsed section of the same pane. That section is explicitly
    marked/labelled as derived, and its rows have no checkboxes.
 5. **No thread in view: greyed out, not jumpy.** The pane stays where it is,
    greyed out, showing the last thread's name; it does not jump around.

@@ -28,12 +28,19 @@ import os
 import subprocess
 import sys
 
+import pytest
 from conftest import write_project_config
 from helpers import _build_and_render
 
 from refdes import build as build_mod
 from refdes import keys, parse, seal
 from refdes.schema import load_project
+
+needs_chmod = pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permission bits: chmod 0o000 does not stop Windows (or root) "
+    "from opening the file, so the unreadable case cannot be produced that way",
+)
 
 CONFIG = (
     "site: { title: T, out: _site }\n"
@@ -221,6 +228,37 @@ def test_ambiguous_bare_src_contributes_sentinel_and_still_errors(tmp_path):
                config=config)
     assert any("ambiguous" in d.message for d in p.errors), p.errors
     assert _payload(p, p.item_by_id("DEC-001"))["images"] == [["x.png", None]]
+
+
+@needs_chmod
+def test_unreadable_image_contributes_sentinel_and_still_errors(tmp_path):
+    """IMAGE-ASSET-007: an image that exists and resolves but will not open
+    (mode 000) contributes the same `[path, None]` sentinel as an unresolved
+    src -- under its *resolved* path, deterministic, distinct from any real
+    pair -- and the render-pass build error names it. The hash pass keeps its
+    `except OSError` on purpose: raising from here (the obvious "aligning"
+    shortcut) crashes `compute_hashes` before the render pass can report the
+    reference, and serving the project (whose poller computes hashes on every
+    reload) would die on an unreadable image. Sabotage: contribute nothing --
+    an unreadable image then hashes exactly like no images at all, so
+    swapping its bytes back in leaves a sealed entry looking untouched."""
+    write_project_config(tmp_path, CONFIG)
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "a.md").write_text(
+        _item("DEC-001", "![x](gone.png)\n"), encoding="utf-8"
+    )
+    png = tmp_path / "items" / "gone.png"
+    png.write_bytes(PNG_A)
+    png.chmod(0o000)
+    try:
+        p = _rebuild(tmp_path)
+        # Recomputed while the file is still unreadable: `content_hash` is
+        # one-way, and recomputing after the chmod restores the digest.
+        images = _payload(p, p.item_by_id("DEC-001"))["images"]
+    finally:
+        png.chmod(0o644)
+    assert any("cannot be read" in d.message for d in p.errors), p.errors
+    assert images == [["items/gone.png", None]]
 
 
 def test_unresolved_text_equal_to_resolved_path_sorts_and_hashes(tmp_path):

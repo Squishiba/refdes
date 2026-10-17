@@ -1,0 +1,125 @@
+Task: does a REJECTED component's satisfies: link count toward its target's
+coverage stage? The standard's comment says no; the code says "claimed".
+Branch: fix-rejected-satisfies-stage (base main f33efa4).
+
+## Outcome
+
+No code change. The current behaviour (`claimed`) is deliberately pinned by
+the design doc, by a test, and by both just-verified docs pages. Task step 3,
+second branch applies: write up the conflict as a decision for Jared; touch
+no code, no comment, no changelog fragment.
+
+## 1. Reproduction (fresh probe, hardware@3)
+
+Probe project: .scratch/rejected-probe/ (refdes init, standard: hardware@3).
+items/pcb/requirements.yaml: REQ-1 (requirement, status: active).
+items/pcb/components.yaml: CMP-1 (component, status: rejected,
+satisfies: [REQ-1]). Later added items/pcb/logs.yaml: LOG-1 (log,
+status: rejected, satisfies: [REQ-1]) for the consistency check.
+
+`refdes index` -> coverage (verbatim, index.json):
+
+    {
+     "REQ-1": {
+      "stage": "claimed",
+      "addressed_by": [],
+      "claimed_by": [
+       "CMP-1"
+      ],
+      "satisfied_by": [],
+      "verified_by": []
+     }
+    }
+
+With the rejected log added (index2.json), claimed_by becomes
+["CMP-1", "LOG-1"] -- a rejected LOG entry's satisfies link lands in the
+same bucket. Same "claimed" stage.
+
+Confirmed in-repo: tests/test_component_rejected.py::test_rejected_never_satisfies
+flips both components to rejected and asserts stage == "claimed".
+
+## 2. Intent hunt (quotes + file:line)
+
+- src/refdes/standards/hardware/v3/base.yaml:255 (component status doc):
+  "Only a selected component counts as settled and closes coverage on what
+  it satisfies; a rejected one was considered and not chosen, and never
+  satisfies."  <-- the phrase the probe finding hangs on.
+- src/refdes/build.py:1136-1139 (_coverage_for): a satisfier whose status is
+  not in the type's satisfying_statuses is appended to `claimed`;
+  model.py:749-759 (Coverage.stage) returns "claimed" when claimed_by is
+  non-empty. The model is binary: every satisfies link is either settled
+  (status in satisfying_statuses) or claimed. There is no third
+  "counts for nothing" bucket.
+- docs/design/candidate-parts.md §5.3 (lines 447-453): "`satisfying_statuses:
+  [selected]` is **unchanged**, and that single fact does all the coverage
+  work: a `rejected` component that `satisfies:` a bound leaves that
+  requirement at `claimed`, never `satisfied`. No new coverage code, no new
+  flag, and the four-stage model in `docs/coverage.md` is untouched."
+  The design deliberately chose "claimed" as where a rejected component's
+  link lands.
+- docs/design/candidate-parts.md §9 table (line 848):
+  "test_rejected_never_satisfies | A `rejected` component `satisfies:` a
+  bound -> stage stays `claimed`."
+- docs/design/candidate-parts.md §5.1 (lines 419-421) quotes the base.yaml
+  comment verbatim -- the comment is the design's own wording, not a stale
+  side. In context "never satisfies" means "never counts as `satisfied`",
+  and §5.3 says operationally that means `claimed`.
+- tests/test_component_rejected.py:199-220: docstring "the existing
+  four-stage model reads the status, and `rejected` simply is not in the
+  allowed set"; asserts satisfied_by == [], claimed_by == ["CMP-PWR-002"],
+  and (flipped, rejected-only) stage == "claimed" (line 220). This test
+  deliberately pins the current behaviour -- task step 3's trigger for
+  "change NO code".
+- docs/coverage.md:12 and :266 (page verified against hardware@3, PR #284):
+  claimed = "a `status` not (yet) in the type's `satisfying_statuses:`";
+  "Only a link whose `status` is in the list counts as satisfying; the rest
+  count as `claimed`." Unconditional -- no dead-status exception.
+- docs/concepts.md:89 (verified, PR #282): same rule, same table.
+- Consistency with other "dead" statuses: log has satisfying_statuses:
+  [accepted] (base.yaml:292) and its enum includes rejected/superseded
+  (base.yaml:298) -- a rejected log's satisfies link also lands in
+  `claimed` (probe index2.json above). "Drop out of coverage entirely"
+  semantics exist only on the *covered* side via coverable_statuses
+  (e.g. requirement draft/retired, base.yaml:190); no satisfier-side
+  status is treated as "counts for nothing" anywhere.
+- CHANGELOG.md:1057-1059 (0.3.x Fixed): the claimed/satisfied split is
+  described as "claimed" (an unsettled item says it satisfies) vs
+  "satisfied" (a settled one does) -- no rejected-specific carve-out.
+- Grep of tests/ for "status: rejected" hits only test_component_rejected.py
+  and test_standards.py (a required_when test, coverage-irrelevant). No
+  test pins "counts nothing" for any status.
+
+## 3. Decision (per task step 3, branch two)
+
+Sources do NOT disagree -- base.yaml's "never satisfies", the design doc,
+the test, and both docs pages all mean: a rejected satisfier never closes
+coverage (never `satisfied`); its link is recorded as `claimed`. The probe
+observation is a wording ambiguity in the base.yaml comment (it can be read
+as "counts for nothing"), not a code/docs conflict. The comment is not
+plainly the stale side -- it is quoted verbatim by the design that owns it
+-- so it is left alone, per the task's instruction to fix it only if plainly
+stale. For Jared: if "a dead-status claim should count for nothing (stage
+falls past `claimed` to open/addressed)" is wanted, that is a new third
+bucket in the settled/claimed model (_coverage_for, build.py:1136-1139), a
+docs change (coverage.md/concepts.md stage tables), a base.yaml comment
+change, and a deliberate reversal of test_rejected_never_satisfies -- i.e.
+a design decision, not a bug fix. That is exactly why no code was touched.
+
+## 4. Tests / sabotage / changelog
+
+- No behaviour fix was made, so per COMMON ("every behaviour fix gets a
+  test") no new test is added; the existing test_rejected_never_satisfies
+  already pins the investigated behaviour in both directions (mixed:
+  satisfied_by == [selected]; rejected-only: stage == "claimed").
+- Sabotage: N/A -- nothing was fixed, so there is nothing to revert. The
+  existing pins were confirmed green in the full suite.
+- Changelog fragment: none. changelog.d/README.md rule applied: fragments
+  are for user-visible changes; this PR changes no behavior, so no fragment
+  (the log file is the deliverable).
+
+## 5. Verification
+
+- Full suite: PYTHONPATH=$PWD/src ... python -m pytest -q -p no:cacheprovider
+  -> see .scratch/suite.txt, counts recorded in the PR body.
+- ruff check --select E9,F src tests: clean (no files touched anyway).
+- python docs-site/gen_examples.py --check: passes.

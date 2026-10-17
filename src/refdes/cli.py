@@ -428,7 +428,11 @@ def cmd_check(args) -> int:
             f"--board {args.board!r} is not a board declared in refdes-project.yaml's "
             f"boards: registry.{hint}"
         )
-    if args.workspace and args.workspace not in project.workspaces:
+    # `is not None`, not truthiness: `--workspace ''` used to fall through
+    # the filter unvalidated and check the whole project in silence (docs
+    # PR #286). Blank is not a workspace name, so it is named like any
+    # other unknown one.
+    if args.workspace is not None and args.workspace not in project.workspaces:
         import difflib
 
         close = difflib.get_close_matches(
@@ -678,10 +682,27 @@ def _run_stamp(args, kind: str) -> int:
         # as the `--no-write` one (`_refuse_no_write`), not the "errors found"
         # code. Naming the file is the whole point: the user asked for a stamp
         # and has to be told which path would have held it.
+        #
+        # The parenthetical follows the reported cause, the rule DIAG-WORD-008
+        # established for the other destination refusals (`id`'s write-back
+        # first among them): a full disk is not a tree that is read-only, and
+        # `(read-only tree?)` with "make the tree writable" sends the user
+        # hunting for a permission that was never the problem. A cause the
+        # tree cannot explain keeps the marker (model.destination_refusal).
+        cause = outcome.refusal_cause
+        remedy = (
+            "Make the tree writable and run it again"
+            if cause is None or model.could_be_read_only(cause)
+            else "Fix the reported failure and run it again"
+        )
         print(
-            f"\nerror: cannot write {outcome.refusal} (read-only tree?) -- "
-            f"{kind} {args.name!r} was not stamped. Make the tree writable and "
-            "run it again, or run it with --no-write to see what it would stamp.",
+            "\nerror: "
+            + model.destination_refusal(
+                outcome.refusal,
+                f"{kind} {args.name!r} was not stamped. {remedy}, or run it "
+                "with --no-write to see what it would stamp.",
+                cause,
+            ),
             file=sys.stderr,
         )
         return 2
@@ -768,10 +789,22 @@ def cmd_index(args) -> int:
 
 
 def _item_tags(item) -> list[str]:
+    """An item's tags, the strings only.
+
+    A `tags:` entry is a plain string, and a mapping element is a load-time
+    error the item is still listed under -- so this read decides what the
+    listing *matches*, and `str()`ing the element put the dict's repr in the
+    haystack: `ls --tag name` found `{'name': 'not-a-string', ...}`, and so
+    did the free-text query (run-6a B6's residual, run-7 F16). An entry that
+    is not a string is not a tag: it gets no match in `--tag` and none in
+    the query, same as the item whose file failed to parse is not in the
+    listing at all."""
     tags = item.fields.get("tags")
-    if not tags:
-        return []
-    return [str(t) for t in tags] if isinstance(tags, list) else [str(tags)]
+    if isinstance(tags, str):
+        return [tags]
+    if isinstance(tags, list):
+        return [t for t in tags if isinstance(t, str)]
+    return []
 
 
 def cmd_ls(args) -> int:
@@ -814,6 +847,23 @@ def cmd_ls(args) -> int:
     """
     project, _stale = _load(args, require_ids=False)
     _announce_load_writes(project)
+    # `--workspace ''` is falsy, and the filter below reads a falsy flag as
+    # "no filter": `ls --workspace $WS` with $WS unset listed the whole
+    # project and exited 0, answering the query with a lie (docs PR #286).
+    # Blank is not a name, so it is refused with check's named error rather
+    # than run as a filter. Unknown *names* keep the query posture below
+    # ("no items match", exit 0) -- that asymmetry with `check` is ls's
+    # documented design for every filter.
+    if args.workspace == "":
+        project.error(
+            "--workspace '' is not a workspace declared in refdes-project.yaml's "
+            "workspaces: registry. An empty value filters nothing and is refused "
+            "rather than silently listing everything; omit the flag to list "
+            "every item."
+        )
+        for d in project.errors:
+            print(str(d), file=sys.stderr)
+        return 1
     # Items in a file that failed to parse are not in the listing and never
     # can be -- say so, and don't let the listing pass for a complete answer.
     load_errors = project.errors
@@ -2843,8 +2893,16 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument(
         "--require-citations",
         action="store_true",
-        help="promote the unpinned-citation (info) and missing-cache-blob "
-        "(warning) diagnostics to errors (CI)",
+        help="promote citation pin-state diagnostics to errors (CI): an "
+        "unpinned citation (info today), a keep_copy: citation whose cached "
+        "blob is missing (warning today), a local citation changed since it "
+        "was pinned, a SOURCE FILE CHANGED pin on a file feeding source() "
+        "values, and a section:/page: the lockfile cannot resolve (all "
+        "warnings today). Citation warnings outside this list stay warnings "
+        "-- inconsistent keep_copy:, a citation path whose case differs "
+        "from the file on disk, a page: that disagrees with its resolved "
+        "section: -- and a corrupt cache blob or missing cited file is "
+        "already an error everywhere",
     )
     p_build.add_argument(
         "-v", "--verbose",

@@ -1,0 +1,45 @@
+Task: run-8b F17, selected empty workspace steers editor creation
+Branch: fix/editor-create-empty-workspace (from origin/main fd8dcee)
+
+Reproduction
+------------
+PR #299, in-prog-logs/user-sim-release-gate-run8b.md §1.4, reports that a
+create with workspace product-b (which had no item files) landed in a
+product-a list file and inherited that file's REQ-PA prefix. The narrowed
+candidate list in serve/edit.py:suggest_destination() was empty, so the
+function silently kept the unscoped list of files. A new HTTP regression
+uses item_layout: workspace, registered workspace/board path aliases, and a
+product-a list file with defaults.prefix: REQ-PA. Before the change, its
+product-b preview returned items/pa/power/requirements.yaml; the test failed
+at that destination assertion. This is the reported failure, reproduced in
+the isolated worktree with PYTHONPATH pinned to its src/.
+
+Change
+------
+When a selected, declared workspace has no file of the requested type and
+item_layout is workspace, suggest a new Markdown file under the registered
+workspace path. If a board was selected, include its registered path too.
+No board selected means no board path is invented. The new file has no other
+file's defaults or id prefix. The existing-file, unscoped, flat-layout, and
+explicit destination paths stay as before. The suggestion is shared by
+preview and the locked create, so both return/land at the same path.
+
+Verification
+------------
+- The new HTTP test was red at origin/main (preview chose product-a); green
+  after the change. It checks workspace-only and board+workspace paths,
+  path aliases, id/prefix, byte-identical product-a file, unscoped and
+  existing-scope controls, and an explicit destination override.
+- tests/test_serve_create.py: 65 passed.
+- tests/test_editor_create_workspace.py + tests/test_workspaces.py: 32 passed.
+- Scoped ruff E9,F on the two touched Python files: clean.
+- `refdes schema` run in the generated test project; requirement entries
+  expose board and workspace as string fields. No schema changes made.
+
+The first full create-suite invocation used a nonexistent pytest basetemp
+parent and failed in test setup. Creating this worktree's .scratch/ parent
+fixed the harness path; the rerun above passed. The initial HTTP test also
+needed the sandbox's loopback-bind allowance. No production failure arose
+from either environment setup issue.
+
+Status: fix and focused verification complete; PR review and CI pending.

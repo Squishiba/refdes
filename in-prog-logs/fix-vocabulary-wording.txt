@@ -1,0 +1,91 @@
+# fix-vocabulary-wording — work log
+
+Task: fix five wording bugs in the generated vocabulary text
+(src/refdes/vocabulary.py), per .scratch/task/TASK.txt.
+
+## Verification (all five confirmed on this branch, HEAD fd8dcee)
+
+- B1 (verifies example authors `verified_by:` on a requirement): CONFIRMED.
+  Probe in .scratch/probe-b1 (refdes init + requirements.yaml with
+  `verified_by: [TST-PWR-001]` on REQ-PWR-001): `build` errors
+  "unknown field 'verified_by' on requirement -- did you mean the link
+  'governed_by'?" (parse.py:1376-1382 link-typo branch; inverse names are
+  computed backlinks, build.py:908/927). Other link examples checked
+  (refines:503, satisfies:522, part_of:575, generic line 757): all say
+  "shows ... / gain ... / computed backlink" — none authors an inverse.
+  Only the verifies example needs the fix.
+- B2 (body "required field"): CONFIRMED. build.py:298-304 enforces
+  spec.body_required with project.warn ("A warning, not an error, so a
+  stub can exist while it's still being drafted").
+- B3 (former_ids "Written by the engine when an id is re-minted"):
+  CONFIRMED. revise.py (_rename_prefix, rename path) re-mints ids and
+  writes no former_ids (grep: no former_ids writes in revise.py);
+  former_ids.py propose/confirm writes entries from a baseline snapshot
+  (former_ids.py:6-7,58-62; propose needs a baseline).
+- B4 (board): CONFIRMED. boards.py:3-8,83-112: segment matched against
+  the `boards:` registry; no registry → board stays ""; unregistered
+  segment → warn "no board: ... is not in the boards: registry", board
+  unset.
+- B5 (section): CONFIRMED. parse.py:813-843 `_resolve_section_marker`
+  docstring: the marker *asserts* the type of the items after it (stricter
+  than defaults:); parse.py:1634-1639 same for the Markdown spelling. The
+  RESERVED_KEYS "section" text describing an item-page heading is wrong.
+  The example (723-728) is already right.
+
+## Fixes (src/refdes/vocabulary.py)
+
+- B1: verifies example — dropped the `verified_by:`-authored-on-the-
+  requirement half; now says REQ-PWR-001 gains verified_by as the computed
+  backlink and the inverse is not authorable. Checked all other link
+  examples: none authors an inverse (refines/satisfies/part_of all say
+  computed/shows/gains).
+- B2: body definition — now "the type requires it -- an empty body is
+  then a warning, not an error, so a draft stub can still build".
+- B3: former_ids definition + example — "Nothing writes it when ids are
+  re-minted: add entries by hand, or with `refdes former-ids propose
+  --confirm` against a baseline."
+- B4: board definition + example — segment "resolved only against the
+  `boards:` registry ...; an unregistered segment warns and leaves the
+  board unset".
+- B5: section definition — now "The type asserted for the items that
+  follow it" (YAML entry / Markdown marker), item naming a different type
+  is an error; "heading" wording gone. Example was already right.
+
+docs/vocabulary.md regenerated with docs-site/gen_examples.py; committed
+with the source. --check passes.
+
+## Tests
+
+- tests/test_vocabulary_page.py: added 5 wording-contract tests (one per
+  bug), pinning the corrected text and rejecting the old claims.
+- Suite run: see below.
+
+## Sabotage
+
+Reverted the B1 example fix (authors `verified_by:` on REQ-PWR-001, both
+the original text and a variant) ->
+tests/test_vocabulary_page.py::test_verifies_example_does_not_author_an_inverse_name
+FAILED (AssertionError) both times; restored the fix, test passes.
+
+## Changelog fragment
+
+changelog.d/vocabulary-wording.fixed.md -- README rule: "fixed -- a bug
+fix"; the bug is the generated page's user-visible text (docs/vocabulary.md
+is generated from vocabulary.py, both shipped).
+
+## Suite / gates
+
+(see .scratch/suite.txt)
+
+- tests/fixtures/no_theme_build_hashes.json: the vocabulary.html pinned
+  hash recaptured (0ce44bc7..., CRLF variant, matching the fixture's
+  Windows-captured convention). The byte-identical theme test pins the
+  whole built site INCLUDING vocabulary.html; this change edits that
+  page's text, so the pin is a test that pinned the old wording --
+  updating it is the documented remedy (TASK: "If a test pins the old
+  wording, update it"). Suite run 1: 1 failed (this pin), 3973 passed,
+  2 skipped -> pin updated -> theme test green.
+
+Final suite (.scratch/suite.txt): 3974 passed, 2 skipped, exit=0.
+ruff check --select E9,F src tests: All checks passed.
+docs-site/gen_examples.py --check: both pages up to date.

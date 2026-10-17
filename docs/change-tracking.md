@@ -61,8 +61,8 @@ types:
     body: { on_change: invalidate }
 ```
 
-Anything not declared falls back to `on_change.default` (`invalidate` in the starter
-schema).
+Anything not declared falls back to `on_change.default` — a project setting in
+`refdes-project.yaml` whose built-in default is `invalidate`.
 
 **Per item**, in the front-matter, when one item genuinely differs:
 
@@ -73,7 +73,10 @@ on_change:
   reason: "Owner rotates weekly during bring-up; not a meaningful change."
 ```
 
-A `reason:` is expected — omitting it is a warning. One line, and every
+A `reason:` is expected with a `fields:` override — omitting it is a warning
+(a `mode:`-only mapping is not warned on). An entry in `fields:` may also name
+`body` — it is a field override, so it wins over the item's whole-item mode; a
+body left out of `fields:` follows that mode. One line, and every
 suppression is self-documenting. A type that declares its own field named
 `on_change` owns that key; the override applies to types without such a field.
 
@@ -84,25 +87,33 @@ on_change: ignore
 ```
 
 Useful for draft items not yet baselined, and for items rewritten wholesale by a
-spreadsheet re-import.
+spreadsheet re-import. The mapping form works here too — `mode:` with an optional
+`reason:` — and is the only way to give a whole-item suppression a reason:
+
+```yaml
+on_change:
+  mode: ignore
+  reason: "Rewritten wholesale by the spreadsheet re-import."
+```
 
 Precedence: item field override → whole-item mode → schema field → project default.
 
 ## The content hash
 
-Each item's hash is computed over its `invalidate` fields, its links, its body
-(if the body is `invalidate`), and — since hash format 5 — the bytes of the
-local images its body references, so replacing a figure's bytes marks every
-item using it changed even when no text moved. It appears at the foot of every
-item page and in `items.json`:
+Each item's hash is computed over its type, its `invalidate` fields, its links,
+its body (if the body is `invalidate`), and — since hash format 5 — the bytes
+of the local images its body references, so replacing a figure's bytes marks
+every item using it changed even when no text moved. It appears at the foot of
+every item page and in `items.json`:
 
 ```json
 "content_hash": "673e6ba11269f350"
 ```
 
 Change an owner and it stays identical. Change a limit and it changes. That is the
-whole mechanism: a link records the hash of its target at review time, and a
-mismatch later means the target moved and the link needs re-reviewing.
+whole mechanism, once suspect links exist: a link records the hash of its target
+at review time, and a mismatch later means the target moved and the link needs
+re-reviewing.
 
 Imported items keep the hash their own project computed, so cross-project suspect
 links work the same way.
@@ -125,9 +136,11 @@ under the entry's recorded format. If that recomputed hash matches what was
 stored, the item's content demonstrably hasn't changed — on a writable run the
 entry is rewritten in place to the current format (`carried`). If it doesn't
 match, the item genuinely changed since the stamp; the entry is left at the
-format it was stamped at. An item with no live counterpart (deleted, or renamed
-without `former_ids:`) is likewise left alone — that's the ordinary "removed"
-case.
+format it was stamped at — with one exception: rebasing a baseline onto keys,
+`refdes keys adopt` explicitly marks an uncomparable entry format 1 as it
+reports it (described below). An item with no live counterpart (deleted, or
+renamed without `former_ids:`) is likewise left alone — that's the ordinary
+"removed" case.
 
 This conditional carry-forward means a partially-migrated baseline stays
 precisely describable: some entries at format 3, some still at format 1. Those
@@ -147,7 +160,10 @@ baseline once it has been reviewed.
 If fields can be excluded from invalidation, somebody could quietly downgrade one
 to hide a substantive change. Two things close that:
 
-1. The policy lives in `refdes-schema.yaml`, in the repo, versioned like anything else.
+1. The policy lives in the schema — for a standard-pinned project, in the pinned
+   standard's own types (the `standard:` pin is in the repo, so the policy is
+   versioned by it); a project that declares its own types puts the policy in its
+   `refdes-schema.yaml`.
 2. `refdes audit` lists everything currently suppressed.
 
 ```

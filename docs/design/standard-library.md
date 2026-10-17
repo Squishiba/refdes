@@ -22,14 +22,18 @@ what it leaves for field sets and for two related backlog items to still do,
 what it costs existing projects to adopt, and how a project selects it (and
 optional presets on top of it) at `init` time and afterward.
 
-**Implemented**, as of v0.5.0 (unreleased) — `refdes/standards.py` and the
+**Implemented**, shipped in v0.4.0 (2026-08-18 — the "(unreleased)" this
+header once carried predates that release and v0.5.0's, 2026-08-21) —
+`refdes/standards.py` and the
 bundled dictionaries under `refdes/standards/hardware/{v1,v2,v3}/`, including
-merge/override, `field_sets`/`include:`, versioning and pinning, migrations,
-and `--standard`/`--preset` at `init`. The bundled standard is currently
-pinned at `hardware@3`, itself unreleased. This header is stale from an
-earlier draft; the document's prose describes the landed shape accurately —
-verify specifics against `standards.py` rather than assuming this file is
-current.
+merge/override, `sets:`/`include:` (renamed from `field_sets:` at `dc0c138`,
+unreleased: the frozen v1/v2 bundles keep the old spelling, and a
+`field_sets:` in a project overlay is the rename error), versioning and
+pinning, migrations, and `--standard`/`--preset` at `init`. The bundled
+standard is currently pinned at `hardware@3`, itself unreleased. This header
+is stale from an earlier draft; the document's prose describes the landed
+shape accurately — verify specifics against `standards.py` rather than
+assuming this file is current.
 
 **2026-10-01 supersession:** the `design-debate` preset used throughout this
 document as an example is retired by the threads design decision

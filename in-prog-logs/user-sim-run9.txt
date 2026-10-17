@@ -1,0 +1,53 @@
+Work log — user-sim-run9 (user-simulation release gate, run 9)
+
+Setup
+- Branch user-sim-run9 at 12bbf6b (== main), clean tree.
+- git log --oneline f33efa4..12bbf6b -- src/ -> the 9 expected commits
+  (6d017b1 #305, 1c4e9a8 #306, 5937a36 #302, 4a79d51 #304, a3e9600 #268,
+  4357a6c #296, bd4a82f #295, 8da0dc7 #273, 086b7b0 #277). My first read of
+  the command output looked like 7 lines; a re-run showed all 9 (display
+  truncation).
+- Read run7 report §0 / §2.1 / findings table for shape (not the whole file).
+- Harness: .scratch/run9/rr <dir> <args…> = PYTHONPATH=<worktree>/src
+  /home/jorb/work/venv-refdes/bin/python -m refdes.cli run inside <dir>.
+- p-base = refdes init (hardware@3). Probe projects cf305, cf305x, cf306,
+  cf302, cf295, cf273{,b,c}, cf277b, cf296{,b}, cf268, cf304, dd.
+
+PROGRESS (all 9 PRs reached, all FIXED — details + pasted output in
+in-prog-logs/user-sim-release-gate-run9.md)
+- #305 FIXED. ls/check --workspace '' refused named, exit 1 (ls prints no
+  listing); unknown-name asymmetry as documented; audit has no --workspace.
+  XLSX bare A1:B2 -> message quotes 'A1:B2', names file+key, Sheet1!$B$2
+  advice, no NoneType; Sheet1!A1:B2 clean path; valid name fetches.
+  --require-citations help complete. Docs item 4 not probed (docs-only).
+- #295 FIXED. Diamond: 0 errors exit 0; audit shows both chains. Push:
+  true 2-cycle names the full path.
+- #277 FIXED. adopt + stamp + identical re-run -> "unchanged … nothing to
+  stamp" exit 0; edit -> conflict exit 1; non-adopted no-op unchanged.
+- #296 FIXED. tokens light/dark: light value in :root; paper built-in
+  faf6ee in :root; token override correctly replaces paper's bg.
+- #306 FIXED (3/3) + pushes: stale display half resolves by key and the
+  root row shows the renamed id; bogus key -> named "does not exist".
+- #268 FIXED. Named reference error (verbatim sentence), no traceback,
+  check/build counts equal, repeat stable; site.assets unreferenced
+  refusal names the file; FIFO ref -> "does not exist" (documented posture).
+- #273 FIXED (3/3 with caveats): audit names reasons for non-PDF and
+  count-failed states; local-fillable reason needs serve accept-pin record
+  (not CLI-reachable, pinned by tests); stamp refusal keeps read-only cause
+  (ENOSPC not simulable); ls dict-tags no longer substring-match.
+- #304 FIXED (5/5 wordings + 5/5 behaviors reproduced).
+- #302 FIXED via serve API (port 8765, token file, X-Refdes-Token header,
+  Origin on POST, cookie jar): preview suggests items/product-b/board-a/
+  requirements.md; create lands there, REQ-001 (no REQ-A inheritance),
+  product-a md5 unchanged; workspace-only/board-b/existing/unscoped variants
+  correct; explicit override wins; outside-items destination refused.
+  Server killed. Nit: preview?workspace=unregistered silently falls back.
+- Daily driver (dd/): req+bound+4 log entries (links, calc+bound check via
+  front-matter checks:, image in page), build, read HTML. Verdict/task/
+  anchor/hashed-asset all render. FINDINGS: R9-F1 yaml-fence checks: in
+  body renders as text, check silently never runs (moderate); R9-F2 calc
+  fence id= on captured item trips "edited after captured" (low); nit
+  [[ID#calc]] -> field-ref warning, no anchor-spelling hint.
+- Gates (report-only, baseline): suite 4005 passed 2 skipped exit 0 (5:36,
+  .scratch/suite.txt); ruff check --select E9,F src tests clean;
+  gen_examples.py --check up to date.

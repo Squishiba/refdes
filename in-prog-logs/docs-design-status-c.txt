@@ -1,0 +1,127 @@
+Task: audit implementation-status claims in three design docs against code and
+git history; correct stale ones. Branch docs-design-status-c, off main at
+a3e9600. Docs-only task (TASK.txt): no behaviour fixes, so no tests added and
+no sabotage step (there is nothing behavioural to sabotage — every edit is
+prose in docs/design/; the suite step is the doc-subset run recorded below).
+No changelog fragment: internal design-doc status text is not a user-visible
+behaviour change (changelog.d/README.md — docs-only internal design notes ship
+no fragment; the sibling design-doc audit PRs, e.g. #300, shipped none).
+
+Method per doc: grep -n for status markers, read only the marked ranges,
+verify each claim with grep -n on src//editors/ and git log -S / --grep for
+the landing commit. No refdes probes were needed — every claim resolved
+against files, line anchors, and git history.
+
+=== Row per claim (doc | claim (line, pre-edit) | actual | evidence) ===
+
+docs/design/editor-vscode-adapter.md (authored bf5f988/#55, last touched 086dcc2/#165)
+
+1. L1 "Status: proposed (drafted 2026-09-27)" | PARTIAL STALE: design is
+   proposed, but §8 slices have landed | FIXED — status line now names the
+   landed slices | git log --grep="Slice V": da2e44b/#58 (V−1), 0f38619/#66 (V0)
+2. L7 "Nothing here is implemented" | STALE: Slice V−1 (activation on
+   refdes-project.yaml) and Slice V0 (ServeClient, /api/item hover facts,
+   Open-in-editor CodeLens, serve status-bar states, Attach-to-running-server)
+   are in editors/vscode/ | FIXED | extension.js:26 (ServeClient), 539-550
+   (CodeLens "Open in editor"), 886-893 (attach command); da2e44b, 0f38619
+3. §2.3 "as shipped it does not activate in a current refdes project …
+   Nothing in this document can be exercised in a real VS Code window until
+   that one-line-each fix lands" | STALE — the blocker is fixed | FIXED with an
+   *(Updated …)* note | extension.js:66-73,780 + package.json:27 all read
+   refdes-project.yaml; da2e44b/#58 commit message names §2.3 explicitly
+4. §6 Q4 (stale activation marker) | ANSWERED — recommendation landed as
+   Slice V−1 | FIXED (note appended) | da2e44b/#58, 2026-09-27
+5. §8 slice headers: V−1/V0 landed | FIXED ("Landed — <commit>") | da2e44b,
+   0f38619
+6. §8 Slice V1 (webview sidebar) | NOT BUILT — confirmed, marked "Not built" |
+   grep -rn WebviewViewProvider/createWebviewPanel editors/vscode/ = 0 hits
+7. §8 Slice V2 (writes) | NOT BUILT — confirmed, marked "Not built" |
+   grep -rn POST/api/item edit in editors/vscode/*.js = 0 write calls
+8. §7.1 tests/test_vscode_adapter_contract.py | DONE (exists, pinned) — claim
+   was forward-looking and has landed; header note now cites it |
+   tests/test_vscode_adapter_contract.py; 3c24a63/#108
+9. §2.1 file inventory (extension.js "536 lines", README "132 lines") and all
+   §2 line anchors | TRUE at the self-dated "verified 2026-09-27" heading,
+   drifted now (extension.js=988, README=189) | SKIPPED as text edits —
+   §2 is explicitly dated; added one clause to the status line pointing out
+   the anchors are drafting-time (cheap, honest, no anchor-by-anchor chase)
+10. §2.4 shipped-server claims (launch line, API list incl. POST /api/assets)
+    | TRUE | src/refdes/serve/api.py:57, cli.py serve; also confirmed by #165's
+    own update of the §3.3 API table
+
+docs/design/lifecycle.md
+
+1. L28 "**Implemented**, as of v0.5.0 (unreleased)" | WRONG on both counts:
+   shipped in v0.4.0 (released 2026-08-18), and v0.5.0 itself released
+   2026-08-21 | FIXED | CHANGELOG.md:731-736 (lifecycle under [0.4.0]),
+   CHANGELOG.md:464 ([0.5.0] - 2026-08-21); CLI landed 9b893d7 (2026-08-18)
+2. Header "This header is stale from an earlier draft" | REMOVED — after the
+   fix the header is no longer stale; kept the "verify against
+   lifecycle.py/cli.py" clause
+3. §1 implementation anchors (cli.py cmd_revision/cmd_release/_run_stamp,
+   lifecycle.py) | TRUE | cli.py:618,745,749; src/refdes/lifecycle.py exists
+4. L445 "Suspect links (not yet implemented — see §5)" | STILL TRUE | SKIPPED |
+   README.md:373-374 ("Not built yet … edge-scoped suspect links"),
+   docs/change-tracking.md:204-206; grep suspect in src = doc-string prose only
+5. §5 L555-557 "Both README.md … and docs/change-tracking.md … currently file
+   baselines under the git-reader layer" | STALE as a present-tense claim —
+   the reclassification happened | FIXED with *(updated …)* note | README.md:
+   374-376 "Baselines … *are* built, and need no git reader at all",
+   docs/change-tracking.md:206-209; landed 595bc9a "Document project lifecycle"
+6. §5 L600-603 "worth updating … not done here" | DONE later, in 595bc9a |
+   FIXED (note appended) | 595bc9a (2026-08-18)
+7. Touch-surface table L703 row "(not done in this change)" | DONE in 595bc9a |
+   FIXED | same
+8. Table rows: release_gate: / baseline_identity: config keys | TRUE |
+   schema.py:86; lifecycle.py:15 (os_user default)
+9. Table row "Two new sections in refdes audit output" | TRUE |
+   cli.py:1820-1831 (Since last revision / Since last release)
+10. Table row design-log "After a release" note | TRUE | docs/design-log.md:395
+11. §4.541 "As shipped: the two ids are marked as placeholders" | TRUE |
+    cli.py:737,741 (LOG-A-0NN / LOG-A-0MM with inline placeholder comments)
+
+docs/design/editor-image-upload.md
+
+1. L1/L6 "Status: proposed … Nothing here is implemented" | STALE: all of §17
+   has landed | FIXED — status line names every phase | Phase 0 86baa20/#50
+   (2026-09-25); Phase 1 03625df/#52; Phase 2 271ece6/#53; Phase 3 8d34251/#60;
+   Phase 4 79eaacf/#63; Phase 5 00ca9d3/#69 (all 2026-09-27)
+2. L31 "The upload feature itself is still unimplemented." | STALE | FIXED
+   *(Updated …)* note | api.py:57,938 POST /api/assets; images.js:89-105
+   upload half of the picker
+3. L41-42 "No upload, no POST /api/assets, no Phase 1 or later." (in the
+   Phase 0 update) | True at writing, stale as standing text | FIXED — scoped
+   as "true at writing" + a new "Phases 1–5 have shipped" update block | the
+   five commits above
+4. §2 L98-100 *(Updated 2026-09-25: … upload half of the boundary is still
+   uncrossed.)* | STALE | FIXED — appended second update | 03625df/#52
+5. §14 table "the endpoint case lands with Phase 1" | LANDED | FIXED (past
+   tense + test pointer) | tests/test_serve_upload.py:1646
+   test_upload_moves_the_revision
+6. §15.6 "format 5 folds … image digest" | TRUE | SKIPPED | build.py:1904
+   HASH_FORMAT = 5, :1974 comment cites §15.6
+7. §17 row 0 "Shipped 2026-09-25" | TRUE | SKIPPED | 86baa20/#50; rows 1-5 now
+   carry matching "Shipped 2026-09-27" markers
+8. Phase 5 claims (docs/markdown.md upload section; browser-editor.md
+   Deferred/Later updated) | TRUE | SKIPPED | docs/markdown.md:205,
+   browser-editor.md:75 "Image upload has shipped", :1118-1121
+9. §2 "deferred image upload twice and never designed it" + quoted Deferred
+   text | historical design framing (browser-editor.md:75 now says shipped) —
+   design reasoning, not status text | SKIPPED per task (don't rewrite §1-§2
+   framing; the §2 inline updates carry the correction)
+
+hardware@3 caveat honoured: no claim in this change calls hardware@3 shipped;
+none of the edits touch standard-version claims.
+
+Notes kept, not edited: editor-vscode-adapter.md L4 cites
+browser-editor.md:1100; the adapter line now lives at browser-editor.md:1122
+(line drift, not status text — left alone, consistent with the dated-anchor
+clause added to the status line).
+
+Verification:
+- pytest -q -p no:cacheprovider tests -k "docs or anchor or link" (per
+  TASK.txt, full suite skipped by override): 382 passed, 3611 deselected,
+  41.59s, exit=0 (.scratch/suite.txt).
+- python docs-site/gen_examples.py --check: schema-reference.md and
+  vocabulary.md up to date, exit=0.
+No code changed, so ruff is unaffected (docs-only diff).

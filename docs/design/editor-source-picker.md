@@ -1,5 +1,7 @@
 Status: **proposed**; **Slices A, B, and C landed** (§11). `sources.list_entries` +
-`SourceEntry` and the three read endpoints ship, with their authorization and
+`SourceEntry` and the three read endpoints ship (a fourth read endpoint,
+`sources/page`, joined them with the PDF picker's Slice P-A), with their
+authorization and
 caps and the reader/endpoint tests, and §4's accept ships: one widened
 `set_body` request writes the item and `.refdes/citations.yaml` as one
 operation inside the write lock, with the rollback, proven against the CLI's
@@ -410,10 +412,17 @@ a picked value exactly as they do to a typed sentence — no second editor state
 
 ## 8. Non-goals
 
-- **xlsx.** Deferred, with CSV proven first, exactly as `calc-sources.md` §4
+- **xlsx.** Deferred here, with CSV proven first, exactly as `calc-sources.md`
+  §4
   frames it. The picker's shape does not depend on the reader: `list_entries`
-  is one method on one more reader.
-- **PDF datasheet values.** Deferred, and explicitly the *reason* §3's confirm
+  is one method on one more reader. *Update (re-check 2026-10-16):* the
+  **reader** landed on 2026-10-04 (ef7bed7, #170) as the optional
+  `refdes[xlsx]` extra, behind the §4 contract; what is still open is exactly
+  what this bullet framed — `list_entries` for it, i.e. the picker listing
+  (`serve/sources.py` records `.xlsx` as "an extractor but no picker listing
+  yet").
+- **PDF datasheet values.** Deferred at drafting, and explicitly the *reason*
+  §3's confirm
   contract exists. It needs a PDF text-and-coordinates library plus page
   rendering, and `browser-editor.md` calls it "the heaviest dependency the
   editor has". It is its own slice, behind this panel. Now proposed in
@@ -421,7 +430,9 @@ a picked value exactly as they do to a typed sentence — no second editor state
   same panel and this §4 accept -- the PDF picker adds a reader and a page
   view, not a second write path -- on the existing optional `refdes[pdf]`
   extra, with the page context and candidate-list rules of
-  `calc-sources.md` §1 carried through unchanged.
+  `calc-sources.md` §1 carried through unchanged. **Landed 2026-09-27** as
+  Slices P-A/P-B/P-C of that document (1d796a7, 8226b79, bda7ab5) — exactly as
+  proposed here: one reader, one page view, this same §4 accept.
 - **Editing, creating, uploading, or writing back to a source file.** A source
   file is read-only to the editor, in every direction (`calc-sources.md` §10).
 - **`refdes fetch --update` from the browser.** §4. Re-accepting a changed
@@ -559,7 +570,9 @@ End to end:
 
 ## 11. Phasing
 
-**Slice A — the service reads. LANDED 2026-09-25.** `sources.list_entries` +
+**Slice A — the service reads. LANDED 2026-09-26** (59d2915, #49; the merge
+crossed UTC midnight, hence the 2026-09-25 date recorded here at the time)**.**
+`sources.list_entries` +
 `SourceEntry`, the three read endpoints, their authorization and caps, and the
 reader/endpoint tests. No UI. This slice is independently useful: it is the API
 a CLI `refdes sources list --item X` or a future xlsx picker both sit on, and it
@@ -588,6 +601,10 @@ is the slice the author feels, and it is deliberately last: with A and B proven,
 C is composition.
 
 **Later.** The citations row editor, which is what unlocks "cite a new file"
-(§8). The xlsx reader behind the same `list_entries` contract. The PDF
+(§8). The xlsx reader behind the same `list_entries` contract — the reader
+itself landed 2026-10-04 (ef7bed7, #170); the `list_entries` listing behind
+this panel is what remains. The PDF
 datasheet picker behind the same confirm-before-accept panel, with the page
-context and candidate-list rules already agreed in `calc-sources.md` §1.
+context and candidate-list rules already agreed in `calc-sources.md` §1 —
+**landed 2026-09-27** as Slices P-A/P-B/P-C of
+[editor-pdf-picker.md](editor-pdf-picker.md).

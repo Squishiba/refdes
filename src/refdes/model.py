@@ -738,7 +738,7 @@ class ImportSpec:
 
 @dataclass
 class Coverage:
-    """Four distinct notions of 'done' for one requirement or constraint."""
+    """Five stages of 'done' (`open` plus four evidence lists) for one requirement or constraint."""
 
     item_id: str
     addressed_by: list[str] = field(default_factory=list)   # log entries
@@ -1045,6 +1045,21 @@ class Project:
     # so the preview decorator (docs/design/thread-workbench.md W2) reads
     # this instead of re-running the asset search.
     image_results: dict[str, list[dict]] = field(default_factory=dict)
+    # Source paths this build's `_process_images` pass probed readable
+    # (IMAGE-ASSET-007): fed by the digest read and by the probe on a
+    # `site.assets:`-registered reference, so a file referenced from many
+    # items costs one open per file, not one per reference, and
+    # `check_registered_assets_readable` skips what the reference gate
+    # already read.
+    readable_probe: set[str] = field(default_factory=set)
+    # Source paths this build refused as unreadable (IMAGE-ASSET-007),
+    # keyed project-root-relative like `assets`: recorded by the reference
+    # gate and by `check_registered_assets_readable` (whose probe is the
+    # gate for a registered file no reference gates), so a referenced
+    # unreadable file is reported once -- at the reference -- and the
+    # registration check does not add the "remove it from site.assets:"
+    # sentence an author of a live reference must not follow.
+    unreadable_assets: set[str] = field(default_factory=set)
     # `site.theme:` -- the built-in theme this project selects -- and
     # `site.tokens:`, its own token overrides merged over that theme. Both are
     # validated at load by theme.py; `render_site` turns the merged overrides

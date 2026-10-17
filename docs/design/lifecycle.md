@@ -25,10 +25,14 @@ agreed." The build mode itself is never called "draft" anywhere in the
 interface — only described that way in prose — to keep that word meaning one
 thing.
 
-**Implemented**, as of v0.5.0 (unreleased) — `refdes revision`/`refdes
+**Implemented**, shipped in v0.4.0 (released 2026-08-18 — the CLI commands
+landed in 9b893d7, and `CHANGELOG.md` lists the lifecycle under `[0.4.0]`; an
+earlier version of this header said "as of v0.5.0 (unreleased)", which was
+wrong on both counts: v0.5.0 itself released 2026-08-21, and the lifecycle
+shipped one version earlier) — `refdes revision`/`refdes
 release` (`cli.py:cmd_revision`/`cmd_release`/`_run_stamp`) and the readiness
-gate and baseline stamping in `lifecycle.py`. This header is stale from an
-earlier draft; the document's prose describes the landed shape accurately —
+gate and baseline stamping in `lifecycle.py`. The document's prose describes the
+landed shape accurately —
 verify specifics against `lifecycle.py`/`cli.py` rather than assuming this
 file is current.
 
@@ -555,8 +559,11 @@ already documents the `amends:` convention for corrections.
 Both `README.md` ("Not built yet... Git history layer — field-level diffs,
 item timelines, suspect links, baselines") and `docs/change-tracking.md`
 ("What is not built yet... baselines, and change reports between two
-baselines") currently file baselines under the git-reader layer. This
-document's conclusion is narrower than that framing suggests: **baselines
+baselines") currently file baselines under the git-reader layer — *(updated:
+that filing has since been corrected, in 595bc9a; both files now list
+baselines as built and leave only the git-reader items in the unbuilt
+bucket. The quoted text is the drafting-time state.)*
+This document's conclusion is narrower than that framing suggests: **baselines
 and the two-question diff in §3 do not need a git reader at all.**
 
 What this design **does** give you, with zero git object reads:
@@ -599,7 +606,8 @@ which is exactly the filter a git-backed timeline would want before walking
 history for the items that matter. `README.md`'s and `change-tracking.md`'s
 "not built yet" lists are worth updating to move "baselines" out of the
 git-layer bucket once this ships — not done here, since the brief scopes
-this document to `docs/design/lifecycle.md` only.
+this document to `docs/design/lifecycle.md` only. *(That update landed later,
+in 595bc9a — "Document project lifecycle".)*
 
 One explicit non-goal, stated for clarity: neither command checks git
 working-tree cleanliness (no "refuses to stamp with uncommitted changes").
@@ -700,4 +708,4 @@ failure, `2` `SchemaError` — `src/refdes/cli.py:311-316`):
 | `refdes release <name>` | new CLI subcommand |
 | Two new sections in `refdes audit` output | since-last-revision / since-last-release diff |
 | "After a release" convention note | `docs/design-log.md` |
-| Reclassify "baselines" out of the git-layer "not built yet" bucket | `README.md`, `docs/change-tracking.md` (not done in this change) |
+| Reclassify "baselines" out of the git-layer "not built yet" bucket | `README.md`, `docs/change-tracking.md` (not done in this change; done later, in 595bc9a) |

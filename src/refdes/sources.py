@@ -577,8 +577,20 @@ class XlsxReader:
 
                 try:
                     destinations = list(defined.destinations)
-                except (ValueError, TypeError, AttributeError) as exc:
-                    problems.append(prefix + f"invalid defined-name destination: {exc}")
+                except (ValueError, TypeError, AttributeError):
+                    # openpyxl's `destinations` crashes on a destination it
+                    # tokenizes as a range but cannot regex back into
+                    # sheet!cells (e.g. a bare `A1:B2` with no sheet) --
+                    # AttributeError on a None match. Raw, that reads
+                    # `'NoneType' object has no attribute 'group'` (docs PR
+                    # #294); quote the offending destination text instead, so
+                    # the message names the file, the name, and what is wrong.
+                    problems.append(
+                        prefix + f"defined-name destination {defined.attr_text!r} "
+                        "is not a cell reference this reader can parse -- a "
+                        "defined name must point at exactly one cell, like "
+                        "Sheet1!$B$2"
+                    )
                     continue
                 if len(destinations) != 1:
                     problems.append(prefix + "defined name must refer to exactly one cell")

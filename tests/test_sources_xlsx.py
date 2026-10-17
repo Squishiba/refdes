@@ -97,6 +97,23 @@ def test_xlsx_rejects_ranges_external_and_non_numeric_cells(spreadsheet):
         _fails(spreadsheet, "power", "blank" if value is None else "not a numeric cell")
 
 
+def test_xlsx_malformed_destination_names_file_name_and_problem(spreadsheet):
+    """A destination the tokenizer reads as a range but openpyxl's sheet-range
+    regex cannot match (a bare `A1:B2` with no sheet) crashes
+    `DefinedName.destinations` with `AttributeError: 'NoneType' object has no
+    attribute 'group'`. The reader must name the file, the defined name, and
+    the offending destination text -- not leak that (docs PR #294)."""
+    _add_name(spreadsheet, "case_rise", "A1:B2")
+    with pytest.raises(SourceExtractionError) as info:
+        _extract(spreadsheet, "case_rise")
+    message = str(info.value)
+    assert "budget.xlsx" in message
+    assert "case_rise" in message
+    assert "A1:B2" in message
+    assert "one cell" in message
+    assert "NoneType" not in message
+
+
 def test_xlsx_formula_without_cached_value_has_actionable_error(spreadsheet):
     from openpyxl import load_workbook
 

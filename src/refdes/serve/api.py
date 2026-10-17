@@ -26,7 +26,7 @@ from . import filters as filters_mod
 from . import sources as sources_mod
 from . import state as state_mod
 from . import upload as upload_mod
-from .filters import FilterError, check_state, item_tags
+from .filters import FilterError, check_state, item_tags, validate_facet
 
 
 def item_pages(project: Project) -> dict[str, str]:
@@ -642,7 +642,16 @@ def _create_schema(app) -> tuple[int, dict]:
 
 def _create_preview(app, query: dict[str, list[str]]) -> tuple[int, dict]:
     """The id that WOULD be minted and the destination that WOULD be used,
-    planned purely (serve.edit.preview_creation) -- nothing is reserved."""
+    planned purely (serve.edit.preview_creation) -- nothing is reserved.
+
+    A `workspace` scope must name a registered workspace, checked with the
+    list route's own facet rule: `/api/items?workspace=ghost` is a 400 naming
+    the value and the registered ones, and the preview refuses the same way
+    (run-9 R9-F3). It used to ignore the unknown name and fall back to the
+    unscoped suggestion -- a 200 pointing into some other workspace's tree,
+    silently. `board` keeps its existing lenient reading; the create form
+    offers only registered values of both, so this is the direct-caller path."""
+    project = app.state.snapshot.project
     type_name = (query.get("type") or [""])[0]
     if not type_name:
         return 400, {"error": "type is required: ?type=<declared type>"}
@@ -650,8 +659,13 @@ def _create_preview(app, query: dict[str, list[str]]) -> tuple[int, dict]:
     workspace = (query.get("workspace") or [""])[0] or None
     explicit = (query.get("id") or [""])[0] or None
     destination = (query.get("destination") or [""])[0] or None
+    if workspace is not None:
+        try:
+            validate_facet(project, "workspace", workspace)
+        except FilterError as exc:
+            return exc.status, {"error": str(exc)}
     return 200, edit_mod.preview_creation(
-        app.state.snapshot.project,
+        project,
         type_name,
         explicit_id=explicit,
         board=board,

@@ -1,0 +1,18 @@
+Task: fix the Coverage stage-count drift noted by the #312 reviewer.
+Claude Sonnet 5.5, 2026-10-17.
+
+Verified: docs/coverage.md ("The five stages") and README.md (#312) say five
+stages; model.Coverage.stage returns open/addressed/claimed/satisfied/verified.
+Three leftovers still said "four":
+- src/refdes/model.py Coverage docstring ("Four distinct notions")
+- src/refdes/build.py compute_board_coverage docstring ("same four stages")
+- docs/coverage.md conforms_to paragraph ("same four stages")
+compute_board_coverage builds Coverage objects and reads cov.stage, so the
+per-board result has all five stages.
+
+Changed the three wordings. Docstring/docs only, no changelog fragment.
+Checks: ruff --select E9,F on both files clean; pytest -k coverage 27 passed.
+
+Run 8a F2/F3 (user-sim-release-gate-run8a.md): both are method notes, already
+recorded in that report; nothing to change in the product.
+Finished.

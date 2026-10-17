@@ -1,11 +1,16 @@
-Status: proposed (drafted 2026-09-27) — a design spec, not a decision. It designs
+Status: **proposed** (drafted 2026-09-27) — a design spec, not a decision;
+**Slices V−1 and V0 of §8 have landed** (da2e44b/#58, 0f38619/#66 — the §7.1
+contract tests are pinned too, 3c24a63/#108); Slices V1 and V2, and every
+webview, remain design only. It designs
 the one Later item of `docs/design/browser-editor.md` that was left with no
 design behind it: "VS Code custom-editor adapter over the same application
 services" (`docs/design/browser-editor.md:1100`), and is cross-referenced from
 that line. Every open question in §6 carries a recommendation, and each
 recommendation is the default if Jared lets it stand unanswered. §9 records what
-was considered and rejected. Nothing here is implemented, and §2's claims about
-current behaviour were each checked against the files named at the claim.
+was considered and rejected. At drafting nothing here was implemented; the
+slices named above have landed since, and §2's claims about
+current behaviour were each checked against the files named at the claim
+— the line anchors in §2 are 2026-09-27 ones and the files have grown since.
 
 The constraint this document works under is not negotiable and is quoted rather
 than paraphrased: "Python remains the only implementation of the schema, parser,
@@ -110,7 +115,11 @@ activate in a current refdes project, and its "no refdes.yaml found" warning
 (`extension.js:423`) is the only thing an author gets.** Nothing in this document
 can be exercised in a real VS Code window until that one-line-each fix lands.
 It is a bug, not a design question; §8 makes it Slice V−1 and §6 Q4 records it
-for the record.
+for the record. *(Updated 2026-10: landed as Slice V−1 — da2e44b/#58. The
+activation glob, the root walk, and the warning text all read
+`refdes-project.yaml` now (`package.json:27`, `extension.js:66-73,780`); the
+blocker above describes the extension as it shipped, and no longer describes
+this tree.)*
 
 ### 2.4 What the server side already ships
 
@@ -472,6 +481,7 @@ Not really a question — the extension cannot activate on a current project
 (§2.3). *Recommendation:* fix it first, as its own one-commit change
 (`extension.js:44`, `extension.js:423`, `package.json:27`), before any adapter
 work, since nothing else here is testable in a real window until it lands.
+*(Answered and landed: exactly that, as Slice V−1 — da2e44b/#58, 2026-09-27.)*
 
 **Q5 — May VS Code ever write?**
 *Recommendation:* not in v1. If it ever does, the only permitted write is
@@ -598,14 +608,16 @@ status header; `docs/design/editor-image-upload.md` §17 Phase 0). The adapter
 follows the same order, and the first slice is deliberately smaller than
 anything above.
 
-**Slice V−1 — make the shell alive (a bug fix, not a feature).**
+**Slice V−1 — make the shell alive (a bug fix, not a feature). Landed —
+da2e44b/#58, 2026-09-27.**
 `findRoot` and `activationEvents` point at `refdes-project.yaml`
 (`extension.js:44`, `package.json:27`); the warning text follows
 (`extension.js:423`); README setup follows. Nothing in V0 can be seen in a real
 window until this lands. No design content; included because a plan that starts
 with an extension that does not activate is not a plan.
 
-**Slice V0 — read-only hover and one deep link. (The slice that proves the token.)**
+**Slice V0 — read-only hover and one deep link. (The slice that proves the
+token.) Landed — 0f38619/#66, 2026-09-27.**
 
 - `ServeClient`: spawn `<refdes.command> -c <config> serve --no-open`, parse the
   first stdout line, hold `{base, port, token}` in memory, kill on deactivate;
@@ -624,13 +636,13 @@ whole "does the extension host talk to this API correctly" question, resolved
 against the real server, at the cost of a hover. If it is not used, nothing
 further is built — which is the point of making it this small.
 
-**Slice V1 — read-only sidebar view (only if V0 earns it).**
+**Slice V1 — read-only sidebar view (only if V0 earns it). Not built.**
 A `WebviewViewProvider` panel: the filtered item list from `GET /api/items`, and
 the selected item's inspector from `GET /api/item/<ref>`, with "Open in editor"
 as the only action. Still no writes. This is the first place the second-UI cost
 of §3.4 is paid, and it is paid only after V0 shows the demand.
 
-**Slice V2 — writes (may be cut permanently).**
+**Slice V2 — writes (may be cut permanently). Not built.**
 Field and body editing from the sidebar form, through
 `POST /api/item/<ref>/edit` with a freshly-read `expected_revision`; the 409
 payload rendered as-is with keep-mine / keep-theirs / copy-by-hand and no merge.

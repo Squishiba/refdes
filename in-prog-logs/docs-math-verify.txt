@@ -1,0 +1,192 @@
+# docs-math-verify — verify docs/math.md against the running tool
+
+Branch: docs-math-verify, main b42881e.
+Tool: refdes 0.5.0 (/home/jorb/work/venv-refdes/bin/refdes), PYTHONPATH not
+needed — the venv install is used. Probe project: .scratch/math-probe/.
+
+Started: git status clean at b42881e.
+
+## Claim table
+
+(status: V=verified, W=WRONG, M=MISSING FROM DOCS, C=cant verify)
+
+Naming: V=verified, W=WRONG (fixed), M=MISSING from docs, C=cant verify.
+
+## Fences, naming, anchors
+
+- V  bare ```calc legal, renders as before; id="..." on fence line only; `id`
+     is the only accepted attribute; bare word / unquoted value / unknown key /
+     out-of-grammar name each a build error at the fence line (verbatim texts
+     match; suggestions shown).
+- V  grammar [a-z][a-z0-9_-]{0,39}: 40-char name builds, 41-char rejected.
+- W  "the same shape as citation ids and figure ids" (line ~54).
+     CITATION_ID_RE = [A-Za-z0-9_-]+ (build.py:183) — accepts `Ab9_-x`
+     (probe: LOG-CIT builds with uppercase/leading-digit citation id).
+     Figure ids: "never format-checked" verbatim in build.py's own comment.
+     Block grammar is a lowercase-initial 40-capped SUBSET. Sentence rewritten.
+- V  duplicate block names in one item: error naming both lines + rename fix.
+- V  same name in two items fine; not a scope, not a key, no @key composites.
+- V  named block: anchor #calc-<name> + caption on own item page; bare
+     #calc-<name> on item page, all #calc: links name the owner's page.
+- V  merged document.html: second same-named block gets id="calc-losses-2"
+     (grep _site/document.html). Board/workspace copies: document.html,
+     document-board-a/b.html (bare, single), document-ws-one.html (has -2).
+     Item pages keep bare anchors.
+- V  renaming a block breaks [[#calc:name]] (WARNING at referrer site) and
+     {{calcblock}} (ERROR at referrer page:1) — "loudly, at the referring
+     site" holds.
+
+## Cross-item references
+
+- V  one dot, display-id then .name; all 4 malformed-reference error texts
+     verbatim; 3-segment `A.B.name` rejected (no block naming).
+- V  dependency order: LOG-B sorts first, references later-sorted item, fine.
+- V  reference saves as DISPLAY-ID@key composite; next writable build rewrites
+     the md; `refdes --no-write build` (global flag, before subcommand)
+     resolves bare form without writing.
+- V  renaming a target refreshes labels to the new display id, resolution
+     intact; renaming display id = 0 changes in audit (relabel line in
+     baseline); value rename -> dependent change names the moved reference
+     (audit: "referenced LOG-PWR-010.V_in: 12 V (11.4 V … 12.6 V) -> 11.4 V
+     (10.83 V … 11.97 V)"); prose-only edit -> dependent not changed.
+- V  pipe on reference: `V_in = LOG-PWR-010.V_in | mV` renders
+     11400 mV 10830 mV … 11970 mV (tolerance flows through).
+- V  imported items: reference refused, verbatim message.
+- V  baseline hash stores key-prefixed refs (probe key vk0prna6qap) + full
+     precision: edit 11.4 -> 11.4001 V (rendered display identical) marks the
+     dependent item changed.
+- V  pre-hash_format-4 baselines (calc_refs stripped): dependent reports
+     changed with no reference named.
+- J  "(`hash_format` 4)" x2 (lines ~152, ~241): accurate as introduction
+     (calc_refs/source_inputs hashed at >=4; build.py:1902 HASH_FORMAT=5);
+     stamped baselines today read `hash_format: 5` (lifecycle.md:240 "currently
+     5"). Clarified to "(from `hash_format` 4)".
+
+## source()
+
+- V  full-call form required; abbreviated `source("file")` rejected; source()
+     must be the full right-hand side (verbatim); source() in a project
+     equation rejected (verbatim).
+- V  fetch pins to .refdes/citations.yaml; check/build read lockfile only
+     (file edit after pin = warning, build keeps locked value).
+- V  fetch battery: no citation / no csv+json / missing path / bad header /
+     missing key / unitless file value / nonnumeric value — all messages
+     verbatim; pins untouched on every failure.
+- V  unit mandatory; dimension mismatch "source unit" error; 1850 W renders
+     as 1850 W (no 1.85 kW); 1000x advisory verbatim.
+- V  `± 2 % | 1` tolerance on source; per-row warning on rendered item is a
+     condensed per-key form: "⚠ analysis/power-budget.csv changed:
+     'rail_3v3_power' locked 3.0, file now 2.3 (CHANGED) -- accept with:
+     refdes fetch --update --path ..." — docs said "The same text shows
+     under the affected calc row" (line ~236): not the same text; fixed to
+     quote the real per-row form.
+- V  build warning SOURCE FILE CHANGED matches quoted shape (real build lists
+     unchanged keys too as "(this value is unchanged)"); --require-citations
+     promotes to ERROR, build rc=1 (it is a `build` flag, not check).
+- V  fetch --update prints "source value changed  analysis/power-budget.csv:
+     rail_3v3_power: 1.85 -> 2.3", re-pins; accepted update marks item
+     changed (clean rev7 baseline stamped at 3.0, sed 2.3 -> changed 1);
+     unrelated row edit elsewhere -> changed 0.
+- V  citation must be declared on the same item (verbatim authorization
+     error); remote URL citations rejected verbatim.
+- V  XLSX (openpyxl installed; pyproject `xlsx = ["openpyxl>=3.1"]` extra,
+     math.md's "refdes[xlsx]" claim matches): qualified Sheet1!case_rise,
+     unqualified single-sheet, ambiguity message, workbook-scoped-name
+     "no defined name has this key", formula-without-cache message — all
+     verbatim.
+- M(none)  audit "says which reference moved" — verified above.
+
+## Tolerances
+
+- V  "± 5%" / "+/- 5%" both; one ± per assignment (verbatim); cannot apply ±
+     to a value that already has one (verbatim); P = V_in * 2 A ->
+     24 W 22.8 W … 25.2 W; x-x width: V_in - V_in -> 0 V -1.2 V … 1.2 V;
+     absolute ± 10 mV.
+
+## Units
+
+- V  W/in^2, m/s^2 render; uF/µF/μF -> µF (U+00B5); Ω/ohm; N·m -> 2 J;
+     N*m outside brackets -> unknown name 'm'; spaced `2 W / in^2` parse
+     error; 4 mil/mils/th -> th; 4 mil*1 in -> 101.6 in⋅µm; sq alias ->
+     3 in² (units.aliases in config).
+- V  verified list all render: degC, delta_degC -> Δ°C, dBm, ppm, uH, GHz,
+     mAh, oz, kWh; AWG -> "unknown unit 'AWG'" (not in list).
+- V  brackets [h], [N*m] -> 2 J; collision warning verbatim; [A] suppresses
+     it; 5 W/h not flagged (one-off compound).
+- V  display collapse: 1 W/1 mΩ/1 MHz from volt*ampere, mV/A, 1/us;
+     1.4 inch -> in; 0.5 h kept; W/in^2: volt*ampere -> W, inch**2 kept
+     (Q = V*I/A**2 unasserted renders 510.2 mW/in² — consistent with
+     assertion-pinning sentence).
+- V  units.preferred accepted by configcheck (build.py:864-880 logic; no
+     enforcement of a single-symbol claim beyond warnings — docs promise
+     warnings only).
+
+## Functions
+
+- V  sin -> verbatim "unknown function 'sin'; available: abs, exp, ln,
+     log10, max, min, sqrt" (clean project; with equations defined the list
+     includes them).
+- V  ln(2 V) dimensionless error; min(1 V,2 V,3 V) 3 args ok; log10(100)=2;
+     exp(0)=1; abs; sqrt(4 m²)=2 m.
+- V  `^` -> "unsupported operator BitXor" (exponentiation is **);
+     2 ** (1 V) -> "exponent must be dimensionless"; (-2)**0.5 verbatim;
+     v = 5 ± 6, sqrt(v) corner rejection verbatim; v=5±6 fine.
+
+## Project equations
+
+- V  current_limit example renders; inline equivalence spot-check:
+     current_limit(2500, 0.8 V, 3.3 kohm) ± 15% | A == 2500*0.8 V/3.3 kohm
+     ± 15% | A, both render "0.6061 A 0.5152 A … 0.697 A".
+- V  arity verbatim "current_limit() takes 3 argument(s) (K, V, R), got 2";
+     3.3 kg -> "declared as A but the expression evaluates to V/kg";
+     cycle "equations: equation cycle: a -> b -> a" (configuration error
+     naming the closing path); sqrt shadowing rejected verbatim; chain
+     a->b works (chain_a(1)=4); project-wide namespace.
+- V  note: accepted, nothing at build time reads it (grep: EQUATION_KEYS
+     only).
+
+## Assertions
+
+- V  "declared as W but the expression evaluates to V/A" verbatim; |
+     whitespace optional; `V = 12 V ± 5% | mV` builds; retired colon form
+     verbatim ("'name : unit = expression' spelling was retired ... run
+     'refdes calc-rewrite'"); calc-rewrite --help claims (transactional,
+     baselines carried, seals untouched via _carry_forward_seals) match.
+
+## Loops/conditionals/imports/attributes/lambda
+
+- V  for/if/import/lambda/attribute-access all rejected at parse (messages
+     verified).
+
+## Other
+
+- V  example: P_diss = 0.2981 W, A_board = 1.26 in², 0.2366 W/in²;
+     {{P_diss}} in prose -> "298.1 mW"; prose line "The converter loses
+     0.2981 W over 1.26 in² of board." renders verbatim.
+- V  variables visible across blocks in an item, not across items (unknown
+     name at second item).
+- C  "Symbolic solve is planned" — roadmap statement, no source string;
+     noted in PR body.
+
+## Fixes applied to docs/math.md
+
+1. Naming paragraph: "the same shape as citation ids and figure ids" replaced
+   with the true relation (citation-id alphabet + lowercase-initial + 40 cap;
+   figure ids never format-checked).
+2. Source-changed section: "The same text shows under the affected calc row"
+   replaced with the actual condensed per-row warning text.
+3. "(hash_format 4)" -> "(from hash_format 4)" x2.
+
+## Possible bugs for PR body (not documented, not fixed)
+
+- sources.py: malformed XLSX defined-name destination yields unhelpful
+  "invalid defined-name destination: 'NoneType' object has no attribute
+  'group'".
+- --require-citations help text lists only unpinned-citation/missing-cache-blob
+  promotion; SOURCE FILE CHANGED is also promoted (code is right, help terse).
+
+## Verification runs
+
+- ruff check --select E9,F src tests: All checks passed! rc=0
+- python docs-site/gen_examples.py --check: schema-reference.md + vocabulary.md up to date
+- full suite: 3938 passed, 12 skipped, exit=0 (.scratch/suite.txt)
