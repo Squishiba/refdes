@@ -457,3 +457,48 @@ Exact commands (run from the repository root in the project venv
 
 No src/ or tests/ changes were made; this is a design-only PR.
 No changelog.d fragment is needed because the change is not user-visible yet.
+
+Rescope (Sol, 2026-10-16)
+-------------------------
+Status: finished for this design pass; PR #250 description updated by REST PATCH.
+The commit and push of this pass are its publication step.
+
+Progress:
+- Started with a clean `design-inline-calc` worktree. Read
+  docs/design/named-calc-blocks.md and docs/math.md before editing, then
+  checked cited functions in src/refdes/calc.py, build.py, lifecycle.py,
+  seal.py, history.py, citations.py, and schema.py. Ran `refdes schema` and
+  `refdes check/build/release/revision/init/calc-rewrite --help` as relevant.
+- Made `.scratch/inline-calc-probe/` with `refdes init`; its hardware@3 project
+  has an item containing `Vout := 2 V * 2 = 5 V`. `refdes check` reported
+  0 errors despite the deliberately wrong result, confirming that inline-calc
+  is still design-only. The probe and schema output remain under .scratch/.
+- Rewrote docs/design/inline-calc.md from 839 to 176 lines. It now covers
+  only the trigger and basic grammar, mandatory stored result, precision
+  comparison, diagnostic severity, source-order scope, calc_hash and item
+  hashing, cross-item/source inputs, and sealed/captured history. Four
+  first-slice questions remain, each with a default.
+- Moved the fill command, live editor updates and undo, one-unknown solve,
+  E-series suggestions, multi-output calculators and validity conditions,
+  version lockfile, shipped library, form panel, deferred decisions, and old
+  P2-P4 direction into the 123-line docs/design/inline-calc-later.md. It is
+  explicitly not under review.
+- Did not edit docs/index.md: it maps public docs, while both design pages
+  live under docs/design/. Ran the requested docs checks: docs-anchor tests
+  passed (2), and docs-site/gen_examples.py --check reported both files current.
+- Wrote the replacement PR body to .scratch/pr250-body-sol.md and updated
+  PR #250 with `gh api -X PATCH repos/Squishiba/refdes/pulls/250
+  -F body=@.scratch/pr250-body-sol.md`. The API returned PR number 250.
+
+Difficulties and corrections:
+- The previous design cited line numbers and current behavior that had drifted.
+  In particular, `release_gate.inline_calc_results` is not a current rule,
+  so the new doc labels it proposed. `calc_hash_for` currently reads only
+  fenced block contents; `_calc_reference_values` and fetch discovery also
+  scan fences only. The first slice names the extensions those paths need.
+- Historical entries now have both build seals and history-backed capture
+  paths. The gate proposal exempts protected history while keeping stale
+  warnings visible; no automatic rewriting is part of this slice.
+- The first PR read failed under sandbox network restrictions and succeeded
+  with approved escalated access. The REST PATCH succeeded. No other branch
+  or worktree was changed.
