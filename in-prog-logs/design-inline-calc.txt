@@ -2,15 +2,15 @@ TASK: design doc -- evaluate-in-place math for engineering notes (inline-calc)
 Branch: design-inline-calc
 PR: #250
 Date: 2026-10-15 (this log rewritten 2026-10-17)
-Status: finished; the four open questions were decided by the owner 2026-10-17
+Status: finished; the four open questions are DECIDED (2026-10-17)
 
 Review history
 --------------
-The design work started at c729fc3 (2026-10-15) and grew into an 839-line
-proposal that went through about ten automated review rounds without
-converging. Sol then rescoped it to the first slice (f4974bc, 2026-10-16),
-and reviewers approved the design after that. The per-round history is
-deliberately not recorded here.
+The design work started at c729fc3 (2026-10-15) and grew into a proposal far
+larger than the eventual slice, which went through about ten automated
+review rounds without converging. Sol then rescoped it to the first slice
+(f4974bc, 2026-10-16), and reviewers approved the design after that. The
+per-round history is deliberately not recorded here.
 
 Owner decisions
 ---------------
@@ -22,13 +22,13 @@ docs/design/inline-calc.md:
 - D3: no code execution; the restricted evaluator in src/refdes/calc.py is
   the only evaluator.
 
-What the design docs contain (line counts re-counted 2026-10-17)
-------------------------------------------------------------------
-- docs/design/inline-calc.md, 183 lines: the first slice only -- trigger
+What the design docs contain
+----------------------------
+- docs/design/inline-calc.md: the first slice only -- trigger
   and basic grammar (section 1), verification and diagnostics (section 2),
   hashes, dependencies and historical entries (section 3), and the four
   open questions.
-- docs/design/inline-calc-later.md, 126 lines: explicitly not under
+- docs/design/inline-calc-later.md: explicitly not under
   review; the deferred ideas -- result-writing command, live editor
   updates, one-unknown solve and E-series, reusable calculators and pins,
   editor form panel, and the deferred-question mapping table.
@@ -74,9 +74,9 @@ kohm; E96 neighbors 3.16 kohm -> 3.332 V and 3.24 kohm -> 3.269 V; E24
 Difficulties
 ------------
 The main difficulties were process, not content: the review loop never
-converged on the 839-line doc, and the log's practice of citing the commit
-that fixed each review round produced <pending> placeholders and follow-up
-"record sha" commits, which became a recurring source of small
+converged on the full early proposal, and the log's practice of citing the
+commit that fixed each review round produced <pending> placeholders and
+follow-up "record sha" commits, which became a recurring source of small
 inaccuracies in the log itself. Both loops were cut: the doc was rescoped,
 and this log no longer records per-round history.
 
@@ -87,11 +87,11 @@ Tests run (2026-10-17, repository root, project venv)
 
 Design-only PR: no src/ or tests/ changes.
 
-Open questions (named here; all decided by the owner 2026-10-17; see
+Open questions (named here; all DECIDED 2026-10-17; see
 "Open questions for this slice" in docs/design/inline-calc.md)
 - Precision (was Q2)
 - Freshness gate (was Q5)
 - Unit slot (was Q17)
 - Triggered incomplete text (was Q1)
 
-Status: finished; the four open questions were decided by the owner 2026-10-17
+Status: finished; the four open questions are DECIDED (2026-10-17)
