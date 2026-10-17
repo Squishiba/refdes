@@ -34,9 +34,10 @@ of `items/`.
 
 **`invalid YAML front-matter: ...`** on a line partway down a `.md` file
 A [multi-item markdown file](authoring.md#several-items-in-one-file) reads every
-`---`-fenced block that opens with a `key:` line as an item. This is one of those
-blocks failing to parse — the line number points inside it. Until it parses, that
-item is not in the project at all.
+`---`-fenced block that opens with a `key:` line as an item — except a `---`
+inside a fenced code block, which is example text (the loader warns once at that
+line, naming the file). This is one of those blocks failing to parse — the line
+number points inside it. Until it parses, that item is not in the project at all.
 
 **`duplicate key 'id' in one mapping (lines 14 and 17) -- YAML keeps the last, ...`**
 One mapping spells the same key twice. YAML resolves that silently by keeping the

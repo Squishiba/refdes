@@ -308,3 +308,63 @@ def test_list_file_body_is_unaffected(tmp_path):
     assert [item.id for item in project.items.values()] == ["DEC-LIST-001"]
     assert "---" in project.item_by_id("DEC-LIST-001").body
     assert [d.message for d in project.warnings] == []
+
+
+# ---------------------------------------------------- fences inside front matter (review round 2)
+
+FM_SCALAR_FENCE = (
+    "---\nid: DEC-FENCE-001\ntype: decision\ntitle: First\n---\nBody A plain.\n\n"
+    "---\nid: DEC-FENCE-002\ntype: decision\ntitle: Second\nnote: |\n"
+    "  ```\n  a fence marker inside a block scalar is YAML string content\n"
+    "---\nBody B plain.\n\n"
+    "---\nid: DEC-FENCE-003\ntype: decision\ntitle: Third\n---\n"
+    "Body C with a closed fence:\n```text\nfence\n```\n"
+)
+
+
+def test_fence_opened_in_front_matter_is_yaml_text_not_a_fence():
+    """PR #331 review round 2: the protection scan must not read a ``` line
+    inside an item's FRONT MATTER (a block scalar can carry one) as a fence
+    opener -- it is YAML string content. Reading it as a fence lets it
+    protect that item's own closing `---`, and the item vanishes with no
+    warning (main loads all three items)."""
+    blocks, errors, _dups, warnings = parse.md_front_matter_blocks(FM_SCALAR_FENCE.split("\n"))
+    assert errors == []
+    assert [parsed.get("id") for _, _, parsed in blocks] == [
+        "DEC-FENCE-001",
+        "DEC-FENCE-002",
+        "DEC-FENCE-003",
+    ]
+    assert warnings == []
+
+
+def test_front_matter_fence_opened_at_its_end_still_loads_every_item():
+    """The reviewer's exact shape: the block-scalar ``` is unclosed inside
+    the front matter and pairs with a *closed* fence in a later item's body;
+    front matter is opaque to fence tracking, so nothing protects anything
+    and all items load exactly as they do today."""
+    text = FM_SCALAR_FENCE.replace(
+        "  a fence marker inside a block scalar is YAML string content\n",
+        "  fence marker unclosed inside the block scalar\n",
+    )
+    blocks, errors, _dups, warnings = parse.md_front_matter_blocks(text.split("\n"))
+    assert errors == []
+    assert [parsed.get("id") for _, _, parsed in blocks] == [
+        "DEC-FENCE-001",
+        "DEC-FENCE-002",
+        "DEC-FENCE-003",
+    ]
+    assert warnings == []
+
+
+def test_front_matter_fence_loads_all_items_through_the_loader(tmp_path):
+    """End to end: the reviewer's file loads as it does on main -- all three
+    items, no errors, no warnings."""
+    project, _path = _project(tmp_path, "fence_fm", FM_SCALAR_FENCE)
+    assert [d.message for d in project.errors] == []
+    assert [item.id for item in project.items.values()] == [
+        "DEC-FENCE-001",
+        "DEC-FENCE-002",
+        "DEC-FENCE-003",
+    ]
+    assert [d.message for d in project.warnings if "fenced code block" in d.message] == []

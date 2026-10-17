@@ -912,7 +912,9 @@ def _parse_item_count(rel: str, text: str) -> int | None:
             lines = text.split("\n")
             # Same splitter parse_markdown_file uses, so body prose behind a
             # `---` thematic break is never mistaken for front matter and
-            # multi-item files judge the way they load.
+            # multi-item files judge the way they load. `_fence_warnings` is
+            # the loader's to report: this guard re-splits a file the project
+            # load already split and announced.
             blocks, errors, _duplicates, _fence_warnings = parse.md_front_matter_blocks(lines)
             if errors or not blocks:
                 return None
@@ -1082,6 +1084,8 @@ def _stale_mapped_names(rel: str, text: str, mapping: Mapping) -> list[str]:
 
     try:
         if rel.endswith(".md"):
+            # `_fence_warnings` is the loader's to report; this stale-prefix
+            # scan reads a file the project load already split and announced.
             blocks, errors, _duplicates, _fence_warnings = parse.md_front_matter_blocks(
                 text.replace("\r\n", "\n").split("\n")
             )

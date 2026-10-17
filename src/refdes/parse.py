@@ -38,7 +38,7 @@ FENCE_RE = re.compile(r"^---[ \t]*$")
 # A YAML mapping key opening a line at column 0 -- what has to follow a `---` for it
 # to be read as a new item's front-matter rather than a literal horizontal rule.
 KEY_LINE_RE = re.compile(r"^[A-Za-z_][\w.-]*\s*:(\s|$)")
-# A fenced code block's opening line (see _code_fenced_lines): up to 3 spaces of
+# A fenced code block's opening line (see _split_and_fences): up to 3 spaces of
 # indentation, then 3+ of one fence character; the rest of the line is the fence's
 # info string, which a backtick fence may not fill with backticks. A closing line
 # is the same character in a run at least as long, with nothing after it.
@@ -1441,50 +1441,94 @@ def _yaml_mapping(text: str) -> tuple[dict | None, list[DuplicateKey]]:
     return (parsed, duplicates) if isinstance(parsed, dict) else (None, duplicates)
 
 
-def _code_fenced_lines(lines: list[str], start: int) -> set[int]:
-    """Line indices strictly inside a closed fenced code block, scanning from
-    `start` (the body of a Markdown item file: front matter is YAML, where a
-    ``` line is string content, not a fence).
+def _split_and_fences(
+    lines: list[str], fence_idx: list[int]
+) -> tuple[list[int], list[tuple[str, int]]]:
+    """Walk the file once, in order, deciding which `---` fences split it.
 
-    The rules are CommonMark's, narrowed to what matters for splitting
-    (R10-X1): an opener is up to 3 spaces of indent then 3+ of one fence
-    character (a backtick fence whose info string contains a backtick is not
-    an opener); the block runs to the next line of the same character in a
-    run at least as long with nothing after it. Fences do not nest. An
-    opener with no closing line before the end of the file opens nothing --
-    the least-surprising fallback is today's behavior, where every `---`
-    after an unclosed fence opener keeps splitting as it always did.
+    A three-state machine -- front matter, body, fenced code -- starting
+    just after block 0's closing `---` (`fence_idx` is the raw `---` lines
+    with fence_idx[0] == 0; block 0 is a split by definition):
+
+      * front matter runs from a splitting `---` (a YAML key line follows)
+        through the next `---` line, and is OPAQUE to fence tracking: it is
+        YAML, where a ``` line is string content (a block scalar can carry
+        one) and must never open a fence -- reading one as a fence lets it
+        protect the item's own closing `---` and the item vanishes
+        (PR #331 review round 2).
+      * body lines open fences (CommonMark's rules narrowed to what
+        matters for splitting): up to 3 spaces of indent, then 3+ of one
+        fence character, and a backtick fence's info string carries no
+        backtick; the block closes at the next line of the same character
+        in a run at least as long with nothing after it. Fences do not nest.
+      * inside a fence, `---` lines are literal text: they never split.
+
+    An opener with no closing line before the end of the file opens
+    nothing -- the least-surprising fallback is the pre-fence behavior,
+    where every `---` after it keeps splitting as it always did. A fenced
+    `---` with a key line after it is the shape of an item, and
+    suppression cannot tell a pasted example from an item swallowed by an
+    unclosed fence (the two are structurally identical), so every
+    suppressed candidate is announced: a deliberate example costs one
+    warning, and an item hidden behind an unclosed fence can never vanish
+    without a word (PR #331 review: no item that loads today may silently
+    stop loading).
+
+    Returns (split_idx, fence_warnings): the fences that split -- block
+    0's pair and every item boundary -- in order, fenced `---` lines gone;
+    and (message, line) pairs (1-based) for the caller to *warn* (the
+    lowest severity, not an error).
     """
-    protected: set[int] = set()
-    i = start
+    fence_set = set(fence_idx)
+    split_idx = [0, fence_idx[1]]
+    warnings: list[tuple[str, int]] = []
     n = len(lines)
-    while i < n:
-        mo = _FENCE_OPEN_RE.match(lines[i])
-        if mo is None:
-            i += 1
-            continue
-        marker, info = mo.group(1), mo.group(2)
-        if marker[0] == "`" and "`" in info:
-            i += 1
-            continue
-        close_re = _FENCE_CLOSE_RES[marker[0]]
-        j = i + 1
-        while j < n:
-            cm = close_re.match(lines[j])
-            if cm is not None and len(cm.group(1)) >= len(marker):
-                break
-            j += 1
-        if j == n:
-            i += 1
-            continue
-        protected.update(range(i + 1, j))
-        i = j + 1
-    return protected
+    # Block 0's closing `---` does double duty as item 1's opener when a key
+    # line follows it (the pairing loop checks the key itself); seed the walk
+    # inside front matter for exactly that case.
+    in_fm = bool(KEY_LINE_RE.match(lines[fence_idx[1] + 1] if fence_idx[1] + 1 < n else ""))
+    opener: tuple[str, int] | None = None
+    pending: list[int] = []  # `---` lines inside the currently open fence
+    for i in range(fence_idx[1] + 1, n):
+        line = lines[i]
+        is_fence_line = i in fence_set
+        if in_fm:
+            if is_fence_line:
+                split_idx.append(i)  # closes it (and may open the next item)
+                # A closing `---` does double duty as the next item's opener
+                # when a key line follows it (the pairing loop checks the key
+                # itself, and pairs consecutive fences).
+                in_fm = bool(KEY_LINE_RE.match(lines[i + 1] if i + 1 < n else ""))
+        elif opener is not None:
+            char, length = opener
+            cm = _FENCE_CLOSE_RES[char].match(line)
+            if cm is not None and len(cm.group(1)) >= length:
+                for j in pending:  # the fence closed: its `---` lines never split
+                    if KEY_LINE_RE.match(lines[j + 1] if j + 1 < n else ""):
+                        warnings.append((FENCED_FRONT_MATTER_WARNING, j + 1))
+                opener = None
+                pending = []
+            elif is_fence_line:
+                pending.append(i)
+        elif is_fence_line:
+            if KEY_LINE_RE.match(lines[i + 1] if i + 1 < n else ""):
+                split_idx.append(i)  # opens a new item's front matter
+                in_fm = True
+            # else: a literal horizontal rule in the body -- not a split
+        else:
+            mo = _FENCE_OPEN_RE.match(line)
+            if mo is not None and not (mo.group(1)[0] == "`" and "`" in mo.group(2)):
+                opener = (mo.group(1)[0], len(mo.group(1)))
+    # An unclosed opener protects nothing: the `---` lines under it split as
+    # they always did (all pending lines sit after every recorded split).
+    split_idx.extend(pending)
+    return split_idx, warnings
 
 
 FENCED_FRONT_MATTER_WARNING = (
-    "front matter inside a fenced code block is treated as example text; if a "
-    "real item was meant here, an earlier code fence is probably unclosed."
+    "front matter inside a fenced code block is treated as example text; no "
+    "action is needed if this is an example; if a real item was meant here, "
+    "check for an unclosed earlier code fence."
 )
 
 
@@ -1499,7 +1543,7 @@ def md_front_matter_blocks(
     opens a new item when the line right after it looks like a YAML key and a
     closing fence follows; otherwise it stays a literal horizontal rule in
     the previous item's body. A `---` inside an open fenced code block (see
-    _code_fenced_lines) is literal text and is not a fence at all: a pasted
+    _split_and_fences) is literal text and is not a fence at all: a pasted
     front-matter example in a ```yaml fence stays body prose of the item
     that carries it, never a phantom item (R10-X1). Returns (blocks, errors,
     duplicates, fence_warnings) with errors as (message, line) pairs for the
@@ -1526,13 +1570,7 @@ def md_front_matter_blocks(
     if len(fence_idx) < 2 or fence_idx[0] != 0:
         return [], [("no YAML front-matter (file must start with '---')", 1)], duplicates, fence_warnings
 
-    fenced = _code_fenced_lines(lines, fence_idx[1] + 1)
-    if fenced:
-        for k in range(1, len(fence_idx) - 1):
-            i = fence_idx[k]
-            if i in fenced and KEY_LINE_RE.match(lines[i + 1] if i + 1 < len(lines) else ""):
-                fence_warnings.append((FENCED_FRONT_MATTER_WARNING, i + 1))
-        fence_idx = [i for i in fence_idx if i not in fenced]
+    fence_idx, fence_warnings = _split_and_fences(lines, fence_idx)
 
     close0 = fence_idx[1]
     head_text = "\n".join(lines[1:close0])

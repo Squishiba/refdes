@@ -96,7 +96,34 @@ Scan re-run: items/ still 0 fenced `---` → repo's own project loads with 0
 new warnings (`refdes check`: 0 "fenced code block" lines). Full suite
 4038 passed, 2 skipped; ruff E9,F clean on all touched files.
 
+## Review round 2 (head 817f843, reviewer e1ca4bed) — front matter is opaque to fences
+
+Reproduced the medium finding first (`.scratch/probe_fm_fence.py`, run
+against branch and main): a ``` line inside a *later* item's front-matter
+block scalar opened a fence (the protection scan ran from block 0's close to
+EOF, straight through front matter), protecting that item's own closing
+`---`; main loads A/B/C, head loaded A + a YAML error, silently. Fix: the
+scan is now one in-order walk (`_split_and_fences`), a three-state machine
+(front matter / body / fenced code) — front-matter regions run from a real
+splitting `---` through the next `---` and are skipped for fence purposes;
+only body lines open fences; a closing `---` does double duty as the next
+opener (seeded at block 0's close — that regression showed up as
+test_per_item_prefix_overrides... failing, fixed by the double-duty seed).
+New tests (3, red on the head first): block-scalar fence loads all items
+(unit, reviewer-shape with the opener closed in a later body, e2e through
+the loader). Warning text reworded to cover the common closed-paste case
+("no action is needed if this is an example; ... check for an unclosed
+earlier code fence"); docs/troubleshooting.md's "every `---`-fenced block"
+claim qualified; changelog fragment renamed `.changed.md` → `.fixed.md`
+(git mv). The four `_fence_warnings` discards (patcher, revise x2,
+serve/edit) are commented, not reported: each path only re-splits project
+files, and the project load that admitted the file already warned. Scan +
+repo check stay 0 new warnings; full suite 4041 passed, 2 skipped; red on
+origin/main 55d3a87 with the new file: 18/20. PR body updated via gh api
+(warning contract, current counts, inline repro replacing the run10 §4
+citation).
+
 ## Status
 
-Finished. Full suite: 4038 passed, 2 skipped. `ruff check <touched> --select
-E9,F` clean. PR opened, not merged.
+Finished. Full suite: 4041 passed, 2 skipped. `ruff check <touched> --select
+E9,F` clean. PR updated, not merged.

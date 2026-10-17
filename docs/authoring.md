@@ -101,6 +101,8 @@ one closing `---` looks like a fresh front-matter block, so the whole rest of th
 file stays its body.
 
 A `---` inside an open fenced code block is literal body text and splits nothing.
+Fences are tracked in item bodies only: a ` ``` ` line inside front matter — a
+block scalar can carry one — is YAML string content and never opens a fence.
 The block runs from a line of three or more backticks (or tildes), indented no more
 than three spaces, to the next line of the same character in a run at least as long
 with nothing after it; a line inside it that looks like a fence with an info string
