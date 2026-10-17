@@ -155,7 +155,7 @@ One platform-wide requirement — "every board uses the standard debug header" �
 is one item, so the table above goes `satisfied` the moment *any* board
 complies.
 
-A board that declares `conforms_to: [GRP-…]` gets the same four stages
+A board that declares `conforms_to: [GRP-…]` gets the same five stages
 computed again for each member of that group, counting only that board's own
 satisfiers.
 

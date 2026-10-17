@@ -738,7 +738,7 @@ class ImportSpec:
 
 @dataclass
 class Coverage:
-    """Four distinct notions of 'done' for one requirement or constraint."""
+    """Five stages of 'done' (`open` plus four evidence lists) for one requirement or constraint."""
 
     item_id: str
     addressed_by: list[str] = field(default_factory=list)   # log entries
