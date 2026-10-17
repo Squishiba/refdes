@@ -1,0 +1,91 @@
+# fix R10-F5: a pre-#323 labelled calc capture must not warn as edited
+
+Task: R10-F5, the release blocker of user-sim run 10 (report on
+origin/user-sim-run10, section 3.1). PR #323 took a ```calc fence's
+`id="..."` label out of the captured-history semantic digest, so an item
+captured with a labelled fence BEFORE #323 stores a digest hashing the label
+text; the current digest strips it, matches no stored event, and
+`refdes check`/`build`/`audit` report the entry as `edited after captured`
+with nobody having edited it. The report's own remedy (`refdes history
+capture`) is refused ("already captured" — one capture per item), so the
+warning was permanent; only `history redact` cleared it.
+
+## Repro (verified on main, before the fix)
+
+`.scratch/old12bbf6b` = `git archive 12bbf6b src | tar -x -C ...` (pre-#323,
+the run-10 base). `.scratch/r10f5/` = fresh `refdes init` (hardware@3) with
+one log whose body has a labelled fence (```calc id="losses"). Captured with
+`PYTHONPATH=.scratch/old12bbf6b/src ... history capture LOG-E1` ("captured
+LOG-E1: manual capture"), then main's code:
+
+    refdes check  -> WARNING ... LOG-E1: edited after captured ...  (1 warning)
+    refdes audit  -> Entries edited after captured: LOG-E1
+
+Matches the report byte-for-byte in shape. After the fix the same project is
+`0 warnings`, audit `(none)`; a label rename (losses -> burn) stays silent; a
+summary edit and a calc-row edit each warn once; reverting them goes quiet.
+
+## Design (preferred shape confirmed, with one addition)
+
+`capture_index` is the single comparison point (the `edited_after_captured`
+warning, the audit list, items.json, the thread/task-pane facts all read it).
+When an item's current digest matches no live capture event, it is now given
+two more chances, in order:
+
+1. `legacy_semantic_digest(item)` — the pre-#323 payload (labels included),
+   a helper next to `semantic_payload`. Cheap, no file I/O; covers the
+   unedited entry.
+2. the event's stored snapshot object re-digested under the current formula
+   (`_stored_snapshot_matches_current`).
+
+The second is required by the decided label-only-edit rule: the task asks
+that a label-only edit made AFTER the upgrade stay silent. The legacy digest
+alone cannot say that (it hashes the *new* label). The stored snapshot holds
+the collapsed capture-time body, so the label comes off it via a
+collapsed-text twin of the fence strip (```calc\s+id="..."; the grammar
+declares id the only calc-fence attribute, calc.parse_fence_attrs). A real
+edit (prose or a row) moves all digests and warns exactly as before.
+
+Narrow on purpose: HISTORY_FORMAT stays 1, capture writes and the digest
+format are untouched, sealing/baselines/build.HASH_FORMAT untouched. The
+legacy helper is documented as removable once a project's captures are all
+post-#323 (or a future history migration rewrites stored digests).
+
+## Tests
+
+New section in `tests/test_history_edited.py` (the file #323 extended). The
+pre-#323 capture fixture is built from the legacy payload functions (digest +
+object + `captured` event the old code wrote), not a store binary. Cases:
+(1) pre-323 labelled capture, unedited -> silent (red on main, green after);
+(2) prose edit -> warns; (3) calc-row edit -> warns; (4) label rename after
+the upgrade -> silent; (5) unlabelled capture under either code -> unchanged
+(silent; edits warn); (6) capture by current code -> silent, stays silent
+through a rename; (7) the legacy digest is pinned to the pre-#323 formula;
+(8) the legacy digest matches when the snapshot objects are not on disk (the
+events-committed/objects-not shape).
+
+Sabotage: neutering `_stored_snapshot_matches_current` fails (4); removing
+the legacy digest from the comparison fails (1) and (8); the legacy digest
+formula is pinned by (7).
+
+## Notes / gotchas
+
+- First version of `_stored_snapshot_matches_current` reused
+  `_strip_calc_fence_labels` on the stored body; on collapsed text the
+  `^```calc[^\n]*` anchor swallows the whole body, so a label rename still
+  warned — that is why the collapsed-text label regex exists. Test (4)
+  caught it.
+- Sabotage cleanup used `git checkout -- src/refdes/history.py`, which
+  reverted the fix along with the sabotage; re-applied from context (the
+  incident is why this log mentions it — checkout on a shared tree is the
+  stash-shaped footgun with a different name).
+- Full suite: 4029 passed, 2 skipped. `ruff check <touched files> --select
+  E9,F` clean.
+- Docs: `grep -rn 'edited after captured' docs README.md changelog.d` — the
+  false remedy sentence lived only in #323's changelog fragment. It is
+  rewritten to say what the comparison now does. troubleshooting.md,
+  cli-reference.md and the design-log pages state the warning truthfully and
+  needed no change.
+
+Status: done — repro, tests (red->green), fix, changelog fragments, full
+suite, PR opened (not merged).

@@ -6,7 +6,10 @@
   twice. The block's rows remain content: editing a row of a captured
   entry's named fence warns exactly as before. Items with no labelled calc
   fence digest byte-for-byte what they digested before, so no existing
-  capture is invalidated by this change; an item captured *with* a labelled
-  fence under the old digest gets one (warning-only, never build-failing)
-  `edited after captured` line on the first build after upgrading, which a
-  `refdes history capture` of the entry settles.
+  capture is invalidated by this change. An item captured *with* a labelled
+  fence under the old digest reads as unchanged on the first build after
+  upgrading: the comparison also recognises the old digest of the live
+  entry, and a label-only edit made after the upgrade, because a stored
+  snapshot re-digested under the current formula is compared too. Real
+  edits of such an entry — prose and calc rows alike — warn as they always
+  did.

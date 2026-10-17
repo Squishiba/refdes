@@ -27,7 +27,10 @@ Two deliberate departures from the doc's sketch, both stated in the plan:
    fields, raw link spellings (model.py keeps raw and resolved deliberately
    separate and write-back needs raw), and the body with whitespace collapsed
    and calc-fence labels stripped (a ```calc block's ``id="..."`` is a label
-   on the rendering, not content — run-9 F2).
+   on the rendering, not content — run-9 F2). Captures made before that strip
+   are compared through ``legacy_semantic_payload`` and the stored snapshot
+   (run-10 F5; see ``capture_index``), so the label change costs no project a
+   working history store.
    Identity and provenance (``key``, display ``id``, ``source`` file/line) are
    *stored* in the object but excluded from the digest, for the same reasons
    ``compute_hashes`` excludes an item's own key and display id: minting an
@@ -171,6 +174,13 @@ def _collapse_ws(text: str) -> str:
 # normalization existed (tests/test_history_edited.py pins it).
 _CALC_FENCE_OPEN_RE = re.compile(r"^```calc[^\n]*", re.MULTILINE)
 
+# The collapsed-text twin of the strip above, used only by
+# `_stored_snapshot_matches_current` to re-digest a stored snapshot body:
+# the snapshot holds the whitespace-collapsed text, where the fence-open
+# anchor would swallow the whole body, and ``id="..."`` is the only
+# attribute the calc-fence grammar declares (calc.parse_fence_attrs).
+_CALC_FENCE_LABEL_RE = re.compile(r'```calc\s+id="[^"\n]*"')
+
 
 def _strip_calc_fence_labels(body: str) -> str:
     return _CALC_FENCE_OPEN_RE.sub("```calc", body)
@@ -197,6 +207,77 @@ def semantic_payload(item: Item) -> dict[str, object]:
         "links": item.links,
         "body": _collapse_ws(_strip_calc_fence_labels(item.body)),
     }
+
+
+def legacy_semantic_payload(item: Item) -> dict[str, object]:
+    """The pre-#323 semantic payload: ``semantic_payload`` with the calc-fence
+    label strip removed (the label text stays in the hashed body).
+
+    This is a compatibility digest, not a format. PR #323 (run-9 R9-F2) took
+    a ```calc fence's ``id="..."`` out of the digest; every digest minted for
+    a *labelled* fence before that change hashes the label, so the current
+    digest of an unedited entry matches no stored event and
+    ``edited_after_captured`` reports it as edited with nobody having edited
+    it (run-10 F5) — permanently, since ``history capture`` refuses a second
+    capture of one item. ``capture_index`` recomputes this digest for an item
+    the current digest has not matched, so a pre-#323 capture of an unchanged
+    entry compares equal. It exists only for that comparison: when a project's
+    captures are all post-#323 — or an explicit history migration rewrites the
+    stored digests — this function and its call sites come out.
+    """
+    return {
+        "history_format": HISTORY_FORMAT,
+        "type": item.type,
+        "fields": item.fields,
+        "links": item.links,
+        "body": _collapse_ws(item.body),
+    }
+
+
+def legacy_semantic_digest(item: Item) -> str:
+    """The digest a pre-#323 build stored for ``item`` (see
+    ``legacy_semantic_payload``)."""
+    return digest_of(legacy_semantic_payload(item))
+
+
+def legacy_object_payload(item: Item) -> dict[str, object]:
+    """The pre-#323 object-file payload: ``legacy_semantic_payload`` plus the
+    stored-but-undigested identity/provenance keys, exactly as
+    ``object_payload`` adds them."""
+    payload = dict(legacy_semantic_payload(item))
+    payload["key"] = item.key
+    payload["id"] = item.id
+    payload["source"] = {"file": item.source_file, "line": item.source_line}
+    return payload
+
+
+def _stored_snapshot_matches_current(root: str, digest: str, current: str) -> bool:
+    """Whether a stored snapshot, digested under the *current* formula, is the
+    item's current digest.
+
+    The one comparison the legacy digest cannot make: a pre-#323 capture whose
+    label the author renamed *after* the upgrade. The stored digest hashes the
+    old label, the current digest strips labels, and the live legacy digest
+    hashes the new one — all three differ, yet no content moved. The stored
+    snapshot body is the whitespace-collapsed capture-time body, so the
+    label has to come off *it* to re-digest: the fence-open strip runs on raw
+    lines, where a fence's info string ends at the newline, and cannot run on
+    collapsed text (every fence line would run to the end of the body).
+    ``calc.parse_fence_attrs`` declares ``id="..."`` the only calc-fence
+    attribute, so this is the fence-open strip on a collapsed body: remove
+    the label exactly as the line strip removes it, then the collapse absorbs
+    the seam. A real edit moves the stripped body and stays an edit.
+    """
+    try:
+        data = load_object(root, digest)
+    except HistoryError:
+        return False  # the event's snapshot is unreadable: report as edited
+    body = data.get("body")
+    if not isinstance(body, str):
+        return False
+    core = {k: data[k] for k in ("history_format", "type", "fields", "links", "body")}
+    core["body"] = _collapse_ws(_CALC_FENCE_LABEL_RE.sub("```calc", body))
+    return digest_of(core) == current
 
 
 def digest_of(payload: dict[str, object]) -> str:
@@ -726,6 +807,14 @@ def capture_index(project) -> dict:
     ``occurred_at`` may not order events to find "newest" (§2). The
     representative event is a matching capture, or the lowest-id live one
     when the item is edited; ids are derived, so the pick is stable.
+
+    An event also matches through two pre-#323 comparisons (run-10 F5), in
+    order: the item's *legacy* digest (labels included) — the digest an
+    unedited labelled capture stored, and the cheap one — then the event's
+    stored snapshot digested under the current formula, which absorbs a
+    label rename made after the upgrade. A label-only edit is not semantic,
+    so it stays silent on both sides of the change; a real edit moves all
+    three digests and warns as before.
     """
     events = load_events(str(project.root))
     captures = [e for e in events if e["kind"] in _CAPTURE_KINDS]
@@ -746,6 +835,17 @@ def capture_index(project) -> dict:
             continue
         current = semantic_digest(item)
         matches = [e for e in live if str(e["object"]) == current]
+        if not matches:
+            legacy = legacy_semantic_digest(item)
+            matches = [e for e in live if str(e["object"]) == legacy]
+        if not matches:
+            matches = [
+                e
+                for e in live
+                if _stored_snapshot_matches_current(
+                    str(project.root), str(e["object"]), current
+                )
+            ]
         event = matches[0] if matches else sorted(live, key=lambda e: str(e["id"]))[0]
         index[key] = (event, not matches)
     return index

@@ -11,7 +11,9 @@ error, never a changed exit code, never a write. The schema declares
 from __future__ import annotations
 
 import json
+import os
 import re
+from pathlib import Path
 
 from conftest import write_project_config
 
@@ -570,3 +572,176 @@ def test_the_label_strip_leaves_unlabelled_digests_byte_identical(tmp_path):
                 "body": history._collapse_ws(item.body),
             }
         )
+
+
+# ------------------- pre-#323 labelled captures are not "edited" (run-10 F5)
+
+# PR #323 took a ```calc fence's `id="..."` out of the semantic digest. A
+# LABELLED fence captured before that change stored a digest hashing the
+# label text, so the current digest matches no stored event and the entry
+# reports `edited after captured` with nobody having edited it -- run-10
+# F5, the release blocker, whose documented remedy (`history capture`) the
+# one-capture-per-item rule refuses. The fixture replays such a capture:
+# the digest, object and event the old code wrote, built from
+# `legacy_semantic_payload`/`legacy_object_payload` (the exact payload the
+# old digest hashed), not from a captured store binary.
+
+CALC_ONE = (
+    "defaults: { type: log }\n"
+    "items:\n"
+    "  - id: LOG-001\n    summary: First.\n    body: |\n"
+    "      ```calc\n"
+    "      P_diss = 3.3 V * 0.5 A | W\n"
+    "      ```\n"
+)
+
+CALC_ONE_NAMED = CALC_ONE.replace("```calc\n", '```calc id="losses"\n')
+
+
+def _capture_pre_323(root, item_id):
+    """Write the object + `captured` event the pre-#323 code would have
+    written for ``item_id``: the digest is over the legacy payload, labels
+    included."""
+    project, _stale = loader.load_tree(str(Path(root) / "refdes-project.yaml"), write=True)
+    item = project.item_by_id(item_id)
+    digest = history.legacy_semantic_digest(item)
+    path = history.object_path(root, digest)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    Path(path).write_text(
+        history._format_yaml(
+            history.legacy_object_payload(item), history._OBJECT_HEADER
+        ),
+        encoding="utf-8",
+    )
+    history.append_event(root, "captured", item.key, digest, reason="manual capture")
+
+
+def test_a_pre_323_labelled_capture_is_not_edited_when_unchanged(tmp_path):
+    """R10-F5 at the digest layer: captured with the pre-#323 digest, edited
+    by nobody, checked by the current code -> no warning. Red on main: the
+    current digest strips the label, so the stored event matches nothing.
+    Sabotage: drop the legacy digest from the comparison and the report's
+    permanent false warning is back."""
+    cfg = _setup(tmp_path, CALC_ONE_NAMED)
+    _capture_pre_323(tmp_path, "LOG-001")
+    project, _stale = loader.load_tree(cfg, write=True)
+    build_mod.build(project)
+    assert _edited_warnings(project) == []
+    assert history.edited_after_captured(project) == []
+
+
+def test_a_pre_323_labelled_capture_still_warns_on_a_prose_edit(tmp_path):
+    """The compatibility comparison opens the door on labels only: prose is
+    content, so a real edit of a pre-#323 capture warns exactly as before."""
+    cfg = _setup(tmp_path, CALC_ONE_NAMED)
+    _capture_pre_323(tmp_path, "LOG-001")
+    _edit_summary(tmp_path, "LOG-001", "Rewritten after the upgrade.")
+    project, _stale = loader.load_tree(cfg, write=True)
+    build_mod.build(project)
+    warnings = _edited_warnings(project)
+    assert len(warnings) == 1
+    assert "LOG-001" in warnings[0].message
+
+
+def test_a_pre_323_labelled_capture_still_warns_on_a_calc_row_edit(tmp_path):
+    """Rows inside the fence stayed content through #323, and the legacy
+    comparison keeps them content: a pre-#323 capture with an edited row
+    warns, label and all."""
+    cfg = _setup(tmp_path, CALC_ONE_NAMED)
+    _capture_pre_323(tmp_path, "LOG-001")
+    _replace_in_log(tmp_path, "0.5 A", "0.6 A")
+    project, _stale = loader.load_tree(cfg, write=True)
+    build_mod.build(project)
+    warnings = _edited_warnings(project)
+    assert len(warnings) == 1
+    assert "LOG-001" in warnings[0].message
+
+
+def test_a_label_rename_after_the_upgrade_stays_silent(tmp_path):
+    """Decided in the fix and documented in `capture_index`: a label is not
+    semantic, so a label-only edit made after the upgrade of a pre-#323
+    capture must not warn either -- the stored snapshot digested under the
+    current (label-stripping) formula equals the current digest. Sabotage:
+    compare the raw stored digest only, and renaming a label of an old
+    capture is an "edit"."""
+    cfg = _setup(tmp_path, CALC_ONE_NAMED)
+    _capture_pre_323(tmp_path, "LOG-001")
+    _replace_in_log(tmp_path, 'id="losses"', 'id="burn"')
+    project, _stale = loader.load_tree(cfg, write=True)
+    build_mod.build(project)
+    assert _edited_warnings(project) == []
+
+
+def test_an_unlabelled_capture_behaves_the_same_under_either_digest(tmp_path):
+    """#323's byte-for-byte guarantee, on the comparison side: with no label
+    in the body the legacy and current digests are one digest, so a pre-#323
+    capture matches the current digest directly -- silent before the fix and
+    silent after, and its real edits warn as they always did."""
+    cfg = _setup(tmp_path, CALC_ONE)
+    _capture_pre_323(tmp_path, "LOG-001")
+    project, _stale = loader.load_tree(cfg, write=True)
+    build_mod.build(project)
+    assert _edited_warnings(project) == []
+
+    _edit_summary(tmp_path, "LOG-001", "Rewritten after capture.")
+    project, _stale = loader.load_tree(cfg, write=True)
+    build_mod.build(project)
+    warnings = _edited_warnings(project)
+    assert len(warnings) == 1
+    assert "LOG-001" in warnings[0].message
+
+
+def test_an_entry_captured_by_the_current_code_stays_silent(tmp_path):
+    """The capture side of #323, end to end: a labelled fence captured by
+    the current code digests exactly as the current formula, so the check
+    right after the capture is silent and stays silent through a label
+    rename."""
+    cfg = _setup(tmp_path, CALC_ONE_NAMED)
+    assert cli_mod.main(["-c", cfg, "history", "capture", "LOG-001"]) == 0
+    project, _stale = loader.load_tree(cfg, write=True)
+    build_mod.build(project)
+    assert _edited_warnings(project) == []
+
+    _replace_in_log(tmp_path, 'id="losses"', 'id="burn"')
+    project, _stale = loader.load_tree(cfg, write=True)
+    build_mod.build(project)
+    assert _edited_warnings(project) == []
+
+
+def test_the_legacy_digest_is_the_pre_323_formula(tmp_path):
+    """The legacy payload is exactly what the digest hashed before #323:
+    sha256 over the canonical JSON of
+    `{history_format, type, fields, links, _collapse_ws(body)}` -- the
+    formula `test_the_label_strip_leaves_unlabelled_digests_byte_identical`
+    pins as pre-strip. Sabotage: change the legacy payload's shape and an
+    old store stops matching."""
+    cfg = _setup(tmp_path, CALC_ONE_NAMED)
+    project, _stale = loader.load_tree(cfg, write=True)
+    item = project.item_by_id("LOG-001")
+    assert history.legacy_semantic_digest(item) == history.digest_of(
+        {
+            "history_format": history.HISTORY_FORMAT,
+            "type": item.type,
+            "fields": item.fields,
+            "links": item.links,
+            "body": history._collapse_ws(item.body),
+        }
+    )
+
+
+def test_a_legacy_digest_match_survives_an_unshared_snapshot(tmp_path):
+    """The legacy digest is not only the cheap path: a project that commits
+    the capture events without the snapshot bodies -- the events are the
+    audit trail, the objects are the content, and a privacy-shaped project
+    keeps exactly one of the two -- has no stored body to re-digest, so the
+    digest comparison is the only comparison left standing. Sabotage: drop
+    the legacy digest from the comparison and an unedited pre-#323 capture
+    of that shape warns again."""
+    cfg = _setup(tmp_path, CALC_ONE_NAMED)
+    _capture_pre_323(tmp_path, "LOG-001")
+    objects = tmp_path / ".refdes" / "history" / "objects"
+    for name in os.listdir(objects):
+        os.remove(objects / name)
+    project, _stale = loader.load_tree(cfg, write=True)
+    build_mod.build(project)
+    assert _edited_warnings(project) == []
