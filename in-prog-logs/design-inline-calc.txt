@@ -2,7 +2,7 @@ TASK: design doc -- evaluate-in-place math for engineering notes (inline-calc)
 Branch: design-inline-calc
 PR: #250
 Date: 2026-10-15 (this log rewritten 2026-10-17)
-Status: finished, awaiting owner's decisions on the four open questions
+Status: finished; the four open questions were decided by the owner 2026-10-17
 
 Review history
 --------------
@@ -87,11 +87,11 @@ Tests run (2026-10-17, repository root, project venv)
 
 Design-only PR: no src/ or tests/ changes.
 
-Open questions (named here; see "Open questions for this slice" in
-docs/design/inline-calc.md)
+Open questions (named here; all decided by the owner 2026-10-17; see
+"Open questions for this slice" in docs/design/inline-calc.md)
 - Precision (was Q2)
 - Freshness gate (was Q5)
 - Unit slot (was Q17)
 - Triggered incomplete text (was Q1)
 
-Status: finished, awaiting owner's decisions on the four open questions
+Status: finished; the four open questions were decided by the owner 2026-10-17

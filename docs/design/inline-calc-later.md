@@ -35,7 +35,21 @@ undo. The preview pane remains the optional "as published" view (owner D2).
 A candidate solve span was
 `` `Rbot := ? where 0.8 V * (1 + 10 kohm/Rbot) = 3.3 V from 1 kohm to 1 Mohm` ``.
 The unknown is the assigned name; explicit bounds give a one-dimensional root
-search. A trial value would be passed to the existing restricted evaluator,
+search.
+
+**Range symbol, UNDECIDED (owner note, 2026-10-17; the solve design is not
+under review):** the owner wants a symbol for the range, not the words
+`from ... to ...` — e.g. something like `1k ~ 10k ohm` — and asked what math
+normally uses. Weighing the candidates: refdes already prints tolerance
+intervals as `11.4 V … 12.6 V` (`docs/math.md`, "Tolerances"), and its
+tolerance sign already has an ASCII alias pattern (`±` / `+/-`,
+`src/refdes/calc.py:689`); `~` is common on datasheets ("1k~10k") but also
+reads as "approximately", and no calc-syntax use of it exists in
+`src/refdes/calc.py` today; `[a, b]` is math's closed-interval notation. The
+candidate to recommend is `…` with ASCII alias `..`, mirroring the
+`±` / `+/-` alias pattern and the existing interval display. This supersedes
+the earlier `from ... to ...` spelling above (old Q9); the explicit bracket
+itself stays required. A trial value would be passed to the existing restricted evaluator,
 with domain errors and absent roots reported, not crashed. Source-order use
 before a solve remains open; the earlier default was strict order, so the
 constraint spells out the expression instead of referencing a forward-defined
@@ -115,7 +129,7 @@ their own review.
 | Q5, severity | Not deferred here: resolved into the first slice — its section 2 severities and its open question Q2 (was Q5). |
 | Q6-Q7, command | `refdes inline-calc fill`; refuse historical edits and report them. |
 | Q8, editor undo | Try native text insertion, test undo in supported browsers; retain manual Fill fallback. |
-| Q9-Q10, solve | Require explicit bracket; keep E-series suggestions in UI/CLI. |
+| Q9-Q10, solve | Require explicit bracket; its spelling is now an open choice (a range symbol, not the words `from ... to ...`) — see the UNDECIDED note in "One-unknown solving and E-series". Keep E-series suggestions in UI/CLI. |
 | Q11, Q16, outputs | Comma-separated names/results; require output count match. |
 | Q12-Q13, versions/library | Separate equation-history lockfile; delay bundled presets. |
 | Q14, solve ordering | Strict source order until a later design justifies another pass. |

@@ -1,6 +1,8 @@
-Status: **Proposed, design only.** This document specifies the first inline-calc
-slice. No parser, evaluator, CLI, or editor implementation is in this PR.
-Later directions are parked in [inline-calc-later.md](inline-calc-later.md).
+Status: **Proposed, design only; open questions decided.** This document
+specifies the first inline-calc slice. No parser, evaluator, CLI, or editor
+implementation is in this PR. The owner decided the four open questions on
+2026-10-17; the decisions are recorded under each question below. Later
+directions are parked in [inline-calc-later.md](inline-calc-later.md).
 
 # Inline calc: stored results in item prose
 
@@ -160,23 +162,34 @@ their old item hash. The `calc_hash` extension is separate: old baselines
 without that probe stay silent in the verdict-change signal
 (`src/refdes/lifecycle.py:_stale_arithmetic`).
 
-## Open questions for this slice
+## Open questions for this slice (decided by the owner, 2026-10-17)
 
 1. **Precision (was Q2):** Is half of the stored literal's last written place the right
    acceptance window, including coarse literals such as `4 V`? **Recommended
    default:** yes; authors choose visible precision, and `4.0 V` tightens it.
+   **Decided (2026-10-17):** the recommended default is accepted.
 2. **Freshness gate (was Q5):** Should stale editable results fail release while old
    sealed or captured results only warn? **Recommended default:** yes, using
    `release_gate.inline_calc_results` with `{release: true, revision: false}`.
+   **Decided (2026-10-17):** the recommended default is accepted.
 3. **Unit slot (was Q17):** Should `| unit` precede `= result`? **Recommended default:**
    yes; it matches the landed calc line and keeps assertion independent of
    stored presentation (`docs/math.md`, "Display units").
+   **Decided (2026-10-17):** the recommended default is accepted. Calcpad
+   writes the unit after the number and `expression|unit` converts the result
+   to that unit before `= result` (e.g. `1.23 m + 35 cm + 12 mm|cm` gives
+   `159.2 cm`; <https://calcpad.eu/help/64/units>), the same slot as this
+   design's `name := expression | unit = result` with the same conversion
+   meaning. The two `|` are not identical: refdes's `|` also asserts
+   dimensionality and pins the display unit (`docs/math.md`, "Display units").
 4. **Triggered incomplete text (was Q1):** Should a span with `:=` but no valid result
    be an error? **Recommended default:** yes; D1 requires a verified stored
    result. This reverses the old draft's Q1(a), which left spans not matching
    the grammar as ordinary code; this slice treats `:=` as declared intent
    that must never be silently ignored. The editor may show this as an
    in-progress diagnostic, but no editor behavior is specified here.
+   **Decided (2026-10-17):** the recommended default is accepted; the
+   reversal of the old draft's Q1(a) default stands.
 
 Implementation and review of solving, suggestions, fill/refresh tooling,
 live editor changes, calculator definitions and lockfiles, and the form panel
