@@ -48,9 +48,20 @@ Chunk 3 (severity table + verification): DONE.
   Fixed to scale the mantissa only; the exponent test pinned it.
 - Full suite green: 4063 passed, 2 skipped.
 
-Next: chunk 4 -- docs/math.md "Inline calc" section (run every example),
-changelog.d fragment, gen_examples --check, grep items/ and docs/ for
-spans containing := and report the count, push branch, open PR.
+Chunk 4 (docs, changelog, ship): DONE.
+- docs/math.md "Inline calc" section between "Referencing results in
+  prose" and "Writing units"; every example and severity claim verified
+  against a real init-project probe in .scratch/inline-doc-probe
+  (warning line format, source() end-to-end after fetch --update).
+- changelog.d/inline-calc-spans.added.md; gen_examples --check clean;
+  full suite 4063 passed 2 skipped.
+- Behavior-change grep: single-backtick spans containing := in items/
+  = 0 (this repo's own project is unaffected); docs/ matches are
+  prose/design text and fenced examples, never item bodies.
+- Probe-confirmed gaps, documented in math.md + changelog + PR: the
+  evaluation order and fetch key discovery read fences only -- a
+  cross-item ref or source() used ONLY in spans can evaluate before
+  its target ("does not define 'x'") or stay unpinned.
 
 Known slice-1 gaps for the PR body (design section 3 is deliberately
 out of scope): the scheduler's cross-item reference scan reads calc
