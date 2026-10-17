@@ -324,17 +324,17 @@ def test_a_refused_accept_leaves_both_the_item_file_and_the_lockfile_byte_identi
     assert "names no source() call" in payload["reason"]
     assert snapshot_tree(root) == before
     assert os.stat(item_file).st_mtime_ns == item_mtime
-    assert os.stat(lock_file).st_mtime_ns == lock_mtime, (
-        "a refusal wrote the lockfile and put it back"
-    )
+    assert os.stat(lock_file).st_mtime_ns == lock_mtime, "the refusal wrote the lockfile"
 
 
-def test_a_diagnostic_gate_refusal_rolls_the_lockfile_back_too(served):
-    # §4 step 6, the first two-file transaction the editor performs. The pin is
-    # valid and has to land before the candidate can be judged -- that is the
-    # only way the new `source()` line resolves -- and then the body breaks the
-    # build for its own reason. The gate's `Invalid` comes back unchanged, and
-    # the lockfile goes back to the bytes it held.
+def test_a_diagnostic_gate_refusal_never_writes_the_lockfile(served):
+    # §4 step 6, the first two-file transaction the editor performs. The pin
+    # is valid and has to be staged before the candidate can be judged -- the
+    # in-memory overlay is the only way the new `source()` line resolves --
+    # and then the body breaks the build for its own reason. The gate's
+    # `Invalid` comes back unchanged, and the lockfile never moves: under §4's
+    # pair-landing shape a refusal inside the gate has written nothing, so
+    # there is no rollback for it to perform.
     _app, client, root = served
     item_file = root / "items" / "decisions.yaml"
     before = snapshot_tree(root)
@@ -386,15 +386,16 @@ OTHER = 'o = source("analysis/budget.csv", "other") | 1'
 def test_a_conflicting_accept_does_not_unpin_a_save_that_already_landed(
     served, monkeypatch
 ):
-    # WRITE-CONCUR-001 (the PR #134 review's HIGH): the accept's lockfile write
-    # sits outside the cross-process check-and-replace section, so a
-    # cooperating server can land its whole accept -- body and pin -- in the
-    # window between this writer's lockfile write and its late revision check.
-    # Restoring the bytes *this* writer read would delete that save's pin while
-    # its body, which names the pin, is on disk: `refdes check` then fails the
-    # project on a line the loser never wrote. The rollback leaves a file it no
-    # longer owns alone -- §4's inert-pin failure mode is the design's own
-    # documented posture -- and the winner's project still checks.
+    # WRITE-CONCUR-001 (the PR #134 review's HIGH): a cooperating server
+    # lands its whole accept -- body and pin -- mid-gate, in the window
+    # before this accept's late revision check. The old shape's rollback
+    # restored the bytes *this* writer had read, deleting that save's pin
+    # while its body, which names the pin, sat on disk: `refdes check` then
+    # failed the project on a line the loser never wrote. Under §4's
+    # pair-landing shape this accept writes nothing before the landing
+    # section, the revision check conflicts it there, and the conflict lands
+    # nothing -- the winner's pin stands under the body naming it, and the
+    # winner's project still checks.
     _app, client, root = served
     item_file = root / "items" / "decisions.yaml"
     lock_file = root / ".refdes" / "citations.yaml"
@@ -740,10 +741,10 @@ def test_a_conflicting_accept_does_not_erase_a_pin_a_same_key_accept_adopted(
 
     def same_key_accept_lands_midflight(before, after, item, op):
         # The winner's whole applied state, as it exists at this instant:
-        # its lockfile (identical bytes to the loser's staged write, so the
-        # write is a no-op) and its body, which differs from the loser's --
-        # both inside one section of the project lock, as a real applied
-        # save lands them.
+        # its lockfile (byte-identical to the bytes this accept staged --
+        # the premise the assertion below pins) and its body, which differs
+        # from the loser's -- both inside one section of the project lock,
+        # as a real applied save lands them.
         with project_write_lock(str(root)):
             lock_file.write_bytes(
                 citations_mod.lockfile_text(pin_eff_records(root)).encode("utf-8")
@@ -876,6 +877,7 @@ def test_a_writer_that_already_pinned_the_key_lands_its_own_pins_too(
             )
             lock_file.write_bytes(citations_mod.lockfile_text(records).encode("utf-8"))
         return original_gate(before, after, item, op)
+
     monkeypatch.setattr(
         edit_mod, "_blocking_diagnostics", a_writer_lands_a_body_and_pins_both
     )

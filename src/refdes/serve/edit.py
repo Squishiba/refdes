@@ -1094,8 +1094,10 @@ def _restore(path: str, original: bytes) -> bool:
     restore that fails partway leaves the destination exactly as it found
     it -- never truncated to zero bytes by the restore itself, the way an
     in-place `"wb"` open would leave it. Returns True when the swap landed
-    and False when it did not; a caller whose message says the file was
-    put back must ask, not assume. The swap preserves the destination's
+    and False when it did not; a caller that REPORTS the undo in a message
+    must ask, not assume -- the apply path's `_restore_lockfile` reports
+    nothing, so it reads no bool, by that helper's own design. The swap
+    preserves the destination's
     mode, copied from the file itself -- which also narrows the old
     in-place write: a destination DELETED before the restore is not
     recreated -- the mode stat fails, the temp is discarded, the restore
@@ -1376,12 +1378,23 @@ def _create_locked(config: str, request: CreateRequest):
                 f"and {new_id} was not reserved",
                 path=path,
             )
-        # Known facts only: the reservation failed, the rollback did not
-        # land, and a failed restore touches nothing -- so the file was
-        # left as the restore found it. What is ON the file is not
-        # asserted: the create's write landed, but a writer outside the
-        # lock can have moved the destination since, and the restore
-        # never re-reads to know.
+        # Known facts only, in the shape the rollback actually took. For
+        # the append shapes the rollback is a restore: a failed restore
+        # touches nothing, so the file was left as the restore found it.
+        # For the new-md shape the rollback is an unlink: a failed unlink
+        # touched nothing, so the created file stands. What is ON the file
+        # is not asserted in either shape: the create's write landed, but
+        # a writer outside the lock can have moved the destination since,
+        # and the rollback never re-reads to know.
+        if original is None:
+            return Refused(
+                who,
+                new_id,
+                f"the id ledger could not be written ({exc}); {new_id} was not "
+                f"reserved, and {rel} was not removed: the file the create "
+                f"wrote stands, the failed rollback touched nothing",
+                path=path,
+            )
         return Refused(
             who,
             new_id,
@@ -1813,8 +1826,10 @@ def _rollback(path: str, original: bytes | None) -> bool:
     """Undo a completed write when a later step failed: restore the previous
     bytes, or remove the file that did not exist before. Returns True when
     the undo is known to have landed; False means the destination is not
-    what it was, and the caller must say so rather than claim a rollback
-    that did not happen."""
+    what it was. A caller that reports the undo in a message must say so
+    rather than claim a rollback that did not happen; the apply path's
+    `_restore_lockfile` deliberately does not report it -- it swallows the
+    bool for the inert-pin residue its own docstring names."""
     if original is None:
         try:
             os.unlink(path)
