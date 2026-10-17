@@ -12,7 +12,7 @@ just invalidated.
 Refdes itself:
 
 ```bash
-cd docs-site && refdes build   # -> _docs/index.html
+cd docs-site && refdes build   # -> _docs/index.html at the repo root
 ```
 
 Start with [getting started](docs/getting-started.md) for a ten-minute tutorial, or
@@ -21,7 +21,8 @@ Start with [getting started](docs/getting-started.md) for a ten-minute tutorial,
 ## Install
 
 ```bash
-python -m venv .venv && ./.venv/Scripts/python.exe -m pip install -e .
+python -m venv .venv && ./.venv/bin/python -m pip install -e .
+# Windows (PowerShell): .\.venv\Scripts\python.exe -m pip install -e .
 ```
 
 ## Commands
@@ -32,7 +33,8 @@ refdes build     # render _site/ and items.json
 refdes check     # validate without rendering; non-zero exit on errors
 refdes index     # print the resolved project as one JSON document on stdout, for tooling
 refdes id        # allocate IDs for items that have none, writing them back
-refdes audit     # list suppressed fields, resealed entries, board moves, and imports
+refdes audit     # list suppressed fields, resealed entries, board/workspace
+                 # moves, baseline diffs, and imports
 ```
 
 Those are the everyday ones. `refdes --help` lists every command —
@@ -87,13 +89,15 @@ defaults:
   prefix: REQ-PWR
   owner: J. Bin
 items:
-  - text: The unit shall operate from 9 V to 36 V.
-  - text: Converter efficiency shall exceed 90 % at half load.
+  - body: The unit shall operate from 9 V to 36 V.
+  - body: Converter efficiency shall exceed 90 % at half load.
 ```
 
 Leave the `id:` off. `refdes id` allocates the next free number and writes it
-into the file. IDs are never derived from position, so inserting a requirement at
-the top does not shift anything below it.
+into the file, along with the item's immutable surrogate `key:` — the stable
+anchor links resolve by (see [IDs](docs/ids.md)). IDs are never derived from
+position, so inserting a requirement at the top does not shift anything below
+it.
 
 ## Math
 
@@ -181,15 +185,16 @@ Every field declares what a change to it means:
 | mode | timeline | baseline diff | invalidates downstream |
 |---|---|---|---|
 | `invalidate` | yes | yes | yes |
-| `log` | yes | no | no |
+| `timeline` | yes | no | no |
 | `ignore` | no | no | no |
 
 The timeline column is design intent for the parked git-history layer, so
-`log` and `ignore` behave identically today. Set per field in the schema (a
+`timeline` and `ignore` behave identically today. Set per field in the schema (a
 project's own fields in `refdes-schema.yaml`; the project-wide default in
-`on_change:` in `refdes-project.yaml`), overridable per item (with a required
-`reason:`). The content hash is computed over `invalidate` fields only, which is
-what stops an owner change from marking fifty links suspect.
+`on_change:` in `refdes-project.yaml`), overridable per item (an omitted
+`reason:` on a field override is a warning). The content hash is computed over
+`invalidate` fields only, which is what stops an owner change from marking fifty
+links suspect.
 
 `refdes audit` lists everything currently suppressed. Suppression is allowed;
 invisible suppression is not.
@@ -219,10 +224,9 @@ items:
       or renegotiate the 0.15 W/in² figure...
 ```
 
-That `board: board-a` is the `log` type's own hand-typed field, not the
-`boards:` registry's reserved `board:` override (below) — a type's own field
-always wins, so a `log` entry stays plain-text-tagged rather than board-scoped
-until that field is retired in favor of the reserved key.
+That `board: board-a` is the reserved `board:` key (see Multiple boards
+below): the entry is scoped to that registered board like any other item, and
+naming one the `boards:` registry does not declare is a build error.
 
 Entries are append-only: corrections are appended, exactly as in a paper
 notebook where you strike through and initial rather than erase. Under the
@@ -251,13 +255,14 @@ history-backed entry once it has been captured), which is what actually matters.
 
 ## Coverage
 
-Three separate questions, deliberately not collapsed into one flag:
+Five separate questions, deliberately not collapsed into one flag:
 
 | stage | meaning |
 |---|---|
 | `open` | nothing references it at all |
 | `addressed` | a log entry works on it |
-| `satisfied` | a verdict log entry claims to meet it |
+| `claimed` | an entry claims to meet it, verdict not settled |
+| `satisfied` | a settled verdict entry or component claims to meet it |
 | `verified` | a test proves it |
 
 A requirement can be satisfied without being verified, and addressed without being
@@ -291,9 +296,9 @@ anything, and every item's board stays unset. Override the path for one item
 build error, not a silent no-op.
 
 Each registered board gets its own scoped `document-<board>.html`,
-`coverage-<board>.html`, `log-<board>.html`, and `summary-<board>.html`
-alongside the unchanged project-wide versions — handing `document-board-a.html`
-to Board A's team shows only their items. If a board declares `token:`, the
+`coverage-<board>.html`, `log-<board>.html`, `summary-<board>.html`, and
+`tree-<board>.html` alongside the unchanged project-wide versions — handing
+`document-board-a.html` to Board A's team shows only their items. If a board declares `token:`, the
 build warns when an item's id prefix does not contain it — a lint, not a
 rename. `.refdes/boards.yaml` records which board each item was on at the last
 build (commit it, the same as `.refdes/ids.yaml`); moving a file into a
@@ -388,8 +393,8 @@ downstream should read that, not the HTML.
 ## Known limitations
 
 - **Torque reads as energy.** `N·m` and `J` are dimensionally identical, so a
-  torque collapses to joules on display. Pin it with an assertion (`tq = … | N*m`)
-  if it matters. Every units library has this problem; none solve it without a
+  torque collapses to joules on display, and a `| N*m` assertion does not pin it
+  back. Every units library has this problem; none solve it without a
   separate notion of quantity kind.
 - **Interval widths are conservative.** A variable appearing more than once in an
   expression is treated as independent at each occurrence, so `x - x` reports a
@@ -398,7 +403,8 @@ downstream should read that, not the HTML.
 ## Tests
 
 ```bash
-./.venv/Scripts/python.exe -m pytest tests/ -q
+./.venv/bin/python -m pytest tests/ -q
+# Windows (PowerShell): .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
 The suite covers the invariants that must not quietly break: IDs never shift or get

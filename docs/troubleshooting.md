@@ -109,16 +109,19 @@ spelling. An unknown field with nothing close to it is only a warning
 the forward-compatible case, where there is no typo to correct.
 
 **`missing required field 'title'`**
-The schema marks it `required: true`. In the bundled standard, `test` and
-`component` use `title`, and a verdict-bearing `log` entry uses `summary`
-(the merged type; `title` is not its label field). `requirement` and `bound` have no
-required field at all under **hardware@3** -- their content lives in the
+The schema marks it `required: true`. In the bundled standard, `test`,
+`component`, and `group` use `title`, and a verdict-bearing `log` entry uses
+`summary` (the merged type; `title` is not its label field). `bound` requires
+its `limit:` — a bound without a limit is not a bound. `requirement` has no
+required field under **hardware@3** — its content lives in the
 markdown `body:`, which is required but enforced as a *warning*, so a stub
 can exist while it is still being drafted:
 
 ```
 WARNING items/reqs.yaml:7 [REQ-PWR-001] — body: is empty -- title: is an
-        optional short label, not a substitute for the content itself.
+        optional short label, not a substitute for the content itself. A
+        warning, not an error, so a stub can exist while it's still being
+        drafted.
 ```
 
 The older `missing required field 'text'` message belongs to hardware@2,
@@ -133,7 +136,7 @@ The `hardware@2` rename. Either put `standard.version:` back where it was and
 run `refdes standard upgrade --to 2` (which rewrites the items and their ids
 for you), or rename by hand — the prefix moved from `CON` to `BND` too, and
 `title:` became `text:` in the same version. See [the standard
-library](standard-library.md#the-versions-shipped-so-far).
+library](standard-library.md#the-versions-bundled-so-far).
 
 **`'constraint.title' is now 'constraint.text' -- rename this key ...`**
 The same rename's field half, which you'll see on a hand-rolled schema that
@@ -370,8 +373,10 @@ WARNING <project> — 2 item(s) with no coverage — see coverage.html
 2 items, 0 errors, 1 warnings
 ```
 
-(The coverage warning is the two-item project's own, not part of the rename: it
-is here because the block is what the command prints, in full.)
+(The coverage warning is the two-item project's own, not part of the rename: its
+requirements are `active`, and a draft requirement is excluded from coverage — a
+project of drafts prints `0 warnings` here. The block is what the command prints,
+in full.)
 
 Recording the retired id as `former_ids:` for external citations is a separate
 step, and a prefix-wide rename is what
@@ -406,7 +411,9 @@ The denominator's interval spans zero. Narrow the tolerance or restructure.
 Split it across two lines.
 
 **Units display oddly (`2 J` for a torque).**
-`N·m` and `J` are dimensionally identical. Pin it: `tq = ... | N*m`.
+`N·m` and `J` are dimensionally identical, and the display shows the canonical
+form — so pinning the line (`tq = ... | N*m`) is accepted and changes nothing:
+the result still reads `J`. Name the unit in prose if the distinction matters.
 
 **`calc fence: unknown attribute 'name' -- a calc fence accepts id="..."; write id="losses".`**
 A calc fence's info string has exactly one attribute, `id="..."`. `name=` was an

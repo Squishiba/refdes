@@ -1,0 +1,190 @@
+Task: verify docs/coverage.md against what refdes actually does (branch docs-coverage-verify, base 185aa53).
+
+Method: fresh probe projects under .scratch/cov/ (p1..p15), each built with
+`refdes init` (hardware@3) / hand-written minimal projects, driven by a
+PYTHONPATH wrapper .scratch/cov/refdes so the branch's src/ is what runs
+(the venv's installed refdes points at a different checkout -- never used).
+
+Claim table (VERIFIED / WRONG / MISSING / CAN'T VERIFY). "pN" = probe project.
+
+Five stages / items.json
+- Five stages, producers, "highest reached" .... VERIFIED
+  build.py:_coverage_for (1106-1158), model.py Coverage.stage (750-759);
+  p2 items.json stages open/addressed/claimed/satisfied/verified all seen.
+- items.json `coverage` object shape (stage, addressed_by, claimed_by,
+  satisfied_by, verified_by) .... VERIFIED (p2 _site/items.json).
+
+What gets coverage
+- coverable:true puts type in coverage; fallback to requirement/constraint
+  by name with a one-time warning .... VERIFIED (build.py:933, 957-979; p9
+  self-declared schema: "WARNING <project> — types.requirement does not
+  declare 'coverable:'; falling back to name-based detection
+  (requirement/constraint are coverable by convention). ..."; a type named
+  `note` with no coverable: got no coverage and no warning).
+- "The standard library declares it explicitly on both." .... WRONG for
+  hardware@3: base.yaml declares `coverable: true` +
+  `coverable_statuses: [active]` on `requirement` only; `bound` inherits
+  both via `extends: requirement` (v2 declared both explicitly; v3 merged).
+  -> fix.
+- coverable_statuses unset excludes only status: retired (when the type has
+  a status field) .... VERIFIED (build.py:982-993; p9 draft REQ-003 IS
+  tracked, retired REQ-002 absent).
+- coverable_statuses set = inclusion list; excluded items appear in
+  coverage *and* warnings nowhere .... VERIFIED (p2: draft REQ-004 and
+  retired REQ-006 absent from coverage.html and from the "no coverage"
+  count).
+- "The standard sets this on requirement/bound" (coverable_statuses) ....
+  VERIFIED via inheritance (requirement declares [active]; bound extends
+  it; p2 BND items tracked, draft bound excluded).
+- extends inherits coverable/coverable_statuses/satisfying_statuses/
+  verifying_statuses; subtype satisfies/verified through links naming the
+  parent .... VERIFIED (p14: `contract extends requirement` tracked by the
+  parent's rules; `verdict extends log` with status proposed -> CTR-001
+  claimed; p2: component's satisfies targeting [requirement] lands on the
+  subtype bound BND-002).
+- coverage page/summary/{{index}} group subtypes under parent unless
+  coverage.group_inherited false .... VERIFIED (render.py:177-181,
+  blocks.py:243-255; p2 coverage page shows BND rows with "(bound)" badge;
+  with group_inherited:false the badge is gone; {{index by="status"
+  type="requirement"}} lists BND-001/BND-002 under requirement).
+- Imported (external) items excluded .... VERIFIED by code:
+  compute_coverage iterates project.local_items (build.py:1266),
+  model.py:1153-1155 filters external. Not run end-to-end (needs a second
+  project + imports; code path is decisive).
+
+Which links feed coverage
+- Exactly the three verb pairs, from either end .... VERIFIED
+  (_coverage_for reads addressed_by/addresses, satisfied_by/satisfies,
+  verified_by/verified_by only).
+- constrained_by/governed_by/blocked_by/refines/derives_from contribute
+  nothing .... VERIFIED (p2: BND-001 with an accepted log's constrained_by
+  stayed open, in the "2 item(s) with no coverage" count).
+- satisfies gate: claimed outside satisfying_statuses (log accepted,
+  component selected), satisfied inside; unconfigured type counts every
+  link .... VERIFIED (v3 base.yaml:249,292; p2 REQ-002/LOG-002(proposed)
+  claimed, REQ-001/LOG-001(accepted) satisfied, BND-002/CMP-001(candidate)
+  claimed; p9 log with no satisfying_statuses -> proposed link satisfied).
+- verifies gate: verifier status in verifying_statuses (test passing);
+  unconfigured counts every link .... VERIFIED (v3 base.yaml:236; p2:
+  TST-002 planned left BND-002 claimed; flipping to passing -> verified).
+- addresses: no status gate .... VERIFIED (p2 REQ-003 addressed by a
+  status-less log).
+- authored `verified_by:` on the requirement feeds coverage, gated by the
+  verifier type's verifying_statuses .... VERIFIED with the type
+  declaring the link (p5 overlay `requirement.links.verified_by: [test]`:
+  TST planned -> REQ open; passing -> REQ verified).
+  NOTE (added to the doc): in stock hardware@3 the requirement declares no
+  verified_by, so authoring it on a requirement is a hard error, not a
+  silent no-op (p6: "ERROR ... unknown field 'verified_by' on requirement
+  -- did you mean the link 'governed_by'?").
+
+The coverage page
+- one table, least-covered first, columns
+  ID|Title|Stage|Addressed by|Claimed by|Satisfied by|Verified by ....
+  VERIFIED (p2 coverage.html).
+- counts by stage at top; index "Outstanding work" panel; item-page
+  coverage strip .... VERIFIED (p2: counts "2 open / 1 addressed only /
+  2 claimed, unsettled / 1 satisfied, unverified / 1 verified";
+  index.html panel; req-001.html coverage-strip).
+- conforms_to: per-board stages, coverage-<board>.html "Conforming
+  contracts" table, coverage.html row "not yet satisfied on boards:
+  board-b", unboarded satisfier counts for no board project-wide
+  satisfied .... VERIFIED (p10: warnings
+  "REQ-001 is not satisfied on board 'board-b' ..."; coverage.html rows
+  carry "not yet satisfied on boards: board-a, board-b";
+  coverage-board-b.html has the table; SHL-001 (no board) satisfies
+  REQ-002 project-wide, both boards' per-board stage open).
+
+Warnings
+- summary lines, exact text .... VERIFIED:
+  "WARNING <project> — 2 item(s) with no coverage — see coverage.html"
+  "WARNING <project> — 1 requirement(s) satisfied but not verified — see
+  coverage.html".
+- "satisfied but not verified" suppressed when no test items .... VERIFIED
+  (p4 = p2 minus tests.yaml: the line disappears; p2 with tests: present).
+- per-item claimed warning text .... VERIFIED:
+  "WARNING items/board-a/bounds.yaml:11 [BND-002] — claimed but not
+  verified (no test links to it)".
+- check exits 0 with warnings .... VERIFIED (rc=0, 5 warnings).
+- info level, -v/--verbose on check and build; the blocked_by stale check
+  is the one info in this area; nothing else coverage produces is info ...
+  VERIFIED (check/build --help; p2 -v: "INFO ... [LOG-003] — blocked_by
+  LOG-004, which is now 'accepted' ..."; no project.info in the coverage
+  code path -- grep shows info only in blocked.py/chains.py).
+
+When the claimer is blocked
+- per-item warning names chain to root with root status .... VERIFIED:
+  "... claimed by LOG-002, which is blocked_by LOG-003 <- LOG-004
+  (accepted)".
+- aggregate line text .... VERIFIED:
+  "WARNING <project> — 1 requirement(s) unsettled because LOG-004 is
+  accepted — see coverage.html".
+- "When several claimed items trace to the same single root blocker" ....
+  WRONG as stated: the line appears for a SINGLE item too (p2: 1 item ->
+  "1 requirement(s) unsettled because ..."). The conservative rule is per
+  item (exactly one root), not a minimum item count (build.py:1320-1341,
+  comment "One bucket per root blocker that accounts for >=1 ... item").
+  -> fix.
+- coverage.html shows the chain inline next to claimed rows .... VERIFIED
+  (p2: REQ-002 row carries "← LOG-003 ← LOG-004 (accepted)").
+
+Which statuses count as satisfying
+- default: any satisfies link counts, status not consulted .... VERIFIED
+  (p9).
+- declaring satisfying_statuses without a status field fails the load ....
+  VERIFIED (p8: "configuration error: types.spec.satisfying_statuses
+  requires a 'status' field on spec").
+- thread entry with satisfies but no status: thread's current status used.
+  defaults-inherited status is not a declaration. Unmerged fork -> claim
+  stays claimed. Same rule for verifying_statuses .... VERIFIED
+  (build.py _coverage_status:1087-1103 + chains.resolve_current;
+  p7: tip LOG-002 accepted -> root LOG-001's claim satisfied;
+  p13 --no-write: forked thread, fork entry declares nothing -> REQ-004
+  claimed; p15: thread whose only statuses come from defaults -> claimed;
+  --no-write needed because a writable load retargets a new entry's
+  follows: to the current tip, which erases the fork).
+
+Closing the gaps / stub-tests
+- stub-tests writes one starter test per coverable item with no verifying
+  test, verifies: pre-filled; "Run 'refdes id'..." hint .... VERIFIED
+  (p11: 5 stubs; targets exactly the uncovered coverable items).
+- one multi-item markdown file per (board|workspace) .... VERIFIED
+  (stub_tests.py:97,153 groups by (workspace, board)).
+- dedupe by the declared verifies edge, not text; planned/id-less tests
+  count .... VERIFIED (rerun: "no coverable item is missing a verifying
+  test"; a hand-written TST-003 with a different title but verifies:
+  [REQ-008] suppressed its stub).
+- rerun appends to the prior file, never overwrites .... VERIFIED (adding
+  REQ-008 -> "wrote 1 stub(s) to items/board-a/stub-tests.md", file now 6
+  stubs, original content intact).
+- stub status = the type's declared default (planned), not in
+  verifying_statuses; coverage unchanged by a run .... VERIFIED (p11 check
+  after stubbing: same stages as before, stubs error only "item has no
+  id").
+- stub takes the type's default prefix; board token lint .... VERIFIED
+  (p12 token 'A': "WARNING items/board-a/stub-tests.md:2 [TST-001] — item
+  is on board 'board-a' (token 'A'), but its id prefix 'TST' does not
+  contain that token" -- boards.py:187-191).
+
+Fixes made to docs/coverage.md
+1. "declares it explicitly on both" -> requirement declares, bound inherits
+   (hardware@3).
+2. aggregate unsettled line: not gated on "several" -- one item is enough.
+3. authored verified_by note: needs the type to declare the link; in stock
+   hardware@3 it's a load error.
+
+Skipped
+- No code change (docs-only task), so no new test and no sabotage: rules
+  5 applies to behaviour fixes; there are none here. gen_examples --check +
+  docs anchor tests + full suite are the gates.
+- No changelog fragment: docs/coverage.md prose corrections are not a
+  user-visible behavior change; changelog.d/README.md scope is behavior/CLI
+  changes (rule: user-visible changes only).
+
+Suite run (end of task): see below.
+
+Gates run (worktree root, worktree src on PYTHONPATH):
+- ruff check --select E9,F src tests -> All checks passed! (exit 0)
+- python docs-site/gen_examples.py --check -> schema-reference.md/vocabulary.md up to date (exit 0)
+- pytest tests/test_docs_anchors.py tests/test_docs_examples.py -> 8 passed
+- full suite: PYTHONPATH=$PWD/src ... -m pytest -q -p no:cacheprovider -> exit=0, 3938 passed, 2 skipped (326s; .scratch/suite.txt)

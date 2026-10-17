@@ -1,0 +1,78 @@
+fix-theme-light-side — theme colour overridden in BOTH palettes with
+different values must keep its light value (branch off main 1bbfbe0)
+
+START — verify the claim (2026-10-16)
+
+Task claim checked against src/refdes/theme.py render_theme_css on this
+branch: TRUE, unchanged. root_names (theme.py:640-644) keeps a light token
+only when `name not in color_names or not _differs_in_dark(name)`, so a
+colour token set in both palettes with different values is excluded from
+the `:root` block. Its dark value is emitted in the media block and
+[data-theme="dark"]; its light value lands only in [data-theme="light"],
+which is emitted only when some *other* token is light-only. So in light
+mode the page shows the stylesheet default, not the theme's light colour.
+
+REPRO (fresh .scratch/repro-theme-light/, refdes init, worktree code via
+PYTHONPATH=<worktree>/src so the venv's main-checkout install is not used):
+
+  site:
+    tokens:
+      light: {--bg: "#fffdf5"}
+      dark:  {--bg: "#101018"}
+
+`refdes build` -> _site/assets/theme.css (verbatim, light value nowhere):
+
+  :root {
+  }
+
+  @media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101018;
+    ...full effective dark palette...
+  }
+  }
+
+  [data-theme="dark"] {
+    --bg: #101018;
+    ...full effective dark palette...
+  }
+
+Built-in theme case: `theme: paper` (docs/themes.md shows the key) ->
+`_site/assets/theme.css` starts `:root {\n}` and `grep -c faf6ee` (paper's
+light --bg) = 0. Whole light palette lost, as PR #292 says for built-ins.
+(Pre-fix, built-in themes are pure-dark overrides: light mode renders the
+stylesheet default.)
+
+FIX
+
+render_theme_css: emit EVERY light override in :root, including the
+both-palettes-different case. Dark mode still wins because the media block
+re-asserts the effective dark palette at the same specificity, later in the
+sheet, and [data-theme="dark"] out-specifies :root. [data-theme="light"]
+emission condition unchanged (light-only present), per "don't change other
+theme behaviour". Docstring first routing bullet updated to match.
+
+TESTS (tests/test_theme.py, after the routing block)
+
+render_theme_css-level, exact blocks: both-palettes-different (the bug),
+flat pair (exactly one :root, unchanged), light-only, dark-only, mixed.
+Build-level: theme: paper -> paper.light in :root, paper.dark in media.
+61 passed in tests/test_theme.py.
+
+SABOTAGE: git diff theme.py saved to .scratch/theme-fix.patch, fix
+reverted with `git checkout -- src/refdes/theme.py` (no stash used), ran
+the two bug tests -> exactly 2 failed, 59 deselected; restored with
+`git apply .scratch/theme-fix.patch` -> 61 passed again. (Note: an
+invalid `git stash --version` probe printed usage and created no stash.)
+
+CHANGELOG: changelog.d/theme-light-side-in-root.fixed.md. Rule applied
+from changelog.d/README.md: user-visible bug fix -> `fixed` category, one
+bullet, committed with the change.
+
+VERIFICATION GATES
+- ruff check --select E9,F src/refdes/theme.py tests/test_theme.py: pass.
+- python docs-site/gen_examples.py --check: up to date.
+- Full suite (foreground, once): 3944 passed, 2 skipped in 338s, exit=0.
+  .scratch/suite.txt. No load flake hit.
+
+DONE — branch fix-theme-light-side, committed, pushed, PR opened.

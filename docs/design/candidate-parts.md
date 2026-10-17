@@ -4,6 +4,9 @@ mapping (§4), `hardware@3`'s `component.status` includes `rejected` (§5), and
 `refdes new --list` plus the dead-`defaults:` warning ship in the CLI (§6).
 §10's questions were implemented as recommended; §11 records what was
 considered and rejected, including the rejection Jared made directly.
+Phase 5's two remaining §8 rows landed in PR #319: the `docs/coverage.md`
+sentence on why `rejected` is not `obsolete`, and the `docs/index.md`
+Generated-blocks row, which now lists `{{compare}}`.
 
 # Candidate parts: comparing, disqualifying, and selecting
 
@@ -578,7 +581,11 @@ declared intent, never its name, so it survives a rename, a move, and a
 reorganisation, and it fires on the real mistake (someone set every item's
 status explicitly and the `defaults:` is a lie).
 
-Warning, not error; project-suppressible like the other authoring warnings.
+Warning, not error; it always warns -- there is no project-level suppression
+for authoring warnings (the config's severity knobs --
+`cross_workspace_severity`, `check_severity`, `lint_own_tags` -- are per-lint
+switches, and none of them reaches this `project.warn`; docs PR #287 verified
+this against the running tool and corrected the user-facing page to match).
 Nothing else. In particular, no `candidate_sets:` registry mirroring `boards:`
 — there is no page, no scope, and no coverage rule that needs candidate sets to
 be registered, so a registry would be ceremony around a convention.

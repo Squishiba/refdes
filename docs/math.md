@@ -50,8 +50,10 @@ on a page block. Naming is **opt-in**: a ```` ```calc ```` with no attribute is
 legal and renders byte-for-byte as it always has; a block needs no name until
 something wants to point at it.
 
-The name is lowercase, 1–40 characters, matching `[a-z][a-z0-9_-]{0,39}` — the
-same shape as citation ids and figure ids, and deliberately not the
+The name is lowercase, 1–40 characters, matching `[a-z][a-z0-9_-]{0,39}` —
+citation ids use the same letters/digits/`-`/`_` alphabet with looser shape
+rules, and figure ids are never format-checked at all, so the block grammar is
+the strictest of the three. It is deliberately not the
 symbol-shaped value names (`P_diss`) a block assigns, so a bare token's kind is
 readable and a block name can never be pasted where a value name belongs and
 look right. `id` is the only attribute the fence accepts: anything else on the
@@ -149,7 +151,7 @@ version, and that is a later decision.
 ### An upstream change marks the dependent changed
 
 The value a reference resolved to is part of the referring item's content
-hash (`hash_format` 4), so when `LOG-PWR-001`'s `V_in` moves, `LOG-B` shows up
+hash (from `hash_format` 4), so when `LOG-PWR-001`'s `V_in` moves, `LOG-B` shows up
 as `changed` in the baseline diff even though nothing in its own text did --
 and `refdes audit` says which reference moved:
 
@@ -233,12 +235,15 @@ build keeps using the reviewed, locked value until you accept the change:
 WARNING <project> — SOURCE FILE CHANGED: 'analysis/power-budget.csv' no longer matches its pin, but the build is still using the LOCKED values, not the file -- 'rail_3v3_power': locked 1.85, file now 2.3 (CHANGED) [used by LOG-PWR-001]. Review the change, then accept it with: refdes fetch --update --path analysis/power-budget.csv
 ```
 
-The same text shows under the affected calc row on the rendered item.
+Under each affected calc row on the rendered item a condensed form of the
+same warning shows: `⚠ analysis/power-budget.csv changed: 'rail_3v3_power'
+locked 1.85, file now 2.3 (CHANGED) -- accept with: refdes fetch --update
+--path analysis/power-budget.csv`.
 `refdes fetch --update` is the acceptance gate: it prints
 `analysis/power-budget.csv: rail_3v3_power: 1.85 -> 2.3`, re-pins the file and
 its values together, and the next build uses `2.3`. CI can promote the warning
 to an error with `--require-citations`. The locked value is part of the item's
-content hash (`hash_format` 4), so an accepted update marks the item changed
+content hash (from `hash_format` 4), so an accepted update marks the item changed
 even though its text did not; an unrelated edit elsewhere in the file does not.
 Design: [calc-sources](design/calc-sources.md).
 

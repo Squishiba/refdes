@@ -106,15 +106,27 @@ needed — arithmetic is calc's job, and a `limit` only ever compares one value.
 ## Declaring a check
 
 In the item doing the work — usually the entry that reaches a verdict — name a calc
-value and the item to check it against:
+value and the item to check it against, **in the front matter**, alongside `type:`
+and `id:`:
 
 ```yaml
+---
+id: LOG-PWR-001
+type: log
+summary: Thermal analysis of the regulator
 checks:
   - value: eff
     against: BND-THM-002
   - value: P_dens
     against: BND-THM-001
+---
 ```
+
+`checks:` is a field of the item, so it lives in the item's front matter — the
+text between the opening `---` and the closing `---`. Writing it as a ` ```yaml `
+fence in the item's **body** (next to the ` ```calc ` fence) is inert: the fence
+renders as literal text on the page and the check silently never runs. The build
+warns on that shape and names the fix.
 
 `value` must be a variable defined by a `calc` block in the **same item**.
 `against` must be an item with a `limit`, and may be
@@ -148,10 +160,10 @@ ERROR items/log/regulator.md:2 [LOG-PWR-001] —
 
 The message leads with the worst-case bound that was actually checked. `P_dens`
 here has no tolerance, so worst case and nominal are the same number and there
-is nothing to disambiguate. A value that does carry a tolerance gets a
-`(nominal X)` suffix instead, since the number that failed and the number an
-author typed can differ — see [worst case, not nominal](#worst-case-not-nominal)
-above:
+is nothing to disambiguate. A value that does carry a tolerance, checked
+against a one-sided bound, gets a `(nominal X)` suffix instead, since the
+number that failed and the number an author typed can differ — see
+[worst case, not nominal](#worst-case-not-nominal) above:
 
 ```
 ERROR items/log/io.md:2 [LOG-IO-002] — CLIM violates BND-IO-004:
@@ -163,7 +175,8 @@ and the failure is listed on the site index. `refdes check` exits non-zero, so
 CI catches it.
 
 Tip: use a [unit assertion](math.md) matching the bound's units
-(`P_dens : W/in^2`) so both sides of the comparison read in the same unit.
+(`P_dens = P_diss / A_board | W/in^2`) so both sides of the comparison read
+in the same unit.
 
 ## Candidates vs. verdicts
 
@@ -269,6 +282,7 @@ These are errors too, not silent passes:
 | `check against 'BND-X', which does not exist` | wrong ID, or a failed import |
 | `check against BND-X, which declares no limit` | target has no `limit` field |
 | `check ... cannot compare: ...` | dimensional mismatch between value and limit |
+| `each checks: entry needs 'value' and 'against'` | an entry missing one half; a near-miss key (`valye:`) is its own error, naming the fix |
 
 ## How close was it?
 
@@ -277,9 +291,11 @@ Passing is not the same as passing comfortably. Every evaluated check also recor
 of them tightest-first so a check that scrapes through by 3% sits at the top of the
 page instead of hiding among the greens.
 
-Negative means violated, positive means slack, and the sign always agrees with the
-pass/fail verdict. See [output formats](output.md) for the details, including the
-cases where a margin is genuinely undefined.
+Negative means violated, positive means slack, and the sign agrees with the
+pass/fail verdict — the one case where it does not is a strict `<`/`>` whose
+worst case lands exactly on the limit, which fails with a margin of zero. See
+[output formats](output.md) for the details, including the cases where a
+margin is genuinely undefined.
 
 ## Why this matters across projects
 

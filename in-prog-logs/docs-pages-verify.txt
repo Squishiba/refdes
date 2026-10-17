@@ -1,0 +1,156 @@
+# docs-pages-verify — verify docs/pages.md against real behavior
+
+Branch docs-pages-verify, base main 90fabc0. Started clean tree.
+
+Method: wrapper `.scratch/pages-probe1/refdes` runs this worktree's src
+(`PYTHONPATH=$PWD/src python -c 'from refdes.cli import main; main()'`).
+Probe projects under .scratch/pages-probe{1,2,3}/ (all relative paths,
+`refdes init` hardware@3 as base; init confirmed writing
+`standard: base hardware / version 3`).
+
+## Claim table (VERIFIED / WRONG / MISSING / CAN'T VERIFY)
+
+1. "Drop markdown in `pages/`" — VERIFIED. model.py:964 `pages_dir = "pages"`
+   default; probe1 builds with bare pages/ dir.
+2. Layout example (refdes-project.yaml, items/, pages/ siblings) — VERIFIED.
+3. "No front-matter is required" — VERIFIED (probe1 alpha.md/beta.md, no
+   front-matter, build clean).
+4. "The title comes from the first `# heading`" — VERIFIED
+   (pages.py:77-80 H1_RE; title-cased filename fallback when no heading).
+5. "`power-architecture.md` renders to `power-architecture.html`" — VERIFIED
+   (probe1: math.md → math.html etc.).
+6. Front-matter table: `title` (nav label + page title) VERIFIED (index.md
+   front-matter title "Home" won over H1 "Home Alpha Heading"); `order`
+   default 100 VERIFIED (pages.py:87); `nav` default true VERIFIED
+   (pages.py:88; delta.md nav:false rendered delta.html, absent from sidebar);
+   `board`/`workspace` default none VERIFIED.
+7. `site.pages:` and `site.nav:` keys — VERIFIED (schema.py:1090-1091).
+8. "Names are page slugs (the filename without .md). Anything unlisted
+   follows, sorted by `order` then title" — VERIFIED (probe1 sidebar order:
+   index, notes [listed], then Gamma(order 5), Alpha, Beta, Deep Page, Math
+   — unlisted sorted by order, then title).
+9. Nested pages: subfolders of pages/ load; slug joins path with "-"
+   (pages/sub/deep.md → sub-deep.html); dirs starting "."/"_" skipped
+   (_drafts/, .hidden/ not built) — behaviour VERIFIED, MISSING FROM DOCS.
+10. "sidebar already gets one collapsible group per board, listing that
+    board's own reports — summary, coverage, design log, references, full
+    record" — group per board VERIFIED (probe2 `<details>` group "Power";
+    collapsible: base.html.j2 details/summary + CSS toggle). Report list
+    WRONG (incomplete): nav.REPORT_LABELS + scope_reports give
+    summary, coverage, design log, references, parts, tree, full record
+    (log/references/parts conditional on content; vocabulary is
+    project-wide only). Probe2 Power group: Summary, Coverage, Full record,
+    Tree (no log/references/parts — project has no log items/citations).
+11. "Tag a page's front-matter `board:` … joins that group" — VERIFIED
+    (overview.html in Power group).
+12. "A `board:`/`workspace:` tag naming an undeclared key is a build error"
+    — behaviour VERIFIED, MISSING FROM DOCS. Real output:
+    `ERROR pages/nosuch.md — page board: 'nosuch' is not declared in
+    refdes-project.yaml's boards: registry` (pages.py:validate_boards;
+    same posture for workspaces:). Tag cleared, page renders top-level.
+13. "A page tagged with only `workspace:` sits directly in that workspace's
+    group, alongside any board groups nested inside it" — VERIFIED
+    (ws.html directly in "Product A"; Power group nested inside; nav.py
+    build_nav).
+14. "tag `workspace:` instead of, or as well as, `board:`" — VERIFIED
+    (both.md → Power group nested under Product A; board tag places page
+    in the board group; workspace nesting of boards derives from items,
+    probe2 used item_layout: workspace + items/product-a/power/*.yaml).
+15. "`order` and `nav: false` still work the same inside a board's group" —
+    VERIFIED (nav children built from the same sorted project.pages).
+16. "Bare IDs and `[[REQ-PWR-002]]` both work, with hover previews, exactly
+    as in an item body" — VERIFIED (probe2 landing: both became
+    `<a class="ref" href="req-001.html" data-ref="REQ-001">`; preview-data
+    payload carries REQ-001 with status "active"; page bodies go through
+    the same `_linkify` as items, build.py:3256 vs 3225). Missing-target
+    case: bare/wikilink id with no item → warning "reference to 'REQ-001',
+    which does not exist" (warning, not error), wikilink renders
+    `ref ref-missing` span.
+17. "`[Math](math.md)` … rewritten to `math.html` at build time" —
+    VERIFIED (index.html: `<a href="math.html">Math</a>`;
+    pages.py:rewrite_page_links).
+18. "All the usual markdown … tables and fenced code" — VERIFIED
+    (gfm-like MarkdownIt; probe1 alpha.md `<table>` rendered; fenced code
+    renders as pre/code).
+19. "Any page with more than two `##` headings gets a sticky contents list
+    built from its headings, each with a stable anchor" — WRONG in detail,
+    rest VERIFIED. page.html.j2:7 counts h2 AND h3 (pages.py HEADING_RE
+    matches `<h([23])>`; probe1 notes.md = 2×`##` + 1×`###` got a TOC with
+    anchors section-a/section-b/sub-c; alpha.md 0 headings, no TOC;
+    index.md 3×`##` TOC). Sticky: style.css:390 position: sticky. Anchors
+    stable slugs, duplicates get -2/-3 suffixes.
+20. "Pages do not get `calc` blocks evaluated" — VERIFIED (probe1:
+    ```calc block rendered as `<pre><code class="language-calc">` verbatim,
+    no evaluation, no diagnostic).
+21. Pages-only example (site: title/out/pages/nav; refdes-schema.yaml
+    types: note) — VERIFIED verbatim in probe3 (nav naming absent pages is
+    silently fine); build: "0 items, 0 errors"; a project with neither
+    standard: nor types: is a config error ("declares no item types"),
+    consistent with the example shipping refdes-schema.yaml.
+22. "With no items, the coverage page, design log, full record, and
+    `items.json` are all skipped, and the nav shows only your pages" —
+    VERIFIED (probe1/probe3 out dirs: no coverage.html/log.html/
+    document.html/items.json; render.py returns right after pages when
+    `not project.items`; probe1 sidebar has no report/Items/JSON links).
+    More than the four named are skipped (summary/references/parts/tree/
+    vocabulary too) — list not exhaustive, not fixed.
+23. "A page called `index` becomes `index.html`" — VERIFIED (probe1/2:
+    page slug index owns index.html).
+24. "if you have both pages and items, the item dashboard moves to
+    `items.html`" — WRONG. render.py:1082: dashboard moves to items.html
+    only when a page with slug exactly `index` exists. Probe2: pages +
+    items, pages named landing.md (no `index`) → dashboard stayed
+    index.html, no items.html written; add pages/index.md → items.html
+    appears and index.html is the prose page.
+25. "Building it: `cd docs-site && refdes build`" — VERIFIED (build runs
+    from the project dir; docs-site/refdes-project.yaml exists with
+    exactly the site: block the pages-only example shows — title "Refdes",
+    out ../_docs, pages ../docs, nav starting [index, getting-started,
+    concepts] — so "That is how this documentation is built" checks out;
+    docs-site/refdes-schema.yaml is the note type exactly as quoted).
+
+## Fixes applied to docs/pages.md (docs only, no code changes)
+
+- #19 TOC threshold: "more than two `##` headings" → "more than two `##`
+  and `###` headings".
+- #24 dashboard sentence: "if you have both pages and items" → "if the
+  project has items too" (the trigger is the `index` page, not pages
+  alone).
+- #10 board report list: add parts, tree.
+- #9 add subfolder/slug sentence in "Writing one".
+- #12 add sentence: unknown board:/workspace: tag is a build error.
+- (also from probe2) page slug colliding with a generated report name is
+  a build error when the project has items — real output:
+  `ERROR pages/coverage.md — page 'coverage.md' would be written to
+  coverage.html, which is a generated report. Rename the page.`
+  One sentence added in the pages-only section (it's where the collision
+  cannot happen, so it's where the contrast lands).
+
+## Cross-page notes
+
+- docs/output.md "Site navigation" section repeats the same imprecise
+  "more than two `##` headings" rule. Task says don't edit other pages —
+  noted in PR body.
+
+## Tests / checks
+
+- (docs-only change: no behaviour fix, so per COMMON "every behaviour fix
+  gets a test" there is nothing to add a test for, and no sabotage to
+  run — recording that explicitly.)
+- docs tests: `pytest -q tests/test_docs_anchors.py tests/test_docs_examples.py
+  tests/test_pages.py tests/test_standard_docs_complete.py` → 19 passed.
+- `docs-site/gen_examples.py --check` → rc 0, all up to date.
+- docs-site end-to-end build with the edited page: "0 items, 0 errors,
+  4 warnings" (warnings pre-existing: site.assets 'images' not a
+  directory in this worktree + vocabulary.md citation refs; none from
+  pages.md).
+- changelog: no fragment. Rule applied from changelog.d/README.md: the
+  fragment categories are all tool-behavior changes (breaking/added/
+  changed/fixed/removed); a docs-page correction changes no tool
+  behavior, so nothing here would fold into [Unreleased].
+- `ruff check --select E9,F src tests` → All checks passed (rc 0).
+- Full suite, foreground, once, at the end:
+  `PYTHONPATH=$PWD/src python -m pytest -q -p no:cacheprovider` →
+  exit=0, "3938 passed, 2 skipped in 337.98s" (.scratch/suite.txt).
+  Re-ran the four docs test files after the final line-wrap fixes:
+  19 passed.

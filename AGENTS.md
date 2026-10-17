@@ -91,6 +91,12 @@ Specifically in the directory `in-prog-logs/` as text files. Name the file
 after the task you were working on; write your incremental progress down here,
 what difficulties you may have had, and if the task was finished or not.
 
+Keep the log under 150 lines, and don't cite your own commit in it: a log
+can't name the commit that contains it, and "record the sha" follow-up commits
+just give the next reviewer new text to find wrong (PR #250's log reached ~590
+lines that way). Summarize review rounds in a sentence instead of adding a
+section per round, and put a line count in your final reply, not in the file.
+
 ## Identify yourself in every commit
 
 End every commit you make with a `Co-authored-by:` trailer naming the model

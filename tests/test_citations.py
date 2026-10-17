@@ -1068,7 +1068,7 @@ def test_cli_audit_never_calls_a_missing_kept_copy_kept(citation_project, capsys
     "kept_copy, blob, expected_pin, expected_state",
     [
         (False, False, "hash-only", "pages unchecked"),
-        (True, True, "kept", "ok"),
+        (True, True, "kept", "pages unchecked"),
     ],
 )
 def test_cli_audit_pinned_citation_keeps_its_pin_words(
@@ -1077,14 +1077,15 @@ def test_cli_audit_pinned_citation_keeps_its_pin_words(
     """Only the row that was lying changes: a pinned citation with no kept copy
     still reads `hash-only`, and one whose bytes are kept still reads `kept`.
 
-    The state column joins in for the hash-only row (CITE-LOCK-003): this
-    citation cites `page: "14"`, and a hash-only pin whose record carries no
-    count can never have that page checked -- `fetch --update` is the only
-    command that can bring bytes back to count. Printing `ok` there is
-    cmd_audit's own description of the failure it fixed in run-5: reading a
-    record as a check. The pin column, which is this test's subject, is
-    untouched; the kept row proves the flip is about the bytes, not the flag.
-    """
+    The state column joins in for both rows (CITE-LOCK-003 and run-7 F13):
+    this citation cites `page: "14"`, and a record that carries no page count
+    at all has never compared that page to anything -- the hash-only pin has
+    no bytes here for `fetch --update` to bring back, and the kept pin has
+    its bytes on this machine for a plain `fetch` to count. Printing `ok` for
+    either is cmd_audit's own description of the failure it fixed in run-5:
+    reading a record as a check. The pin column, which is this test's subject,
+    is untouched; both rows flip together, and the words differ by what each
+    record's state can say about the bytes it has."""
     sha = hashlib.sha256(b"datasheet bytes").hexdigest()
     _write_citation_lockfile(
         citation_project,

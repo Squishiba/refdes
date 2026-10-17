@@ -1,10 +1,13 @@
 # Stale-arithmetic signal — design spec
 
-**Implemented**, as of v0.5.0 (unreleased) — `lifecycle._stale_arithmetic` and
-the `stale_arithmetic` field on `lifecycle.Baseline`/diff output. This header
-is stale from an earlier draft; see `git log -- docs/design/stale-arithmetic-signal.md`
-and `lifecycle.py` for the landed shape, which this document's prose still
-describes accurately.
+**Implemented** (`b537edd`, 2026-08-28) — `lifecycle._stale_arithmetic` and
+the `stale_arithmetic` field on `lifecycle.DiffResult` (diff output;
+`verdict`/`calc_hash` on the baseline entries it compares against). An
+earlier version of this header dated the landing to v0.5.0 and called it
+unreleased: 0.5.0 shipped on 2026-08-21, before this commit, so the signal
+ships with the next release (unreleased at the time of writing). See
+`git log -- docs/design/stale-arithmetic-signal.md` and `lifecycle.py` for
+the landed shape, which this document's prose still describes accurately.
 
 ## The problem
 

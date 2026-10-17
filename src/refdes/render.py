@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -836,6 +837,40 @@ def _asset_file_list(asset_dir: str) -> list[str]:
     return out
 
 
+def _copy_source_refused(exc: OSError, src: str, dest: str) -> bool:
+    """Whether a `shutil.copy2` OSError means the *source* refused (True --
+    name the asset) or the *destination* did (False -- cli.py's exit-2
+    "cannot write the site" refusal owns it; sending the user to chmod the
+    project file for a full disk is the same wrong-file bug this whole pass
+    exists to kill, in the other direction).
+
+    `shutil` names the file it was working on: opening/stat'ing the source
+    carries `src`, opening the destination and `copystat`'s chmod carry
+    `dest`. The copy loop's read and write do not (the OSError comes from
+    the raw fd operation), so a filename-less OSError is split by errno:
+    ENOSPC/EDQUOT/EFBIG/EROFS can only come from a write, so they are the
+    destination; the rest -- EIO, EBADF, EFAULT -- can come from the read
+    and are resolved for the source. EIO is the honest gap: `write()` can
+    fail with EIO too (a storage fault mid-write is filename-less and
+    undecidable), and that case takes the asset sentence and exit 1, not
+    cli.py's site refusal -- the tie-break names a real file the user can
+    inspect and unlinks the partial copy, while a site refusal for a
+    source-side EIO would send the user to the output directory for an
+    unreadable project file, the bug this split exists to kill.
+    (IMAGE-ASSET-007 review, F1; round-5 review, P2.)
+
+    An OSError naming *neither* path (reachable only through exotic
+    `copystat`/symlink intermediates) is taken as destination-side --
+    `return exc.filename == src` sends it to the loud exit-2 refusal that
+    publishes nothing, which is the safe direction: an asset-side call
+    here would publish a site silently missing a file the asset may not
+    have been (round-6 review, F4).
+    """
+    if exc.filename is not None:
+        return exc.filename == src
+    return exc.errno not in {errno.ENOSPC, errno.EDQUOT, errno.EFBIG, errno.EROFS}
+
+
 def _copy_project_assets(
     project: Project, out_dir: str, written: set[str], taskpane_enabled: bool = False
 ) -> None:
@@ -873,9 +908,51 @@ def _copy_project_assets(
         src = os.path.join(project.root, *rel.split("/"))
         if not os.path.isfile(src):
             continue  # already reported as a build error when the reference was resolved
+        if rel in project.unreadable_assets:
+            # Already refused this build -- at its reference, by
+            # `_process_images` (IMAGE-ASSET-007 review round 3): a
+            # second, copy-side sentence telling the author to remove
+            # the file contradicts the reference's own advice and makes
+            # `check` and `build` disagree on the count for one state.
+            # The file stays registered (it resolved); it is simply not
+            # published.
+            continue
         dest = os.path.join(asset_out, *dest_rel.split("/"))
+        # Destination-side failures deliberately sit OUTSIDE the try below:
+        # makedirs and every write-path OSError (ENOSPC in the copy loop
+        # carries no filename, a refused chmod names `dest`) must reach
+        # cli.py's refusal, which names the site directory and exits 2 --
+        # IMAGE-ASSET-007 review. Only the *source* read gets the named
+        # per-asset error, so this function never sends the user to chmod
+        # the wrong file.
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        shutil.copy2(src, dest)
+        try:
+            shutil.copy2(src, dest)
+        except OSError as exc:
+            if not _copy_source_refused(exc, src, dest):
+                raise  # destination-side: cli.py's "cannot write the site" owns it
+            try:
+                # The failure landed mid-copy: `shutil` created `dest` and
+                # may have written into it. "This build does not publish
+                # it" must not leave the stub behind -- it is not in
+                # `written`, so the manifest prune will never claim it
+                # (IMAGE-ASSET-007 review round 2).
+                os.remove(dest)
+            except OSError:
+                pass
+            # The copy loop serves hashed images too, and those live
+            # nowhere in `site.assets:` -- the remedy names their own
+            # reference instead (review round 2).
+            remedy = (
+                "remove it from the site.assets: directory"
+                if dest_rel == rel
+                else "point the reference at a readable file"
+            )
+            project.error(
+                f"asset {rel!r} cannot be read: {exc.strerror or exc}. Make "
+                f"it readable, or {remedy} -- this build does not publish it"
+            )
+            continue
         written.add(f"assets/{dest_rel}")
 
 
@@ -901,7 +978,28 @@ def _copy_datasheet_assets(project: Project, out_dir: str, written: set[str]) ->
             continue  # already reported as cache_missing when the citation was resolved
         dest = os.path.join(asset_out, *rel.split("/"))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        shutil.copy2(src, dest)
+        # Same split as `_copy_project_assets` (IMAGE-ASSET-007 review, F4):
+        # the source is `.refdes/copies/<sha>`, and an unreadable cached PDF
+        # escaping to `cli.py`'s site-write refusal would send the user to
+        # chmod their output directory for a cache-file problem.
+        try:
+            shutil.copy2(src, dest)
+        except OSError as exc:
+            if not _copy_source_refused(exc, src, dest):
+                raise  # destination-side: cli.py's "cannot write the site" owns it
+            try:
+                # Same partial-stub rule as `_copy_project_assets`
+                # (IMAGE-ASSET-007 review round 5): "does not publish
+                # it" must not leave a truncated PDF in the site.
+                os.remove(dest)
+            except OSError:
+                pass
+            project.error(
+                f"published datasheet {rel!r} cannot be read: "
+                f"{exc.strerror or exc}. Refetch the citation, or make the "
+                f"cache entry readable -- this build does not publish it"
+            )
+            continue
         written.add(target)
 
 

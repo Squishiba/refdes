@@ -14,8 +14,10 @@ different population.
 
 The decision is taken. This document specs it; it does not relitigate it.
 
-**Status: Phase 4a implemented.** H6–H9 and the Phase 4b thread panel remain
-later work.
+**Status: Phase 4a implemented.** H6, H7 and H8 have since landed (`tasks:`
+on the merged `log` with its fold, `refdes thread`/`refdes work` and the
+index `threads` projection, and the two off-by-default release-gate rules);
+H9 and the Phase 4b thread panel remain later work.
 
 **Scope note on concurrent work:** this document does not touch, and makes
 no claim about, `standards/hardware/v3/base.yaml`, any file under `docs/`
@@ -126,8 +128,11 @@ reachable behind the queried entry contribute tips, so any unmerged fork is
 undefined; otherwise the nearest entry that declares the field wins, and two
 equidistant declarations that disagree are undefined. The build reports one
 fork `info` per open fork and one `follows` cycle `error` per cycle.
-`hardware@3` still does not declare `follows:` (Phase 4), so this remains
-available only to projects that declare the ordinary link themselves. See
+At the time of writing `hardware@3` did not yet declare `follows:` (Phase 4),
+so this was available only to projects that declare the ordinary link
+themselves — Phase 4a (d71c143/#176) has since added it (`link_types:`
+`follows: {inverse: followed_by}` and `follows: [log]` on the merged `log`,
+`standards/hardware/v3/base.yaml:166,305`). See
 `tests/test_chains.py`.
 
 **Phase 3b implemented** (rendering): §8's "Rendering" row. The page of any
@@ -145,8 +150,10 @@ and names the open tips. `chains.py` gains the additive helpers this needs —
 `thread_entries`, `thread_tips` — all built on the same component memo as
 `resolve_current`, so a thread costs one fold per key however many of its
 pages are rendered. An item with no `follows:` edge in either direction renders
-byte-identically to before. `hardware@3` still does not declare `follows:`
-(Phase 4, which documents threads fully). See `tests/test_threads_render.py`.
+byte-identically to before. At the time of writing `hardware@3` did not
+yet declare `follows:` (that was Phase 4, which documents threads fully;
+it has since landed with Phase 4a, d71c143/#176). See
+`tests/test_threads_render.py`.
 
 ---
 

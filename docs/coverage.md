@@ -48,7 +48,9 @@ picture:
   (`requirement`/`constraint` are coverable by name -- the two names that
   convention has ever recognized, kept as-is for compatibility rather than
   following the `hardware@2` rename) with a one-time warning. The
-  [standard library](standard-library.md) declares it explicitly on both.
+  [standard library](standard-library.md) declares it explicitly on
+  `requirement`; in `hardware@3` `bound` is `extends: requirement`, so it
+  inherits the flag (and `coverable_statuses:`) rather than declaring them.
 - **`coverable_statuses:`** narrows which of those items actually participate,
   by `status`. Unset, it excludes only `status: retired` (if the type has a
   `status` field at all) — the original behavior. Set, it's an *inclusion*
@@ -105,7 +107,11 @@ intuition fail it — and the rule holds in each failure:
   of the test declaring `verifies:` — feeds coverage just the same: the
   verifier type's `verifying_statuses:` decides whether each such link
   counts, exactly as it would for `verifies:`
-  (`build._verifier_type_names`, `build._coverage_for`).
+  (`build._verifier_type_names`, `build._coverage_for`). Authoring it from
+  that end requires the requirement's type to declare `verified_by:` in its
+  own `links:` — the bundled standard's doesn't, so in a stock
+  `hardware@3` project the key is a load error
+  (`unknown field 'verified_by' on requirement`), not a silent no-op.
 - A `_by` suffix does not put one in either. **`constrained_by` does not feed
   coverage**, however strongly the name suggests otherwise. A log entry that
   only `constrained_by`'s a bound leaves it exactly as open as if no link
@@ -149,7 +155,7 @@ One platform-wide requirement — "every board uses the standard debug header" �
 is one item, so the table above goes `satisfied` the moment *any* board
 complies.
 
-A board that declares `conforms_to: [GRP-…]` gets the same four stages
+A board that declares `conforms_to: [GRP-…]` gets the same five stages
 computed again for each member of that group, counting only that board's own
 satisfiers.
 
@@ -206,9 +212,10 @@ WARNING items/main-io/requirements.md:40 [REQ-IO-CONN-002] — claimed but not v
   LOG-IO-001 (on_hold)
 ```
 
-When several `claimed` items trace to the same single root blocker, a
-second summary line groups them — this is the sentence coverage exists to
-produce: not just "unsettled," but *why*:
+When `claimed` items trace to the same single root blocker, a second
+summary line groups them — a single item sharing the root is already enough
+for the line to print, counted `1 requirement(s)` — this is the sentence
+coverage exists to produce: not just "unsettled," but *why*:
 
 ```
 WARNING <project> — 2 requirement(s) unsettled because LOG-IO-001 is on_hold — see coverage.html
@@ -246,6 +253,12 @@ An item whose `status` is not in that list still records the link — it shows
 up as `claimed_by` on the requirement's coverage, and the requirement's stage
 caps at `claimed` instead of `satisfied`. Declaring `satisfying_statuses:`
 requires the type to have a `status` field; the project fails to load otherwise.
+
+Of the bundled `component`'s non-satisfying statuses, `rejected` and
+`obsolete` are not synonyms of each other — `rejected` records a decision this
+project made (considered the part, did not use it), `obsolete` a fact about
+the part (EOL, NRND) that can land on a part you did select — though both
+leave a `satisfies:` target at `claimed`, never `satisfied`.
 
 For a thread entry that declares `satisfies:` but not `status:`, coverage
 uses the thread's current status. A `status:` inherited from the file's

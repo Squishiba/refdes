@@ -119,9 +119,10 @@ check is gone.
   contract, a separate change with its own collision considerations.
 
   **Closed 2026-10-01.** The premise is gone: the payload does carry a key,
-  on both ends of the contract. `render._items_json` exports it as a
-  nullable, always-present field -- `render.py:641`, `"key": item.key or
-  None` -- and `imports._absorb` reads it back at `imports.py:64-65`,
+  on both ends of the contract. `render.items_json` exports it as a
+  nullable, always-present field -- `render.py:734` (cited as `:641` when
+  this bullet was written; line drift), `"key": item.key or None` -- and
+  `imports._absorb` reads it back at `imports.py:64-65`,
   validates it with `keys.malformed_key_message` (`imports.py:67`), carries
   it into the `Item` it builds (`imports.py:96`), and indexes the imported
   item by that key rather than by a provisional handle
@@ -1440,7 +1441,9 @@ In rough order of how likely each is to change the design:
    every file.
 
    **Status: done — composite shape kept.** The rename ran on this
-   repository's own adopted project (trial commit `3226700`, `REQ-PWR-001` →
+   repository's own adopted project (trial commit `3226700` — no longer
+   reachable: the trial branch was deleted and the object garbage-collected;
+   `df58a63` records the run and its outcome — `REQ-PWR-001` →
    `REQ-PWR-010`): the only changes were the item's `id:` line and the
    display half of each inbound composite (`verifies:
    [REQ-PWR-001@1zn5skrv6k3]` → `[REQ-PWR-010@1zn5skrv6k3]`, and the same
@@ -1474,10 +1477,13 @@ In rough order of how likely each is to change the design:
    `build(seal_write=...)`), the baseline hash-format migration reached from
    `former-ids propose`, and the baseline stamp itself (`revision`/`release`
    report "would stamp" and write nothing). Explicit write commands either
-   honor the flag by running their existing dry-run (`id`, `revise`,
-   `keys adopt`, `stub-tests`) or refuse with exit 2 (`fetch`, `init`,
-   `standard upgrade`, `standard add-preset`/`remove-preset`,
-   `former-ids propose --confirm`); `new` and `schema` write nothing to
+   honor the flag by running their existing dry-run (`id`, `rename` — P12's
+   rename of `revise`, 4e29ff6 — `calc-rewrite`, `stub-tests`, `revision`,
+   `release`, `keys adopt`, `standard upgrade` — added to this list when it
+   grew a `--dry-run`, 509a487) or refuse with exit 2 (`fetch`, `init`,
+   `standard add-preset`/`remove-preset`,
+   `former-ids propose --confirm`, `history capture`/`redact`/
+   `migrate-seals`); `new` and `schema` write nothing to
    begin with. `build --no-write` still writes the site, per §2. The
    enumeration is pinned by `tests/test_no_write.py`, which snapshots every
    byte of the project tree before and after each load-type command.

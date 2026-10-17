@@ -1,0 +1,149 @@
+Task: verify docs/standard-library.md against live behavior (branch docs-standard-library-verify, main 4502c58)
+Method: fresh projects under .scratch/verify1/ via `refdes init` + hand-built
+hardware@1/@2 projects; every quoted message run, not recalled. Tool:
+/home/jorb/work/venv-refdes/bin/refdes (repo src via PYTHONPATH, editable install).
+
+NOTE: the bash tool here truncates trailing stdout/stderr of chained commands;
+several "hangs" during probing were tool artifacts — verified by re-runs with
+timers (refdes upgrade refuse path: 0.46s, exit 1, rolled back).
+
+CLAIM TABLE (section: claim -> VERIFIED / WRONG / MISSING / CAN'T-VERIFY, evidence)
+
+Intro + standard: block
+- block shape (base/version/presets) is what init writes -> VERIFIED (init output, proj/refdes-project.yaml)
+- types/link_types/sets need not exist anywhere; no refdes-schema.yaml at init -> VERIFIED (find . after init)
+
+What's in it (tables; PR #274 already fixed, quick re-check)
+- 6 types, prefixes REQ/BND/TST/CMP/GRP/LOG, all status enums -> VERIFIED (`refdes schema` JSON, v3/base.yaml)
+- 15 verbs + inverse naming, governs/constrains/blocks/contains the four non-`_by` -> VERIFIED (v3/base.yaml link_types)
+- group has no status, coverable:false, not a satisfies target -> VERIFIED (v3/base.yaml 264-274)
+- legacy_prefixes [DEC] loads warning-free -> VERIFIED (t6: DEC-001 typed log after upgrade, 0 errors)
+- provenance on all types, stewardship on all but log -> VERIFIED (schema.json per-type properties)
+- "no decision type in @3; refdes new decision -> `unknown type 'decision'.` on stderr, exit 1" -> VERIFIED (stdout empty, stderr text, exit 1)
+
+When a thing is finished with
+- retired drops out of coverage (no open-coverage warning) but dangling-link error still fires -> VERIFIED (t17: REQ retired + refines: [REQ-999] -> ERROR, no coverage warning)
+- superseded: link/status disagreement warns in BOTH directions -> VERIFIED (t8: "supersedes LOG-004, but that item's status is 'accepted'..." + "status is 'superseded' but nothing supersedes it...")
+- obsolete at check_severity info: failing check cannot break build -> VERIFIED (t9: obsolete comp failing BND-001, build 0 errors)
+- on_hold cascade line "N requirement(s) unsettled because LOG-00X is on_hold" -> VERIFIED (t8: build.py:1339 format; live warning matched, incl. "— see coverage.html" suffix not quoted in doc)
+- rejected component info / rejected log requires rationale (required_when) / require_rejection_rationale: false in refdes-project.yaml -> VERIFIED (t9 ERROR "'rationale' is required when status is 'rejected'"; t10 false -> clean)
+- eliminated/rebutted = design-debate preset words, exact enums -> VERIFIED (v2/presets/design-debate.yaml)
+
+Opting out
+- standard: none: init writes it, no refdes-schema.yaml; project types authored in refdes-schema.yaml load -> VERIFIED (t3 + widget loads)
+
+Overriding and extending
+- overlay fields merge by key; new field adds; field:null removes -> VERIFIED (t13: erratum_ref ok, rationale -> "unknown field 'rationale' on requirement." WARNING)
+- status redeclare = whole-spec replace (no partial merge) -> VERIFIED (t20: {default: active} dropped choices -> status: banana accepted)
+- types.component: null -> load error naming both sides -> VERIFIED ("configuration error: types.log.links.selects names target type 'component', which is not declared (removed by an override?)")
+- type-level scalar replaced wholesale (check_severity) -> VERIFIED (t19: overlay check_severity: error -> obsolete failing check = ERROR)
+
+sets / include
+- later include wins (fields) -> VERIFIED (t14: s2's x wins)
+- two sets declaring same link verb w/ different targets -> load error naming both sets -> VERIFIED (t14b: "sets 'va' and 'vb' both declare link 'refines' with different targets")
+- include fully shadowed warns in build output -> VERIFIED (t14: "set 's1' contributes nothing that survives the merge")
+- doc:-only patch over included field allowed; any other partial override refused -> VERIFIED (t14 ok; t16: "neither a full definition (missing 'type') nor a doc-only patch; keys given: on_change")
+
+Presets
+- @3 ships none; add-preset/init --preset refuse: "preset 'design-debate' does not exist for hardware@3 (available: [])" -> VERIFIED (exit 2, exact)
+- --preset + --standard none refused; wording matches init --help -> VERIFIED
+- upgrade --to 3 refusal + rollback on pinned preset -> VERIFIED (t5: exact "rewritten project no longer loads: preset 'design-debate' does not exist for hardware@3 (available: [])", version stayed 2)
+- remove-preset reports breakage BEFORE writing, writes anyway -> VERIFIED (t5)
+- [DB-001] tag in remove-preset output example -> WRONG: real ERROR line has NO item tag ("items/main/db-001.md:2 — unknown type 'debate' -- it was provided by the 'design-debate' preset...")
+- "all three refuse the same name with the same does-not-exist error" -> WRONG for remove-preset: on a @3 project with design-debate hand-listed, remove-preset SUCCEEDS (that's the escape from the load error; proj-remove test); with it absent it refuses "is not currently selected". Only init --preset and add-preset emit the does-not-exist text. (standards.py:256 collision text for preset-vs-preset verified in code, can't trigger live: @1/@2 bundle one preset.)
+- "remove-preset first, then upgrade: both succeed" -> WRONG as written for the page's own example project: with db-001.md left in place the upgrade refuses "project has existing build errors" (exit 1) until items are migrated; after removing db-001 the upgrade succeeds (t5)
+- preset collision quote -> VERIFIED against src/refdes/standards.py:256 wording
+- design-debate contents (debate/option/claim/position, resolved_by:[decision], option [candidate, eliminated], claim [open, accepted, rebutted]) -> VERIFIED (v2 preset yaml)
+- "unknown field 'raises' ... provided by the 'design-debate' preset" wording exists -> VERIFIED for the unknown-type case live; the field-level variant is the same code path (parse.py) and is marked in-doc as illustrative @1/@2 example
+
+refdes init
+- writes site:/standard:/id: only, .vscode/settings.json (absolute schema path, items/**/*.yaml), .gitignore = settings.json + .refdes/copies/ + .refdes/schema.json + .refdes/sealing-optin.json + .refdes-write.lock -> VERIFIED (all exact)
+- existing .vscode/settings.json: left untouched, exact "yaml.schemas" line printed -> VERIFIED (t4)
+- <latest> resolved to real integer 3 -> VERIFIED
+
+refdes new
+- `refdes new log` scaffold byte-identical to the doc block (cmp script: EXACT MATCH) -> VERIFIED
+- project-defined types scaffold (widget) -> VERIFIED
+- "status is optional, defaults to nothing" (log) -> VERIFIED (v3 yaml, no default; scaffold commented)
+
+JSON Schema emission
+- --json exists; .refdes/schema.json regenerated by build/check/index/id/fetch/audit (all six, tested each) -> VERIFIED
+- check mtime warning + refresh -> VERIFIED (".refdes/schema.json was older than refdes-project.yaml -- refreshed...")
+- covers field names/types, status enums, link verbs with targets in description, reserved keys id/type/on_change/prefix/board/workspace -> VERIFIED (schema.json)
+- "additionalProperties: false on every branch ... lights up `sattisfies:` the moment it's typed" -> WRONG: item branches ship additionalProperties: TRUE (schema_json.py:263; tests/test_schema_json.py asserts NOT false — finding 3: editor must not reject input `refdes check` only warns about). Only list_file/section_marker declare false. (docs/design/standard-library.md §4 repeats the stale claim — noted in PR body, not touched.)
+
+Versioning and pinning
+- "byte-identical forever once shipped" / "carries every version it has ever shipped" / heading "The versions shipped so far" @3 -> WRONG-vocabulary: hardware@3 is UNRELEASED (v3/base.yaml:3 "hardware@3 is still unreleased"; CHANGELOG.md [Unreleased] carries the @3 move; AGENTS.md). @3 is bundled, not shipped.
+- upgrade chains migrations in order (v1 -> v2 -> v3: CON->BND ids, constraint->bound, title->text->body chained, decision->log, equivalent->drop_in) -> VERIFIED (t21, two-step output)
+- v2->v3 rewrite set: text->body, method->body, title->summary (decision->log), records->follows, equivalent->drop_in, merge_types -> VERIFIED (t6 files)
+- upgrade writes bare targets, no events; first writable load captures ("captured DEC-001: LOG-001 now follows it", "(minted N key(s) and rewrote M reference(s) while loading)", composite follows target, event file in .refdes/history/events/) -> VERIFIED (t6)
+- --no-write never reaches capture -> VERIFIED (t12: --no-write check = no capture; plain check captured)
+- edited-after-captured WARNING -> VERIFIED (t6) — doc quote truncates the real message, which ends "... See https://squishiba.github.io/refdes/troubleshooting.html#the-design-log."
+- refuses + rolls back on item with existing body content -> VERIFIED (t7: "can't rename requirement.text to body: this item already has its own body content..."; version + files unchanged)
+- --dry-run prints plan ("would refuse: ..."), writes nothing, exit 1 -> VERIFIED (t7)
+- body required on requirement/bound enforced as WARNING not error; title optional -> VERIFIED (t11: "body: is empty -- ... A warning, not an error, so a stub can exist...")
+- equivalent: at @3 -> build ERROR naming drop_in; other unknown verbs only WARN -> VERIFIED (t18)
+- coverage computed strictly from addressed_by/satisfied_by/verified_by; constrained_by feeds none -> VERIFIED (build._coverage_for code)
+- run_checks iterates every local item -> VERIFIED (build.py:1693-1695)
+- v1: six types, constraint.title required; v2 preview [status, text, limit]; v1 equivalent/alternate [] unrestricted; v2 restricted to [component]; bound gains refines [bound] alongside derives_from -> VERIFIED (v1/v2 base.yaml)
+- v2 near-synonym quote -> VERIFIED verbatim (v2/base.yaml 22-25)
+
+MISSING FROM DOCS (fixed):
+- @3 moved citations from a component-only hand-rolled field into an includable set
+  (component.datasheets -> component.citations, breaking; log gains citations), and
+  `upgrade --to 3` rewrites it, including url->path and vendor->keep_copy inside
+  citation entries (v3/migration.yaml 14-39,81-86; live-verified in t6: datasheets->
+  citations, - url: -> - path:). CHANGELOG [Unreleased] lists it as @3 change 4; the
+  page's change list (1-7) and the upgrade paragraph omitted it.
+- @3 log declares `sealing: history` (v3/base.yaml ~289; CHANGELOG @3 change 6):
+  editing an entry is no longer a sealed-content build error; captured+edited = the
+  warning the page already shows; legacy log-seal files keep being read; overlay
+  `sealing: build` restores the old lock. Page showed the warning example but never
+  the change.
+
+CAN'T VERIFY:
+- "issue #7 findings 7 and 22", "redhat-developer/vscode-yaml#207 open" (external GitHub state)
+- @2 adoption history prose ("real adoption over a single development cycle") — v2/base.yaml:11 attests ("All three came out of real adoption"); CHANGELOG per-change publication history not independently checkable.
+- refdes VS Code extension claims (extensionDependencies redhat.vscode-yaml; front-matter key completionProvider reading the index payload) -> VERIFIED against editors/vscode/package.json:28 and extension.js:574-625,695-712 in-repo. (Kept here only for the upstream-issue half which is external.)
+
+SUITE / GATES
+- full suite: 1 failed, 3968 passed, 2 skipped -- sole failure test_docs_anchors
+  (heading rename "versions shipped" -> "versions bundled" broke 2 cross-page
+  anchor links in cli-reference.md:1346 and troubleshooting.md:139). Fixed
+  those two lines mechanically (fragment + link text only; this is the only
+  out-of-page edit, disclosed in the PR body). Re-run: tests/test_docs_anchors.py
+  2 passed. Suite otherwise green on first run -- docs-only change, no code touched.
+- docs-site/gen_examples.py --check: up to date, exit 0.
+- ruff check --select E9,F src tests: All checks passed.
+- No changelog fragment: the change is documentation-only (a docs page plus its
+  anchor links); no behavior changed, so CHANGELOG/[Unreleased] has nothing to
+  record -- per task instruction ("No changelog fragment (say why)").
+
+FIXES APPLIED to docs/standard-library.md (W=wrong-claim fix, M=missing added):
+- W1 heading + intro: "shipped" -> "bundled" (x2); @3 lead-in now says
+  "bundled with the current tool, not yet released (see CHANGELOG [Unreleased])".
+- W2 presets paragraph: split the three commands' actual checks (init/add-preset
+  vs-not-exist; remove-preset = selection check + repair path).
+- W3 remove-preset example: removed the invented [DB-001] tag from the ERROR line.
+- W4 "remove-preset first, then upgrade, and both succeed": added caveat -- exits
+  1; with preset-vocabulary items remaining the upgrade refuses with
+  "project has existing build errors" until items are migrated.
+- W5 additionalProperties: rewritten to the real behavior (item branches
+  additionalProperties: true by design; only the list-file envelope is false).
+- W6 edited-after-captured quote: appended the omitted "See ...troubleshooting.html#the-design-log." tail.
+- W7 (minor) "had not tagged yet" -> "had not been tagged yet".
+- M1 new change 8: citations field-set move (datasheets->citations breaking
+  rename, log gains citations, url->path / vendor->keep_copy) + upgrade
+  paragraph extended with the same renames.
+- M2 change 7 extended: log `sealing: history` (edit-after-capture warning
+  replaces sealed-content build error; legacy log-seal files; overlay
+  `sealing: build` restores the lock) -- all three sourced from v3/base.yaml
+  289-290 + CHANGELOG [Unreleased] @3 change 6.
+- Cross-page notes for PR body: CHANGELOG @3 "Seven changes" list omits
+  drop_in/group/component-rejected that this page lists; docs/design/
+  standard-library.md repeats the stale "additionalProperties: false" claim
+  (and its heading anchors) -- design docs untouched per task rules.
+
+STATUS: finished. All gates green. Commit contains docs/standard-library.md,
+the two anchor-link lines in docs/cli-reference.md + docs/troubleshooting.md,
+and this log. No changelog fragment (docs-only).

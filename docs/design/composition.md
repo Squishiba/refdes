@@ -1,9 +1,12 @@
 Status: decided — owner (Jared) approved all five open questions as
-recommended, 2026-09-20. Engine implementation landed on ao/refdes-106/root
-(rename, links/body widening, conflict errors, shadow warning, doc-only
-patches); the base.yaml factoring refactor is deliberately deferred to the
-`extends:` pass per question 3. The two `extends:`-dependent tests landed
-with the extends engine (`tests/test_composition.py`).
+recommended, 2026-09-20. Engine implementation landed (rename `dc0c138`,
+links/body widening `0459f64` — with the conflict errors and the shadow
+warning — doc-only patches `8085da2`); the base.yaml factoring refactor,
+deferred at drafting to the `extends:` pass per question 3, landed with it
+(`ecb85bb`, 2026-09-21). The two `extends:`-dependent tests landed with the
+extends engine (`tests/test_composition.py`). This header first cited branch
+`ao/refdes-106/root` and its commits `6f2ea68`/`5d05498`/`08b79e4`; the work
+arrived rebased, so those SHAs no longer resolve.
 
 # Composition — widening `include:` beyond fields
 
@@ -31,21 +34,25 @@ attempt to factor every duplicated field declaration in
 the resolved schema held byte-identical as the oracle. The spec answers what
 that attempt measured, not what a reader might imagine was duplicated.
 
-**Implementation status:** engine landed (rename `6f2ea68`, widening
-`5d05498`, doc-only patches `08b79e4`). The base.yaml refactor and the
-`test_hardware3_base_resolves_unchanged` oracle ride the `extends:` pass
-(open question 3, decided) -- the `extends:` half of that oracle is
-`test_hardware3_base_resolves_unchanged` in `tests/test_extends.py`, the
-sets-factoring half is still to do; `test_extends_naming_a_set_is_an_error`
-and `test_extends_and_include_together_own_declaration_wins` are implemented.
+**Implementation status:** engine landed (rename `dc0c138`, widening
+`0459f64`, doc-only patches `8085da2`; the SHAs first listed here were the
+pre-rebase branch's and no longer resolve). The base.yaml refactor and the
+`test_hardware3_base_resolves_unchanged` oracle rode the `extends:` pass
+(open question 3, decided) and landed with it: `ecb85bb` factored
+`base.yaml` onto the widened sets, so the oracle
+(`tests/test_extends.py:582`) now guards both halves;
+`test_extends_naming_a_set_is_an_error` and
+`test_extends_and_include_together_own_declaration_wins` are implemented.
 
 ---
 
 ## 1. What a shareable set may contain
 
-Today `include:` carries fields only: `_expand_include`
-(`standards.py:305`) merges `field_sets:` entries into `fields:` and pops
-itself. §12.3 of `extends.md` measured what is byte-identical across types
+At drafting, `include:` carried fields only: `_expand_include`
+(`standards.py:305` then) merged `field_sets:` entries into `fields:` and
+popped itself. The landed engine widened it as spec'd — it now resolves
+`include:` over `sets:`-namespace entries into `fields:`, `links:` and
+`body:` (`standards.py:440`, per the Q1 rename `dc0c138`). §12.3 of `extends.md` measured what is byte-identical across types
 but structurally unreachable (the line numbers below are re-cited against
 the current `base.yaml`; §12 itself was measured before the P8/P11 commits
 landed):
@@ -265,6 +272,12 @@ Where each layer is applied today, by file and function:
 | type's own declaration | same call: own `fields:`/`links:`/`body:` overlaid last inside `_expand_include` / `_merge_types` |
 | parent's resolved spec | `_resolve_extends`, the single pass spec'd in `extends.md` §2.3 — runs after `_merge_types` returns, before `schema.py::load_project` constructs `ItemType` objects (`schema.py:489` resolves, the construction loop follows) |
 
+Post-landing drift of the coordinates above: the Q1 rename (`dc0c138`) renamed
+`_merge_field_sets` to `_merge_sets`, and with the extends engine merged,
+`resolve_namespaces` runs it at `standards.py:74` before `_merge_types` (78) and calls
+`_resolve_extends` at `standards.py:90` — so the pass lives in `standards.py`, not
+`schema.py`, and `schema.py:489` is now `_validate_required_when`.
+
 Consequences worth naming:
 
 - **A type that both extends and includes**: its includes are expanded
@@ -326,6 +339,10 @@ two named things visible on one line.
 ---
 
 ## 6. Failure modes and named tests
+
+(The `field_sets.` prefix in the quoted messages below is pre-rename design
+text; the messages ship as `sets.<name> ...` — the Q1 rename `dc0c138`, e.g.
+`standards.py:86`.)
 
 refdes's characteristic bug is reporting success while doing nothing. In
 composition that bug wears two faces: a set that silently contributes

@@ -1,0 +1,167 @@
+Task: audit implementation-status claims in docs/design/keys.md and
+docs/design/standard-library.md against code + git history; correct stale
+status text only. Branch docs-design-status-f.
+
+Method note: per TASK.txt, keys.md's doc-level implementation-status
+paragraph was verified against code (AGENTS.md says it is fully landed and is
+itself the record), not re-derived section by section. No code changes, so no
+test/sabotage step (TASK.txt line 10). No changelog fragment: internal design
+docs only, docs/README rule for user-visible changes does not apply (I applied
+the "user-visible changes only" rule from changelog.d/README.md and the edits
+are pure documentation status text).
+
+== keys.md — claim | actual | evidence ==
+- "§1/§2/§3/§5/§6 Layers 1-5/§7 implemented" (doc-level status, l.17-45)
+  | DONE — all verified against code. |
+  keys.mint keys.py:117; malformed_key_message keys.py:131 (Layer 1);
+  validate/uniqueness keys.py:191 (Layer 2); build._unknown_key_message
+  build.py:748 (Layer 3); _validate_latest_baseline keys.py:554 (Layer 4);
+  audit_historical_baselines keys.py:595 invoked only in cmd_audit
+  (cli.py:1667/1702) (Layer 5); cmd_keys_adopt cli.py:2369 over adopt.py;
+  .refdes/keys-adopted.yaml present; root adoption commit 0a37b1b exists.
+- "§4 revise/former_ids cleanup implemented; _rename_prefix survives;
+  Mapping.prefixes stays; ledger-burned collision check gone" (l.32-45)
+  | DONE. | revise.py:1128 _rename_prefix, revise.py:1268-1272 mint->expand->
+  expand_missing_checks, _bare_reference_blockers revise.py:1420/1441,
+  former_ids.propose key-proven exact candidates former_ids.py:105-120,
+  Mapping.prefixes revise.py:124, no burned-prefix check in revise.py.
+- "Closed 2026-09-14: checks: against: composite via plan_check_expansion /
+  expand_missing_checks / _planned_target / build._unknown_key_message /
+  hash_format: 3" (l.83-95) | DONE. | links.py:323/879/979, build.py:748,
+  build.py:2382 (hash_format >= 3 checks rule).
+- "Closed 2026-10-01: imports carry the key, render._items_json exports it —
+  render.py:641" (l.121-127) | PARTIAL (mechanism DONE, citations STALE). |
+  Function is `render.items_json` (render.py:619; `def _items_json` never
+  existed per git log -S); the `"key": item.key or None` export is
+  render.py:734 (was 641 when written, verified at 3d1e55a). imports.py:64-67,
+  96, 121 match the doc's cites (imports.py:118-122 block contains :121).
+  FIXED.
+- "§9 item 1 implemented (shapes tests)" (l.1431) | DONE. |
+  test_keys_adopt.py:55-108 covers flow/block/quoted/one-line mapping/
+  defaults/front-matter/CRLF.
+- "§9 item 2 done, trial commit 3226700" (l.1442-1444, echoed §10 l.1526-1531)
+  | DONE as a decision record; commit cite STALE. | `git cat-file -t 3226700`
+  -> not a valid object (trial branch deleted, object GC'd); decision recorded
+  in df58a63. FIXED by annotating the cite.
+- "§9 item 3 implemented (tmp_path seals+baseline tests, sabotage rollback)"
+  (l.1457) | DONE. | test_keys_adopt.py:156 (rekeys baselines+seals, reports
+  uncomparable) :285 (mid-write sabotage byte-for-byte restore).
+- "§9 item 4 done: --no-write gates ...; report list (id, revise, keys adopt,
+  stub-tests); refuse list (fetch, init, standard upgrade, standard
+  add-preset/remove-preset, former-ids propose --confirm)" (l.1470-1483)
+  | PARTIAL: gating DONE (schema.json "not refreshed" cli.py:403/413,
+  build(seal_write=) build.py:3622, "would stamp" cli.py:714, new/schema
+  stdout-only cli.py:2104/2121) but the enumeration is STALE. | Current
+  --no-write help cli.py:2810-2818, pinned by
+  test_no_write.py:559-571: report list is id, rename, calc-rewrite,
+  stub-tests, revision, release, keys adopt, standard upgrade; refuse list is
+  fetch, init, standard add-preset/remove-preset, former-ids propose
+  --confirm, history capture/redact/migrate-seals. `revise` renamed to
+  `rename` (4e29ff6, P12); `standard upgrade` flipped from refuse-exit-2 to
+  forced dry-run (cli.py:2313, 509a487; test
+  test_standard_upgrade_under_no_write_reports_the_plan_like_dry_run).
+  FIXED.
+- "§9 item 5 / §10: Resolved: Damm" (l.1485/1516) | DONE. | keys.py:40 Damm
+  table, check_char keys.py:101.
+- "§7 storage: baselines/seals/membership keyed on surrogate, legacy readers,
+  conditional carry-forward, hash_in_format shared helper" (l.811-926)
+  | DONE. | seal.py:84-99 both shapes, boards.py:210-228 both shapes,
+  keys.baseline_identity keys.py:266, keys.hash_in_format keys.py:302,
+  lifecycle.migrate_hash_format lifecycle.py:399, key_restore.py exists.
+- "§8 validate_prefixes now warns" (l.1323, §10 l.1503) | DONE. |
+  ids.py:322-333 docstring "visible warning, never a rewrite".
+
+== standard-library.md — claim | actual | evidence ==
+- Doc-level status "Implemented, as of v0.5.0 (unreleased) — standards.py +
+  hardware/{v1,v2,v3}, including merge/override, field_sets/include:,
+  versioning and pinning, migrations, --standard/--preset at init; bundled
+  standard pinned hardware@3, itself unreleased" (l.25-32)
+  | PARTIAL: substance DONE, version/status STALE. | Standard library shipped
+  in 0.4.0 (CHANGELOG.md:756 under "## [0.4.0] - 2026-08-18"); 0.5.0 is
+  itself released (CHANGELOG.md:464, 2026-08-21) so "(unreleased)" is false.
+  `sets:` renamed from `field_sets:` at HEAD (dc0c138, unreleased CHANGELOG
+  section; v3/base.yaml:111 uses `sets:`, v1/v2 frozen bundles keep
+  `field_sets:`, standards.py:194-201; overlay `field_sets:` = rename error).
+  hardware/{v1,v2,v3} exist; --standard/--preset on init cli.py:3206/3213;
+  standard upgrade chains migration.yaml per version (cli.py:3300-3326);
+  hardware@3 unreleased — true (CHANGELOG [Unreleased]). FIXED (header only).
+- "2026-10-01 supersession: design-debate preset retired by threads decision"
+  (l.34-39) | TRUE, already recorded. | v3 ships no presets dir;
+  parse.py:127-140 "the four types the retired design-debate preset provided,
+  all merged into..."; docs/cli-reference.md:1194. No edit needed.
+- §2 engine capabilities coverable/coverable_statuses/verifying_statuses/
+  required_when incl. {links: X} extension (l.377-546, §11 l.1530)
+  | DONE. | schema.py:489-536 _validate_required_when (incl. .links),
+  build.py:987-992 coverable_statuses, build.py:1093 verifying_statuses,
+  v3/base.yaml:97 required_when {links: alternate}. No edit needed.
+- §3 "As actually shipped (finding 12)" corrections (l.600-615) | TRUE. |
+  standard upgrade always rewrites, chained migration.yaml, hash carry-
+  forward, --dry-run plan (cli.py:3300-3326 description). Design list above
+  it self-flagged as "not what got built". No edit.
+- §9 blocked_by on the verdict type = log in hardware@3; stale-blocker
+  diagnostic; cycle = build error (l.1083, 1132, 1167) | DONE. |
+  v3/base.yaml:280-310 log links blocked_by: [], :170 cycle doc;
+  blocked.py:1-26 stale-blocker + _is_settled reusing satisfying/verifying
+  statuses, blocks.walk_cascade cycle detection. No edit.
+- §10 parts page / part-number index (l.1285) | DONE. | render.py:280-285
+  part anchor, render.py:1311-1313 parts.html, citations.by_part_number.
+  No edit.
+- §11 drop_in/alternate self-inverse verbs (l.1440) | DONE. |
+  v3/base.yaml:172-180. No edit.
+- §12 JSON Schema emission (.refdes/schema.json, refdes schema --json,
+  refdes new scaffold) (l.1598-1853) | DONE. | cli.py:400-415 staleness
+  tripping at load, :3261 --json, cmd_new/cmd_schema stdout-only. No edit.
+- §1 "Six types: requirement, constraint, decision, test, component, log.
+  No more." + v1 code block (l.45, 82) | historical design for the v1
+  bundle; v1/base.yaml matches the block; v2 renamed constraint->bound,
+  v3 merged decision into log + added group. Design reasoning, self-flagged
+  by the header's "verify specifics" note — NOT a status line; left alone
+  per TASK.txt rule 8.
+- §7 migration-impact table "refdes.yaml shrinks..." (l.783) — design-era
+  filename (config is refdes-project.yaml now, AGENTS.md). Historical
+  migration plan, not a status claim; left alone per rule 8.
+
+== edits made ==
+keys.md:
+- "Closed 2026-10-01" imports bullet: render._items_json -> render.items_json,
+  cite render.py:641 -> render.py:734 (noted as line drift).
+- §9 item 2: trial commit 3226700 annotated as garbage-collected, df58a63
+  named as the surviving record.
+- §9 item 4: --no-write enumeration updated to the current,
+  test_no_write.py-pinned lists (rename/calc-rewrite/revision/release/standard
+  upgrade report; history capture/redact/migrate-seals refuse), with the P12
+  (4e29ff6) and --dry-run (509a487) provenance.
+standard-library.md:
+- Doc-level header: shipped-in-0.4.0 / 0.5.0-released date fix; field_sets ->
+  sets: rename (dc0c138) recorded.
+
+== checks ==
+- No code changes: no test/sabotage step (TASK.txt line 10); no changelog
+  fragment (internal design docs, docs prose only).
+- PYTHONPATH=$PWD/src venv-refdes python -m pytest -q -p no:cacheprovider
+  tests -k "docs or anchor or link" > .scratch/suite.txt: exit=0,
+  382 passed, 3625 deselected.
+- python docs-site/gen_examples.py --check: exit=0 (schema-reference.md,
+  vocabulary.md up to date).
+- ruff not run: no src/tests files touched (docs-only change).
+Task finished: yes.
+
+== review round 1 (CHANGES REQUESTED on 9eeddde) ==
+Findings (from review of PR #318):
+- M1: keys.md:1483 cited e22d1be as the provenance of standard upgrade's
+  --no-write flip. e22d1be is docs-only ("No source or test changes"), not an
+  ancestor of HEAD (on unmerged origin/ao/refdes-176/docs-cli-stub-history),
+  and its own cli-reference table lists standard upgrade as REFUSE — the
+  opposite of the claim. True provenance: 509a487 "feat(cli): standard upgrade
+  gets --dry-run (F11) (#239)", reachable. ACCEPTED, fixed.
+- M2: keys.md:1481 cited a8b1327 for P12's revise->rename; a8b1327 is not an
+  ancestor of HEAD (on unmerged origin/vocab-p12-rename-p13-index-help).
+  Main's squash is 4e29ff6 (PR #200), reachable. ACCEPTED, fixed.
+- M3: same two stale hashes repeated in this log. ACCEPTED, fixed above.
+Verified: git merge-base --is-ancestor {a8b1327,e22d1be} HEAD -> false;
+{4e29ff6,509a487} HEAD -> true. Same failure class as 3226700 that this PR
+annotates — my own citation slip. Behavior claims unchanged (pinned by
+cli.py:2810-2818 / tests/test_no_write.py:559-571, re-verified unchanged).
+No code changes: no test/sabotage. Gates (re-run, docs-only change):
+  pytest tests -k "docs or anchor or link": exit 0, 382 passed, 3625 deselected
+  gen_examples.py --check: exit 0

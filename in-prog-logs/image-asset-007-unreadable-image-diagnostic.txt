@@ -1,0 +1,284 @@
+IMAGE-ASSET-007: unreadable image gets a named diagnostic
+==========================================================
+Date: 2026-10-15. Branch: fix/image-unreadable-diagnostic-20261015, base 3793ac9 (main, includes #261).
+
+Finding (row in in-prog-logs/current-main-resweep-image-digests.tsv)
+--------------------------------------------------------------------
+An image src that resolves to a file the build cannot open (mode 000):
+- hash pass `_image_inputs_hash_value` (build.py) records `[rel, None]` --
+  the same None sentinel as "unresolved", silently;
+- render pass `_process_images.swap` (build.py, the `with open(full_path,
+  "rb")` digest read) has no OSError handling: `refdes check` / `refdes
+  build` die with a raw PermissionError traceback naming the image nowhere.
+
+Reproduction on current main (real CLI, PYTHONPATH pinned to this worktree's
+src, refdes.__file__ verified; probes in .scratch/image-unreadable/)
+---------------------------------------------------------------------
+- proj2: items/dec-a.md body `![gone](gone.png)`, items/gone.png chmod 000,
+  no site.assets. `refdes check` and `refdes build` -> PermissionError
+  traceback from build.py swap (open), exit 1, zero diagnostics.
+- proj1 (the TSV probe's layout): site.assets [assets], assets/gone.png
+  chmod 000, body refs frozen /assets/gone.png. `refdes check` exits 0
+  reporting 0 errors (the collect_static_assets registration makes the
+  render digest-cache hit, so the crash moves to render_site's
+  shutil.copy2, where cli.py's site-write catch turns it into
+  "cannot write the site to _site (Permission denied) -- nothing was
+  rendered", exit 2, pointing at the output directory).
+- In-process: `_image_inputs_hash_value` returns [['assets/gone.png', None]].
+Delta vs the TSV's pin: at 3793ac9 the site.assets layout does not crash
+`check`; it is quiet on check and misleading on build. The local-reference
+layout reproduces the crash exactly. Claim ("no diagnostic names the
+unreadable image") PRESENT on current main.
+
+Fix
+---
+- build.py `_process_images.swap`: wrap the digest read in
+  `except OSError` -> project.error naming src, resolved project-relative
+  path and exc.strerror ("image src 'X' exists at 'rel' but cannot be read:
+  Permission denied. Make the file readable, or point the reference at a
+  readable file"), record(False) for the preview, leave the reference
+  unrewritten -- same posture as missing-image (build error, not warning,
+  exit 1). The two sentences stay distinct (permission semantics preserved).
+- build.py hash pass: unchanged behavior (the None sentinel is the
+  deterministic hash contribution; raising there would crash compute_hashes
+  before the render pass can report, and kill serve's poller); docstring +
+  comments updated to name the third sentinel producer.
+- render.py `_copy_project_assets`: wrap shutil.copy2 in `except OSError`
+  -> project.error naming the asset and the OS's reason, continue (asset
+  not published, rest of site published). Without this, the site.assets
+  bulk-copy PermissionError escapes render_site into cli.py's
+  "cannot write the site" refusal (cli.py deliberately keeps that catch for
+  real destination failures -- untouched).
+- #261's src canonicalization untouched.
+- docs/markdown.md: documented both sentences.
+
+Tests (4 new, red on base 3793ac9, green after; 31 controls pass on base)
+--------------------------------------------------------------------------
+- tests/test_image_search.py: named build error + unrewritten ref + preview
+  record; `cli.main(["check"]) == 1` with the diagnostic and no traceback;
+  unreadable site.assets file refused naming the asset, rest of site
+  publishes.
+- tests/test_image_hash.py: `[["items/gone.png", None]]` sentinel under the
+  resolved path (payload recomputed while unreadable) + the named error.
+All chmod-based tests use the repo's existing nt/root skipif.
+
+Verification
+------------
+- red on base: 4 new fail (PermissionError / traceback / quiet check), 31
+  controls pass (verified by running the HEAD archive tree with the new test
+  files).
+- green: tests/test_image_search.py + test_image_hash.py 35 passed.
+- adjacent: test_serve_images, test_render_assets, test_site_assets_confinement,
+  test_integration, test_exit_codes, test_serve_state: 133 passed.
+- full suite: see below.
+- scoped ruff (build.py, render.py, both test files): 2 findings, identical
+  to the base baseline (build.py:3 I001, render.py:114 SIM103 pre-existing);
+  test files clean at baseline and after.
+
+Status: COMPLETE. PR opened, not merged (per lane rules).
+
+FINAL: commit b3b08fc on fix/image-unreadable-diagnostic-20261015, pushed,
+PR https://github.com/Squishiba/refdes/pull/268 opened against main
+(base 3793ac9, #261 untouched). Full suite 3891 passed / 2 skipped.
+PROGRESS.md row for IMAGE-ASSET-007 updated. Not merged (no self-review by
+lane rules). Task complete.
+
+REVIEW ROUND (orchestrator covering Sol): review of #268 returned
+CHANGES REQUESTED. Rebased on origin/main (35c2304) -- clean.
+Findings and responses:
+1 (blocking, real): render.py's blanket `except OSError` swallowed
+   destination failures (unwritable site.out, ENOSPC) and blamed the asset
+   -- regression vs base for exactly the case the comment claimed to
+   preserve (docs/cli-reference.md:58). Fixed: `if exc.filename != src:
+   raise` -- source reads get the named per-asset error, every
+   destination-side OSError (makedirs outside the try, dest open, ENOSPC
+   in the copy loop which carries no filename, refused chmod naming dest)
+   reaches cli.py's exit-2 site-write refusal.
+2 (low-medium, real): a *referenced* site.assets file is registered by
+   collect_static_assets, so the digest-path gate was short-circuited:
+   check said 0 errors, record ok:True, page pointed at a refused copy.
+   Fixed: readability probe (open/close, no content read) on the
+   pre-registered reference path, cached in Project.readable_probe (new
+   field, model.py) so a heavily-referenced directory costs one open per
+   file.
+3 (low, real): the blanket OSError asserted "exists ... but cannot be
+   read" for a FileNotFoundError race between the isfile gate and the
+   open. Fixed: shared `refused()` helper -- FileNotFoundError re-unifies
+   with the gate's own "does not exist" sentence; EACCES/EISDIR/EIO keep
+   the unreadable one.
+4 (info): check's clean bill over an unreadable site.assets file -- the
+   referenced case is now caught by fix 2 (check renders); an
+   UNreferenced one stays build-time-only (check publishes nothing, so it
+   cannot see the copy) -- docs/markdown.md reworded to match.
+5 (info): changelog "preview record marks the reference failed" was true
+   only for the digest path -- fix 2 makes it true for every referenced
+   file; changelog and docs wording extended.
+New tests (red at 9d47275 per the review's reproductions, green here):
+referenced-static gated at check exit 1; vanished-between-gate-and-open
+gets "does not exist"; read-only site.out keeps build's exit-2 refusal
+naming the site dir.
+Targeted: 188 passed. Scoped ruff: identical to pre-fix head.
+
+REVIEW ROUND 2 (orchestrator covering Sol): second review (257e04ab) =
+CHANGES REQUESTED on head 33207ce. origin/main unchanged (35c2304); branch
+already on top, rebase no-op.
+F1 (real): the copy loop's raw read/write OSErrors carry no filename, so
+   the round-1 `exc.filename != src` split sent source-side read failures
+   (EIO mid-read) to cli.py's site-write refusal -- the same wrong-file
+   bug mirrored. Fixed: render._copy_source_refused(exc, src, dest) --
+   filename==src is source; filename==dest is destination; filename None
+   splits by errno (ENOSPC/EDQUOT/EFBIG/EROFS = write-only = destination,
+   read-capable = source). Tests for each half (monkeypatched copy2 raising
+   the real copy-loop shapes: ENOSPC -> exit 2 site-write refusal naming the
+   dir; EIO -> exit 1 naming the asset, site publishes around it).
+F2 (real): check still passed clean over an UNreferenced unreadable
+   site.assets: file (it renders, publishes nothing -- copy-time refusal
+   invisible). Fixed: readability probe moved to collect_static_assets
+   registration: open/close per file, FileNotFoundError (walk->probe race)
+   silently dropped, other OSError = named build error naming the file
+   (file=refdes-project.yaml, same convention as the confinement warns),
+   file NOT registered -> publish has nothing to copy. check exit 1 now.
+   Existing bulk-copy test updated (build reports, not render).
+F3 (real at review-time head): record ok:True for a referenced unreadable
+   site.assets file -- with the registration refusal the file is
+   unregistered, the reference falls to the digest path, its open fails,
+   record(ok:False) + reference sentence. Build-level test asserts the
+   record, item id, unrewritten reference.
+F4 (adjacent class, small wrap done): _copy_datasheet_assets' unwrapped
+   copy2 -- same escape to the site-write refusal from .refdes/copies/.
+   Same helper, names the datasheet, destination-side raises to cli.py.
+   Unit test both directions via the raiser.
+F5: informational (full-suite PYTHONPATH, CI windows pending), no action.
+Docs/changelog reworded: registration refusal semantics.
+Targeted 193 passed; full suite 3928 passed / 2 skipped; scoped ruff
+identical to baseline (5 pre-existing findings, render.py:115 = line shift
+from the errno import).
+
+## Review round 4 (tests/docstrings; reviews 00a60fd8 + 663e6890)
+
+Round 3 (uncommitted when round 4 arrived): registration refusal moved out
+of collect_static_assets into check_registered_assets_readable (post-render,
+inside build.build so check and build share it); Project.unreadable_assets
+records what the reference gate and the registration check refused, the copy
+loop skips those -- a referenced unreadable file is ONE error, the item-side
+sentence, in both commands; digest read feeds readable_probe (no second
+open). Docs/changelog reworded to match.
+
+Round 4 items:
+- 00a60fd8 F1 (blocking): the referenced-gated test was non-discriminating
+  (the registration sentence satisfies its substring asserts). Fixed: the
+  reference's own sentence pinned verbatim. Sabotage shown: swap probe ->
+  `elif False` -> 3 failed (gated-at-reference, records-failed,
+  reported-once) with the registration sentence in the report; restored.
+- 00a60fd8 F2: the site-write-refusal test's docstring claimed the copy
+  loop; it dies at the first page write. Rewritten (round 3) to pin the
+  page-write half; the copy-loop split is pinned by
+  test_an_unwritable_asset_destination_blames_the_site_not_the_asset.
+- 00a60fd8 F3: docs quote the reference sentence; test 1 now asserts the
+  full message with == (pin) -- truncation fails.
+- 00a60fd8 F4: readable_probe test: shared beside-image, os.open counted,
+  probe_opens == [] and rel in readable_probe.
+- 00a60fd8 F5 (nit): did NOT move the copy-loop/datasheet tests; kept the
+  unreadable-file story in one module. Noted in the PR comment.
+- 663e6890 F1 (FIFO hang): probe now O_RDONLY|O_NONBLOCK; test with SIGALRM
+  watchdog (status 0, no hang). Code change justified by the hang repro.
+- 663e6890 F2 (hashed hint): copy-loop remedy branches on dest_rel == rel;
+  hashed images get "point the reference at a readable file".
+- 663e6890 F3 (partial stub): source-refused handler unlinks the partial
+  dest (not in `written`, so the prune never claims it).
+- 663e6890 F4/F5: fixed by round 3 (single error; changelog leads with the
+  registration check).
+
+## Review round 5 (windows-latest RED; review 67e7116b)
+
+P1 (blocking, confirmed from the windows-latest job log, run 38800147585:
+`AttributeError: module 'os' has no attribute 'O_NONBLOCK'` at
+build.py:3445): the FIFO probe resolved `os.O_NONBLOCK` bare -- Unix-only
+constant, so every check/build with a registered asset crashed on Windows.
+Fix: `getattr(os, "O_NONBLOCK", 0)`; test simulates the Windows `os` with
+`monkeypatch.delattr` (no skipif).
+P3: `_copy_datasheet_assets` left its partial stub (truncated PDF in the
+published tree, "does not publish it", absent from `written`); now unlinks
+like its sibling, test with the partial-write raiser.
+P2 (EIO on the destination write blamed on the source): NOT changed --
+a filename-less EIO is undecidable, and the split's whole purpose is to
+stop sending users to the output directory for a project-file problem;
+the asset-side tie-break names a real file, unlinks the partial, and
+continues publishing, while a site refusal for a source-side EIO would
+reproduce exactly that bug. The docstring now says EIO is write-capable
+and names this as the documented tie-break, not a guarantee.
+
+## Review round 6 (chunk 1 CHANGES REQUESTED, review 3d2ce622; rebased onto 8ed01c5)
+
+F1+F2 (blocking, accepted): the reference probe opened with a bare
+blocking os.O_RDONLY -- on a FIFO it waits for a writer forever; base
+attempted no open on that branch, so the hang is this PR's. Fixed: open
+with getattr(os, "O_NONBLOCK", 0) AND fstat the fd -- S_ISREG or the
+reference gets "cannot be read: not a regular file" (a successful FIFO
+open must not record resolved: publish's isfile skip would dangle
+silently, F2). Test: SIGALRM-bounded (15s), isfile-swap simulates the
+gate->probe shape swap. Sabotage shown: bare os.O_RDONLY -> alarm fires,
+test fails at 15.16s; restored -> 36 passed in 1.49s. Scope note: the
+full-CLI FIFO project hangs EARLIER, in the load-time image freeze
+(open() of referenced files, present on base -- pre-existing, separate
+resweep lane), so the test drives collect_static_assets+render_bodies
+directly, as the reviewer's repro did; the CLI-level freeze hang on FIFOs
+is NOT in this ticket and was not touched.
+F3 (accepted, doc-only): "one error per file" reads per-file; the
+per-reference count is the deliberate posture (each broken reference is
+its own error, matching the missing-image behavior -- no cache added).
+docs/markdown.md and the changelog now say "one per reference, like a
+missing image".
+F4 (accepted, docstring-only): the filename-eq-src test classifies a
+neither-path OSError as destination; documented as the safe tie-break
+(loud exit-2 publishing nothing beats publishing a site missing a file).
+F5 (rejected): the parallel copy-side/reference-side sentences are
+intentionally parallel; both remedies are literally true for the copy-
+side case (the file's bytes are what failed to read, at publish time).
+No change; reason in the PR comment.
+F6 (accepted, lane clarification): both artifacts exist OUTSIDE the git
+tree -- the TSV at /home/jorb/work/refdes/in-prog-logs/
+current-main-resweep-image-digests.tsv (untracked lane data), PROGRESS.md
+at /home/jorb/work/refdes/.scratch/PROGRESS.md -- which is why repo-tree
+searches find neither. Claims are true; records live in the main
+checkout, not in commits.
+Gates: targeted 36 passed; full suite below; scoped ruff = baseline.
+
+## Review round 7 (text-only, review bca0c361)
+
+Finding 1 (medium, accepted -- docs/changelog narrowed, no gate change):
+the "never the removal advice" claim covers IMAGE references only. A
+HYPERLINK ([x](/assets/f)) to an unreadable registered file is not seen
+by the image gate, gets the registration check's removal advice, and the
+published page keeps the link dangling. docs/markdown.md and the
+changelog now say so plainly; PR body lists it as a known limitation.
+Teaching the registration check about link targets is a wider change
+(link resolution is a different pass) and stays out of this ticket.
+Finding 2 (low, accepted): the probe comment claimed a bare-name
+reference "resolves to" a FIFO -- the gate's os.path.isfile rejects
+FIFOs with "does not exist"; the S_ISREG branch is race-only. Comment
+corrected.
+Finding 4 (nit, accepted): the lane's artifact paths are in the MAIN
+CHECKOUT, not this worktree -- express them relative to that checkout:
+<main checkout>/in-prog-logs/current-main-resweep-image-digests.tsv and
+<main checkout>/.scratch/PROGRESS.md. Suite counts of the earlier
+rounds in this log (3891/3923/3928/3937/3939) are round-local; the
+current head count is the one in the PR body.
+Gates this round: docs-anchor tests + focused image tests; docs/changelog
+text only, no code behavior change (comment text in build.py only).
+
+## Review round 8 (review 3d5e58d; main merged in as e2f6e48)
+
+Finding 1 (MEDIUM, accepted): check_registered_assets_readable ran
+between render_bodies and render_pages; pages resolve images too, so a
+page body's image reference to an unreadable registered file got BOTH
+the registration sentence (removal advice) and the reference's own --
+reproduced (4 errors). Fixed: the check runs after every render pass
+that resolves references (bodies and pages); docstring's "runs after
+render_bodies" updated. Test: pages/overview.md image -> unreadable
+registered file, check reports ONE item-side error, no removal advice,
+"1 items, 1 errors". Sabotage shown: call moved back before
+render_pages -> test fails on "remove it from" in the report; restored.
+Findings 2+3 (nits, accepted): docs/markdown.md double blank line
+removed; new paragraphs' `--` set to em dashes like the surrounding
+prose. No other changes. Full suite: 3969 passed / 2 skipped.

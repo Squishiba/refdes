@@ -188,7 +188,10 @@ the body draft). It also surfaces a constraint §1 and §5 had not stated: an it
 body naming an unpinned key is a build error, so the editor's diagnostic gate
 refuses such a save — which means Accept must write the body and the lockfile
 together, and cannot be a text insert plus a later `refdes fetch`.
-Status: proposed, nothing implemented.
+Status: landed 2026-09-26/27 — Slice A listing (59d2915/#49) and Slice B
+one-operation accept (197bc7c/#59). The xlsx listing remains open: the reader
+extracts, its `list_entries` refuses (`serve/sources.py` §"Only a file whose
+registered reader can list entries").
 
 **Note (2026-09-21).** The requirement above already covers CSV/xlsx: a picker
 in the editor lists the keys/values of a pinned source file, the author picks
@@ -196,8 +199,9 @@ one, and the editor writes the `source("path", "key")` text — unchanged.
 
 **New, raised by Jared on 2026-09-21: a picker for values in a PDF datasheet.**
 His proposal: the picker **tries** to extract the number, then asks the author
-to verify it is correct before accepting. **Status: NOT DECIDED
-IMPLEMENTATION / later slice.**
+to verify it is correct before accepting. **Status: landed 2026-09-27**
+(slices P-A/P-B/P-C: 1d796a7/#57, 8226b79/#67, bda7ab5/#71), as proposed
+below and in `editor-pdf-picker.md`.
 
 Agreed shape and safety rules:
 
@@ -238,7 +242,9 @@ row, none pre-selected), and how Accept reuses the CSV picker's
 one-operation accept (`editor-source-picker.md` §4) rather than inventing a
 second write path. A PDF source value's durable key is an author-named key
 re-located at fetch time by its quoted row text -- the `section:` pattern
-applied to a table row. Status: proposed, nothing implemented.
+applied to a table row. Status: landed 2026-09-27 as slices P-A/P-B/P-C
+(1d796a7/#57, 8226b79/#67, bda7ab5/#71), exactly as proposed; faithful
+pdf.js rendering stays the priced later option it was here.
 
 ---
 
@@ -540,8 +546,9 @@ file as a warning (or an error under `--require-citations`)
 (`src/refdes/citations.py:417-468`; `citations.verify()`, lines 290-335). The
 recommendation is to preserve that finding-25 behavior, but make the source
 resolver itself lockfile-only: it never opens or parses the CSV/XLSX file. See
-Open Question 1 for Jared's decision whether “builds read the lockfile only” is
-intended to change the existing local-citation hash check too.
+Open Question 1, which asked whether “builds read the lockfile only” is
+intended to change the existing local-citation hash check too — decided
+2026-09-19: A, the existing check is preserved.
 
 | Situation | `refdes fetch` | `refdes fetch --update` | `refdes check` | `refdes build` |
 |---|---|---|---|---|
@@ -813,20 +820,24 @@ source-derived `Value` passed as an ordinary argument.
 
 ### V1 scope
 
-- [ ] Add `source(path, key)` as item-calc-only syntax: exactly two string
+**Implementation status:** V1 scope landed 2026-09-21 in c7c01cb (finding 26),
+boxes checked against the tree. The `xlsx` extra then followed as the first
+"Later" item (ef7bed7/#170).
+
+- [x] Add `source(path, key)` as item-calc-only syntax: exactly two string
   literals, same-item local citation required, explicit unit assertion required.
-- [ ] Add `refdes.sources` internal protocol/registry and only the stdlib CSV
+- [x] Add `refdes.sources` internal protocol/registry and only the stdlib CSV
   reader.
-- [ ] Extend fetch discovery, per-file atomic extraction, lock serialization,
+- [x] Extend fetch discovery, per-file atomic extraction, lock serialization,
   `--update` value diff output, and source-specific diagnostics.
-- [ ] Make check/build resolve values from lockfile only; never parse a reader
+- [x] Make check/build resolve values from lockfile only; never parse a reader
   input during evaluation.
-- [ ] Preserve current local citation hash-drift verification unless Jared
-  decides otherwise in Open Question 1.
-- [ ] Add selected locked source values to the owning content hash; coordinate
+- [x] Preserve current local citation hash-drift verification (Open Question 1
+  decided A).
+- [x] Add selected locked source values to the owning content hash; coordinate
   the next `HASH_FORMAT` number with phase 4a and migrate it deliberately.
-- [ ] Render source provenance beside calc rows.
-- [ ] Keep source files strictly read-only; do not add navigation, formula
+- [x] Render source provenance beside calc rows.
+- [x] Keep source files strictly read-only; do not add navigation, formula
   calculation, reader plugins, xlsx, EDA readers, EDA checks, or write-back.
 
 ### Later

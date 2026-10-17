@@ -1361,10 +1361,10 @@ def suggest_destination(
     board: str | None = None,
     workspace: str | None = None,
 ) -> str:
-    """Suggest, never decide: the file where items of this type already live
-    (preferring the same board and, where the project registers workspaces,
-    the same workspace when one is given), falling back to a new single-item
-    Markdown file named for the type. The explicit override
+    """Suggest, never decide: prefer a file of this type in the selected
+    board/workspace. Under the workspace layout, an empty selected workspace
+    gets a new Markdown file inside its own directory instead of borrowing
+    another workspace's file and file-level defaults. The explicit override
     always wins (Decisions, "Creation destination: suggest plus override")."""
     files = [
         item.source_file.replace("\\", "/")
@@ -1382,6 +1382,14 @@ def suggest_destination(
         ]
         if same_scope:
             files = same_scope
+        elif workspace and project.item_layout == "workspace" and workspace in project.workspaces:
+            # The scope is empty, so no existing file can donate its defaults
+            # or prefix. Keep the workspace's registered path even when the
+            # caller did not choose a board; a board choice adds its own path.
+            scope = f"items/{project.workspaces[workspace].path_segment}"
+            if board and board in project.boards:
+                scope += f"/{project.boards[board].path_segment}"
+            return f"{scope}/{type_name}s.md"
     if files:
         return Counter(files).most_common(1)[0][0]
     return f"items/{type_name}s.md"

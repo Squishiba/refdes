@@ -48,10 +48,13 @@ Four independent reasons, each verified:
    marker's `item_key` against live items. H4's own log records the same gap: "nothing
    **reads** them yet … the markers are inert-but-true records"
    (`in-prog-logs/living-notes-phase-h4.md:86-92`).
-2. **Nothing has run the migration.** `refdes history` is unreleased — the fragment
-   `changelog.d/history-commands.added.md` is still pending and `CHANGELOG.md` has no
-   `refdes history` entry (last release 0.5.0). This repo's own `.refdes/` has no
-   `history/` directory. There are no markers on disk anywhere outside test fixtures.
+2. **Nothing had run the migration** when this was drafted. `refdes history` is
+   unreleased — the fragment `changelog.d/history-commands.added.md` is still pending
+   and `CHANGELOG.md` has no `refdes history` entry (last release 0.5.0). That part
+   still holds; the rest of this point does not: `3010883` (#158, 2026-10-02) flipped
+   hardware@3's `log` to `sealing: history` and ran the migration on this repo, so
+   `.refdes/history/events/` now carries six `legacy-seal` markers. This repo is now
+   the affected population.
 3. **No silent skip, no data loss.** Two records deriving the same `item_key` collapse to
    one marker, and the seal machinery makes that collision hard to reach: `seal.verify()`
    resolves a legacy display-id record to whatever item now claims the id and errors on a
@@ -94,7 +97,9 @@ let a reader tell the two generations apart.
 
 That is the asymmetry that makes this worth deciding now: **the `history` group is
 unreleased, so a derivation decision is nearly free today and permanent the moment anyone
-migrates a project.**
+migrates a project.** (Post-drafting: that moment has arrived for this repo — #158
+(`3010883`) migrated it, so "free" now covers every project that has not yet run
+`migrate-seals`, not this one.)
 
 ## 4. Options
 
@@ -231,11 +236,17 @@ option above except (f) acquires a migration requirement it does not have today.
    item's key? Today it cannot (`cli.py:1260-1266`). If a deleted item's seal marker can
    hold content-adjacent text, is unreachable-by-name a privacy gap as well as an
    attribution one?
-4. Does H5's planned downgrade of `_report_deleted` from error to warning change the
+4. Does H5's downgrade of `_report_deleted` from error to warning change the
    calculus? It removes the mechanism that currently keeps the affected population small,
-   and it lands in the same release train as the migration.
-5. `_report_deleted` scans the base seal file only (`seal.py:354`). Is that intended, or a
-   separate bug? It determines whether the affected population is visible at all.
+   and it landed in the same release train as the migration (H5 is no longer planned:
+   `3edb68b` #157 made a history-backed legacy-seal orphan "a warning naming the
+   record and the seal file -- the same class of diagnostic as an edit, never an
+   error", `_report_deleted`'s docstring in `seal.py`).
+5. ~~`_report_deleted` scans the base seal file only~~ — it scans the base file *and*
+   every board's: the pass loops `sorted({""} | set(project.boards))` and `load_seals`
+   each board (`seal.py`, in the version that introduced the function, `55fd49d`), so
+   the population is visible on boards too; what is base-only is the caller's
+   write-back (`base_changed` → `save_seals(..., board="")`).
 6. Is the base/board overlap dedup (`history.py:852-855`) a guarantee we must preserve? It
    is what rules out record-derived identity as the finding proposed it.
 7. If we ever want a tombstone identity that survives display-id reuse, keys.md's only
@@ -249,7 +260,8 @@ option above except (f) acquires a migration requirement it does not have today.
 - Confirmed the derivation and its fallback order at `src/refdes/history.py:879`; confirmed
   `legacy-seal` is in `NO_OBJECT_KINDS` (`history.py:96`), so a marker carries no snapshot.
 - Confirmed `refdes history` is unreleased (pending `changelog.d` fragment; no
-  `refdes history` line in `CHANGELOG.md`), and this repo's `.refdes/` has no `history/`.
+  `refdes history` line in `CHANGELOG.md`). The companion claim that this repo's
+  `.refdes/` has no `history/` is now stale: #158 (`3010883`) ran the migration on it.
 - Confirmed adoption cannot heal the population: `plan_surrogate_storage` re-keys a legacy
   seal entry only when its live item is identified and its hash carries; otherwise it keeps
   the display id and reports the record uncomparable (`src/refdes/keys.py:349-358`). So the

@@ -1,0 +1,135 @@
+Task: verify every claim in docs/blocks.md against actual refdes behavior
+(branch docs-blocks-verify, base main 90fabc0); fix the page, keep code
+untouched.
+
+Method
+------
+All claims verified by running this checkout's CLI
+(env PYTHONPATH=$PWD/src <venv-refdes>/bin/python -m refdes.cli) against
+scratch projects in .scratch/:
+
+- .scratch/blkverify — hardware@3 project, boards power/io (io has
+  includes: [GRP-PWR-001]), workspace rev-b, 13 items (req/bound/log x3/
+  component x2 with keys + drop_in/group x2/blocked_by chain LOG-IO-003..
+  005 with a follows edge), probe pages probe.md..probe4.md covering every
+  block and parameter, incl. composite-key targets
+  (item="LOG-PWR-001@7f1vgy42vva").
+- .scratch/blkbad — one page whose every line reproduces a quoted failure
+  message; build exit=1 with 22 <p class="block-error"> markers.
+
+~70 claims checked: 9 defects (all in docs/blocks.md), everything else
+confirmed. All 11 quoted failure messages reproduce verbatim (2 of them
+cross-checked against tests/test_calcblock.py:463 and tests/test_blocks.py:
+501, which assert the same strings).
+
+Claim table (VERIFIED unless noted)
+-----------------------------------
+Syntax section
+  VERIFIED  directive is page-only ({{tree}} in an item body renders
+            literal); directive must sit alone on its line; unmatched name
+            stays literal ({{TBD}}); inline mid-paragraph directive stays
+            literal; params validated strictly with fix-naming build errors.
+  FIXED     "directives inside fenced code blocks stay literal" was only
+            implicit — verified ({{index}} in a fence renders literal) and
+            added one sentence.
+  FIXED     The two {{index by="schematic_page" type="log"}} examples:
+            hardware@3 log has no schematic_page field (refdes schema:
+            author/checks/citations/date/note/options/rationale/source/
+            status/summary/tags/tasks) — the page's own example was a
+            documented failure-mode. Both now use by="status".
+
+{{index}}
+  VERIFIED  one table per group; enum groups in declared-choice order;
+            date groups lexicographic ISO; (unset) group last; a list field
+            lists the item under every value; (bound) subtype marker;
+            subtypes default follows coverage.group_inherited (true);
+            local items only; no sort=/limit=; by= field-type rule; tag=
+            must exist on a local item.
+  FIXED     board= row omitted that members of the board's includes:
+            groups are in scope, rendered "shared, via GRP-…".
+  FIXED     empty-index note ("No test items.") was missing from the
+            page's list of "nothing found" renderers (it only named
+            cascade/compare) — index renders one too.
+
+{{cascade}}
+  VERIFIED  from/direction required; depth default 3, positive-int rule;
+            via= default = trace:true link types; cycle renders "(already
+            shown above)"; direction=both renders Upward/Downward; empty
+            renders 'nothing found (direction="down")'; from must exist.
+  FIXED     the default-exclusion list named "records" — hardware@3 has no
+            records link type; the four trace:false starters are amends,
+            follows, supersedes, addresses (v3/base.yaml).
+
+blocked_by paragraph
+  VERIFIED  report is automatic (build.py:3512 always resolves blocked
+            graph), feeds coverage (build.py:1260 annotation) and
+            refdes audit (cli-reference.md:691); cycle in it is a hard
+            build error; blocked.py reuses blocks.walk_cascade with
+            on_cycle="error"; via="blocked_by" cascade works and is
+            renderable, acyclicity not assumed.
+
+{{tree}}
+  VERIFIED  board=/workspace= scoping; includes: members marked shared
+            ("4 own, 1 shared"); expanded-under hint links to the group;
+            page linkifier links IDs (PROTECTED_RE covers pre|code|a,
+            build.py:91); output is the same <ul class="tree"> markup as
+            the generated tree.html; no via= by design.
+  FIXED     depth= wording: "how many levels start open (default 2)" is
+            wrong. depth is the level at which nodes start closed
+            (tree.py: open if depth < open_depth, DEFAULT_DEPTH=2): the
+            default opens only the top level; 3 opens two; 1 closes all.
+
+{{calcblock}}
+  VERIFIED  item=/block= required, both strict; local-only (imported-item
+            message); renders the owner's table + caption naming the owner
+            (linked) and block; anchor reuse gains -2 suffix on the same
+            page; never evaluates — pass-through of the computed rows,
+            including a calc-error row (⚠ unknown name); owner's failing
+            calc fails the build at the owner's line and the error row
+            renders unchanged here; calc fences on a page are inert
+            (blocks are pages, calc fences are items — the page/ item split).
+
+Scope / non-goals / failure modes
+  VERIFIED  strictness asymmetry (unmatched block literal, known block
+            strict); every nothing-to-render case for known blocks is a
+            build error with ⚠ in place; image {width= caption=} syntax is
+            the same parser (FIGURE_ATTR_RE, build.py:159).
+  FIXED     failure-mode example listed "schematic_page, status, title"
+            for v3 log — now "date, status, summary" (real v3 fields).
+  FIXED     non-goals family list omitted compare.
+  FIXED     the whole {{compare}} section was missing: compare is a
+            registered block (registry: calcblock, compare, index, cascade,
+            tree), the page's own empty-selection paragraph referenced it,
+            and docs/concepts.md:37 and docs/parts.md:123 point here for
+            it. Section added: params (type required; against with limit-
+            checking + checks: requirement; columns incl. calc:<name>
+            defaulting to the type's preview: list falling back to title;
+            status; board/tag/subtypes as in index), never-evaluates,
+            local-only, sorted-by-ID/no order=/no sort= rationale, legend
+            states, all-empty-column warning. All claims verified against
+            the rendered table and tests/test_compare_block.py.
+
+Tests
+-----
+No behavior fix → no new test (docs-only change; COMMON gates behaviour
+fixes). Sabotage: broke the new section's schema-reference.md#types anchor
+-> tests/test_docs_anchors.py::test_no_broken_anchor_links_in_docs FAILED
+(AssertionError at :106) -> restored, passes.
+Full suite: 3938 passed, 2 skipped (exit 0). docs tests +
+docs-site/gen_examples.py --check clean. ruff check --select E9,F src
+tests clean.
+
+Possible bugs (reported in PR body, not fixed — code untouched):
+A. blocked_by diamond (LOG-IO-005 -> [003, 004], 003 -> 004) is reported
+   as a cycle: walk_cascade's visited set is global, so a re-merge trips
+   on_cycle="error"; a diamond is not a cycle.
+B. {{tree}} accepts board= and workspace= simultaneously (silent
+   intersection); docs say "At most one of the two" — unenforced.
+C. {{cascade}} from= rejects composite DISPLAY@key targets while
+   {{calcblock}} item= accepts them (item_by_id vs key lookup).
+D. {{tree}} scoped to a board/workspace with zero items renders a bare
+   <li>IO</li> — no count, no tree-empty note.
+E. blocks.py module docstring is stale ("two below", "index, cascade, and
+   what joins them later") against the five registered blocks.
+
+Status: finished. docs/blocks.md + this log committed; no code touched.

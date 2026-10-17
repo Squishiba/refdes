@@ -56,7 +56,10 @@ composite resolves by the key, and content hashing uses it, never the label. The
 display half (before `@`)
 is readable context that the tool refreshes automatically when the target item
 is renamed: on the next writable load, a stale `OLD-ID@key` becomes
-`NEW-ID@key`.
+`NEW-ID@key`. The refresh refuses when the stale label names a *live* item of
+its own — a reference whose display half now belongs to a different item: the
+load warns, naming the key's real item and the item the label points at, and
+leaves the reference untouched until you say which one it meant.
 
 When you do need to write the `ID@key` half by hand — a merge of items files
 needs composite pins, because a bare id anchors on the tip and collides — the
@@ -97,7 +100,15 @@ A test saying `verifies: [REQ-PWR-002]` gives the requirement
 `verified_by: [TST-PWR-002]` without the requirement mentioning it.
 
 Declare it from whichever end is natural — a test knows what it covers; a log
-entry knows what it satisfies. Declaring both ends is allowed but redundant.
+entry knows what it satisfies. Authoring the *same* edge from both ends is
+redundant, and only available where the schema declares it: the standard's
+inverse verbs (`verified_by`, `satisfied_by`, …) are computed, never listed
+under a type's `links:`, so writing `verified_by:` on a requirement is an
+unknown-field **error** with the edge dropped, not a second copy of it — the
+spelling is close to a link the type does declare (`governed_by`), and close
+spellings stop the build (see [authoring](authoring.md)). A
+project that declares an inverse verb as an authorable link of its own gets
+the redundancy — the page shows the edge once either way.
 
 ## Starter link types
 
@@ -326,10 +337,15 @@ component's `satisfying_statuses` value, so coverage reads the status, and an
 authored lifecycle field should not silently mean whatever the graph happens to
 say. The warning leaves the author to decide which half was wrong.
 
-Nothing is reported when the vocabulary does not carry both halves: a type with
-no `status` field, or one whose `choices` never offer the paired value, can
-never be in disagreement about it. And a project that never declares
-`supersedes`/`selects` at all hears nothing, whatever its statuses say.
+Nothing is reported when the vocabulary does not carry both halves: the verb
+must be in the project's resolved `link_types`, and the item's own type must
+declare a `status` field whose `choices` offer the paired value — a type with
+no `status` field, or one whose choices never name it, can never be in
+disagreement about it. Every project pinned at a bundled standard carries
+`supersedes` and `selects`, so a `status: superseded` entry with nothing
+superseding it warns there even if no item has ever authored a `supersedes:`
+link; only a self-declared schema (`standard: none`) that carries neither
+verb hears nothing, whatever its statuses say.
 
 ## `blocked_by:` and the cascade report
 
@@ -368,9 +384,11 @@ with itself.
 file:line of the edge that actually closes the loop:
 
 ```
-ERROR items/main-io/log.md:12 [LOG-IO-003] — blocked_by cycle:
-  LOG-IO-003 -> LOG-IO-001 -> LOG-IO-003
+ERROR   items/main-io/log.md:12 [LOG-IO-003] — blocked_by cycle:
+        LOG-IO-003 -> LOG-IO-001 -> LOG-IO-003
 ```
+
+(one line in real output — wrapped here to fit the page)
 
 **The stale-blocker check.** The moment an edge stops being live — its
 target reaches a settled status (per the type's `satisfying_statuses:` or
@@ -378,10 +396,12 @@ target reaches a settled status (per the type's `satisfying_statuses:` or
 still declares it — is worth a nudge:
 
 ```
-INFO items/main-io/log.md:80 [LOG-IO-005] — blocked_by LOG-IO-001, which
-  is now 'accepted' — is it still blocked? Remove the edge if resolved, or say
+INFO    items/main-io/log.md:80 [LOG-IO-005] — blocked_by LOG-IO-001, which
+  is now 'accepted' -- is it still blocked? Remove the edge if resolved, or say
   in 'rationale' why it still applies.
 ```
+
+(one line in real output — wrapped here to fit the page)
 
 `info`: default-hidden (a project mid-resolution trips this repeatedly as
 blockers clear one at a time, which is normal, not a defect), shown with
@@ -434,7 +454,11 @@ fragment is read as a field name — `[[LOG-PWR-001#losses]]` warns that type
 `#calc:` fragment is a warning that says what the target actually has — a
 block of another name (naming them), fences with no name at all, or no calc
 blocks — never a build failure, the same unresolved-reference posture as
-above.
+above. A bare `[[LOG-PWR-001#calc]]` is that field-name miss for the one
+fragment readers reach for with the name left off, so its warning adds
+"did you mean `#calc:<name>`?" and names the blocks the target has (pointing
+at `id="..."` on the fence when they have none); a target that computes
+nothing gets no hint, and every other field miss keeps its plain sentence.
 
 A `[[fig:some-id]]` reference — the same `[[...]]` envelope, a `fig:` prefix —
 resolves to a numbered figure instead of an item. See [width and

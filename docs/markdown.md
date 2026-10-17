@@ -132,6 +132,24 @@ so a broken one stops the build:
 ERROR items/log/dec-001.md:2 [LOG-001] — image src 'figures/nope.png' does not exist
 ```
 
+A `src` that resolves to a file the build **cannot read** (its permissions
+deny the `refdes` process) is the same kind of build error at the same place,
+with its own sentence naming the file and the OS's reason:
+
+```
+ERROR items/log/dec-001.md:2 [LOG-001] — image src 'figures/locked.png' exists at 'items/log/figures/locked.png' but cannot be read: Permission denied. Make the file readable, or point the reference at a readable file
+```
+
+A mode-000 file inside a `site.assets:` directory is refused by every
+build: `refdes check` names the file and the build publishes the rest of
+the site, leaving that file out. A file an item's body references **as an
+image** gets its error at the reference above — one per reference, like a
+missing image — not the removal advice, which an item whose body links
+the file must not follow. The gate is image-only: a *hyperlink*
+(`[the datasheet](/assets/locked.pdf)`) to an unreadable registered file
+gets the removal advice above, and the published page keeps the link —
+dangling, to a file the site did not publish.
+
 ### A bare filename, found on the search path
 
 A `src` written as a **bare filename** — no `/` in it — that does not resolve
@@ -521,9 +539,12 @@ refdes fetch --path docs/sch.pdf   # just this one cited path
 refdes fetch --update            # re-fetch even if already pinned
 ```
 
-`refdes fetch` is the **only** command that touches the network. `build` and
-`check` read only the committed lockfile (`.refdes/citations.yaml`) and the
-local copies, so they stay completely offline.
+`refdes fetch` is the **only** command that pulls, and `build` and `check`
+read only the committed lockfile (`.refdes/citations.yaml`) and the local
+copies, so they stay completely offline. The one opt-in exception is
+[`check --refresh`](cli-reference.md#refdes-check): it re-fetches every
+pinned citation to compare hashes, so it touches the network and writes
+nothing.
 
 **Pinning vs. keeping a copy.** Every fetched citation is pinned: its sha256 and
 fetch time are recorded in `.refdes/citations.yaml`, keyed by path, and
