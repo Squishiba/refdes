@@ -20,6 +20,22 @@ Chunk 1 (grammar + trigger + tests): DONE.
   not exist there. Proof method for every chunk's new tests.
 - ruff --select E9,F clean on the two touched files.
 
-Next: chunk 2 -- thread triggered spans through _run_item_calcs in
-source order with the fences, sharing env + origins (duplicate-assignment
-and unknown-name errors per the design); build-level tests.
+Chunk 2 (evaluation + tests): DONE.
+- build.py: _run_inline_span evaluates the span's RHS through
+  calc.evaluate_block as the canonical fence line `name = rhs | unit`
+  (same grammars/restrictions; duplicate-name, unknown-name, source()
+  unit rules come for free). _run_item_calcs now runs fences and
+  triggered spans as one source-ordered event list sharing env+origins,
+  so spans see fence names and vice versa; {{name}} renders span values
+  via item.calc_values.
+- 9 more tests: span->fence, fence->span, span->span, forward-use
+  unknown-name at the span's file:line, duplicates span<->fence and
+  span<->span citing both lines, malformed span error, ordinary span
+  untouched, {{P}} rendering. Sabotage: 8/9 fail on the grammar-only
+  tree bde63a7 (collected before integration); full file fails at
+  import on base cbcd22e. 25/25 + 200 neighbor tests green.
+
+Next: chunk 3 -- stored-result verification diagnostics (severity table:
+errors for missing/malformed/eval-failure/incompatible-unit, warning for
+stale, silence in-window), half-place boundary tests, unit conversion in
+the literal, nonfinite/malformed literal, source untouched, check==build.

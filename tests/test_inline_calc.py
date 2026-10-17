@@ -183,3 +183,101 @@ def test_triggered_malformed_span_keeps_its_line_offset():
     assert len(spans) == 1
     assert spans[0].line_offset == 1
     assert spans[0].error is not None
+
+
+# ------------------------------------------- evaluation in the item's env
+
+
+def _item(project, item_id="DEC-001"):
+    return project.item_by_id(item_id)
+
+
+def _inline_errors(project):
+    return [d for d in project.errors if d.message.startswith("inline calc ")]
+
+
+def test_span_assigns_for_a_later_fence(tmp_path):
+    project = _build(
+        tmp_path,
+        "`Rbot := 2.2 kohm = 2.2 kohm`\n\n```calc\nG = 10 kohm / Rbot | 1\n```\n",
+    )
+    assert project.errors == []
+    assert _item(project).calc_values["G"] == "4.545"
+
+
+def test_fence_value_used_by_a_later_span(tmp_path):
+    project = _build(
+        tmp_path, "```calc\nVin = 5 V\n```\n\n`Vout := Vin * 2 = 10 V`\n"
+    )
+    assert project.errors == []
+
+
+def test_span_uses_an_earlier_span(tmp_path):
+    project = _build(tmp_path, "`a := 2 V = 2 V`\n\n`b := a * 2 = 4 V`\n")
+    assert project.errors == []
+    assert _item(project).calc_values["b"] == "4 V"
+
+
+def test_forward_use_of_a_later_fence_name_is_unknown_name(tmp_path):
+    project = _build(
+        tmp_path, "`Vout := Vin * 2 = 10 V`\n\n```calc\nVin = 5 V\n```\n"
+    )
+    errs = _inline_errors(project)
+    assert len(errs) == 1
+    assert "unknown name 'Vin'" in errs[0].message
+    # The item file is `---\nid\ntype\n---\n` (4 lines), then a blank body
+    # line, then the span: line 6 of the file.
+    assert errs[0].line == 6
+    assert errs[0].file.endswith("dec.md")
+    assert errs[0].item_id == "DEC-001"
+
+
+def test_duplicate_name_across_span_and_fence_cites_both_lines(tmp_path):
+    project = _build(
+        tmp_path, "```calc\nV = 1 V\n```\n\n`V := 2 V = 2 V`\n"
+    )
+    errs = _inline_errors(project)
+    assert len(errs) == 1
+    message = errs[0].message
+    assert "assigned twice" in message
+    assert "first at line 7" in message  # the fence's `V = 1 V` line
+    assert "again at line 10" in message  # the span line
+
+
+def test_duplicate_name_between_two_spans(tmp_path):
+    project = _build(tmp_path, "`x := 1 V = 1 V`\n\n`x := 2 V = 2 V`\n")
+    errs = _inline_errors(project)
+    assert len(errs) == 1
+    assert "assigned twice" in errs[0].message
+    assert "first at line 6" in errs[0].message
+    assert "again at line 8" in errs[0].message
+
+
+def test_malformed_span_is_an_error_at_its_line(tmp_path):
+    project = _build(tmp_path, "`Vout := 2 V * 2` has no stored result\n")
+    errs = _inline_errors(project)
+    assert len(errs) == 1
+    assert "stored result missing" in errs[0].message
+    assert errs[0].line == 6
+    assert errs[0].file.endswith("dec.md")
+    assert errs[0].item_id == "DEC-001"
+
+
+def test_span_without_trigger_stays_ordinary_code(tmp_path):
+    project = _build(
+        tmp_path,
+        "`V_cl = 0.8 V` is ordinary code\n\n``V := 2 V = 9 V`` escapes too\n",
+    )
+    assert project.errors == []
+    assert _inline_errors(project) == []
+    assert "<code>V_cl = 0.8 V</code>" in _item(project).body_html
+    assert "<code>V := 2 V = 9 V</code>" in _item(project).body_html
+
+
+def test_span_value_renders_in_prose(tmp_path):
+    project = _build(
+        tmp_path, "`P := 3.3 V * 1.2 A | W = 3.96 W`\n\nDissipation: {{P}}\n"
+    )
+    assert project.errors == []
+    assert "Dissipation: <code>3.96 W</code>" in _item(project).body_html
+    assert "<code>P := 3.3 V * 1.2 A | W = 3.96 W</code>" in _item(project).body_html
