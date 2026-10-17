@@ -944,7 +944,10 @@ def _atomic_replace(path: str, payload: bytes) -> str | None:
     """Write `payload` to `path` atomically; return None on success, a reason
     on failure. A failed replacement leaves the original bytes in place: the
     temp file is discarded, and if the destination was somehow replaced and
-    the re-read disagrees, the original bytes are put back."""
+    the re-read disagrees, the original bytes are put back -- when the
+    restore itself lands. When it does not, the file is left as it was
+    found (the bytes on disk are not this process's to name) and the reason
+    says so."""
     directory = os.path.dirname(path)
     tmp = None
     try:
@@ -970,11 +973,28 @@ def _atomic_replace(path: str, payload: bytes) -> str | None:
         with open(path, "rb") as fh:
             written = fh.read()
     except OSError as exc:
-        _restore(path, original)
-        return f"could not re-read {path} after the write: {exc}"
+        if _restore(path, original):
+            return f"could not re-read {path} after the write: {exc}; the original bytes were restored"
+        # Both failures are named: the reread, and the restore that did
+        # not land. What is ON the file is not claimed -- a failed
+        # restore left it as the restore found it, and a writer that
+        # bypasses the lock may have moved it since the write.
+        return (
+            f"could not re-read {path} after the write: {exc}, the original bytes "
+            f"could not be restored, and {path} was left as it was found"
+        )
     if written != payload:
-        _restore(path, original)
-        return f"the bytes on disk after the write are not the bytes planned; {path} was restored"
+        if _restore(path, original):
+            return f"the bytes on disk after the write are not the bytes planned; {path} was restored"
+        # What is known and nothing more: a mismatch was observed, the
+        # restore did not land, and it left the file as it found it.
+        # What is ON the file is not known -- this branch is reached
+        # precisely because the bytes on disk are not this process's to
+        # describe, and a re-read here would only be a fresh guess.
+        return (
+            f"the bytes on disk after the write are not the bytes planned, the "
+            f"original bytes could not be restored, and {path} was left as it was found"
+        )
     return None
 
 
@@ -985,14 +1005,50 @@ def _discard_tmp(tmp: str) -> None:
         pass
 
 
-def _restore(path: str, original: bytes) -> None:
+def _restore(path: str, original: bytes) -> bool:
+    """Put `original` back at `path`, atomically: the bytes are staged in a
+    temp file in the destination's own directory and swapped in, so a
+    restore that fails partway leaves the destination exactly as it found
+    it -- never truncated to zero bytes by the restore itself, the way an
+    in-place `"wb"` open would leave it. Returns True when the swap landed
+    and False when it did not; a caller whose message says the file was
+    put back must ask, not assume. The swap preserves the destination's
+    mode, copied from the file itself -- which also narrows the old
+    in-place write: a destination DELETED before the restore is not
+    recreated -- the mode stat fails, the temp is discarded, the restore
+    reports failure, and the file stays deleted. That shape is reachable
+    wherever a destination can vanish between the caller's write and the
+    restore: the reread-failure branch of `_atomic_replace` (a vanished
+    file is one way the reread fails), and, per the same
+    lock-bypassing-writer model the failure messages state, any writer
+    outside the lock."""
+    directory = os.path.dirname(path)
+    tmp = None
     try:
-        with open(path, "wb") as fh:
+        fd, tmp = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.refdes-tmp-", dir=directory)
+        with os.fdopen(fd, "wb") as fh:
+            mode = os.stat(path).st_mode & 0o777
             fh.write(original)
             fh.flush()
             os.fsync(fh.fileno())
-    except OSError:  # nothing further to do; the next load reports what it sees
-        pass
+            # the destination's (often world-readable) mode is applied only
+            # once the contents are fully written: a crashed or partial
+            # temp keeps mkstemp's 0600, so the file's PREVIOUS contents
+            # are never left permissive in the directory mid-restore
+            # (the PERM-OWNER-001 discipline; _atomic_replace and
+            # _atomic_create keep their chmod-before-write ordering --
+            # out of scope here, and the justification is narrower than
+            # it looks: apply_edit and the create-append shapes stage
+            # the WHOLE rewritten file, previous contents included, so
+            # their crash windows predate this change)
+            os.chmod(tmp, mode)
+        os.replace(tmp, path)
+        tmp = None  # the swap consumed the temp file
+    except OSError:  # the destination is untouched; the caller reports the failure
+        if tmp is not None:
+            _discard_tmp(tmp)
+        return False
+    return True
 
 
 # ================================================================== creation
@@ -1171,15 +1227,24 @@ def _create_locked(config: str, request: CreateRequest):
     else:
         try:
             with open(path, "rb") as fh:
-                original = fh.read().decode("utf-8")
+                raw = fh.read()
+            text = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             return Refused(who, new_id, f"could not read {rel}: {exc}")
+        # The rollback payload is the RAW bytes, never the decoded text:
+        # `_restore` writes its payload to a binary file, so handing it a
+        # `str` raised `TypeError` past the `except OSError`, out of a
+        # function documented to return a result -- and an in-place write
+        # of that failed payload left the destination truncated. The
+        # decoded text is only what the append plans onto; the bytes are
+        # what a failed creation restores.
+        original = raw
         # The ending of the line the new block is being appended *after*, not
         # "CRLF if the file mentions CRLF anywhere": appending to a file whose
         # tail is LF used to hand the new item CRLF endings, because an
         # unrelated line higher up was CRLF. The block joins the end, so it
         # takes the end's style.
-        eol = textio.append_ending(original)
+        eol = textio.append_ending(text)
         if dest["kind"] == "append-md":
             block = ["---", f"id: {new_id}", f"key: {key}", f"type: {request.type}", *body, "---", ""]
         else:
@@ -1188,10 +1253,10 @@ def _create_locked(config: str, request: CreateRequest):
             if dest["type"] != request.type:
                 block.append(f"{ind}  type: {request.type}")
             block.extend(f"{ind}  {ln}" for ln in body)
-        head = "" if original.endswith("\n") else eol
+        head = "" if text.endswith("\n") else eol
         # Pure append: every existing byte of the file stays exactly where
         # it was -- the fidelity contract, trivially satisfied.
-        new_text = original + head + eol.join(block) + eol
+        new_text = text + head + eol.join(block) + eol
 
     # Validate the candidate before a byte changes, the same overlay gate
     # apply_edit runs: exactly one more item, no newly introduced error, and
@@ -1220,12 +1285,26 @@ def _create_locked(config: str, request: CreateRequest):
     try:
         ids.reserve_id(before, new_id)
     except OSError as exc:
-        _rollback(path, original)
+        if _rollback(path, original):
+            return Refused(
+                who,
+                new_id,
+                f"the id ledger could not be written ({exc}); {rel} was rolled back "
+                f"and {new_id} was not reserved",
+                path=path,
+            )
+        # Known facts only: the reservation failed, the rollback did not
+        # land, and a failed restore touches nothing -- so the file was
+        # left as the restore found it. What is ON the file is not
+        # asserted: the create's write landed, but a writer outside the
+        # lock can have moved the destination since, and the restore
+        # never re-reads to know.
         return Refused(
             who,
             new_id,
-            f"the id ledger could not be written ({exc}); {rel} was rolled back "
-            f"and {new_id} was not reserved",
+            f"the id ledger could not be written ({exc}); {new_id} was not "
+            f"reserved, and {rel} could not be restored: the creation's bytes "
+            f"were not rolled back, and the file was left as it was found",
             path=path,
         )
 
@@ -1645,16 +1724,19 @@ def _atomic_create(path: str, payload: bytes) -> str | None:
     return None
 
 
-def _rollback(path: str, original: bytes | None) -> None:
+def _rollback(path: str, original: bytes | None) -> bool:
     """Undo a completed write when a later step failed: restore the previous
-    bytes, or remove the file that did not exist before."""
+    bytes, or remove the file that did not exist before. Returns True when
+    the undo is known to have landed; False means the destination is not
+    what it was, and the caller must say so rather than claim a rollback
+    that did not happen."""
     if original is None:
         try:
             os.unlink(path)
         except OSError:
-            pass
-        return
-    _restore(path, original)
+            return False
+        return True
+    return _restore(path, original)
 
 
 def preview_creation(

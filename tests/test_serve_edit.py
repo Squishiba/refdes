@@ -650,18 +650,31 @@ def test_a_mismatched_write_is_restored(project_root, monkeypatch):
     back and the save reports the failure -- the re-read is not decoration."""
     path = target(project_root)
     before = read(path)
-    real_unlink = os.unlink
+    real_unlink, real_replace = os.unlink, os.replace
+    swapped = []
 
-    def hijack(src, dst):
-        # the replacement "succeeds" but lands the wrong bytes
-        with open(dst, "wb") as fh:
-            fh.write(b"not what was planned\n")
-        real_unlink(src)
+    def hijack(src, dst, *args, **kwargs):
+        # aimed at the DESTINATION, not at call order: an earlier
+        # os.replace added to the write path -- an _atomic_replace on
+        # another file, e.g. -- passes through untouched instead of
+        # silently consuming the sabotage
+        if not swapped and os.path.abspath(dst) == os.path.abspath(str(path)):
+            swapped.append(True)
+            # the replacement "succeeds" but lands the wrong bytes
+            with open(dst, "wb") as fh:
+                fh.write(b"not what was planned\n")
+            real_unlink(src)
+            return
+        # the restore's own swap (same destination, first match is the
+        # save's): the real thing -- scribbling over it too would
+        # destroy the very bytes this test asserts come back
+        return real_replace(src, dst, *args, **kwargs)
 
     monkeypatch.setattr(edit_mod.os, "replace", hijack)
     result = edit_mod.apply_edit(
         str(project_root), req(("REQ-001", SetField("status", "draft"), path))
     )
+    assert swapped, "the seam never fired: no swap of the destination was sabotaged"
     assert isinstance(result, Refused), result.message
     assert read(path) == before
 

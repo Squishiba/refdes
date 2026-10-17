@@ -1,0 +1,333 @@
+Task: Editor create rollback byte restoration (isolated from held PR #241)
+Branch: fix/editor-create-rollback-bytes-20261015, cut from origin/main 509a487
+Status: FINISHED — rollback-only fix + regressions, PR to main
+Date: 2026-10-15
+
+The bug (present on main):
+In `_create_locked` (src/refdes/serve/edit.py) both append shapes read the
+destination and stored `original = fh.read().decode("utf-8")` — a str. The
+post-write rollback (`ids.reserve_id` raising OSError -> `_rollback` ->
+`_restore`) hands `original` to `open(path, "wb").write(original)`. The
+"wb" open truncates the destination to zero bytes first; the str write then
+raises TypeError, which passes straight through `_restore`'s `except
+OSError` and out of `create_item`, where the contract says it returns a
+result. Net effect of a failed id reservation: a zero-byte items file and
+an exception.
+
+Reference: PR #241's c4a7d33 fixed this together with the lost-update
+`expected`-check redesign. This branch splits ONLY the rollback part out,
+rebuilt on current main (509a487, which does not contain #241's retry
+loop). #241's branch/commit untouched; nothing cherry-picked.
+
+Red evidence (on unpatched main, deterministic):
+- tests: test_a_failed_id_reservation_restores_the_yaml_append_bytes and
+  ..._the_markdown_append_bytes (tests/test_serve_create.py; seam:
+  `edit_mod.ids.reserve_id` raising ENOSPC; both append shapes).
+  Signature: TypeError: a bytes-like object is required, not 'str' at
+  edit.py:984 (_restore).
+- probe (.scratch/zero-byte-probe): size before: 230, raised: TypeError,
+  size after: 0 — the zero-byte file reproduced directly.
+
+The fix:
+`original` keeps the raw bytes (`original = raw`); the decoded text is a
+local `text` used only for append planning (eol/head/new_text). Comment in
+place spelling out why the rollback payload must stay bytes.
+
+Green evidence:
+- tests/test_serve_create.py: 63 passed.
+- Full suite: 3827 passed, 2 skipped (289s).
+- ruff scoped to the two touched files: 6 findings, all pre-existing on
+  HEAD (verified via git show | ruff --stdin-filename), none introduced
+  here (AGENTS.md: the repo's ruff baseline is not clean; scoped check
+  only).
+
+Limits documented honestly:
+- This fixes the rollback payload only. The create's check-vs-replace race
+  (the residual-loss gap that held #241) is untouched and untouched in
+  behavior: on this branch `_atomic_replace` keeps main's post-write
+  verify/restore, and a destination that moves between the plan read and
+  the replace is still not detected before the swap (main's existing
+  behavior, not regressed; tests confirm no change).
+- The new-md shape (original is None -> unlink) was never affected.
+- The `new_text.encode("utf-8")` round-trip means a destination whose
+  bytes were not valid UTF-8 never reaches the rollback (refused earlier
+  at the decode); unchanged by this fix.
+
+Ledger: PROGRESS.md row updated to OPEN PR at commit.
+
+-------------------------------------------------------------- round 2 (review)
+Reviewer 57352ec5 on PR #244 (CHANGES REQUESTED) at head b1a135b:
+A MEDIUM: `_restore` was truncate-then-write with a swallowed OSError, so
+   the "was rolled back" reason could be false (probe: rollback write hits
+   ENOSPC -> destination 0 bytes, reason claims the rollback).
+B MEDIUM: no changelog fragment.
+C LOW: vacuous "nothing reserved" assertion (short-circuited on a missing
+   ledger file).
+D LOW: tests named `..._bytes` compared decoded text.
+
+Reproduced A at head b1a135b: probe -> `Refused` "items/reqs.yaml was
+rolled back", size after: 0. New regression
+`test_a_rollback_write_that_fails_never_leaves_a_zero_byte_file_and_says_so`
+(red at head: zero-byte destination + lying reason). Seam: the patched
+reserve_id arms an ENOSPC fault aimed at the destination -- write-opens
+truncate-then-fail and swaps onto it fail -- so it faults the rollback in
+both its old in-place form and its new atomic form; the create's own write
+lands before the arming.
+
+Fix (narrow, atomic -- same PR, new head):
+- `_restore` now stages bytes in a temp file in the destination's
+  directory (same prefix, chmod to the destination's mode -- the
+  PERM-OWNER-001 lesson) and swaps with os.replace; returns bool.
+  A failed restore leaves the destination exactly as it found it.
+- `_rollback` returns bool.
+- `_create_locked` says "was rolled back" only when the rollback landed;
+  otherwise the reason says the file "could not be restored" and names
+  what it holds. The `{rel} was rolled back` lie is gone.
+- `_atomic_replace`'s verify-mismatch branch likewise reports the
+  restore's outcome honestly.
+- B: changelog.d/editor-create-rollback-bytes.fixed.md, house style.
+- C: assertion reads the (possibly missing) ledger once and checks
+  `result.ref` (the planned id on a Refused; Refused has no item_id).
+- D: both round-1 tests compare `path.read_bytes()`.
+
+Seam-scope notes (shared primitive, disclosed):
+- `test_a_mismatched_write_is_restored` (test_serve_edit.py) and
+  `test_atomic_replace_rolls_back_on_verify_mismatch` (test_serve_upload.py)
+  hijacked EVERY os.replace; the restore's own swap (new mechanism) got
+  sabotaged too, destroying the bytes they assert come back. Scoped each
+  seam to the write's swap (first call), sabotage intent unchanged; both
+  pass at the new head.
+- The apply-path `_rollback` caller (edit.py:577) ignores the result and
+  makes no claim in any message -- left as-is (out of scope, honest).
+
+Green: focused tests/test_serve_create.py 64 passed; FULL SUITE 3841
+passed, 2 skipped, exit 0 (PTY pty_2d242976, 303.94s) on head rebased to
+origin/main e1d7bdb; scoped ruff on the four touched py files: 11
+findings == 11 pre-existing at pre-change head (zero introduced).
+Post-fix probe: Refused, reason says "could not be restored", size after
+291 (create's bytes intact), no exception.
+
+Limits: the restore is atomic, not durable-proof: a crash inside the
+restore's own os.replace is the same irreducible window as every other
+write here. The check-vs-replace window (#241) remains untouched/open.
+
+------------------------------------------------------------- round 3 (review)
+Reviewer d4a6dad7 on #244 at f3d0098: CHANGES REQUESTED.
+MEDIUM: the `_atomic_replace` verify-mismatch restore-failure reason
+  asserted "{path} holds the bytes of the failed write" -- an unverified
+  fact in the branch that exists precisely because the destination's
+  bytes are not this process's to describe (third-party writer can land
+  a third thing between swap and re-read).
+LOW: `_atomic_replace` docstring still said the original bytes "are put
+  back" unconditionally; `_restore` silently narrowed (a destination
+  deleted before the restore is not recreated -- the mode stat fails --
+  latent, unreachable from today's call sites); the two rescoped test
+  seams depend on replace ORDERING.
+
+Reproduced MEDIUM deterministically (red at f3d0098):
+`test_a_failed_restore_describes_only_what_the_write_observed`
+(test_serve_upload.py). Seam: the upload's swap lands third-party bytes
+(so the verify re-read disagrees), the restore's swap hits ENOSPC. At
+head the reason named "the bytes of the failed write" while the
+destination held b"third-party bytes" -- the reviewer's exact probe.
+
+Fix (narrow):
+- reason -> "the bytes on disk after the write are not the bytes
+  planned, the original bytes could not be restored, and {path} was left
+  as it was found". Known facts only: mismatch observed, restore failed,
+  the restore touches nothing on failure (mkstemp/write/replace failures
+  all leave the destination untouched; POSIX keeps the destination
+  unchanged when replace itself fails). No re-read -- that would only be
+  a fresh guess. Refusal unchanged (test asserts Refused/500 + bytes).
+- `_atomic_replace` docstring: the put-back is conditional on the
+  restore landing; on failure the file is left as found and the reason
+  says so.
+- `_restore` docstring: states the deleted-destination narrowing and
+  that no call site reaches it (every restore runs on the file its own
+  write landed). Chose to document, not code: recreating a deleted
+  destination from the rollback path would be inventing a file the
+  author deleted, outside this PR's scope, unreachable today.
+- seam ORDERING assessed, not weakened: order is the seams' only
+  discriminator (the write's swap and the restore's share the temp
+  prefix AND the destination -- no argument identifies "the write's"
+  call). Mis-aiming (an earlier replace in the write path) lands the
+  planned bytes on the real swap, the verify passes, and both tests fail
+  LOUDLY on their own Refused assertions; documented in both seams.
+
+Green: the new test (red at head) + focused 198 passed, 1 skipped
+(pre-existing skipif) over upload/edit/create suites; full suite in
+PTY pty_01cd75ac (result appended below); scoped ruff 11 == 11
+pre-existing, zero introduced.
+
+Limits unchanged: no #241 CAS window work; the create-side reason ("it
+holds the new item's bytes") stays -- the reviewer cleared it as
+accurate (the create's own write lands before the reservation fails).
+Full suite on the round-3 head: 3842 passed, 2 skipped, exit 0 (PTY
+pty_01cd75ac, 335.40s).
+
+------------------------------------------------------------- round 4 (review)
+Reviewer 21089cf8 on #244 at 5f33aa3: CHANGES REQUESTED.
+MEDIUM: PR body stale -- describes round 1 only ("rollback only, `original`
+  keeps raw bytes"), omits the atomic `_restore` rewrite, the truthful
+  reason changes, the two test-seam rescopes, and cites round-1 counts
+  (63 focused / 3827 full) while the head is 64 / 3842.
+LOW: the round-2/3 log lines cite "the reviewer cleared it" -- those
+  reviews are Paseo sessions OUTSIDE this repo (verifiable only via
+  `paseo logs <id>`, and #244 has no GitHub reviews), and the
+  "PROGRESS.md row updated" line points at the shared ledger file
+  OUTSIDE this repo (not in any commit). Recorded here as a disclosure:
+  the two claims are real but not repo-verifiable.
+LOW: ledger assertion in the yaml rollback test stayed vacuous -- the
+  fixture never has a ledger (see test_preview_reserves_nothing...) and
+  reserve_id is patched to always raise, so `result.ref not in
+  reserved` can never fail. Round 2 reworded C without making it live.
+LOW: no stray-temp assertion in the new create tests (the atomic restore
+  adds temp writes inside items/).
+LOW: create-side failed-restore reason claimed "it holds the new item's
+  bytes on disk" -- disk content the restore never observed (a
+  lock-bypassing writer, or a deleted destination -- the stat fails and
+  nothing is on disk -- falsify it).
+
+Fixes (round 4 head):
+- Create-side reason -> "the creation's bytes were not rolled back, and
+  the file was left as it was found": our own actions only, no claim
+  about disk content. The round-2 test's negation assertion tightened to
+  the affirmative lie ("was rolled back") -- the new message contains
+  "rolled back" only inside "not rolled back", so the loose substring
+  check was updated to the claim it exists to catch (not a weakening:
+  it is red at b1a135b, where the affirmative claim is present; green at 5f33aa3, whose failure path already read "could not be restored").
+- yaml test: vacuous ledger read replaced by the module's own posture,
+  `tree(project_root, "items", ".refdes")` byte-identity -- one
+  unfailable assertion covering no-ledger-write (the unreserved id),
+  no stray restore temp, and destination bytes. Markdown test: same
+  tree assertion added.
+- Round-2 test: direct stray-temp assertion (listdir has no
+  refdes-tmp entries); tree-identity can't apply there because the
+  destination legitimately keeps the create's bytes.
+- PR body rewritten via gh to describe the ACTUAL head: round-1 bytes
+  fix, round-2 atomic restore + truthful reasons + seam rescopes,
+  round-3 known-facts wording, this round's assertion repairs; current
+  counts.
+
+Green: focused create+upload+edit 198 passed, 1 skipped (pre-existing
+skipif) at this head; full-suite + CI on the pushed head reported in
+the PR. Scoped ruff on touched files: see below.
+
+Limits: no #241 CAS-window work (split stays); _restore atomic, not
+crash-durable inside its own swap; deleted-destination narrowing stays
+documented in `_restore`, coding a recreate remains out of scope;
+#241 untouched.
+
+------------------------------------------- round 4 addendum (second reviewer)
+Reviewer 3389f9ee APPROVED the pre-round-4 head 5f33aa3 (stale once round 4
+pushes). Two in-scope LOWs, both addressed:
+- `_restore` chmod'ed the temp to the destination's (world-readable) mode
+  BEFORE writing: a crashed/partial temp held the file's PREVIOUS contents
+  permissive in items/ (PERM-OWNER-001 class). chmod now runs after the
+  write+fsync, so a mid-restore temp keeps mkstemp's 0600; a new test
+  pins the mode round-trip (0640 survives the restore; red for a
+  chmod-removal mutant). `_atomic_replace`/`_atomic_create` keep their
+  ordering (they stage the author's NEW payload) -- not changed.
+- The deleted-destination sub-case of the old create-side reason ("it
+  holds the new item's bytes on disk") was already voided by this round's
+  known-facts wording: the message claims nothing about disk content.
+Out-of-scope follow-up (NOT fixed here, needs its own ticket):
+`src/refdes/history.py` redact's rollback (removed_files loop) is the
+same truncate-then-write shape -- probe showed 390-byte event file -> 0
+bytes under a faulted restore, and the OSError escapes `except Exception`
+replacing the original error. Reviewer's probe .scratch/review244 (their
+checkout); defect recorded here for the ticket.
+
+-------------------------------------------- round 5 (final, text-only)
+Reviewer f4ca9ae8 (CHANGES REQUESTED, no behavioural defects): four
+text fixes, no code behavior touched.
+- This log's red-at citation for the tightened negation assertion
+  corrected: b1a135b is the head with the affirmative "was rolled back"
+  in the failure path (my 5f33aa3 claim was measured wrong -- the test
+  runs green there, its failure path already said "could not be
+  restored").
+- `_restore` docstring: dropped the "no call site reaches that shape"
+  overclaim (false: the reread-failure branch reaches it -- a vanished
+  file fails the reread -- and the lock-bypassing-writer model the
+  messages themselves carve out). Now states the deleted-destination
+  outcome: stat fails, temp discarded, restore reports failure, file
+  stays deleted.
+- The chmod-ordering comment: dropped the "_atomic_replace stages the
+  author's new payload" justification -- false for apply_edit and the
+  create-append shapes, which stage the WHOLE rewritten file (previous
+  contents included); their chmod-before-write crash windows predate
+  this PR (textio.atomic_write_text, by contrast, chmods after the
+  write). The ordering fix for those stays out of scope.
+- Mode-test docstring: 0600 NARROWS a 0640 file (I wrote "widen").
+Targeted tests (tests/test_serve_create.py) green; no code change, so
+no full suite (per orchestrator).
+
+------------------------------------------------------------- round 6 (review)
+Reviewer d470eeaa (chunk 2 of the head-6fcf2c7 review): CHANGES REQUESTED.
+MEDIUM (verified with a probe): the two RESCOPED seams (test_serve_edit
+test_a_mismatched_write_is_restored, test_serve_upload
+test_atomic_replace_rolls_back_on_verify_mismatch) latched on the FIRST
+os.replace, and the comment claimed a mis-aim "fails loudly". False for
+the likeliest mis-aim: an EARLIER _atomic_replace on ANOTHER file
+consume the latch (its own verify restores it), the mismatch branch
+stops running, and both tests pass for the wrong reason.
+Fix (mechanical, the reviewer's pattern -- the one the two NEW upload
+tests already use): aim each seam at the DESTINATION (abspath match),
+keep first-match so the write's swap is the one sabotaged (the restore's
+swap shares the destination and matches second), and assert the latch
+fired -- a seam that never fires is now loud, not silently green.
+Falsifiability preserved: a `_restore` mutant that claims success and
+restores nothing reddens both seams (probe .scratch/mut7).
+LOW: the negative assertion in test_a_failed_restore_describes_only...
+rejected exactly one historical sentence; added the general guard --
+the payload's digest_of(NEW_CURVE) must be absent from the reason.
+Verified: tests/test_serve_edit.py+test_serve_upload.py+
+test_serve_create.py 207 passed, 1 skipped at the rebased tree (main at
+4686a49, clean rebase, 8 commits on top); scoped ruff 8 == 8 merge-base,
+zero introduced. Reviewer's stray-file flag (early-write.tmp, written
+outside their checkout by their probe) is theirs to clean, noted for
+the orchestrator. #241/#253 stay separate; no CAS-window work.
+
+------------------------------------------------------------- round 7 (review)
+Reviewer 24df1ec8 (chunk 2 of the 6e225a8 review; chunk 1 APPROVE by
+481c1435): seven findings, all test-side, all addressed.
+1. Dead seam machinery: `_FullDisk`/`gated_open` in
+   test_a_rollback_write_that_fails... provably never fire (the atomic
+   restore never opens the destination for writing; reviewer proved it
+   by raising AssertionError in __init__ -- test stayed green). Removed;
+   the swap seam stays, latched: `swaps == [False, True]` (the create's
+   swap unarmed, the restore's armed) -- red at round-1 head 7451f641
+   (in-place restore = no restore swap), the seam's firing is asserted.
+2. New-md rollback shape (this PR's `pass`->False contract change) was
+   untested: added the landed case (unlink removes the file, tree
+   byte-identical, reason says "was rolled back and") and the FAILED
+   case (faulted unlink -- destination-aimed seam + latch -- reason
+   must NOT claim rolled back, must say "could not be restored"; file
+   stays with the created bytes). Red at main: main's create claimed
+   "was rolled back" UNCONDITIONALLY -- the failed-unlink test pins the
+   lie (verified red at origin/main).
+3. Deleted-destination narrowing (the docstring's claim) reachable and
+   untested: added create-side test (create's swap lands, third party
+   unlinks the destination, reread fails, restore refuses): file stays
+   GONE, temp discarded, reason names known facts. Red at main (the
+   in-place restore would recreate the file). ASSESSED: the narrowing
+   is intentional and safe -- recreating a deliberately deleted file
+   resurrects content the author-side removed; the atomic restore
+   respects the last observed state; only a lock-bypassing writer
+   reaches it (all app writers serialize on the write lock). Production
+   behavior kept, pinned by the test.
+4. The two NEW upload seams (test_a_failed_restore_describes_only...,
+   test_a_reread_failure_that_also_breaks...) were still order-latched
+   -- a swap of ANY other file consumed them, and scribble_then_fail
+   would scribble third-party bytes onto the wrong file. Rescoped to
+   destination + latch (`len(swaps) == 2`), like the round-6 siblings.
+5. Vacuous `assert "rolled back" in result.reason` (the failure reason
+   contains "not rolled back") -- tightened to "was rolled back and".
+6. Mode test gained the tree posture (stray-temp coverage).
+7. Digest guard extended: OLD_CURVE's digest (what a restore that
+   thinks it knows the disk would name) also asserted absent.
+Verified: focused create+edit+upload green (210 passed, 1 skipped at
+rebased tree, main at 1 commit ahead -> clean rebase); create file 71
+passed; scoped ruff 8 == 8 merge-base, zero introduced.
+#241/#253 untouched; no CAS-window work; no production change this
+round.

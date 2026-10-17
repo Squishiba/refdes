@@ -1530,12 +1530,22 @@ def test_atomic_replace_rolls_back_on_verify_mismatch(tmp_path, monkeypatch):
     work and then scribbles, which is the only way to reach the branch."""
     root = make_upload_project(tmp_path, {"figures/curve.png": OLD_CURVE})
     project = built_project(root)
-    real_replace = os.replace
+    destination = str(root / "figures" / "curve.png")
+    real_replace, real_abspath = os.replace, os.path.abspath
+    scribbled = []
 
-    def replace_then_scribble(src, dst, **kwargs):
-        real_replace(src, dst, **kwargs)
-        with open(dst, "wb") as fh:
-            fh.write(b"neither version")
+    def replace_then_scribble(src, dst, *args, **kwargs):
+        real_replace(src, dst, *args, **kwargs)
+        # aimed at the DESTINATION, not at call order: an earlier
+        # os.replace on another file (an _atomic_replace, e.g.) passes
+        # through unscribbled instead of silently consuming the seam
+        if not scribbled and real_abspath(str(dst)) == real_abspath(destination):
+            scribbled.append(True)
+            with open(dst, "wb") as fh:
+                fh.write(b"neither version")
+        # the restore's own swap shares the destination; the write's swap
+        # matches first, and the restore lands unscribbled -- scribbling
+        # over it too would destroy the bytes this test asserts come back
 
     monkeypatch.setattr(edit_mod.os, "replace", replace_then_scribble)
     result = upload_mod.store_asset(
@@ -1547,9 +1557,123 @@ def test_atomic_replace_rolls_back_on_verify_mismatch(tmp_path, monkeypatch):
     )
     monkeypatch.undo()
 
+    assert scribbled, "the seam never fired: no swap of the destination was sabotaged"
     assert isinstance(result, upload_mod.Refused), result
     assert result.status == 500
     assert (root / "figures" / "curve.png").read_bytes() == OLD_CURVE, "the original bytes are back"
+    assert [n for n in os.listdir(root / "figures") if "refdes-tmp" in n] == []
+
+
+def test_a_failed_restore_describes_only_what_the_write_observed(tmp_path, monkeypatch):
+    """The verify-mismatch branch exists precisely because the bytes on
+    disk are no longer this process's to describe: a third party can land
+    a third thing between the swap and the re-read, and a restore that
+    then fails knows only that it observed a mismatch and left the file
+    as it found it -- it never re-reads to learn what is there, so the
+    reason must not name the destination's bytes. Sabotage: the upload's
+    swap lands third-party bytes (the re-read disagrees), and the
+    restore's swap hits ENOSPC. The refusal is the guarantee; the message
+    is the scope."""
+    root = make_upload_project(tmp_path, {"figures/curve.png": OLD_CURVE})
+    project = built_project(root)
+    destination = str(root / "figures" / "curve.png")
+    real_replace, real_abspath = os.replace, os.path.abspath
+    swaps = []
+
+    def scribble_then_fail(src, dst, *args, **kwargs):
+        # aimed at the DESTINATION, not at call order: a swap of any
+        # other file passes through, and the latch assertion below fires
+        # if the seam ever stops seeing both swaps of THIS file
+        if real_abspath(str(dst)) == real_abspath(destination):
+            swaps.append(dst)
+            if len(swaps) == 1:
+                real_replace(src, dst, *args, **kwargs)
+                with open(dst, "wb") as fh:
+                    fh.write(b"third-party bytes")
+                return
+            raise OSError(28, "No space left on device")
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(edit_mod.os, "replace", scribble_then_fail)
+    result = upload_mod.store_asset(
+        project,
+        dest="figures",
+        name="curve.png",
+        data=NEW_CURVE,
+        expected_hash=_hash(OLD_CURVE),
+    )
+    monkeypatch.undo()
+
+    assert len(swaps) == 2, f"the seam saw {len(swaps)} swaps of the destination; expected the write's and the restore's"
+    assert isinstance(result, upload_mod.Refused), result
+    assert result.status == 500
+    assert (root / "figures" / "curve.png").read_bytes() == b"third-party bytes", (
+        "a restore that failed must leave the destination exactly as it found it"
+    )
+    assert "left as it was found" in result.reason, result.reason
+    assert "holds the bytes of the failed write" not in result.reason, (
+        f"the reason names bytes the restore never read: {result.reason}"
+    )
+    # the general guard, not just the one historical sentence: a reason
+    # that names the payload by digest is naming the bytes too. Both
+    # digests: the upload's payload AND the bytes a restore that thinks
+    # it knows the disk state would claim to have put back
+    assert upload_mod.digest_of(NEW_CURVE) not in result.reason, result.reason
+    assert upload_mod.digest_of(OLD_CURVE) not in result.reason, result.reason
+    assert [n for n in os.listdir(root / "figures") if "refdes-tmp" in n] == []
+
+
+def test_a_reread_failure_that_also_breaks_the_restore_names_both(tmp_path, monkeypatch):
+    """The post-write re-read can fail -- and the restore it triggers can
+    fail too. The reason must report BOTH outcomes: a caller left with a
+    refusal and a moved destination has to learn the original bytes are
+    not back, not only that the re-read broke. Sabotage: the write's swap
+    lands, the re-read then raises, and the restore's swap hits ENOSPC."""
+    root = make_upload_project(tmp_path, {"figures/curve.png": OLD_CURVE})
+    project = built_project(root)
+    target = str(root / "figures" / "curve.png")
+    real_open, real_replace, real_abspath = open, os.replace, os.path.abspath
+    swaps, armed = [], []
+
+    def gated_open(file, mode="r", *args, **kwargs):
+        if armed and "r" in mode and real_abspath(str(file)) == target:
+            raise OSError(5, "Input/output error")
+        return real_open(file, mode, *args, **kwargs)
+
+    def gated_replace(src, dst, *args, **kwargs):
+        # destination-aimed, like the sibling seams: swaps of other
+        # files pass through untouched and the latch assertion below
+        # fires if this file's two swaps stop being seen
+        if real_abspath(str(dst)) == target:
+            swaps.append(dst)
+            if len(swaps) == 1:
+                armed.append(True)  # the write landed; now the reread breaks
+                return real_replace(src, dst, *args, **kwargs)
+            raise OSError(28, "No space left on device")  # the restore's swap fails
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", gated_open)
+    monkeypatch.setattr(edit_mod.os, "replace", gated_replace)
+    result = upload_mod.store_asset(
+        project,
+        dest="figures",
+        name="curve.png",
+        data=NEW_CURVE,
+        expected_hash=_hash(OLD_CURVE),
+    )
+    monkeypatch.undo()
+
+    assert len(swaps) == 2, f"the seam saw {len(swaps)} swaps of the destination; expected the write's and the restore's"
+    assert isinstance(result, upload_mod.Refused), result
+    assert result.status == 500
+    assert "could not re-read" in result.reason, result.reason
+    assert "could not be restored" in result.reason, (
+        f"the reason hides the restore failure behind the reread failure: {result.reason}"
+    )
+    assert "left as it was found" in result.reason, result.reason
+    assert (root / "figures" / "curve.png").read_bytes() == NEW_CURVE, (
+        "a restore that failed must leave the destination as it found it (the write's bytes)"
+    )
     assert [n for n in os.listdir(root / "figures") if "refdes-tmp" in n] == []
 
 
