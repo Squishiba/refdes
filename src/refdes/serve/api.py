@@ -649,8 +649,11 @@ def _create_preview(app, query: dict[str, list[str]]) -> tuple[int, dict]:
     the value and the registered ones, and the preview refuses the same way
     (run-9 R9-F3). It used to ignore the unknown name and fall back to the
     unscoped suggestion -- a 200 pointing into some other workspace's tree,
-    silently. `board` keeps its existing lenient reading; the create form
-    offers only registered values of both, so this is the direct-caller path."""
+    silently. `board` gets the same check (run-11 R11-F4, the parameter right
+    next to the one #326 fixed): `/api/items?board=ghost` refuses it from
+    `parse_filters`, and the preview answered 200 with a suggestion nothing
+    in the project pointed at. The create form offers only registered values
+    of both, so both gates are the direct-caller path."""
     project = app.state.snapshot.project
     type_name = (query.get("type") or [""])[0]
     if not type_name:
@@ -662,6 +665,14 @@ def _create_preview(app, query: dict[str, list[str]]) -> tuple[int, dict]:
     if workspace is not None:
         try:
             validate_facet(project, "workspace", workspace)
+        except FilterError as exc:
+            return exc.status, {"error": str(exc)}
+    if board is not None:
+        # The R9-F3 gate's sibling parameter (run-11 R11-F4): the same
+        # check as above, so `board` is refused here exactly as
+        # `/api/items?board=` refuses it -- same call, same message shape.
+        try:
+            validate_facet(project, "board", board)
         except FilterError as exc:
             return exc.status, {"error": str(exc)}
     return 200, edit_mod.preview_creation(

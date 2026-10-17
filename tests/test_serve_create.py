@@ -1732,6 +1732,67 @@ def test_http_preview_refuses_a_workspace_where_none_are_registered(served):
     assert prev["error"] == items["error"]
 
 
+def test_http_preview_refuses_an_unregistered_board(served_workspaces):
+    """R11-F4: the #326 gate stopped one parameter short of its sibling.
+    `?board=` naming an unregistered board answered 200 -- the preview
+    pointed a typo'ing scripted caller at a file tree nothing said about
+    (a new file at the workspace root the layout does not use) -- while
+    `/api/items?board=nosuchboard` refused it from the facet rule. The
+    preview now refuses from the same `validate_facet` call, with the
+    list route's message; the neighbours are pinned: a registered board
+    alone and paired with a workspace, no scope, and an empty scope all
+    preview exactly as before."""
+    _app, client, root = served_workspaces
+    before = snapshot_tree(root)
+
+    status, items = client.api_get("/api/items?board=nosuchboard")
+    assert status == 400, items
+
+    status, prev = client.api_get("/api/create/preview?type=requirement&board=nosuchboard")
+    assert status == 400, prev
+    assert prev == items  # the same check, the same message shape
+    assert prev == {
+        "error": "board: no such board 'nosuchboard' in this project; "
+        "known boards: board-a"
+    }
+
+    # a registered workspace does not license an unregistered board
+    status, paired = client.api_get(
+        "/api/create/preview?type=requirement&workspace=product-a&board=nosuchboard"
+    )
+    assert status == 400 and "board 'nosuchboard'" in paired["error"], paired
+
+    # the neighbours: registered board alone and paired, no scope, empty scope
+    status, plain = client.api_get("/api/create/preview?type=requirement")
+    assert status == 200 and plain["destination"] == "items/many-platform.yaml"
+    status, board_only = client.api_get("/api/create/preview?type=requirement&board=board-a")
+    assert status == 200 and board_only == plain
+    status, scoped = client.api_get(
+        "/api/create/preview?type=requirement&board=board-a&workspace=product-a"
+    )
+    assert status == 200 and scoped["destination"] == "items/few-product.yaml"
+    status, empty = client.api_get("/api/create/preview?type=requirement&board=")
+    assert status == 200 and empty == plain
+
+    # a refusal reserves and writes nothing, same as every other preview
+    assert not (root / ".refdes" / "ids.yaml").exists()
+    assert snapshot_tree(root) == before
+
+
+def test_http_preview_refuses_a_board_where_none_are_known(served):
+    """The registry-less shape of the same sibling check: a project whose
+    registry declares `board-a` and whose items carry nothing else knows
+    one board, so any other name is refused -- the list route's exact
+    message, not a new one (the workspace parity test above is the
+    sibling)."""
+    _app, client, _root = served
+    status, items = client.api_get("/api/items?board=ghost")
+    assert status == 400, items
+    status, prev = client.api_get("/api/create/preview?type=requirement&board=ghost")
+    assert status == 400, prev
+    assert prev["error"] == items["error"]
+
+
 def test_http_create_reads_an_empty_id_as_auto_like_the_preview(served):
     """An empty id means "not given" on both create routes. The preview
     route has always collapsed `?id=` to the auto plan (api.py's `or None`
