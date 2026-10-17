@@ -100,6 +100,15 @@ is what makes a today-style single-item file valid unmigrated: nothing after its
 one closing `---` looks like a fresh front-matter block, so the whole rest of the
 file stays its body.
 
+A `---` inside an open fenced code block is literal body text and splits nothing.
+The block runs from a line of three or more backticks (or tildes), indented no more
+than three spaces, to the next line of the same character in a run at least as long
+with nothing after it; a line inside it that looks like a fence with an info string
+(```python) does not close it. So pasting a front-matter example into an item's
+body as a ` ```yaml ` fence — delimiters included — stays exactly what it is: an
+example on the page, not a second live item. A fence opener that is never closed
+protects nothing; a `---` after it splits as usual.
+
 An optional leading block whose only key is `defaults:` applies to every item that
 follows, the same way `defaults:` works in a list file:
 

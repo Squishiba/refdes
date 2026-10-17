@@ -38,6 +38,15 @@ FENCE_RE = re.compile(r"^---[ \t]*$")
 # A YAML mapping key opening a line at column 0 -- what has to follow a `---` for it
 # to be read as a new item's front-matter rather than a literal horizontal rule.
 KEY_LINE_RE = re.compile(r"^[A-Za-z_][\w.-]*\s*:(\s|$)")
+# A fenced code block's opening line (see _code_fenced_lines): up to 3 spaces of
+# indentation, then 3+ of one fence character; the rest of the line is the fence's
+# info string, which a backtick fence may not fill with backticks. A closing line
+# is the same character in a run at least as long, with nothing after it.
+_FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_FENCE_CLOSE_RES = {
+    "`": re.compile(r"^ {0,3}(`{3,})[ \t]*$"),
+    "~": re.compile(r"^ {0,3}(~{3,})[ \t]*$"),
+}
 # `body` is the markdown body, not a field. In a .md file it is the text after the
 # front-matter; in a list file it is a `body:` key. A .md file already holds many
 # items sharing one `defaults:` block, so the tradeoff is not file count but whether
@@ -1432,6 +1441,47 @@ def _yaml_mapping(text: str) -> tuple[dict | None, list[DuplicateKey]]:
     return (parsed, duplicates) if isinstance(parsed, dict) else (None, duplicates)
 
 
+def _code_fenced_lines(lines: list[str], start: int) -> set[int]:
+    """Line indices strictly inside a closed fenced code block, scanning from
+    `start` (the body of a Markdown item file: front matter is YAML, where a
+    ``` line is string content, not a fence).
+
+    The rules are CommonMark's, narrowed to what matters for splitting
+    (R10-X1): an opener is up to 3 spaces of indent then 3+ of one fence
+    character (a backtick fence whose info string contains a backtick is not
+    an opener); the block runs to the next line of the same character in a
+    run at least as long with nothing after it. Fences do not nest. An
+    opener with no closing line before the end of the file opens nothing --
+    the least-surprising fallback is today's behavior, where every `---`
+    after an unclosed fence opener keeps splitting as it always did.
+    """
+    protected: set[int] = set()
+    i = start
+    n = len(lines)
+    while i < n:
+        mo = _FENCE_OPEN_RE.match(lines[i])
+        if mo is None:
+            i += 1
+            continue
+        marker, info = mo.group(1), mo.group(2)
+        if marker[0] == "`" and "`" in info:
+            i += 1
+            continue
+        close_re = _FENCE_CLOSE_RES[marker[0]]
+        j = i + 1
+        while j < n:
+            cm = close_re.match(lines[j])
+            if cm is not None and len(cm.group(1)) >= len(marker):
+                break
+            j += 1
+        if j == n:
+            i += 1
+            continue
+        protected.update(range(i + 1, j))
+        i = j + 1
+    return protected
+
+
 def md_front_matter_blocks(
     lines: list[str],
 ) -> tuple[list[tuple[int, int, dict]], list[tuple[str, int]], dict[int, list[DuplicateKey]]]:
@@ -1442,12 +1492,15 @@ def md_front_matter_blocks(
     can never disagree about where an item's front matter is. A fence only
     opens a new item when the line right after it looks like a YAML key and a
     closing fence follows; otherwise it stays a literal horizontal rule in
-    the previous item's body. Returns (blocks, errors, duplicates) with errors
-    as (message, line) pairs for the caller to report and duplicates keyed by
-    the block's `open_i` -- each record's lines already shifted onto the
-    file's own numbering, since a block is parsed as text of its own. An empty
-    blocks list means no usable front matter at all (the conditions that abort
-    parsing).
+    the previous item's body. A `---` inside an open fenced code block (see
+    _code_fenced_lines) is literal text and is not a fence at all: a pasted
+    front-matter example in a ```yaml fence stays body prose of the item
+    that carries it, never a phantom item (R10-X1). Returns (blocks, errors,
+    duplicates) with errors as (message, line) pairs for the caller to report
+    and duplicates keyed by the block's `open_i` -- each record's lines
+    already shifted onto the file's own numbering, since a block is parsed as
+    text of its own. An empty blocks list means no usable front matter at all
+    (the conditions that abort parsing).
     """
     blocks: list[tuple[int, int, dict]] = []
     errors: list[tuple[str, int]] = []
@@ -1455,6 +1508,10 @@ def md_front_matter_blocks(
     fence_idx = [i for i, line in enumerate(lines) if FENCE_RE.match(line)]
     if len(fence_idx) < 2 or fence_idx[0] != 0:
         return [], [("no YAML front-matter (file must start with '---')", 1)], duplicates
+
+    fenced = _code_fenced_lines(lines, fence_idx[1] + 1)
+    if fenced:
+        fence_idx = [i for i in fence_idx if i not in fenced]
 
     close0 = fence_idx[1]
     head_text = "\n".join(lines[1:close0])
