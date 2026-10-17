@@ -65,6 +65,7 @@ def load_tree(
     require_ids: bool = True,
     write: bool = True,
     overlay: Mapping[str, str] | None = None,
+    lockfile_overlay: str | None = None,
 ) -> tuple[Project, bool]:
     """Returns (project, schema_was_stale); see `cli._load` for the latter.
 
@@ -76,14 +77,19 @@ def load_tree(
     `Project.source_overlay`). Overlays are only meaningful read-only: the
     write-back steps address files by path and line, and would rewrite the
     real file from overlay-derived positions.
+
+    `lockfile_overlay` is the same posture for `.refdes/citations.yaml`: the
+    lockfile `citations.load_lockfile` reads is this text, not the file
+    (see `Project.lockfile_overlay`).
     """
-    if overlay and write:
-        raise ValueError("a source overlay can only be loaded with write=False")
+    if (overlay or lockfile_overlay is not None) and write:
+        raise ValueError("an overlay can only be loaded with write=False")
     project = load_project(config_path=config_path)
     if overlay:
         project.source_overlay = {
             parse_mod.overlay_key(path): text for path, text in overlay.items()
         }
+    project.lockfile_overlay = lockfile_overlay
     # A cheap side effect of loading, not a job of its own -- every command
     # that reaches this point has already resolved the full merged schema,
     # so writing .refdes/schema.json here is the same housekeeping posture
@@ -186,6 +192,7 @@ def load_tree(
 def load_readonly(
     config_path: str | None = None,
     overlay: Mapping[str, str] | None = None,
+    lockfile_overlay: str | None = None,
 ) -> Project:
     """Load and fully build a project with every write suppressed.
 
@@ -200,9 +207,17 @@ def load_readonly(
     sees exactly the project a proposed edit would produce. Diagnostics from
     a broken file are reported on the returned project rather than raised
     (the `index` posture), so a half-typed candidate is inspectable.
+
+    `lockfile_overlay` substitutes in-memory text for `.refdes/citations.yaml`
+    for the same reason: an accept's candidate resolves its new `source()`
+    line against the lockfile the accept is about to write (§4).
     """
     project, _stale = load_tree(
-        config_path, require_ids=False, write=False, overlay=overlay
+        config_path,
+        require_ids=False,
+        write=False,
+        overlay=overlay,
+        lockfile_overlay=lockfile_overlay,
     )
     build_mod.build(project, seal_write=False, reseal=False)
     return project

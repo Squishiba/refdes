@@ -1,0 +1,125 @@
+Task: close #182 on branch fix/lockfile-rollback-atomicity-20261015
+(worktree fix-lockfile-rollback-atomicity-20261015, base e1d7bdb).
+Model: Qwen3.8-Flash-Next. Status: FINISHED (PR opened, #253; the
+post-review accuracy fixes of round 4 are the latest commits).
+
+What #182 literally names is stale on main. The claim:
+`_LockfileWrite.rollback` reads the lockfile, compares, and restores with
+no lock, so a cooperating writer landing in the compare->restore gap is
+overwritten by our `previous`. That gap is closed on main: read, compare
+and restore are one `project_write_lock` section (PR #195 follow-up,
+commit d804b59), and `tests/test_citations_lockfile_locking.py::
+test_no_writer_lands_between_the_rollbacks_read_and_its_restore` proves
+it with a thread that cannot get the lock.
+
+What is NOT closed on main is the family #182 belongs to (the same
+write-before-gate shape), and the deterministic probes added to
+tests/test_serve_sources_accept.py prove it red on origin/main:
+
+- test_a_rolled_back_accept_does_not_erase_a_pin_a_same_key_accept_adopted
+  (verified RED on origin/main 2486f52, 2026-10-15): the loser's
+  rollback restores the bytes it read and erases the winner's adopted
+  pin from under the body the winner landed. `refdes check` fails the
+  tree afterwards.
+- test_a_rollback_does_not_delete_a_pin_from_under_a_landed_body: same
+  window, other direction -- a cooperating accept gates over a pin this
+  accept then rolls back out from under its landed body.
+- test_an_accept_survives_a_writer_that_moved_the_lockfile_midgate was
+  GREEN on main (the compare declined to clobber) and stays green here;
+  it is the regression guard for the merge-landing rule.
+
+Why a predicate cannot fix it (decided the HOLD-vs-fix question): at
+refusal time, the clobber's disk state is BYTE-IDENTICAL to the state of
+a refusal that REQUIRES the restore (a pre-named pair pinned by nothing;
+deleting our pin is mandatory there). No observation of shared disk state
+separates the two worlds. A file-mtime predicate is FS-granularity
+dependent (FAT/NFS second granularity), i.e. not sound. So #240's
+tree-check guard was rejected on its P1 hole (an added same-line body
+edit escapes the multiset), and the fix removes the window instead of
+watching it. #240 stays HOLD; the structural fix supersedes it.
+
+The fix (this branch):
+- model.Project gains `lockfile_overlay`; citations.load_lockfile reads it
+  when set (overlay posture, like source_overlay; overlay loads are
+  read-only, load_tree raises on write=True).
+- loader.load_tree/load_readonly gain `lockfile_overlay=`.
+- serve/edit.py: `_accept_pins` no longer writes. It stages whole-file
+  bytes in memory under the project lock. The gate judges the candidate
+  via `lockfile_overlay`. The final section lands the PAIR: revision
+  check -> `_land_lockfile` (skip-if-equal / write-if-unchanged /
+  re-stage-merge over fresh records under fetch's policy if a cooperator
+  moved the file; a pair already pinned at the values this accept read
+  -> the file stands, only the body lands; a pair pinned at a different
+  value, or a re-extraction drifting, -> refusal) -> body replace; on
+  body-replace failure `_restore_lockfile` puts back what THIS section's
+  write replaced, under the same lock (seconds, not a window).
+  `_LockfileWrite`, `rollback()`, `_undo_accept` and all five of its
+  call sites are gone.
+- docs/design/editor-source-picker.md §4 rewritten: new sequence, the
+  indistinguishability proof, the re-stage rule, and the honest residue
+  (crash between the two replaces -> inert pin, cleaned by fetch;
+  writers that ignore the lock are not serialisable by anything here).
+
+Test topology note: the old locking test fired the writer thread inside
+`_rollback`, reached by a gate failure after the write. There is no
+write before the gate any more, so that test is rewritten to fire the
+writer at the one surviving restore site: the body's `_atomic_replace`
+failing after the lockfile landed. Same guarantee, same probe style
+(events, not sleeps; the writer asserts it CANNOT have landed).
+The test_serve_sources_accept seams that simulated "failure after the
+lockfile landed" now simulate failure inside the read-only gate; their
+assertions (both files byte-identical on refusal) got STRONGER for free:
+with nothing written before the gate, refusal leaves nothing by
+construction, and the tests still prove it.
+
+Writer-cooperation note (corrected in round 4): the cooperating-writer
+probes in tests/test_serve_sources_accept.py write item + lockfile
+inside one project_write_lock section. The locking test's mid-gate
+writer (in test_a_write_that_landed_during_the_gate_is_not_clobbered_by_
+the_refusal) takes the lock for its lockfile write and writes the item
+file outside it. Writers outside the lock are the shape §4 declares out
+of scope, so the proof is unaffected; an earlier version of this log
+claimed ALL probes write both files inside one section, which was false
+for that writer.
+
+Verification:
+- red-before: the two probes fail on origin/main (2486f52) -- see above.
+- green-after: all three probes green on the branch.
+- tests/test_serve_sources_accept.py + tests/test_citations_lockfile_
+  locking.py: 39 passed at the pre-merge heads.
+- full suite at the round-4 head: 4028 passed, 2 skipped (~346s, after
+  merging origin/main); `ruff check --select E9,F src tests` clean;
+  scoped E,W,F,I on the touched files shows only the two findings that
+  pre-exist at 812006a (E501 in main's append-md block, I001 in the
+  locking test's imports) and nothing new.
+
+Review history, one line per round (details in the PR thread): round 2
+(both chunks CHANGES REQUESTED at head ede1252) found a real HIGH -- the
+landing section's already-pinned branch fell through to the write and
+erased a cooperator's pins; fixed (file stands, only the body lands),
+probe added, verified RED-then-green, plus its LOWs (writer realism,
+rollback-vocabulary renames, §4/changelog sub-rule). Round 3 (three
+verdicts, all CHANGES REQUESTED) found the gate-approval hole -- a
+co-actor repinning the key at a DIFFERENT value during the gate let the
+body land over a pin the gate never judged; fixed by carrying the
+accept's expected (path, key) -> value map into the landing section
+(equal -> file stands, drift -> refusal naming both values), probes
+verified RED on 812006a then green, plus LOWs (rollback vocabulary
+retired from probe prose, the historical citation kept; probes assert
+their own byte-identity premise; items_yaml derived from ITEMS; §4 and
+changelog landing-rule wording). Round 4 (head 40929ff after merging
+origin/main, 2/3 APPROVE, chunk 1 CHANGES REQUESTED): documentation and
+comment accuracy only, no behavior finding -- stale "read and replace"
+in save_lockfile's docstring and the dead "its rollback" in fetch_all's,
+the loader ValueError naming the source overlay when only
+lockfile_overlay triggered it, a stale header-writer test comment, this
+log's false all-probes claim plus gitignored .scratch pointers and its
+over-cap length, the changelog fragment's re-wrap indentation, and §4's
+steps-3-4 sentence (staging runs in one section; step 4 consumes the
+staged bytes); all fixed, no behavior change.
+
+Not done in this change (documented, not hidden): a writer that ignores
+project_write_lock entirely; crash between lockfile landing and body
+replace (inert pin residue, unchanged class, smaller window); the
+read->os.replace gap inside each atomic replace (same as every other
+writer in the codebase).

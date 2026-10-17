@@ -984,6 +984,13 @@ class Project:
     # before anything is written (docs/design/browser-editor.md, Slice 0).
     # Empty for every ordinary command.
     source_overlay: dict[str, str] = field(default_factory=dict)
+    # In-memory replacement for `.refdes/citations.yaml`: `citations.load_lockfile`
+    # reads from here instead of disk, so the browser editor can build and
+    # validate a candidate accept -- whose new `source()` line resolves against
+    # the lockfile the accept is about to write -- before that lockfile exists
+    # (docs/design/editor-source-picker.md §4). None for every ordinary command;
+    # only `load_tree`/`load_readonly` set it, and only on a read-only load.
+    lockfile_overlay: str | None = None
     # Project-relative paths of the item files whose parse reported a duplicate
     # mapping key -- `parse._report_duplicate_keys` fills this in, and
     # `revise.write_rewrites_verified` refuses to rewrite anything in these
