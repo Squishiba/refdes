@@ -1399,6 +1399,38 @@ def test_http_preview_refuses_an_unregistered_workspace(served_workspaces):
     assert snapshot_tree(root) == before
 
 
+def test_http_preview_refuses_an_unknown_workspace_even_with_an_explicit_destination(
+    served_workspaces,
+):
+    """The untested edge of the R9-F3 gate: it is on the scope parameter, not
+    on the suggestion, so `?destination=` no longer outranks an unknown
+    workspace -- before #326 that pairing was the one ghost shape answering
+    200 (the explicit file won, the ignored scope went unmentioned). Pinned
+    with its neighbour: a known workspace plus the same explicit destination
+    previews exactly as it did before the gate existed."""
+    _app, client, root = served_workspaces
+    before = snapshot_tree(root)
+
+    status_ghost, plain = client.api_get("/api/create/preview?type=requirement&workspace=ghost")
+    status_pair, paired = client.api_get(
+        "/api/create/preview?type=requirement&workspace=ghost"
+        "&destination=items/many-platform.yaml"
+    )
+    assert (status_ghost, status_pair) == (400, 400), (plain, paired)
+    assert paired == plain  # the same refusal -- the destination changes nothing
+
+    status_known, known = client.api_get(
+        "/api/create/preview?type=requirement&workspace=product-a"
+        "&destination=items/many-platform.yaml"
+    )
+    assert status_known == 200 and known["destination"] == "items/many-platform.yaml"
+    assert known["id"] == "REQ-104"
+
+    # a refusal reserves nothing, gate included
+    assert not (root / ".refdes" / "ids.yaml").exists()
+    assert snapshot_tree(root) == before
+
+
 def test_http_preview_refuses_a_workspace_where_none_are_registered(served):
     """The registry-less half of the same check: this project declares no
     `workspaces:`, so no scope name is registered and any `?workspace=` is
