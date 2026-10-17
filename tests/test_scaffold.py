@@ -869,6 +869,143 @@ def test_cli_announces_the_vscode_settings_file_it_wrote(tmp_path, monkeypatch, 
     assert (tmp_path / ".gitignore").is_file()
 
 
+# ---------------- R11-F2: the vscode announcement must track git's answer
+#
+# init asks git about `.vscode/settings.json` for the append decision
+# (#328), then printed "(gitignored -- ...)" unconditionally -- keyed on
+# "init wrote the file", never on the coverage answer it had just asked
+# for. The paren is false exactly in #328's own shape: an author's
+# negation means git tracks the file. The announcement asks git the same
+# question the append decision asks.
+
+
+@pytest.mark.parametrize(
+    "gitignore,ignored",
+    [
+        (".vscode/*\n!.vscode/*\n", False),  # the DOC-REMEDY-018 pair
+        ("!.vscode/settings.json\n", False),  # a bare negation
+        (".vscode/\n!.vscode/\n", False),  # negation on the directory
+        (".vscode/\n", True),
+        ("/.vscode\n", True),
+    ],
+)
+def test_cli_announces_the_vscode_file_the_way_git_reads_it(
+    tmp_path, monkeypatch, capsys, gitignore, ignored
+):
+    git = _git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text(gitignore, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert cli_mod.main(["init"]) == 0
+    out = capsys.readouterr().out
+    lines = [
+        line for line in out.splitlines() if line.startswith("wrote .vscode/settings.json")
+    ]
+    assert len(lines) == 1, out
+    if ignored:
+        assert lines[0] == (
+            "wrote .vscode/settings.json (gitignored -- the yaml.schemas path "
+            "in it names one checkout)"
+        )
+    else:
+        assert lines[0].startswith("wrote .vscode/settings.json (NOT gitignored"), lines[0]
+        assert "(gitignored --" not in out
+    # the ground truth the paren must track, by git's own hand
+    probe = subprocess.run(
+        [git, "check-ignore", "--no-index", "--", ".vscode/settings.json"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == (0 if ignored else 1), probe.stdout
+
+
+# ---------------- R11-F3: the new-file path asks the coverage question too
+#
+# The append path asks git whether a pattern already covers an entry
+# (#328); the brand-new-`.gitignore` path wrote all five lines
+# unasked. git answers for a path not on disk (`check-ignore
+# --no-index`), and the patterns that cover a fresh project's files can
+# live OUTSIDE it -- a repository root's `.gitignore`, the global
+# `core.excludesFile` -- so the new-file path asks the same question.
+
+
+def test_init_new_gitignore_skips_entries_the_repo_root_already_covers(tmp_path):
+    """Run-11's repro: the project is a subdirectory of a repo whose root
+    ignores `.refdes/`; init wrote all five lines, git reading three of
+    them as already covered. The uncovered entries are still written --
+    the root said nothing about them."""
+    git = _git_repo(tmp_path)
+    proj = tmp_path / "hardware" / "board-a"
+    proj.mkdir(parents=True)
+    (tmp_path / ".gitignore").write_text(".refdes/\n", encoding="utf-8")
+    scaffold_mod.init(str(proj))
+    patterns = _gitignore_patterns(proj / ".gitignore")
+    assert ".refdes/copies/" not in patterns
+    assert ".refdes/schema.json" not in patterns
+    assert ".refdes/sealing-optin.json" not in patterns
+    assert ".vscode/settings.json" in patterns
+    assert ".refdes-write.lock" in patterns
+    # ground truth: the root's own line is what covers the skipped one
+    probe = subprocess.run(
+        [
+            git, "-C", str(tmp_path), "check-ignore", "--no-index", "-v", "--",
+            "hardware/board-a/.refdes/copies/",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 0 and ".refdes/" in probe.stdout, probe.stdout
+
+
+def test_init_writes_no_new_gitignore_where_git_covers_every_entry(tmp_path):
+    """All five covered from outside the project: the answer is not an
+    empty `.gitignore`, it is no file at all."""
+    _git_repo(tmp_path)
+    proj = tmp_path / "hw"
+    proj.mkdir()
+    (tmp_path / ".gitignore").write_text(
+        ".refdes/\n.refdes-write.lock\n.vscode/\n", encoding="utf-8"
+    )
+    scaffold_mod.init(str(proj))
+    assert not (proj / ".gitignore").exists()
+
+
+def test_init_new_gitignore_skips_entries_the_global_excludes_file_covers(tmp_path):
+    """The same question, answered by `core.excludesFile`: run 11 verified
+    git is consulted for the global file on the append path; a fresh
+    project whose entries the author has globally ignored gets no file."""
+    _git_repo(tmp_path)
+    excludes = tmp_path / "global-excludes"
+    excludes.write_text(
+        ".refdes/\n.refdes-write.lock\n.vscode/settings.json\n", encoding="utf-8"
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "core.excludesFile", str(excludes)],
+        check=True,
+    )
+    scaffold_mod.init(str(tmp_path))
+    assert not (tmp_path / ".gitignore").exists()
+
+
+def test_cli_announces_only_the_new_gitignore_lines_git_does_not_already_cover(
+    tmp_path, monkeypatch, capsys
+):
+    """The announcement of the same fix: the project's file is created with
+    only the entries git does not read as covered, and the printed list
+    names exactly those."""
+    _git_repo(tmp_path)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (tmp_path / ".gitignore").write_text(".refdes/\n", encoding="utf-8")
+    monkeypatch.chdir(proj)
+    assert cli_mod.main(["init"]) == 0
+    out = capsys.readouterr().out
+    assert [line for line in out.splitlines() if "wrote .gitignore" in line] == [
+        "wrote .gitignore (.vscode/settings.json, .refdes-write.lock "
+        "-- not yours to commit)"
+    ]
+
+
 def test_cli_announces_only_the_patterns_init_actually_added(tmp_path, monkeypatch, capsys):
     """The announcement follows what changed, not what init would have liked to
     write: a project that already ignored `.refdes/copies/` gets no line for it,

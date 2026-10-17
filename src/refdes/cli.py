@@ -2072,10 +2072,24 @@ def cmd_init(args) -> int:
     # no word about it is invisible unless you list the directory (user-sim run
     # 2, "Lower severity" list). The skip case is named by the note below.
     if not vscode_settings_existed:
-        print(
-            "wrote .vscode/settings.json (gitignored -- the yaml.schemas path "
-            "in it names one checkout)"
-        )
+        # The paren is asked, not assumed (R11-F2): it used to be printed on
+        # "init wrote the file" alone, which is false exactly in #328's shape
+        # -- an author's negation (`.vscode/*` + `!.vscode/*`) means git
+        # tracks the file, and the machine-specific yaml.schemas path inside
+        # it is about to be committable. Ask git the same question the
+        # append decision asked (scaffold.vscode_settings_ignored).
+        if scaffold_mod.vscode_settings_ignored(cwd):
+            print(
+                "wrote .vscode/settings.json (gitignored -- the yaml.schemas "
+                "path in it names one checkout)"
+            )
+        else:
+            print(
+                "wrote .vscode/settings.json (NOT gitignored -- the "
+                "yaml.schemas path in it names one checkout, and git does "
+                "not ignore the file; committing it hands every other "
+                "clone a schema that resolves to nothing)"
+            )
     # ...and the `.gitignore` it wrote or appended to is a third thing that
     # appeared, so it is named too -- by what it now ignores rather than by the
     # act of writing it, which is accurate in both the wrote-a-new-file and the
