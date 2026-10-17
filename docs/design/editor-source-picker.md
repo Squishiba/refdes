@@ -205,9 +205,16 @@ The sequence, inside the existing per-project write lock
 5. Load the candidate with `overlay={item_path: new_text}` — now reading the
    lockfile that was just written, so the new `source()` line resolves and the
    delta gate judges the real candidate.
-6. Run the delta gate. Pass → write the body atomically → `Applied`, and
-   `state.refresh()` as today. Fail → **restore the previous lockfile bytes**
-   and return the gate's `Invalid` diagnostics unchanged.
+ 6. Run the delta gate. Pass → re-check, under the project lock, that the
+    pins this accept staged are still on disk, and put them back — **or
+    refuse** (the "Two locks" note below states why a passed gate is not
+    yet a write). Write the body atomically → `Applied`, and
+    `state.refresh()` as today. Fail → **restore the previous lockfile bytes**
+    (with the one guard the "Two locks" note below states: if the tree no
+    longer names the pins this accept added with exactly the lines the accept
+    read them named, a save has landed during the gate and the rollback leaves
+    the file alone)
+    and return the gate's `Invalid` diagnostics unchanged.
 
 Step 6's rollback is the first two-file transaction the editor performs, and
 `browser-editor.md` puts the general transaction journal in "a later slice".
@@ -232,10 +239,48 @@ restores.
 The compare is not there for the (now closed) gap between its own read and its
 restore; it is there for the gate — a save that landed while the gate was
 running has already replaced the file, and restoring the bytes this operation
-read would delete a pin that a body on disk still names. What the lock cannot
-promise is the crash inside the one `os.replace` above, or a writer that
-ignores the lock. Proven both ways, with the interleaving built on events
-rather than on timing, in `tests/test_citations_lockfile_locking.py`.
+read would delete a pin that a body on disk still names. The compare cannot
+see the same race spelled with identical bytes: two accepts of the same key
+stage the same bytes, so the winner's own write is a no-op, the file still
+holds exactly what the loser wrote, and the loser's rollback reads "still
+mine" while the winner's body, naming the pin, is on disk. So the rollback
+also asks the tree — under the same lock, a read-only re-parse — whether the
+lines naming the pairs this write newly pins are still exactly the lines that
+named them when the accept read the project; if they are not, the file has
+passed to a landed save and the restore leaves it alone. The question is
+asked about the naming *lines*, not the named pairs: a pair the project was
+already naming, unpinned, when this writer read it is not exempt, because a
+cooperating accept of that pair stages the identical bytes, writes nothing,
+gates clean over the pin this write added, and lands — adopting it. What the
+lock cannot promise is the crash inside the one `os.replace` above, a writer
+that ignores the lock, and the fact that the gate's disk reads are not locked
+either: a cooperating accept that gates over *this* transaction's pin can
+fail and roll back inside this transaction's own gate, deleting the pin from
+under a body whose gate already passed over it. The window is closed from
+the other side: the final section, under the same lock that replaces the
+body, re-checks that the pins this accept staged are still on disk and puts
+them back — re-staged from the current records, under fetch's own policy —
+before the body lands. That re-check can itself fail: the lockfile
+unreadable, a lockfile that will not parse, a source file whose hash has
+moved (refused in fetch's own words), a replace that fails, a lock that
+cannot be taken. Each is this operation's ordinary refusal — both files
+stay as they are — so a save that has passed its gate can come back
+`Refused`, and §4's refusal posture is unchanged by it. The costs of
+closing the window are the work the lock now sections add: step 4's
+snapshot of the naming lines — one authorized walk of the project's
+`source()` lines — runs inside the write lock on every accept, and step 6's
+tree re-parse runs on the refusal path; both are bounded walks of the same
+tree `fetch` walks, and the seconds-long gate stays outside the lock. The
+pair lands together, and the race is proven both ways: the interleaving is
+built on events rather than on timing in
+`tests/test_citations_lockfile_locking.py`; the identical-bytes race is in
+`tests/test_serve_sources_accept.py::test_a_conflicting_identical_accept_does_not_unpin_the_save_that_adopted_it`;
+the pre-named adoption is in
+`tests/test_serve_sources_accept.py::test_a_rolled_back_accept_does_not_erase_a_pin_adopted_over_a_pre_named_key`;
+the rollback-inside-the-gate is in
+`tests/test_serve_sources_accept.py::test_a_rollback_that_deleted_our_pin_inside_the_gate_is_reapplied_before_the_body`;
+the refusal posture is in
+`tests/test_serve_sources_accept.py::test_a_gate_passed_save_is_refused_when_the_lockfile_cannot_be_repaired_midflight`.
 
 **The browser never re-pins a changed file.** Acceptance extracts under
 fetch's existing non-`--update` policy (`calc-sources.md` §5's command

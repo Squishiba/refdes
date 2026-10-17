@@ -1,0 +1,290 @@
+Fix WRITE-CONCUR-001 (remaining half): identical-bytes accept rollback race
+Date: 2026-10-13
+Branch: fix/accept-pin-rollback-race-20261013 (base 8b6a52e)
+
+FINDING AND HISTORY
+
+The report (in-prog-logs/current-main-rq01.tsv in the main checkout, row 16)
+was verified against older main 8ff0cc8. Two commits between then and the
+base already closed the original scenario: b7cc823 (#182, the rollback's
+byte compare -- restore only while the lockfile still holds exactly the
+bytes this writer wrote) and d804b59 (#195, the accept's read-stage-replace
+and the rollback's read-compare-restore each inside project_write_lock).
+
+The hole that survives on the base is the same race spelled with identical
+bytes: two cooperating accepts of the SAME key stage the same lockfile text,
+so the winner's own write is skipped as a no-op (edit.py, the
+`staged != previous` guard), the winner's body lands, the loser's late
+revision check conflicts, and its rollback -- seeing current == its own
+staged bytes -- restores the pre-accept file. The winner's body, naming the
+pin, is on disk with no pin: `refdes check` exits 1 with
+`calc 'eff': source('analysis/budget.csv', 'eff') has no locked value`.
+
+Reproduced deterministically at the base with
+.scratch/probe-wc001/test_probe_write_concur_001.py (monkeypatches
+edit_mod._blocking_diagnostics to stand in for the winner's applied writes:
+body landed, lockfile untouched):
+  PYTHONPATH=$PWD/src:$PWD/tests /home/jorb/work/venv-refdes/bin/python \
+    -m pytest .scratch/probe-wc001/test_probe_write_concur_001.py -q -s \
+    -p no:cacheprovider
+Output at the base: B 409 conflict; body names the line: True; lockfile
+still pins the key: False; lockfile == pre-B bytes: True; check exit: 1.
+
+WHY NOT A REORDER
+
+The finding suggested moving the lockfile write inside the final
+check-and-replace section. Rejected: the candidate gate resolves the new
+source() line against the lockfile on disk (loader overlay covers item
+source files only; build.py:1544 re-reads citations.yaml unconditionally in
+run_calcs, and citations.verify reads it from disk too), so pins cannot
+exist only in memory without threading a new in-memory overlay through
+build and verify -- a design change §4 explicitly declines ("holding the
+project lock across the gate would keep every other lock-taking writer out
+of the project" for seconds).
+
+THE FIX (src/refdes/serve/edit.py)
+
+_LockfileWrite gains `watched`: the (canonical path, key) pairs this write
+newly satisfies -- the diff of the pinned pairs across stage_source_pins
+(which only ever adds; a changed source file is refused, not re-pinned),
+minus the pairs the project's own bodies were already naming when the
+accept read it. rollback, inside the same project_write_lock section and
+after the byte compare, re-parses the tree read-only (loader.load_tree
+write=False; no build, no lock taken) and skips the restore if any
+source() line on disk now names a watched pair -- the tree moved under us
+and the file has passed to a landed save. Unread additions stay §4's inert
+pin and are still cleaned; pre-existing unpinned names (the never-fetched
+project whose body already names rail_load -- test_a_rolled_back_accept_of_
+a_never_fetched_project_leaves_no_lockfile) are excluded from `watched`,
+so refusals' byte-for-byte restoration is unchanged.
+
+Interleaving argument: any pin in `previous` survives every restore by
+construction (adds excludes it), and any landed body naming a pair NOT in
+previous must have been gated after some writer -- us or the winner --
+wrote that pair, hence landed after the accept's `before` snapshot, so the
+locked tree re-read at rollback sees it. The `watched` subtraction of
+`named_before` cannot suppress a landed winner: a body naming an added
+pair was gated over bytes written after the accept's snapshot, so the
+snapshot cannot already name it.
+
+GAPS LEFT OPEN (restated in the rollback's comment): the four #195 gaps
+(read error, unacquirable lock, crash inside the one os.replace, a writer
+that ignores the lock) plus: the loser's rollback runs before a
+cooperating accept's own body write only if that accept failed to take the
+project lock -- a non-cooperating writer, gap (4); and an OSError loser
+whose rollback lands between the winner's lockfile write and its body
+write is the same crash-window-shaped residue §4 documents.
+
+TESTS
+
+New regression (ported from the probe):
+tests/test_serve_sources_accept.py::
+test_a_conflicting_identical_accept_does_not_unpin_the_save_that_adopted_it
+-- 409 for the loser, winner's body on disk, pin still held, check exit 0.
+At the fix the probe prints: 409 conflict / True / True / check exit 0.
+
+Green: tests/test_serve_sources_accept.py (27), tests/test_serve_sources.py,
+tests/test_citations_lockfile_locking.py, tests/test_citations.py,
+tests/test_lockfile_corruption.py (263 passed, 1 skipped),
+tests/test_serve_edit.py, tests/test_serve_edit_http.py,
+tests/test_serve_edit_links.py, tests/test_serve_edit_http_links.py,
+tests/test_serve_pdf_sources.py, tests/test_serve_editor_e2e.py (139).
+ruff check --select E9,F,I on the two changed files: clean.
+
+DOCS
+
+docs/design/editor-source-picker.md §4: step 6 and the "two locks" note now
+state the tree guard and the identical-bytes case it buys; the module
+docstring in serve/edit.py and the rollback/undo comments carry the same
+posture. Changelog fragment:
+changelog.d/serve-accept-conflict-identical-pin.fixed.md.
+
+Status: finished. Commit is local; not pushed (per instructions).
+
+=======================================================================
+PHASE 2 -- review fixes (F1, F2), 2026-10-15, Qwen3.8-Flash-Next
+
+The independent review (in-prog-logs/fix-branch-review-20261014.txt in the
+main checkout, and the reviewer's worktree
+review-review-accept-pin-rollback-20261014) put the branch on HOLD with two
+findings, both reproduced by event-driven probes in the reviewer's
+.scratch/probe-accept-gate-window/:
+
+F1 (HIGH): the winner-side window. The loser's rollback can run while the
+winner is between its gate and its body replace -- the rollback's tree check
+is a point-in-time read and cannot see a body that has not landed yet. End
+state: winner's body on disk, its pin deleted, `refdes check` exit 1.
+
+F2: `_accept_pins`'s `- named_before` exclusion dropped pairs the project
+was already naming, unpinned, from `watched`, so the tree check never fired
+for them and a loser's rollback erased a winner's adoption of exactly such
+a pair.
+
+Fixes, both in serve/edit.py:
+
+F1: the final section of `_apply_locked` -- under the same lock that
+replaces the body -- now calls `_reapply_pins`: if the lockfile no longer
+holds what this accept staged, the pins are re-checked against the current
+records (`locked_source_value`) and, when missing, re-staged through
+`stage_source_pins` under fetch's own policy and written, all inside the
+lock section that writes the body. `_Acceptance` carries the accept's
+`plans`/`anchors`/`digests` for exactly this. A re-stage that fails is an
+ordinary refusal (both files as found); `lock.previous` moves to the bytes
+this write replaced, so the rollback of this apply owns what it should.
+
+F2: the exclusion is gone. `watched` is now every pair this write newly
+pins, and the check compares the *naming lines*: `_accept_pins` snapshots
+the sorted `(item key/id, line)` multiset of the snapshot's uses of the
+watched pairs (`referents`), and `_pins_referents_moved` re-parses the tree
+under the rollback's lock and restores only while disk names the watched
+pairs with exactly those lines. A second line over a pre-named pair -- an
+adoption -- moves the multiset. A snapshot whose uses cannot be walked for
+non-OSError reasons records `referents = None` and the rollback declines
+(the reviewer's F4 note; inert pin, documented residue). The reviewer's F3
+(latency of a tree parse under the lock on the refusal path) is accepted
+and documented, not designed around.
+
+Verification:
+- Reviewer probes (.scratch/probe-review-f12/, copied read-only): both
+  green -- F1: loser Invalid, winner Applied, body on disk, eff pinned,
+  check exit 0; F2: loser Invalid, winner Applied, eff2 body landed, eff
+  pinned, check exit 0.
+- New regressions in tests/test_serve_sources_accept.py (HTTP surface,
+  deterministic): test_a_rollback_that_deleted_our_pin_inside_the_gate_is_
+  reapplied_before_the_body (F1) and
+  test_a_rolled_back_accept_does_not_erase_a_pin_adopted_over_a_pre_named_
+  key (F2). Both verified RED on HEAD's edit.py (swapped in from
+  `git show HEAD:...`) and GREEN on the fix: the F1 test's gate hook writes
+  the pre-accept lockfile bytes as a cooperating rollback would; the F2
+  test's hook lands a winner body adding a second naming line over a
+  baseline pair named-unpinned (baseline `check` asserted broken first).
+- tests/test_serve_sources_accept.py: 29 passed. test_serve_sources.py +
+  test_citations.py + test_citations_lockfile_locking.py +
+  test_lockfile_corruption.py + test_serve_edit.py +
+  test_serve_edit_links.py: 310 passed, 1 skipped.
+  test_serve_editor_e2e.py + test_serve_edit_http*.py +
+  test_serve_drafts_corruption.py: 66 passed.
+- ruff --select E9,F,I,E501 on the two changed files: only the pre-existing
+  E501 at edit.py:1380 (create-item block, untouched); left alone per
+  AGENTS.md.
+- Branch rebased onto origin/main (fd47a56) before the fixes: clean, main
+  touches none of these files.
+
+DOCS: §4 step 6 and the "two locks" note carry both sides of the window;
+module docstring carries both; changelog fragment rewritten and renamed to
+serve-accept-pin-race.fixed.md.
+
+Status: finished, amended into the branch commit.
+
+=======================================================================
+PHASE 3 -- PR #240 review round (chunk 1 CHANGES REQUESTED, 52191570;
+chunk 2 APPROVE, 9f0d57e9), 2026-10-15, Qwen3.8-Flash-Next
+
+No code defect found by the review; findings were documentation
+accuracy. Addressed:
+
+1 (Medium, docs/design/editor-source-picker.md + serve/edit.py docstring):
+the "Two locks" note said the final section re-checks and re-applies the
+pins; it never said the save can be REFUSED there, and step 6 still read
+"Pass -> write the body". Both fixed: step 6 now says pass -> re-check
+under the project lock, put the pins back, **or refuse**; the note names
+the five refusal outcomes (lockfile unreadable, unparseable, source-file
+hash moved, failed replace, lock unavailable) and states the posture:
+both files stay as found, a gate-passed save can come back Refused. The
+module docstring carries the same clause. New deterministic regression
+on the reachable spelling:
+test_a_gate_passed_save_is_refused_when_the_lockfile_cannot_be_repaired_midflight
+(gate judged clean, then a cooperating rollback deletes the pin AND the
+source file's hash moves -- the re-stage is fetch's extraction under
+fetch's policy, so fetch's own "changed since it was pinned" refusal is
+returned, and the assertions pin that both files are exactly as the
+refusal found them, body never landed).
+2 (Low, §4 + changelog fragment): the lock-held cost was framed as
+refusal-path only; `_accept_pins` in fact walks the snapshot's source()
+lines inside the write lock on EVERY accept. Both texts now say so
+(step 4's naming-lines snapshot on every accept; step 6's tree re-parse
+on the refusal path; both bounded walks of the tree fetch walks; gate
+stays outside).
+3 (Low, changelog fragment): the fragment's opening was near-verbatim
+the sibling fragment's first sentence and cited the sibling's FILENAME
+(`serve-accept-conflict-keeps-other-writers-pin`) as if it named the
+compare -- a pointer that dangles when release_cli deletes fragments.
+Opening rewritten; the compare is now named by what it is (the byte
+compare `_LockfileWrite.rollback` gained for #182).
+4 (Low, serve/edit.py): `_pins_referents_moved`'s bare
+`except Exception: return True` now carries the same
+`# noqa: BLE001 - decline, do not propagate` its sibling at the
+referents snapshot uses.
+5 (Low, this log): the probes the Verification sections cite
+(`.scratch/probe-wc001/`, `.scratch/probe-review-f12/`, and the
+reviewer's `.scratch/probe-accept-gate-window/`) live in the author's
+and the reviewer's worktrees' gitignored `.scratch/` -- that is where
+AGENTS.md puts them, and they are not committable. The durable,
+review-inspectable evidence is the committed tests: the three race
+regressions in tests/test_serve_sources_accept.py (all verified red on
+the pre-fix code, green on the fix), the two in
+tests/test_citations_lockfile_locking.py, and the new refusal-posture
+test. `in-prog-logs/current-main-rq01.tsv` row 16 is the WRITE-CONCUR-001
+ticket row in the shared main checkout; it is the report this branch
+answers, not a verification artifact.
+
+Tests: tests/test_serve_sources_accept.py 30 passed (new posture test
+included); ruff scoped to the two changed files: only the pre-existing
+E501 at edit.py:1380 (untouched create-item block). Docs-only + one
+comment + one test; F1/F2 fixes untouched.
+
+Status: finished, new head pushed to PR #240.
+
+=======================================================================
+PHASE 4 -- PR #240 round-2 review (chunk 1 CHANGES REQUESTED, 6e243fa8;
+chunk 2 APPROVE, bb7273da), 2026-10-15, Qwen3.8-Flash-Next
+
+Reviewer found no correctness defect; findings were a fail-open default,
+broken prose, and the log-citation reproducibility. Addressed:
+
+1 (Medium, serve/edit.py:541-547 -- fail-open defaults): `_LockfileWrite`
+declared `watched: frozenset = frozenset()` and `referents: tuple | None
+= ()`. An omitted `watched` skips the tree guard (line ~629 `if self.watched
+and ...`); an omitted `referents` defaulted to `()` = "no naming lines
+expected", not the documented decline value `None`. Both defaulted to the
+permissive answer, so a future construction that forgot them silently opted
+out of the guard. Fix: both fields are now required (no defaults), and
+`referents` is typed `tuple | None` with the docstring stating `None` is
+the decline value -- the safe answer to no question. The one constructor
+in `_accept_pins` already passes both explicitly, so F1/F2 behavior is
+unchanged. Pinned by
+test_a_lockfile_write_cannot_opt_out_of_the_tree_guard (constructing
+without them raises TypeError).
+
+2 (Low, this log -- reproducibility): the "Output at the base" numbers at
+lines 24-30 and the probe recipes at lines 24-28 point at
+`.scratch/probe-wc001/test_probe_write_concur_001.py` (gitignored, absent
+from a PR checkout), `/home/jorb/work/venv-refdes/bin/python` and
+`in-prog-logs/current-main-rq01.tsv` in the shared main checkout -- none
+runnable from a PR checkout. Recorded plainly: those are author-side
+phase-1 notes; the reproducible evidence a reviewer can run from the PR
+head is the committed tests named in the changelog fragment and §4, and
+this log's phase-2/3 Verification sections. Phase-1 line numbers left
+as-written (history), pointed at by this note.
+
+3 (Low, serve/edit.py:55-58 module docstring): "Both of those / lockfile
+mutations" was broken mid-paragraph by a phase-3 reflow; reflowed.
+
+4 (Low, docs §4:206, 259-265, 279-282): the numbered-list item and the
+proven-cases paragraph had stray leading spaces and an awkward
+"with\nthe identical-bytes race" reflow; reflowed into a clean
+semicolon-separated list of the four proving tests.
+
+5 (Nit, changelog fragment): 59 lines of internal detail. Trimmed the
+mechanism/cost prose (points at §4 for it); kept the user-visible
+behaviour and the four test citations.
+
+Tests: tests/test_serve_sources_accept.py 31 passed (new required-fields
+guard test included); ruff --select E9,F on the changed files clean, E501
+only the pre-existing create-item line at edit.py:1382. Docs/comment/
+one-test-only; F1/F2 lock and rollback behaviour untouched.
+
+CI on head 7ae6c0d was pending on all three jobs when the reviewer ran;
+not asserted green here.
+
+Status: finished, new head pushed to PR #240.
