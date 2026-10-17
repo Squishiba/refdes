@@ -36,7 +36,10 @@ of `items/`.
 A [multi-item markdown file](authoring.md#several-items-in-one-file) reads every
 `---`-fenced block that opens with a `key:` line as an item — except a `---`
 inside a fenced code block, which is example text (the loader warns once at that
-line, naming the file). This is one of those blocks failing to parse — the line
+line, naming the file). An unclosed fence is warned at its opener's line, so the
+rest of the file rendering as code is never silent — and if the file ends with a
+line that looks like a closer carrying an info string, that line is named as the
+likely cause. This is one of those blocks failing to parse — the line
 number points inside it. Until it parses, that item is not in the project at all.
 
 **`duplicate key 'id' in one mapping (lines 14 and 17) -- YAML keeps the last, ...`**
