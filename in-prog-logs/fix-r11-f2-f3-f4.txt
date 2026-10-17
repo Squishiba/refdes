@@ -1,0 +1,52 @@
+Task: fix R11-F2, F3, F4 from user-sim run 11 (branch fix-r11-f234, PR #336),
+then the #328-review follow-up: machine-local git rules must not count as
+project coverage.
+
+F2 (cli.py, scaffold.py): the paren in `wrote .vscode/settings.json
+(gitignored -- ...)` keyed on "init wrote the file", never on git's answer,
+so it lied exactly in DOC-REMEDY-018's shape (an author's negation tracks
+the file). The paren now asks: scaffold.vscode_settings_state splits git's
+answer into who ignores the file -- project-ignored / tracked /
+local-ignored -- and the CLI prints a third paren for a file ignored only
+by a machine-local rule (the .gitignore line init added is what carries the
+ignore to every clone). The who-check for local rules runs BEFORE init
+(init's appended line out-ranks the local rule and masks the pre-init
+world); the rest is probed post-init, because git reports the winning
+`!.vscode/` only once the directory exists on disk, and the directory is
+init's own first write (probed on git 2.47.3: a directory ignore matches
+the file path even absent; a directory negation is invisible until the
+directory exists).
+
+F3 (scaffold.py): the new-file path of `_ensure_gitignore_entries` never
+asked the coverage question, so a project nested in a repo whose root
+.gitignore covers init's entries got them all anyway. It asks the same
+question the append path asks now; fully covered means no file and no
+`wrote` line.
+
+F4 (serve/api.py): `_create_preview` accepted any board string; the list
+route validates it against the project's registered boards. The preview now
+gates `board` with the same `validate_facet` call, message, and 400 mapping.
+
+Follow-up (#328 review, finding 2): git's `check-ignore` also consults the
+global `core.excludesFile` and `.git/info/exclude`, and init had been
+counting their wins as coverage -- an author whose global config ignores
+`.refdes/` got no project .gitignore, and teammates' clones came up
+untracking (then `git add -A`-committing) refdes outputs. Only the
+project's own .gitignore files travel to every clone, so
+`_check_ignore_verdict` counts a win only when check-ignore's source is
+one of them (relative path, basename `.gitignore`, not under `.git/`);
+a local win reads as the project's silence.
+
+Tests: red-first tests in tests/test_scaffold.py for each finding (F2 paren
+cases incl. the local-rule paren, F3 create-path coverage, CLI announces),
+and tests/test_serve_create.py for F4; local-rule tests set
+GIT_CONFIG_GLOBAL/GIT_CONFIG_COUNT so the real global config is never
+consulted. Full suite and ruff (E9,F on touched files) run per commit.
+
+Difficulty: the first rebuild of the paren's probe moved everything
+pre-init, which broke the dir-negation case and was caught only by the
+full suite -- a lesson in not reporting before the suite exits. The
+reviewer's check also caught a false git claim in this log's earlier
+revision; the mechanism above is the probed one.
+
+Status: finished.

@@ -229,33 +229,84 @@ def _repo_toplevel(target_dir: str) -> str | None:
     return proc.stdout.strip() or None
 
 
-def _check_ignore_verdict(toplevel: str, relpath: str) -> bool | None:
-    """Git's own answer for one repository-relative path, asked with
-    `check-ignore --no-index -v` from the repository root: True when a
-    pattern wins -- an ignore, *or* an explicit `!` naming the path, which
-    git reports with exit 0 and the negated pattern on stdout -- False when
-    nothing matches, None when git could not be asked.
+def _source_is_shared_gitignore(source: str) -> bool:
+    """True when `check-ignore -v` names a repository-tracked `.gitignore`
+    as the winning pattern's source: git prints sources of files under
+    the repository relative to its own cwd (which is the toplevel, where
+    we run it), and the global `core.excludesFile` absolute (git requires
+    the path to be absolute), while `.git/info/exclude` prints as a
+    relative path whose basename is not `.gitignore`.
 
-    A winning match of either polarity is the project having stated its
-    position: an ignore covers the path, and a negation means the author
-    chose to track it -- appending ours after that wins by git's
-    last-match rule, which is the whole of DOC-REMEDY-018. This function
-    is deliberately never allowed to second-guess the answer with the
-    literal set: inside a repository git IS the matcher, and a spelling we
-    would not have recognized (`.vscode/*` + `!.vscode/*`, a bare
-    `settings.json`) must read as covering exactly when git says it does.
+    This is the shared/local line (the #328 review's finding 2): the
+    project's `.gitignore` files travel with every clone, and a pattern
+    in one is the PROJECT having stated a position; the global excludes
+    file and `.git/info/exclude` are machine-local, and must not make
+    init skip a line whose absence would leave every teammate's clone
+    untracking (then `git add -A`-committing) a file the project never
+    said anything about."""
+    if os.path.isabs(source) or re.match(r"^[A-Za-z]:[\\/]", source):
+        return False
+    normalized = source.replace("\\", "/")
+    name = normalized.rsplit("/", 1)[-1]
+    return name == ".gitignore" and not normalized.startswith(".git/")
 
-    `--no-index` because the file is not in the index (init has not
-    written it, and in the preflight nothing has been created yet);
-    a path absent from disk is matched by the patterns all the same."""
+
+def _check_ignore_source(toplevel: str, relpath: str) -> tuple[bool, bool] | str | None:
+    """Git's winning match for one repository-relative path, asked with
+    `check-ignore --no-index -v` from the repository root: the tuple
+    `(negated, shared)` of the winning pattern (a `!` pattern, which git
+    reports with exit 0 on stdout, is negated; a source that is a
+    repository `.gitignore` is shared -- see
+    `_source_is_shared_gitignore`), the string `"none"` for exit 1
+    (nothing matched), and None when git could not be asked. `--no-index`
+    because the file is not in the index (init has not written it, and in
+    the preflight nothing has been created yet); a path absent from disk
+    is matched by the patterns all the same. A `-v` line the regex cannot
+    read is None, "no opinion", never a guess."""
     proc = _git(["check-ignore", "--no-index", "-v", "--", relpath], toplevel)
     if proc is None:
         return None
-    if proc.returncode == 0:
-        return True
     if proc.returncode == 1:
+        return "none"
+    if proc.returncode != 0:
+        return None
+    match = _CHECK_IGNORE_SOURCE.match(proc.stdout.split("\n", 1)[0])
+    if match is None:
+        return None
+    source, _, pattern, _ = match.groups()
+    if pattern.startswith('"') and pattern.endswith('"'):
+        pattern = pattern[1:-1]
+    return (pattern.startswith("!"), _source_is_shared_gitignore(source))
+
+
+def _check_ignore_verdict(toplevel: str, relpath: str) -> bool | None:
+    """Whether the PROJECT has stated a position on one
+    repository-relative path: True only when the winning pattern -- of
+    either polarity, an ignore or an explicit `!` naming the path --
+    lives in a repository `.gitignore`, False when nothing matches or
+    the winner is a machine-local rule (global `core.excludesFile`,
+    `.git/info/exclude`), None when git could not be asked.
+
+    A shared winning match of either polarity is the project having
+    stated its position: an ignore covers the path, and a negation means
+    the author chose to track it -- appending ours after that wins by
+    git's last-match rule, which is the whole of DOC-REMEDY-018. A local
+    winning match is not: the project's text says nothing about the path
+    (git's own precedence puts the repository's `.gitignore` files above
+    the local rules, so the project's silence, not a negation, is why
+    the local rule won), and init's entry is what carries the position
+    to every clone. This function is deliberately never allowed to
+    second-guess the answer with the literal set: inside a repository
+    git IS the matcher, and a spelling we would not have recognized
+    (`.vscode/*` + `!.vscode/*`, a bare `settings.json`) must read as
+    covering exactly when git says it does."""
+    win = _check_ignore_source(toplevel, relpath)
+    if win is None:
+        return None
+    if win == "none":
         return False
-    return None
+    _negated, shared = win
+    return shared
 
 
 def _git_covers(target_dir: str, entry: _GitignoreEntry) -> bool | None:
@@ -301,6 +352,153 @@ def _git_covers(target_dir: str, entry: _GitignoreEntry) -> bool | None:
     return _check_ignore_verdict(root, parent)
 
 
+#: Git's `check-ignore -v` line: `source:linenumber:pattern<TAB>pathname`
+#: (gitignore(5)-documented format). The source is matched lazily and the
+#: pattern greedily, which parses the realistic shapes -- a negated pattern
+#: containing colons, a pathname containing tabs -- correctly; a line the
+#: regex cannot read is answered as "no opinion", never as a guess.
+_CHECK_IGNORE_SOURCE = re.compile(r"^(.*?):(\d+):(.*)\t(.*)$")
+
+
+def _check_ignore_ignored_state(toplevel: str, relpath: str) -> str | None:
+    """Git's *who ignores this* answer for one repository-relative path,
+    for `cmd_init`'s announcement: `"project-ignored"` (a shared
+    `.gitignore` ignore wins), `"tracked"` (the shared winner is a `!`
+    negation -- the author chose to track it; reading this as "ignored"
+    is the false paren R11-F2 reported), `"local-ignored"` (only a
+    machine-local rule wins: true for this checkout, invisible to every
+    teammate), `"none"` (nothing matches), None (git has no opinion).
+
+    The winning pattern is read from the `-v` source line; a negation is
+    quoted by git as a whole (`"!foo bar"` for a pattern with a space),
+    so the quotes come off before the `!` test. The exit codes and the
+    `--no-index` reasoning are `_check_ignore_source`'s."""
+    win = _check_ignore_source(toplevel, relpath)
+    if win is None:
+        return None
+    if win == "none":
+        return "none"
+    negated, shared = win
+    if shared:
+        return "tracked" if negated else "project-ignored"
+    return "tracked" if negated else "local-ignored"
+
+
+def vscode_local_rule_ignores(target_dir: str) -> bool:
+    """True when the ONLY rule ignoring `.vscode/settings.json`'s file
+    path is machine-local -- the global `core.excludesFile`,
+    `.git/info/exclude`. `cmd_init` reads this BEFORE `scaffold.init`
+    runs, because init's own appended `.gitignore` line out-ranks the
+    local rule (git's precedence puts repository files above the
+    machine's) and masks it afterwards.
+
+    It is a file-path probe: a directory ignore -- a global `.vscode/` --
+    matches the file path even while the directory is absent (git reports
+    it, verified on git 2.47.3), so this reads such a rule as the local
+    win it is; what a pre-init probe cannot see is a directory
+    NEGATION -- git reports the winning `!.vscode/` only once the
+    directory exists on disk (the probe of the directory path exits 1
+    absent, 0 present, verified the same way), and the directory is
+    init's own first write, so a project tracking it reads as silence
+    here -- which is no harm: silence means False, and
+    `vscode_settings_state`'s probe branch runs post-init, in the world
+    where the directory exists and the negation is visible. False outside
+    a repository, for a git that cannot answer, and for a shared winner
+    (which is no news: the project itself stated the position)."""
+    toplevel = _repo_toplevel(target_dir)
+    if toplevel is None:
+        return False
+    root = os.path.realpath(toplevel)
+    base = os.path.realpath(target_dir)
+    entry = _VSCODE_SETTINGS_GITIGNORE
+    try:
+        rel = os.path.relpath(
+            os.path.join(base, *entry.pattern.strip("/").split("/")), root
+        )
+    except ValueError:
+        return False  # e.g. Windows: target on a different drive
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return False  # not inside the repository git answered for
+    win = _check_ignore_source(root, rel.replace(os.sep, "/"))
+    if win is None or win == "none":
+        return False
+    negated, shared = win
+    return not negated and not shared
+
+
+def vscode_settings_state(
+    target_dir: str, added: list[str], local_rule_pre: bool
+) -> str:
+    """Where `.vscode/settings.json` stands after a successful init, for
+    `cmd_init`'s paren (R11-F2, and #328 review's finding 2): one of
+    `"project-ignored"`, `"tracked"`, `"local-ignored"`, `"unaddressed"`.
+
+    `added` is `added_gitignore_patterns`' answer for init's write (the
+    patterns init added), and `local_rule_pre` is
+    `vscode_local_rule_ignores` read before init ran. When init appended
+    the entry there was no project position on the file path at all (the
+    append decision checked, in a directory init had just created, so
+    even a `dir/` rule was visible to it): the ignore is project-shared
+    from now on -- unless the only rule that was ignoring the file was
+    machine-local, which is `"local-ignored"`: true for this checkout,
+    invisible to every teammate until init's line ships.
+
+    When init appended nothing, the post-init world answers: the file
+    probe of `_git_covers`, and the parent-directory probe for `!dir/`
+    rules. A machine-local winner there means the project DID state its
+    position (a directory track that covered the entry, which is why
+    nothing was appended) and one checkout's rule now overrides it: the
+    clones follow the project, so the answer is `"tracked"` -- the
+    over-warn direction, the same one the literal fallback takes.
+    `"unaddressed"` (the gitignored paren) answers outside a repository
+    and for a git that cannot be asked: the file's not worth committing
+    is the safe paren when git's answer is unavailable, init having
+    appended when the literal set saw no line. No preflight: this reads
+    state after a successful init, whose preflight proved the
+    `.gitignore` readable."""
+    if _VSCODE_SETTINGS_GITIGNORE.pattern in added:
+        return "local-ignored" if local_rule_pre else "project-ignored"
+    toplevel = _repo_toplevel(target_dir)
+    if toplevel is None:
+        return "unaddressed"
+    root = os.path.realpath(toplevel)
+    base = os.path.realpath(target_dir)
+    entry = _VSCODE_SETTINGS_GITIGNORE
+    try:
+        rel = os.path.relpath(
+            os.path.join(base, *entry.pattern.strip("/").split("/")), root
+        )
+    except ValueError:
+        return "unaddressed"  # e.g. Windows: target on a different drive
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return "unaddressed"  # not inside the repository git answered for
+    probe = rel.replace(os.sep, "/")
+    state = _check_ignore_ignored_state(root, probe)
+    if state == "project-ignored":
+        return "project-ignored"
+    if state == "tracked":
+        return "tracked"
+    if state == "local-ignored":
+        return "tracked"
+    if state not in (None, "none"):
+        return "unaddressed"
+    # the file path matches nothing: a position on its parent directory
+    # is a position on the contents (`_git_covers`' `!dir/` rule -- the
+    # winning `!.vscode/` on the directory is invisible to a probe of the
+    # file path alone, and a `.vscode/`-style ignore of the directory
+    # covers them the same way; the probe runs after init created the
+    # directory, which is exactly when git sees directory rules)
+    parent, _, _ = probe.rpartition("/")
+    if not parent:
+        return "unaddressed"
+    parent_state = _check_ignore_ignored_state(root, parent)
+    if parent_state == "project-ignored":
+        return "project-ignored"
+    if parent_state == "tracked":
+        return "tracked"
+    return "unaddressed"
+
+
 def _literal_addresses(text: str, entry: _GitignoreEntry) -> bool:
     """The literal answer: some pattern line in `text` spells out (in one of
     the forms `_covers` accepts) the entry's position -- an ignore pattern
@@ -316,7 +514,7 @@ def _literal_addresses(text: str, entry: _GitignoreEntry) -> bool:
     DOC-REMEDY-018's first fix."""
     for line in text.splitlines():
         stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+        if stripped.startswith("#") or not stripped:
             continue
         if stripped.lstrip("!") in entry.covers:
             return True
@@ -454,13 +652,33 @@ def _ensure_gitignore_entries(target_dir: str, entries: list[_GitignoreEntry]) -
     when some existing pattern already covers a path nothing is written for that
     path at all -- where "already covers" is git's answer inside a repository
     (`_gitignore_addresses`), so an author's negated glob is never out-ranked
-    by a line init appends after it. Each block takes the file's own line
+    by a line init appends after it. The same question is asked when the file
+    is created (R11-F3): git's answer for a not-yet-written path is the set of
+    patterns that will match it once it exists -- the repository's higher
+    `.gitignore` files -- and a project fully covered from above gets no
+    file. Each block takes the file's own line
     ending (textio's `append_ending` rule), so a CRLF gitignore does not grow
     an LF island.
     """
     path = os.path.join(target_dir, ".gitignore")
     if not os.path.isfile(path):
-        textio.write_text(path, _joined_blocks(entries, textio.LF))
+        # The coverage question is asked here too, not only on the append
+        # path below (R11-F3). It has a real answer for a file that does
+        # not exist yet: `check-ignore --no-index` matches a path not on
+        # disk, and the patterns covering a fresh project's files can live
+        # OUTSIDE it -- a repository root's `.gitignore` above the project
+        # (#328's posture, refined by its review's finding 2: only the
+        # repository's own `.gitignore` files, not the machine's global
+        # excludes file). The literal fallback gets
+        # the text the project has ("none", spelled empty): outside a
+        # repository nothing is ignored and all entries are written, today
+        # and after. When git covers everything, the answer is no file at
+        # all -- an empty `.gitignore` announces nothing and saves nothing.
+        missing = [
+            entry for entry in entries if not _gitignore_addresses(target_dir, "", entry)
+        ]
+        if missing:
+            textio.write_text(path, _joined_blocks(missing, textio.LF))
         return
     existing = textio.read_text(path)
     missing = [
