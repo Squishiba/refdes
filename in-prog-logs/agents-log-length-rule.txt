@@ -1,0 +1,8 @@
+Task: add a log-length / no-self-citation rule to AGENTS.md.
+Claude Sonnet 5.5, 2026-10-17. Requested by Jared after PR #250's log grew to ~590
+lines, 8 of its 17 commits being "docs(log)" follow-ups that recorded earlier
+commit hashes.
+Change: one paragraph under "When working on a task, document your changes" in
+AGENTS.md: under 150 lines, don't cite your own commit, summarize review rounds in
+a sentence, put line counts in the final reply.
+Docs/instructions only; no changelog fragment. Finished.
