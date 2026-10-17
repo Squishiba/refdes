@@ -75,4 +75,38 @@ fixture.
   lane. Changelog fragments `changelog.d/{init-vscode-announcement-asks-git,
   init-new-gitignore-asks-git,create-preview-board-gate}.fixed.md`.
 
+Status: finished (R11-F2..F4), then reopened by the #328-review follow-up below.
+
+## Follow-up: machine-local git rules are not coverage (#328 review, finding 2)
+
+Design flaw in the F3/#328 helper: `git check-ignore` consults the
+machine's global `core.excludesFile` and the clone's `.git/info/exclude`
+too, and init counted their wins as coverage -- so an author whose global
+config ignores `.refdes/` got NO project `.gitignore`, and teammates'
+clones came up untracking (then `git add -A`-committing) refdes outputs.
+Only rules in the project's own `.gitignore` files are shared; they are
+the project having stated a position.
+
+- scaffold: new `_source_is_shared_gitignore` (check-ignore's source is
+  shared iff relative to the toplevel, basename `.gitignore`, not under
+  `.git/`; git prints repo sources relative, the excludesFile absolute)
+  and `_check_ignore_source` (winning pattern + source). The append-path
+  `_check_ignore_verdict` now returns True only on a SHARED win; a
+  local win is False (project text silent -- repo rules outrank local
+  ones, git precedence). F2's trio
+  (`vscode_settings_ignored`/`_git_ignores`/`_check_ignore_ignored`)
+  became `vscode_settings_state`/`_check_ignore_ignored_state` with four
+  states: project-ignored / tracked / local-ignored / unaddressed.
+- cli: reads the state BEFORE `scaffold.init` runs (init's own appended
+  line masks the local-rule case); a new third paren
+  "(gitignored by a machine-local rule only -- the .gitignore line init
+  added makes it ignored for every clone; ...)".
+- Tests: 5 new (append path and create path under a global-excludes and
+  under an info/exclude rule; CLI local-rule paren), all red on the
+  branch tip before the fix, green after. A 6th guards project-negation
+  beats local-rule (green both sides). Tests set GIT_CONFIG_GLOBAL to an
+  empty throwaway under tmp_path (GIT_CONFIG_COUNT for the key) so real
+  global config is never consulted.
+- Changelog: the three init fragments updated to the shared/local line.
+
 Status: finished.

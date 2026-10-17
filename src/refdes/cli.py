@@ -2054,6 +2054,10 @@ def cmd_init(args) -> int:
     # `scaffold.init` returns only the config path, so this pre-check is what
     # tells the two outcomes apart for the announcement below.
     vscode_settings_existed = scaffold_mod.vscode_settings_exists(cwd)
+    # Also asked before init runs, for the same reason -- and one more:
+    # init appends its own .gitignore line whenever the file is not
+    # covered, which would mask the pre-init world this paren is about.
+    vscode_state = scaffold_mod.vscode_settings_state(cwd)
     # Read before init runs: `scaffold.init` returns only the config path, so
     # this is the only way the announcement below can say which ignore patterns
     # actually appeared -- including when the answer is none, because the
@@ -2077,18 +2081,29 @@ def cmd_init(args) -> int:
         # -- an author's negation (`.vscode/*` + `!.vscode/*`) means git
         # tracks the file, and the machine-specific yaml.schemas path inside
         # it is about to be committable. Ask git the same question the
-        # append decision asked (scaffold.vscode_settings_ignored).
-        if scaffold_mod.vscode_settings_ignored(cwd):
-            print(
-                "wrote .vscode/settings.json (gitignored -- the yaml.schemas "
-                "path in it names one checkout)"
-            )
-        else:
+        # append decision asked (scaffold.vscode_settings_state), and say
+        # *who* ignores the file: a machine-local rule (global
+        # core.excludesFile, .git/info/exclude) ignores it only on this
+        # checkout, which is a third true answer -- the project's .gitignore
+        # line init added is what carries the ignore to every clone.
+        if vscode_state == "tracked":
             print(
                 "wrote .vscode/settings.json (NOT gitignored -- the "
                 "yaml.schemas path in it names one checkout, and git does "
                 "not ignore the file; committing it hands every other "
                 "clone a schema that resolves to nothing)"
+            )
+        elif vscode_state == "local-ignored":
+            print(
+                "wrote .vscode/settings.json (gitignored by a machine-local "
+                "rule only -- the .gitignore line init added makes it "
+                "ignored for every clone; the yaml.schemas path in it names "
+                "one checkout)"
+            )
+        else:
+            print(
+                "wrote .vscode/settings.json (gitignored -- the yaml.schemas "
+                "path in it names one checkout)"
             )
     # ...and the `.gitignore` it wrote or appended to is a third thing that
     # appeared, so it is named too -- by what it now ignores rather than by the

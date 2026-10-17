@@ -10,5 +10,9 @@
   not ignored, and outside one (or with a git that cannot answer) the
   project's own ignore lines answer, a negated line not counting. When git
   does not ignore the file the line reads `wrote .vscode/settings.json (NOT
-  gitignored -- ...)` and says what a commit ships. The gitignored case
-  reads exactly as before.
+  gitignored -- ...)` and says what a commit ships. When the only rule
+  ignoring the file is machine-local -- the global `core.excludesFile`,
+  `.git/info/exclude` -- the paren says so: `(gitignored by a machine-local
+  rule only -- the .gitignore line init added makes it ignored for every
+  clone; ...)`, because that rule is invisible to every teammate (#328
+  review, finding 2). The gitignored case reads exactly as before.

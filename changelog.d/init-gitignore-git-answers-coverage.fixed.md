@@ -8,6 +8,12 @@
   now answers the question in a repository (with the entry's parent
   directory asked as well, so a `!.vscode/` on the directory is read as a
   position on its contents too), and a winning match of any polarity --
-  ignore *or* negation -- counts as the project having decided. Outside a
+  ignore *or* negation -- counts as the project having decided, when the
+  winning pattern lives in one of the project's own `.gitignore` files:
+  those travel with every clone. Git also consults the machine's global
+  `core.excludesFile` and the clone's `.git/info/exclude`, and a winning
+  match there is one checkout's configuration, not the project's position
+  -- init writes its line all the same, so the ignore is in the shared
+  file for every teammate to get (#328 review, finding 2). Outside a
   repository, and for a git that cannot be run, init's literal spelling
   list answers exactly as before.
