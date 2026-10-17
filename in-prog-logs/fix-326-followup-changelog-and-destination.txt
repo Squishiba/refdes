@@ -1,0 +1,34 @@
+Follow-up to merged PR #326 (create preview rejects an unregistered
+workspace, R9-F3): the reviewer's two low findings.
+
+1. Changelog fragment overstated the gate. Verified against a real
+   `refdes serve` on a throwaway project in .scratch/gate-verify/
+   (started with a recorded PID, stopped with `kill $pid`): the gate is
+   validate_facet -> _known_values (src/refdes/serve/filters.py ~283-331),
+   registry + resolved item workspaces. The reviewer's literal claim --
+   "on an item, not in the registry => previews 200" -- did NOT reproduce:
+   a project registering product-a/b with an item carrying
+   `workspace: legacy-ws` answers 400 on BOTH /api/items and
+   /api/create/preview, because workspaces.resolve() clears unregistered
+   hints (build error, workspace "") and assigns only registry names
+   (src/refdes/workspaces.py:57-70). No-registry project with an
+   item-carried workspace: also 400 on both. So the fragment now says
+   precisely: rejected = neither registered nor any item's resolved
+   workspace; same set/function/message as /api/items; with the resolve()
+   clause so the union cannot be re-misread.
+
+2. Untested edge reproduced on the live serve:
+   `?destination=items/reqs.yaml&workspace=nosuchws` -> 400 (the gate is
+   on the scope parameter; the explicit destination no longer overrides
+   the suggestion as it used to), while the same pair with a known
+   workspace -> 200 honouring the destination. Added ONE test,
+   test_http_preview_refuses_an_unknown_workspace_even_with_an_explicit_
+   destination, in tests/test_serve_create.py: pins the pair (same 400
+   body as the bare ghost, nothing reserved) and the known-workspace
+   neighbour (200, destination honoured, REQ-104). Fragment gained one
+   sentence on the pairing (scripted-caller-visible; the form cannot
+   send an unknown name).
+
+Verification: full suite `PYTHONPATH=$PWD/src ...pytest -q` ->
+4022 passed, 2 skipped. `ruff check tests/test_serve_create.py
+--select E9,F` clean. Touched: the fragment + the one test.
