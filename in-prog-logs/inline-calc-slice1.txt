@@ -1,0 +1,25 @@
+Task: SLICE 1 of inline calc (docs/design/inline-calc.md) -- recognize,
+evaluate and verify `name := rhs [| unit] = result` spans in local item
+bodies. Branch feat-inline-calc-slice1, based on main cbcd22e.
+
+Chunk 1 (grammar + trigger + tests): DONE.
+- New src/refdes/inline_calc.py: code_spans (single-backtick,
+  CommonMark backtick-run rules, multi-backtick spans skipped as the
+  author's escape hatch), contains_trigger (unquoted `:=`),
+  _top_level_equals (final top-level ` = ` delimiter, ignores `=` in
+  quotes and parens), parse_span (full span grammar; malformed triggered
+  span carries an error string, never falls back to ordinary code),
+  triggered_spans (walks the body, skips fenced code incl. ~~~ fences
+  and indented code blocks), compare_stored (half-place window on the
+  stored literal's last written place incl. exponent; tie = round
+  computed to that place, halves away from zero, equality accepted;
+  Decimal text comparison, numeric only, sigfigs never consulted).
+- tests/test_inline_calc.py: 16 grammar/trigger tests green.
+- Sabotage check: the test file run against base tree cbcd22e (git
+  worktree in .scratch) fails at collection -- refdes.inline_calc does
+  not exist there. Proof method for every chunk's new tests.
+- ruff --select E9,F clean on the two touched files.
+
+Next: chunk 2 -- thread triggered spans through _run_item_calcs in
+source order with the fences, sharing env + origins (duplicate-assignment
+and unknown-name errors per the design); build-level tests.
