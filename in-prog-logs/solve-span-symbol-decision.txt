@@ -1,0 +1,6 @@
+Task: record the owner's range-symbol decision for inline-calc solve spans.
+Claude Sonnet 5.5, 2026-10-17.
+Jared accepted the recommended `…` with ASCII alias `..` (replacing the words
+`from ... to ...`). Changed docs/design/inline-calc-later.md in the solve section
+and in the old-Q9 mapping row: UNDECIDED became DECIDED. Docs only; nothing is
+implemented (solving is not in slice 1). Finished.
