@@ -97,6 +97,11 @@ just give the next reviewer new text to find wrong (PR #250's log reached ~590
 lines that way). Summarize review rounds in a sentence instead of adding a
 section per round, and put a line count in your final reply, not in the file.
 
+The cap is for task progress logs. A deliverable report (a user-simulation
+release-gate run, an analysis a task was asked to produce) is the work product
+itself, has no length cap, and should not be trimmed to fit one -- but it still
+never cites its own commit.
+
 ## Identify yourself in every commit
 
 End every commit you make with a `Co-authored-by:` trailer naming the model

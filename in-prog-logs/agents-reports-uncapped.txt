@@ -1,0 +1,5 @@
+Task: exempt deliverable reports from the 150-line log cap in AGENTS.md.
+Claude Sonnet 5.5, 2026-10-17. Jared: the cap should not apply to reports; leave
+them open ended. Reviewers had flagged the run-10 and run-11 user-sim reports
+(220-380 lines) against the cap. Change: one paragraph after the log-length rule
+in AGENTS.md. Instructions only, no changelog fragment. Finished.
