@@ -1,89 +1,149 @@
 # refdes-worker-permissions
 
-Server-only Paseo plugin that stops Sol-dispatched Qwen refdes fix workers
-from blocking on repeated `external_directory` approval prompts, by
-auto-answering **only** the two narrowest routine request shapes. It is a
-replacement for the (unsafe) idea of a broad `external_directory` allow in
-`opencode.json`: project config cannot distinguish read from write for bash
-(`edit: deny` does not constrain shell redirections or Python writes), so the
-allowlist lives in a permission hook that inspects each request.
+Server-only Paseo plugin that stops refdes fix workers from blocking on
+repeated `external_directory` approval prompts, by auto-answering **only**
+requests whose released scope is provably inside a small allowlist of
+directory roots. It replaces the (unsafe) idea of a broad
+`external_directory` allow in `opencode.json`: project config cannot
+distinguish read from write for bash (`edit: deny` does not constrain shell
+redirections or Python writes), so the allowlist lives in a permission hook
+that inspects each request.
 
 **Not deployed.** Nothing here is installed on any daemon; see
-[Presentation](#presentation) for the exact review/install path.
+[Presentation](#presentation-human-only) for the exact review/install path.
+Installing is a **human act**.
 
 ## Policy (fail-closed)
 
 `index.server.ts` subscribes to `agent.permission_requested`
 (https://paseo.sh/docs/plugins/reference.md, "Answer a permission request")
-and answers a request **only** when every gate in
-`shared/classifier.ts` passes; everything else is left pending for a human.
+and answers a request **only** when every gate in `shared/classifier.ts`
+passes; everything else is left pending for a human. Nothing is auto-denied.
 
 | Gate | Requirement |
 | --- | --- |
-| Agent | `agent.provider === "opencode"` and `agent.parentAgentId === "d86b9967-5a0c-41e5-8635-fca6170fdeaa"` (Sol's dispatcher) |
-| Request | `request.provider === "opencode"`, `request.kind === "tool"`, `request.name === "external_directory"` |
-| Case 1: exact progress file | a metadata `filepath`/`file`/`path` string (at `request.input.metadata` or its nested `input`) equal **exactly** to `/home/jorb/work/refdes/.scratch/PROGRESS.md` — no globs, no prefixes |
-| Case 2: read-only evidence command | command text (at `request.input.command` or metadata `command`/`cmd`/`shellCommand`, incl. nested `input`) is a single command whose characters are restricted to `[A-Za-z0-9 ./_\-,:=%+@]` (no `;` `|` `&` `>` `<` `` ` `` `$` `(` `)` `{` `}` `[` `]` `*` `?` `!` quotes, backslash, newline), whose program is exactly `cat`, `head`, or `rg`, whose flags are on a per-program allowlist (rejecting `rg --pre`, `-f`, `--hostname-bin`, `--config`, ...), and whose path arguments all resolve (no `..` segments) under `/home/jorb/work/refdes/in-prog-logs/` (root itself included) or name the exact progress file. `rg` requires an explicit path argument, and a pattern positional |
+| Provider/request | `agent.provider === "opencode"`, `request.provider === "opencode"`, `request.kind === "tool"`, `request.name === "external_directory"` |
+| Identity | `agent.parentAgentId` is on the dispatcher allowlist loaded from `parents.json` (below; absent/invalid file = empty list = nothing approved), **or** `agent.title` starts with `"Review PR "` (the PR-review plugin's reviewer agents) |
+| Scope | `request.input.patterns` is a **non-empty array of strings** and **every** entry passes: absolute, no `..` segment, and inside one of the roots below at a path-segment boundary (the root itself, or `root + "/..."`). All patterns must pass; one bad entry rejects the whole request |
 
-Never auto-approved: any other parent agent, provider, permission name, kind
-(questions, plans, mode changes), arbitrary directory scopes (e.g.
-`.../.scratch/*`), writes to source, commands with shell operators,
-redirections, substitutions, quoting, environment/exec wrappers, unlisted
-flags. Never auto-denied either — a human always keeps control of the
-remainder.
+Allowed roots (hard-coded in `shared/classifier.ts`):
 
-## Payload sufficiency (why exact file paths are enforceable)
+- `/home/jorb/.paseo/worktrees/16msma8v` — this project's Paseo worktrees only
+- `/home/jorb/work/refdes` — the refdes checkout
+- `/home/jorb/work/venv-refdes` — the project venv
 
-The daemon's OpenCode adapter
-(`@getpaseo/server .../providers/opencode-agent.js`, verified 2026-10-15 in
-the running 0.11.2 daemon) builds each OpenCode `permission.asked` event into
-`AgentPermissionRequest` with `name = <permission>` (e.g.
-`external_directory`), `kind: "tool"`, and `input = { patterns, metadata,
-tool, command }` — passing OpenCode's raw `metadata` (which carries the tool's
-`filepath` for file tools) and the parsed command text through. Hook events
-also carry `agent.parentAgentId`
-(`PluginHookAgent`, documented). That is enough for both cases; the
-classifier fails closed (stays pending) if a payload shape ever lacks them.
+Everything else fails closed, including: patterns with `..`, root-prefix
+lookalikes (`/home/jorb/work/refdes-evil`), relative patterns, `/home/jorb/.paseo/*`
+and `/home/jorb/.paseo/worktrees/*` (other projects, daemon config),
+missing/empty `patterns`, non-string entries, any other provider, permission
+name, or kind (questions, plans, mode changes).
+
+The scope check is the whole policy: metadata `filepath` and bash command
+text are **not** approval keys. The old metadata-keyed cases from the first
+revision are retired (the 2026-10-17 security review showed they approved
+scopes the classifier never read — see [Why scope](#why-scope-not-metadata)).
+A `cat`/`head`/`rg` evidence command is approved only through its patterns,
+same as everything else; writes inside the roots are in scope by design.
+
+## Config: parents.json (dispatcher allowlist)
+
+`index.server.ts` reads, on every request:
+
+```
+~/.paseo/plugin-settings/refdes-worker-permissions/parents.json
+```
+
+(the daemon's `plugin-settings/<plugin-id>` convention; override the whole
+path with the env var `REFDES_WORKER_PERMISSIONS_PARENTS_FILE`, or the
+`.paseo` home with `PASEO_HOME`). Format:
+
+```json
+{
+  "parentAgentIds": [
+    "f3993852-557c-4a4e-989b-6490584ef5c8",
+    "d86b9967-5a0c-41e5-8635-fca6170fdeaa"
+  ]
+}
+```
+
+`parents.example.json` in this directory is a ready copy. First id: Claude,
+the current dispatching orchestrator (primary). Second: Sol, backup.
+**Absent, unparseable, or schema-violating file = empty allowlist = nothing
+approved** (reviewer agents by title are unaffected).
+
+## Why scope, not metadata
+
+The 2026-10-17 security review found the first revision decided on request
+*metadata* (exact `filepath`, safe-looking command text) while ignoring
+`request.input.patterns` — the scope OpenCode actually releases on allow.
+A metadata filepath equal to the shared PROGRESS.md file could therefore
+approve a wildcard directory request such as `.scratch/*`.
+
+Verified against the **installed** daemon's OpenCode adapter
+(`@getpaseo/cli/node_modules/@getpaseo/server/dist/server/server/agent/
+providers/opencode-agent.js`, `appendOpenCodePermissionAsked` /
+`buildOpenCodePermissionInput`, checked 2026-10-18 against 0.11.2):
+OpenCode `permission.asked` maps to `request.input = {patterns, metadata,
+tool, command}` — `patterns` (string-filtered from the event) is the granted
+scope; `patterns` is **omitted** when the event carries none. The hook agent
+payload (`server/plugins/lifecycle/index.js`) carries `id`,
+`workspaceId`, `parentAgentId`, `provider`, `cwd` **and `title`** — so the
+`"Review PR "` reviewer match uses a real, documented field, not a guess.
+Any missing/unexpected payload shape fails closed to pending.
 
 ## Tests
 
+Node **>= 22.6** is required (native TypeScript type-stripping for
+`node --test`); `package.json` declares `engines`.
+
 ```sh
 cd tools/paseo-worker-permissions
+export PATH=/home/jorb/.local/node22/bin:$PATH   # node 20 cannot run these
 npm install
 npm run typecheck   # tsc --noEmit against @getpaseo/plugin 0.11.2
-npm test            # node --test, 17 tests
+npm test            # node --test, 16 tests
 ```
 
-Positive cases: exact progress-file read/edit, `cat`/`head`/`rg` over
-`in-prog-logs`, numeric flags, `-e` patterns, progress file as a path
-argument, nested `metadata.input` command. Negative cases: null/foreign
-parent, other providers/permissions/kinds, missing metadata, non-progress
-filepaths, glob filepaths, redirections/pipes/chaining/`$()`/backticks/
-newlines/`&`, quoting, `bash -c`/`env` wrappers, exec-capable `rg` flags,
-`--help`, negative `head -n -5`, paths outside evidence roots incl. `..`
-traversal, no-path invocations.
+The suite is red on the pre-fix classifier. Key cases: wildcard
+`.scratch/*` with an exact-progress-file metadata path → **not** approved;
+scope decided by patterns, not metadata; positives (worktree subpath,
+checkout subpath, venv bin, exact roots); `..` segments, lookalike roots,
+`/home/jorb/.paseo/*` and `.../worktrees/*`, outside-root paths,
+mixed allowed+disallowed, missing/empty/non-string/blank patterns → pending;
+foreign/null parent → pending; empty allowlist (config absent) → nothing;
+Claude+Sol both accepted; reviewer title-prefix matching incl. near-miss
+titles; command text alone approves nothing.
 
-## Presentation (install only after review — deliberately not done here)
+## Presentation (install only after review — human act, deliberately not done here)
 
 ```sh
-paseo plugin install /home/jorb/.paseo/worktrees/16msma8v/fix-worker-permission-policy-20261015/tools/paseo-worker-permissions
+paseo plugin install <path-to-repo>/tools/paseo-worker-permissions
 paseo plugin ls          # require status running, no error
 paseo plugin reload refdes-worker-permissions
 paseo plugin logs refdes-worker-permissions
 paseo plugin remove refdes-worker-permissions   # rollback
 ```
 
-Config changes to the daemon-wide plugin switch (`pluginsEnabled`) require a
-human (Settings -> Plugins) and `paseo reload`; source edits need only
-`paseo plugin reload`. Do not restart the daemon. Auto-allow takes effect for
-agents spawned after the install; existing sessions resume on their next
-request.
+Create `parents.json` (above) before enabling. Config changes to the
+daemon-wide plugin switch (`pluginsEnabled`) require a human (Settings ->
+Plugins) and `paseo reload`; source edits need only `paseo plugin reload`.
+Do not restart the daemon. Auto-allow takes effect for agents spawned after
+the install; existing sessions resume on their next request.
 
 ## Known limits
 
+- Writes inside the allowed roots (incl. the main checkout) are approved by
+  design — the root allowlist is the security boundary, replacing the first
+  revision's narrower metadata cases at Jared's direction (2026-10-17).
+- Dispatcher ids live in `parents.json`; a rotation is a file edit, no code
+  change, no reinstall.
+- The reviewer gate trusts agent titles; anyone who can name an agent
+  "Review PR ..." with in-root work gets worker approvals. Accepted
+  trade-off: dispatch of reviewers is already trusted with the same roots.
 - `respondToPermission` on an already-answered request fails; the plugin
   logs and moves on (human wins the race — safe).
-- The classifier never inspects bash contents for *reads inside the
-  worktree* (not needed — those never trigger `external_directory`).
-- Sol's dispatcher id is hard-coded by design (narrowest scope); a Sol
-  restart that changes the id requires a one-line policy edit.
+- Relative patterns are rejected (fail-closed); observed OpenCode
+  `external_directory` events carry absolute globs.
+- The classifier never inspects bash contents; a safe command text grants
+  nothing by itself, and an approved bash request releases only its
+  in-root patterns.

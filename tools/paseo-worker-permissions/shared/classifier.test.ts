@@ -3,207 +3,264 @@ import { test } from "node:test";
 
 import {
   classifyWorkerPermissionRequest,
+  WORKER_PERMISSION_POLICY,
   type ClassifierAgent,
   type ClassifierRequest,
-  WORKER_PERMISSION_POLICY,
+  type WorkerPermissionPolicy,
 } from "./classifier.ts";
 
-const SOL: ClassifierAgent = { provider: "opencode", parentAgentId: WORKER_PERMISSION_POLICY.parentAgentId };
-const PROGRESS = WORKER_PERMISSION_POLICY.progressFile;
-const LOGS = "/home/jorb/work/refdes/in-prog-logs";
+const CLAUDE = "f3993852-557c-4a4e-989b-6490584ef5c8";
+const SOL = "d86b9967-5a0c-41e5-8635-fca6170fdeaa";
+const PROGRESS = "/home/jorb/work/refdes/.scratch/PROGRESS.md";
+const WORKTREE_ROOT = "/home/jorb/.paseo/worktrees/16msma8v";
 
-function toolRequest(
-  name: string,
-  input: Record<string, unknown> | undefined,
-  kind = "tool",
-  provider = "opencode",
-): ClassifierRequest {
-  return { provider, name, kind, input };
+const POLICY: WorkerPermissionPolicy = { ...WORKER_PERMISSION_POLICY, parentAgentIds: [CLAUDE, SOL] };
+
+function agent(
+  over: Partial<Pick<ClassifierAgent, "provider" | "parentAgentId" | "title">> = {},
+): ClassifierAgent {
+  return {
+    provider: "opencode",
+    parentAgentId: CLAUDE,
+    title: null,
+    ...over,
+  };
 }
 
 function externalDirectory(input: Record<string, unknown> | undefined): ClassifierRequest {
-  return toolRequest("external_directory", input);
+  return { provider: "opencode", name: "external_directory", kind: "tool", input };
 }
 
-test("allows read of the exact shared progress file", () => {
-  const decision = classifyWorkerPermissionRequest(
-    SOL,
-    externalDirectory({ patterns: ["/home/jorb/work/refdes/.scratch/*"], metadata: { filepath: PROGRESS } }),
-  );
-  assert.equal(decision.action, "allow");
+function decide(input: Record<string, unknown> | undefined, a = agent()): ClassifierRequest | never {
+  return externalDirectory(input);
+}
+
+function allow(input: Record<string, unknown> | undefined, a = agent()) {
+  return classifyWorkerPermissionRequest(a, externalDirectory(input), POLICY);
+}
+
+function pending(input: Record<string, unknown> | undefined, a = agent()) {
+  return classifyWorkerPermissionRequest(a, externalDirectory(input), POLICY);
+}
+
+// ---------------------------------------------------------------------------
+// Headline security test (the 2026-10-17 review finding, verbatim):
+// a metadata filepath equal to the exact progress file must NOT approve a
+// wildcard directory request — the scope is patterns, not metadata.
+// ---------------------------------------------------------------------------
+
+test("wildcard .scratch/* with exact progress-file metadata is NOT approved", () => {
+  const input = { patterns: [".scratch/*"], metadata: { filepath: PROGRESS } };
+  assert.equal(allow(input).action, "pending");
+  assert.equal(allow(input, agent({ parentAgentId: SOL })).action, "pending");
 });
 
-test("allows edit/write of the exact progress file via nested metadata.input", () => {
-  const decision = classifyWorkerPermissionRequest(
-    SOL,
-    externalDirectory({ metadata: { input: { filepath: PROGRESS }, title: "Edit" } }),
-  );
-  assert.equal(decision.action, "allow");
+test("absolute patterns decide the scope, not metadata.filepath", () => {
+  const granted = allow({
+    patterns: ["/home/jorb/work/refdes/.scratch/*"],
+    metadata: { filepath: PROGRESS },
+  });
+  assert.equal(granted.action, "allow");
+  const overgrant = allow({
+    patterns: ["/home/jorb/.paseo/worktrees/16msma8v/feat-x/.scratch/*"],
+    metadata: { filepath: PROGRESS },
+  });
+  assert.equal(overgrant.action, "allow");
 });
 
-test("allows cat on an in-prog-logs file", () => {
-  const decision = classifyWorkerPermissionRequest(
-    SOL,
-    externalDirectory({ command: `cat ${LOGS}/worker-permission-policy.txt` }),
-  );
-  assert.equal(decision.action, "allow");
-});
+// ---------------------------------------------------------------------------
+// Scope gate: patterns must be a non-empty string array, absolute, no ..,
+// every entry inside an allowlisted root at a path-segment boundary.
+// ---------------------------------------------------------------------------
 
-test("allows head with numeric flags on evidence files", () => {
-  for (const command of [
-    `head -20 ${LOGS}/a.txt`,
-    `head -n 5 ${LOGS}/a.txt`,
-    `head -n 5 ${LOGS}/a.txt ${PROGRESS}`,
+test("positives: worktree subpath, checkout subpath, venv bin, exact roots", () => {
+  for (const patterns of [
+    [`${WORKTREE_ROOT}/feat-x/src/refdes/model.py`],
+    [`${WORKTREE_ROOT}/feat-x/in-prog-logs/*`],
+    [WORKTREE_ROOT],
+    ["/home/jorb/work/refdes/in-prog-logs/worker-permission-policy-20261015.txt"],
+    ["/home/jorb/work/refdes/src/refdes/*"],
+    ["/home/jorb/work/venv-refdes/bin"],
+    ["/home/jorb/work/venv-refdes"],
   ]) {
-    const decision = classifyWorkerPermissionRequest(SOL, externalDirectory({ command }));
-    assert.equal(decision.action, "allow", command);
+    const decision = allow({ patterns });
+    assert.equal(decision.action, "allow", `expected allow for ${patterns.join(",")}`);
   }
 });
 
-test("allows rg over evidence roots, pattern plus explicit paths", () => {
-  for (const command of [
-    `rg worker ${LOGS}`,
-    `rg -n -i worker ${LOGS}/a.txt`,
-    `rg -C 2 worker ${LOGS} ${PROGRESS}`,
-    `rg -e wo--rd ${LOGS}`,
-    `rg --color never worker ${LOGS}`,
+test("rejects patterns with .. segments", () => {
+  for (const patterns of [
+    ["/home/jorb/work/refdes/../.ssh/*"],
+    ["/home/jorb/work/refdes/.scratch/../.git/config"],
+    [`${WORKTREE_ROOT}/../../home/jorb/.paseo/config.json`],
   ]) {
-    const decision = classifyWorkerPermissionRequest(SOL, externalDirectory({ command }));
-    assert.equal(decision.action, "allow", command);
+    const decision = allow({ patterns });
+    assert.equal(decision.action, "pending", `expected pending for ${patterns.join(",")}`);
   }
 });
 
-test("reads command from nested metadata input like the daemon adapter does", () => {
-  const decision = classifyWorkerPermissionRequest(
-    SOL,
-    externalDirectory({ metadata: { input: { command: `cat ${LOGS}/a.txt` } } }),
-  );
-  assert.equal(decision.action, "allow");
+test("rejects root-prefix lookalikes", () => {
+  for (const patterns of [
+    ["/home/jorb/work/refdes-evil"],
+    ["/home/jorb/work/refdes-evil/src/*"],
+    [`${WORKTREE_ROOT}-evil/x`],
+    ["/home/jorb/work/venv-refdes-old/bin/python"],
+  ]) {
+    const decision = allow({ patterns });
+    assert.equal(decision.action, "pending", `expected pending for ${patterns.join(",")}`);
+  }
 });
 
-test("stays pending for any other parent agent", () => {
-  for (const parentAgentId of [null, "11111111-1111-1111-1111-111111111111", undefined]) {
+test("rejects .paseo scopes outside this project's worktrees", () => {
+  for (const patterns of [
+    ["/home/jorb/.paseo/*"],
+    ["/home/jorb/.paseo/worktrees/*"],
+    ["/home/jorb/.paseo/worktrees/other-project/x"],
+    ["/home/jorb/.paseo/worktrees"],
+    ["/home/jorb/.paseo/config.json"],
+    ["/home/jorb/.paseo/plugins/x"],
+  ]) {
+    const decision = allow({ patterns });
+    assert.equal(decision.action, "pending", `expected pending for ${patterns.join(",")}`);
+  }
+});
+
+test("rejects anything outside the roots", () => {
+  for (const patterns of [
+    ["/home/jorb/.ssh/*"],
+    ["/home/jorb/work/other-repo/x"],
+    ["/etc/*"],
+    ["/"],
+    ["/home/jorb"],
+    ["relative/path/*"],
+    ["src/refdes/model.py"],
+    ["~/.ssh/*"],
+    ["/home/jorb/work/refdes/../refdes-evil/*"],
+  ]) {
+    const decision = allow({ patterns });
+    assert.equal(decision.action, "pending", `expected pending for ${patterns.join(",")}`);
+  }
+});
+
+test("mixed allowed+disallowed patterns are rejected as a whole", () => {
+  const decision = allow({
+    patterns: ["/home/jorb/work/refdes/in-prog-logs/x", "/home/jorb/.ssh/id_ed25519"],
+  });
+  assert.equal(decision.action, "pending");
+});
+
+test("missing, empty, non-string, blank patterns fail closed", () => {
+  const cases: Array<Record<string, unknown> | undefined> = [
+    undefined,
+    {},
+    { patterns: [] },
+    { patterns: "/home/jorb/work/refdes/*" },
+    { patterns: [42] },
+    { patterns: [null] },
+    { patterns: [""] },
+    { patterns: ["/home/jorb/work/refdes/x", ""] },
+    { patterns: [{}] },
+  ];
+  for (const input of cases) {
+    const decision = allow(input);
+    assert.equal(decision.action, "pending", `expected pending for ${JSON.stringify(input)}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Identity gate: parent allowlist comes from policy config (file-backed);
+// reviewer agents of the PR-review plugin match by title prefix.
+// ---------------------------------------------------------------------------
+
+test("foreign, null and undefined parents are never approved", () => {
+  const inputs = [{ patterns: ["/home/jorb/work/refdes/*"] }];
+  for (const a of [
+    agent({ parentAgentId: "11111111-2222-3333-4444-555555555555" }),
+    agent({ parentAgentId: null }),
+    { provider: "opencode", title: null } as ClassifierAgent,
+  ]) {
+    for (const input of inputs) {
+      assert.equal(classifyWorkerPermissionRequest(a, externalDirectory(input), POLICY).action, "pending");
+    }
+  }
+});
+
+test("empty parent allowlist (config absent) approves nothing, even for Sol/Claude", () => {
+  const empty: WorkerPermissionPolicy = { ...WORKER_PERMISSION_POLICY, parentAgentIds: [] };
+  for (const parentAgentId of [CLAUDE, SOL]) {
     const decision = classifyWorkerPermissionRequest(
-      { provider: "opencode", parentAgentId: parentAgentId ?? null },
-      externalDirectory({ metadata: { filepath: PROGRESS } }),
+      agent({ parentAgentId }),
+      externalDirectory({ patterns: ["/home/jorb/work/refdes/*"] }),
+      empty,
     );
-    assert.equal(decision.action, "pending", String(parentAgentId));
+    assert.equal(decision.action, "pending");
   }
 });
 
-test("stays pending for other providers", () => {
-  const decision = classifyWorkerPermissionRequest(
-    { provider: "codex", parentAgentId: SOL.parentAgentId },
-    externalDirectory({ metadata: { filepath: PROGRESS } }),
+test("both allowlisted parents (Claude primary, Sol backup) are accepted", () => {
+  for (const parentAgentId of [CLAUDE, SOL]) {
+    const decision = classifyWorkerPermissionRequest(
+      agent({ parentAgentId }),
+      externalDirectory({ patterns: ["/home/jorb/work/refdes/*"] }),
+      POLICY,
+    );
+    assert.equal(decision.action, "allow");
+  }
+});
+
+test("reviewer agents match by title prefix 'Review PR '", () => {
+  const reviewer = agent({ parentAgentId: null, title: "Review PR #269 (chunk 1/2)" });
+  assert.equal(
+    classifyWorkerPermissionRequest(reviewer, externalDirectory({ patterns: ["/home/jorb/work/refdes/*"] }), POLICY)
+      .action,
+    "allow",
   );
+  for (const title of ["Review PR", "Reviews PR 1", "review PR #1", null, "Ship PR #269"]) {
+    const a = agent({ parentAgentId: null, title });
+    assert.equal(
+      classifyWorkerPermissionRequest(a, externalDirectory({ patterns: ["/home/jorb/work/refdes/*"] }), POLICY)
+        .action,
+      "pending",
+      `expected pending for title ${String(title)}`,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Request gates and the retired Case 2 (command text is no longer a key).
+// ---------------------------------------------------------------------------
+
+test("non-opencode agents/requests and non-external_directory requests stay pending", () => {
+  const ok = { patterns: ["/home/jorb/work/refdes/*"] };
+  const cases: Array<[ClassifierAgent, ClassifierRequest]> = [
+    [agent({ provider: "codex" }), externalDirectory(ok)],
+    [agent(), { ...externalDirectory(ok), provider: "codex" }],
+    [agent(), { ...externalDirectory(ok), name: "bash" }],
+    [agent(), { ...externalDirectory(ok), kind: "command" }],
+    [agent(), { ...externalDirectory(ok), kind: "question", name: "question" }],
+  ];
+  for (const [a, request] of cases) {
+    assert.equal(classifyWorkerPermissionRequest(a, request, POLICY).action, "pending");
+  }
+});
+
+test("safe-looking command text alone approves nothing (scope is patterns)", () => {
+  const decision = allow({
+    command: "cat /home/jorb/work/refdes/.scratch/PROGRESS.md",
+    metadata: { command: "cat /home/jorb/work/refdes/in-prog-logs/x.txt", filepath: PROGRESS },
+  });
   assert.equal(decision.action, "pending");
+  const withScope = allow({
+    patterns: ["/home/jorb/work/refdes/in-prog-logs/*"],
+    command: "cat /home/jorb/work/refdes/in-prog-logs/x.txt",
+  });
+  assert.equal(withScope.action, "allow");
 });
 
-test("stays pending for other permission names and kinds", () => {
-  assert.equal(
-    classifyWorkerPermissionRequest(SOL, toolRequest("bash", { command: `cat ${LOGS}/a.txt` })).action,
-    "pending",
-  );
-  assert.equal(
-    classifyWorkerPermissionRequest(SOL, toolRequest("edit", { metadata: { filepath: PROGRESS } })).action,
-    "pending",
-  );
-  assert.equal(
-    classifyWorkerPermissionRequest(
-      SOL,
-      toolRequest("question", undefined, "question"),
-    ).action,
-    "pending",
-  );
-});
-
-test("stays pending when metadata has no usable filepath or command", () => {
-  assert.equal(
-    classifyWorkerPermissionRequest(SOL, externalDirectory({ patterns: [`${LOGS}/*`] })).action,
-    "pending",
-  );
-  assert.equal(classifyWorkerPermissionRequest(SOL, externalDirectory(undefined)).action, "pending");
-});
-
-test("stays pending for a filepath that is not the progress file", () => {
-  for (const filepath of [
-    "/home/jorb/work/refdes/src/refdes/model.py",
-    `${LOGS}/a.txt`,
-    `${PROGRESS}.evil`,
-    "/home/jorb/work/refdes/.scratch/other.md",
-  ]) {
-    const decision = classifyWorkerPermissionRequest(SOL, externalDirectory({ metadata: { filepath } }));
-    assert.equal(decision.action, "pending", filepath);
-  }
-});
-
-test("stays pending for glob-shaped filepaths", () => {
-  const decision = classifyWorkerPermissionRequest(
-    SOL,
-    externalDirectory({ metadata: { filepath: "/home/jorb/work/refdes/.scratch/PROGRESS*" } }),
-  );
-  assert.equal(decision.action, "pending");
-});
-
-test("stays pending on redirections, pipes, chaining, and substitutions", () => {
-  for (const command of [
-    `cat ${LOGS}/a.txt > /home/jorb/work/refdes/src/refdes/x.py`,
-    `cat ${LOGS}/a.txt; rm -rf /home/jorb/work/refdes`,
-    `cat ${LOGS}/a.txt | sh`,
-    `cat ${LOGS}/a.txt && rm -rf /home/jorb/work/refdes/.scratch`,
-    `cat ${LOGS}/$(whoami).txt`,
-    "cat a.txt\nrm -rf /",
-    `cat ${LOGS}/a.txt &`,
-    "cat `whoami`.txt",
-  ]) {
-    const decision = classifyWorkerPermissionRequest(SOL, externalDirectory({ command }));
-    assert.equal(decision.action, "pending", command);
-  }
-});
-
-test("stays pending on quoting and shell wrappers", () => {
-  for (const command of [
-    `cat "${LOGS}/a.txt"`,
-    "bash -c 'cat x'",
-    `sh -c "cat ${LOGS}/a.txt"`,
-    `env cat ${LOGS}/a.txt`,
-    `echo hi > ${PROGRESS}`,
-  ]) {
-    const decision = classifyWorkerPermissionRequest(SOL, externalDirectory({ command }));
-    assert.equal(decision.action, "pending", command);
-  }
-});
-
-test("stays pending for unapproved flags that can execute code or read files", () => {
-  for (const command of [
-    `rg --pre /bin/sh worker ${LOGS}`,
-    `rg --hostname-bin /bin/sh worker ${LOGS}`,
-    `rg -f /home/jorb/work/refdes/patterns ${LOGS}`,
-    `rg --config /home/jorb/evil.toml worker ${LOGS}`,
-    `cat --help ${LOGS}/a.txt`,
-    `head -n -5 ${LOGS}/a.txt`,
-  ]) {
-    const decision = classifyWorkerPermissionRequest(SOL, externalDirectory({ command }));
-    assert.equal(decision.action, "pending", command);
-  }
-});
-
-test("stays pending for paths outside the evidence roots", () => {
-  for (const command of [
-    `cat /home/jorb/work/refdes/src/refdes/model.py`,
-    `rg worker /home/jorb/work/refdes`,
-    `rg worker /home/jorb/work/refdes/.scratch`,
-    `cat /home/jorb/work/refdes/in-prog-logs/../src/refdes/model.py`,
-    `rg worker ${LOGS} /etc/passwd`,
-  ]) {
-    const decision = classifyWorkerPermissionRequest(SOL, externalDirectory({ command }));
-    assert.equal(decision.action, "pending", command);
-  }
-});
-
-test("stays pending when the read command has no explicit path argument", () => {
-  for (const command of ["cat", "head", "rg", `rg worker`, `head -n 5`]) {
-    const decision = classifyWorkerPermissionRequest(SOL, externalDirectory({ command }));
-    assert.equal(decision.action, "pending", command);
-  }
+test("metadata filepath outside the roots does not veto in-root patterns (documented)", () => {
+  const decision = allow({
+    patterns: ["/home/jorb/work/refdes/in-prog-logs/*"],
+    metadata: { filepath: "/home/jorb/.ssh/id_ed25519" },
+  });
+  assert.equal(decision.action, "allow");
 });

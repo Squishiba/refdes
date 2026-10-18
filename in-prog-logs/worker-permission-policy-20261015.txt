@@ -74,3 +74,35 @@ Limits reported: hard-coded Sol parent id (one-line edit if it rotates);
 no read/write split is expressible in opencode.json for bash, so config was
 NOT the vehicle; plugin install is a human act (pluginsEnabled switch,
 Settings -> Plugins).
+
+FIX ROUND (2026-10-18, security review of this PR):
+The review found the classifier decided on metadata (exact filepath,
+command text) while ignoring request.input.patterns -- the scope actually
+released on allow. A metadata filepath equal to the exact PROGRESS.md file
+could approve a wildcard directory request (.scratch/*); safe command text
+same. Fixed by making the scope the whole policy:
+
+- classifier.ts rewritten: gates = provider/kind/name, identity
+  (parentAgentId in file-backed allowlist, or title starts "Review PR " --
+  title verified present on hook agent payload, daemon
+  plugins/lifecycle/index.js), and scope: patterns must be a non-empty
+  string array, every entry absolute, no ".." segment, inside one of three
+  roots (this project's worktrees 16msma8v, the checkout, venv-refdes) at a
+  segment boundary. ALL patterns must pass; fail-closed on everything else.
+  Metadata cases retired: root allowlist subsumes the progress-file case;
+  command text is no longer an approval key (case 2 kept only as "patterns
+  pass"), so fewer approved shapes (exactly one).
+- Parents from ~/.paseo/plugin-settings/refdes-worker-permissions/parents.json
+  (README documents; env REFDES_WORKER_PERMISSIONS_PARENTS_FILE / PASEO_HOME
+  overrides; absent/malformed = empty list = nothing approved). Claude
+  f3993852... primary, Sol d86b9967... backup; parents.example.json ships.
+- Adapter re-verified in the INSTALLED daemon (opencode-agent.js,
+  appendOpenCodePermissionAsked): input = {patterns, metadata, tool,
+  command}; patterns is the granted scope, omitted when empty.
+- Tests first: new suite red on old head (7 failures incl. the
+  .scratch/*-with-progress-metadata headline), 16/16 green + typecheck on
+  Node 22.6+ (node --test TS stripping; engines field added).
+- README rewritten (policy table, config, why-scope, limits); install steps
+  unchanged, marked human act.
+
+Status: done, pushed to the branch, NOT merged, NOT installed.

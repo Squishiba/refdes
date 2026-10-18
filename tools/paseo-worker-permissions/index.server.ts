@@ -1,21 +1,64 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { classifyWorkerPermissionRequest } from "./shared/classifier";
+import {
+  WORKER_PERMISSION_POLICY,
+  classifyWorkerPermissionRequest,
+  type WorkerPermissionPolicy,
+} from "./shared/classifier";
 
 /**
- * Server-only plugin: answers ONLY Sol-dispatched OpenCode workers'
- * `external_directory` permission requests that the shared/classifier
- * allowlist covers (exact shared PROGRESS.md file, read-only cat/head/rg
- * over in-prog-logs evidence paths). Every other request is left pending
- * for a human. Nothing is auto-denied, auto-approved for other parents,
- * other providers, other permissions, writes to source, questions, plans,
- * mode changes, or arbitrary directory scopes.
+ * Server-only plugin: answers OpenCode `external_directory` permission
+ * requests of refdes workers ONLY when the requesting agent is a child of a
+ * dispatcher on the parents.json allowlist (or a PR-review reviewer by
+ * title) AND every entry of the request's `input.patterns` — the scope that
+ * is actually released — sits inside the allowlisted roots. Every other
+ * request is left pending for a human. Nothing is auto-denied.
  */
+
+const PLUGIN_ID = "refdes-worker-permissions";
+
+function parentsFilePath(): string {
+  const override = process.env.REFDES_WORKER_PERMISSIONS_PARENTS_FILE;
+  if (override && override.length > 0) return override;
+  const paseoHome =
+    process.env.PASEO_HOME && process.env.PASEO_HOME.length > 0
+      ? process.env.PASEO_HOME
+      : path.join(homedir(), ".paseo");
+  return path.join(paseoHome, "plugin-settings", PLUGIN_ID, "parents.json");
+}
+
+function readParentAgentIds(): readonly string[] {
+  let raw: string;
+  try {
+    raw = readFileSync(parentsFilePath(), "utf8");
+  } catch {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return [];
+    const ids = (parsed as Record<string, unknown>).parentAgentIds;
+    if (!Array.isArray(ids)) return [];
+    if (!ids.every((id) => typeof id === "string" && id.length > 0)) return [];
+    return ids as string[];
+  } catch {
+    return [];
+  }
+}
+
 export default function contribute(server: PluginServerContext) {
   const remove = server.on("agent.permission_requested", async (event, context) => {
+    const policy: WorkerPermissionPolicy = {
+      ...WORKER_PERMISSION_POLICY,
+      parentAgentIds: readParentAgentIds(),
+    };
     const decision = classifyWorkerPermissionRequest(
       {
         provider: event.agent.provider,
         parentAgentId: event.agent.parentAgentId,
+        title: event.agent.title,
       },
       {
         provider: event.request.provider,
@@ -23,6 +66,7 @@ export default function contribute(server: PluginServerContext) {
         kind: event.request.kind,
         input: event.request.input,
       },
+      policy,
     );
     if (decision.action !== "allow") {
       return;

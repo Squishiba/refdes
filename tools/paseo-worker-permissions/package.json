@@ -2,10 +2,14 @@
   "name": "refdes-worker-permissions",
   "private": true,
   "version": "0.0.0",
+  "engines": {
+    "node": ">=22.6"
+  },
   "files": [
     "paseo-plugin.json",
     "README.md",
     "index.server.ts",
+    "parents.example.json",
     "shared/"
   ],
   "scripts": {
