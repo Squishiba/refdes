@@ -1,0 +1,70 @@
+Task: SLICE 1 of inline calc (docs/design/inline-calc.md) -- recognize,
+evaluate and verify `name := rhs [| unit] = result` spans in local item
+bodies. Branch feat-inline-calc-slice1, based on main cbcd22e.
+
+Chunk 1 (grammar + trigger + tests): DONE.
+- New src/refdes/inline_calc.py: code_spans (single-backtick,
+  CommonMark backtick-run rules, multi-backtick spans skipped as the
+  author's escape hatch), contains_trigger (unquoted `:=`),
+  _top_level_equals (final top-level ` = ` delimiter, ignores `=` in
+  quotes and parens), parse_span (full span grammar; malformed triggered
+  span carries an error string, never falls back to ordinary code),
+  triggered_spans (walks the body, skips fenced code incl. ~~~ fences
+  and indented code blocks), compare_stored (half-place window on the
+  stored literal's last written place incl. exponent; tie = round
+  computed to that place, halves away from zero, equality accepted;
+  Decimal text comparison, numeric only, sigfigs never consulted).
+- tests/test_inline_calc.py: 16 grammar/trigger tests green.
+- Sabotage check: the test file run against base tree cbcd22e (git
+  worktree in .scratch) fails at collection -- refdes.inline_calc does
+  not exist there. Proof method for every chunk's new tests.
+- ruff --select E9,F clean on the two touched files.
+
+Chunk 2 (evaluation + tests): DONE.
+- build.py: _run_inline_span evaluates the span's RHS through
+  calc.evaluate_block as the canonical fence line `name = rhs | unit`
+  (same grammars/restrictions; duplicate-name, unknown-name, source()
+  unit rules come for free). _run_item_calcs now runs fences and
+  triggered spans as one source-ordered event list sharing env+origins,
+  so spans see fence names and vice versa; {{name}} renders span values
+  via item.calc_values.
+- 9 more tests: span->fence, fence->span, span->span, forward-use
+  unknown-name at the span's file:line, duplicates span<->fence and
+  span<->span citing both lines, malformed span error, ordinary span
+  untouched, {{P}} rendering. Sabotage: 8/9 fail on the grammar-only
+  tree bde63a7 (collected before integration); full file fails at
+  import on base cbcd22e. 25/25 + 200 neighbor tests green.
+
+Chunk 3 (severity table + verification): DONE.
+- 17 more tests: design probe warns (not fails) with the exact design
+  message shape, coarse/fine windows, both window edges, half-place
+  ties (halves away from zero, incl. negatives), trailing zeros,
+  decimal exponent, dimensionless, compatible-unit literal,
+  incompatible-unit error, unit-assertion mismatch, eval failure,
+  nonfinite + unknown-unit literals, source bytes unchanged by the
+  check path, check==build diagnostics.
+- One real bug found this chunk: compare_stored double-applied the
+  decimal exponent of literals like 1.2e3 (Decimal("1.2e3").scaleb(3)).
+  Fixed to scale the mantissa only; the exponent test pinned it.
+- Full suite green: 4063 passed, 2 skipped.
+
+Chunk 4 (docs, changelog, ship): DONE.
+- docs/math.md "Inline calc" section between "Referencing results in
+  prose" and "Writing units"; every example and severity claim verified
+  against a real init-project probe in .scratch/inline-doc-probe
+  (warning line format, source() end-to-end after fetch --update).
+- changelog.d/inline-calc-spans.added.md; gen_examples --check clean;
+  full suite 4063 passed 2 skipped.
+- Behavior-change grep: single-backtick spans containing := in items/
+  = 0 (this repo's own project is unaffected); docs/ matches are
+  prose/design text and fenced examples, never item bodies.
+- Probe-confirmed gaps, documented in math.md + changelog + PR: the
+  evaluation order and fetch key discovery read fences only -- a
+  cross-item ref or source() used ONLY in spans can evaluate before
+  its target ("does not define 'x'") or stay unpinned.
+
+Known slice-1 gaps for the PR body (design section 3 is deliberately
+out of scope): the scheduler's cross-item reference scan reads calc
+fences only, so a cross-item reference from a span depends on the
+other item having been evaluated first; refdes fetch's source()
+discovery likewise misses spans. Single-item projects unaffected.

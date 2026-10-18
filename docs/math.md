@@ -268,6 +268,52 @@ error at the reference, never a silent fallback to the calc's own unit.
 A `{{name}}` that does not match a calc value in the same item is a warning and is
 left as written.
 
+## Inline calc
+
+A one-line calculation can live in the sentence it belongs to, as a code span
+triggered by `:=` and ending with its stored result:
+
+```markdown
+The divider gives `Vout := 0.8 V * (1 + 10 kohm/2.2 kohm) | V = 4.436 V`.
+```
+
+The right-hand side is the ordinary calc-line grammar — the same units,
+functions, tolerances, cross-item references and `source()` as
+`name = expression | unit`, with the same restrictions. The unit assertion, if
+any, sits between the expression and the result; the stored literal may use
+any compatible unit.
+
+`check` and `build` evaluate the expression and verify the stored result
+numerically. Stored `4.4 V` accepts a computed 4.436 V — half of one place
+in the literal's last written digit — while a computed 4.52 V fits neither
+`4.4 V` nor `4.436 V`; trailing zeros (`4.0`) and exponents (`1.2e3`)
+tighten the window to the place they were written to. A result outside its window is a warning at the
+span's line; the source is never rewritten:
+
+```
+WARNING items/log.md:7 [LOG-001] — inline calc Vout: stored result says 4.52 V, now computes 4.436 V
+```
+
+The trigger is a **single-backtick** code span whose content contains `:=`.
+A span without `:=` is ordinary code (`V_cl = 0.8 V` stays a label), and a
+wider ``double-backtick`` span is never triggered — the escape hatch when
+you want the literal text. A span that *is* triggered and cannot be parsed
+is an error, never ordinary code. A missing `= result`, an expression that
+fails, and a stored literal with an incompatible or unparseable unit are
+errors at the span's line.
+
+Inline names live in the same item-wide scope as calc fences, evaluated in
+source order across both: a later fence can use an inline name, a later span
+can use a fence name, `{{Vout}}` renders the value, a duplicate assignment
+is the ordinary "assigned twice" error citing both lines, and a forward use
+is an ordinary unknown-name error. The span itself stays literal code in
+the published page.
+
+Known gaps in this first slice: the build's cross-item evaluation order and
+`refdes fetch`'s key discovery read calc **fences** only, so a cross-item
+reference or `source()` used *only* in an inline span can evaluate before
+its target or be left unpinned. Keep such uses in a fence for now.
+
 ## Writing units
 
 A bare token after a number is always read as a unit. Units contain no internal
