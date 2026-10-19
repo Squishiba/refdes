@@ -451,3 +451,124 @@ def test_check_and_build_report_the_same_thing(tmp_path):
     levels = [d[0] for d in diags(checked)]
     assert levels.count("error") == 1  # the incompatible stored unit
     assert levels.count("warning") == 1  # the stale value
+
+# ------------------------------------------- the run-12 message defects
+# (in-prog-logs/user-sim-release-gate-run12.md F12-4..F12-6): each test
+# pins the message a user-sim run found dishonest, with the fence form as
+# the control wherever the span form is the gap.
+
+
+def _build_items(tmp_path, files, config=BASIC_CONFIG):
+    write_project_config(tmp_path, config)
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    for name, text in files.items():
+        (items / name).write_text(text, encoding="utf-8")
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    return project
+
+
+def _inline_messages(project):
+    return [d.message for d in project.diagnostics if d.message.startswith("inline calc ")]
+
+
+def test_stale_display_never_shows_a_value_that_looks_accepted(tmp_path):
+    # F12-4: 6.899 V / 2 = 3.4495 V is outside the window of stored 3.5 V
+    # (3.45..3.55), yet at 3 sigfigs it displayed as `3.45 V` -- a number
+    # the author reads as passing the window. The warning shows the raw
+    # value whenever the rounded display would itself fit the window.
+    project = _build(
+        tmp_path,
+        "`x := 6.899 V / 2 = 3.5 V`\n",
+        config=BASIC_CONFIG + "sigfigs: 3\n",
+    )
+    warns = _inline_warnings(project)
+    assert len(warns) == 1
+    assert warns[0].message == (
+        "inline calc x: stored result says 3.5 V, now computes 3.4495 V"
+    )
+
+
+def test_span_only_cross_item_reference_names_the_ordering_gap(tmp_path):
+    # F12-5: the scheduler reads dependency edges from fence lines only, so
+    # a reference that lives only in a span runs before its target is
+    # evaluated -- and the old message blamed the target ("it defines no
+    # calc values") for a name its fence defines.
+    project = _build_items(
+        tmp_path,
+        {
+            "a.md": "---\nid: DEC-001\ntype: decision\n---\n\n"
+            "`v := DEC-002.V_in = 2 V`\n",
+            "b.md": "---\nid: DEC-002\ntype: decision\n---\n\n"
+            "```calc\nV_in = 2 V\n```\n",
+        },
+    )
+    assert _inline_messages(project) == [
+        "inline calc v: cross-item reference 'DEC-002.V_in': DEC-002 has "
+        "not been evaluated yet -- a reference used only in an inline span "
+        "creates no evaluation-order edge, so this span can run before the "
+        "target's calc; keep this reference in a calc fence"
+    ]
+    # The fence form is the control: same reference, scheduler edge, clean.
+    project = _build_items(
+        tmp_path,
+        {
+            "a.md": "---\nid: DEC-001\ntype: decision\n---\n\n"
+            "```calc\nv = DEC-002.V_in\n```\n\nSpan v = {{v}}\n",
+            "b.md": "---\nid: DEC-002\ntype: decision\n---\n\n"
+            "```calc\nV_in = 2 V\n```\n",
+        },
+    )
+    assert project.errors == []
+    assert "2 V" in _item(project).body_html
+
+
+def test_span_source_advice_points_at_the_fence_form(tmp_path):
+    # F12-6: a span-only source() can never be pinned -- key discovery
+    # reads calc fences, so `refdes fetch` hashes the file, extracts no
+    # key, and the same error returns forever. The advice says so and
+    # points at the fence form; the fence form keeps the fetch advice.
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "types:\n  decision:\n    prefix: DEC\n    fields:\n"
+        "      citations: { type: citations, on_change: invalidate }\n",
+    )
+    (tmp_path / "analysis").mkdir(exist_ok=True)
+    (tmp_path / "analysis" / "budget.csv").write_text(
+        "key,value\nk1,5.0\n", encoding="utf-8"
+    )
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    span_body = '`k1 := source("analysis/budget.csv", "k1") | V = 5 V`\n'
+    (items / "a.md").write_text(
+        "---\nid: DEC-001\ntype: decision\ncitations:\n"
+        "  - path: analysis/budget.csv\n---\n\n" + span_body,
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    assert _inline_messages(project) == [
+        "inline calc k1: source('analysis/budget.csv', 'k1') has no locked "
+        "value -- key discovery reads calc fences only, so a source() used "
+        "only in an inline span is never pinned; write the line in a calc "
+        "fence and run 'refdes fetch --path analysis/budget.csv'"
+    ]
+    # The fence form is the control: fetch genuinely can pin it from there.
+    (items / "a.md").write_text(
+        "---\nid: DEC-001\ntype: decision\ncitations:\n"
+        "  - path: analysis/budget.csv\n---\n\n"
+        '```calc\nk1 = source("analysis/budget.csv", "k1") | V\n```\n',
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    assert (
+        "calc 'k1': source('analysis/budget.csv', 'k1') has no locked value "
+        "-- run 'refdes fetch --path analysis/budget.csv' to extract and "
+        "pin it"
+    ) in [d.message for d in project.diagnostics]

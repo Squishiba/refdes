@@ -1,0 +1,69 @@
+Fix R12-F4..F6: honest inline-calc messages (run 12 findings)
+==============================================================
+
+Goal: fix the three inline-calc message defects from
+in-prog-logs/user-sim-release-gate-run12.md (F12-4 stale-display
+precision, F12-5 span-only cross-ref blames the target, F12-6 span-form
+source() points at a fetch that can never pin), with regression tests,
+changelog fragments, docs, and a PR. Branch off main (#333 + run-12
+report), started clean.
+
+Reproduction first (as the report says, verify against the checkout):
+throwaway project under .scratch/f12/proj (init + items), driven with
+PYTHONPATH=$PWD/src <venv> -m refdes.cli check. All three messages
+reproduced verbatim:
+  - "stored result says 3.5 V, now computes 3.45 V" (raw 3.4495 V)
+  - "DEC-001 does not define 'V_in' (it defines no calc values)"
+  - "has no locked value -- run 'refdes fetch --path ...'", fetch then
+    answers hash-only and the error returns forever.
+Fence-form controls confirmed clean (fence ref schedules; fence source
+pins on fetch) -- the gaps are span-only, matching docs/math.md.
+
+Gotchas hit while building the scratch fixture: project types live in
+refdes-schema.yaml (types in refdes-project.yaml is an error); an
+inline-span cross-ref RHS must be a pure TARGET.NAME reference
+(CROSS_REF_RE anchors the whole RHS, so "DEC-001.V_in * 2" lexes as
+DEC minus 001).
+
+F12-4, src/refdes/inline_calc.py: compare_stored's acceptance window is
+untouched (decided on full Decimal values). Added _stale_message: if
+the displayed computed value's own rounding interval (half of one unit
+of its last written place, _half_of_place) touches the stored window,
+the raw Decimal text replaces the sigfigs text -- the warning can never
+show a number that reads as accepted. .normalize() on the raw text so
+exactly-representable values ("4 V") print as before; the three exact
+message tests in test_inline_calc.py all stay green by construction
+("5 V"/"4 V" raw-normalizes to 4; "4.436"/"4.52" pairs sit clear of
+each other's windows).
+
+F12-5, src/refdes/build.py _make_calc_resolver: getattr(target,
+"_env", {}) conflated "target not evaluated yet" (span-only reference,
+scheduler edges come from fences only) with "target evaluated and
+defines nothing". Split on hasattr: unevaluated target gets
+"<target> has not been evaluated yet -- ... keep this reference in a
+calc fence"; the defined-names listing only runs on a real miss.
+Chose the minimal message/check fix the finding asked for, not a
+scheduler change -- the grammar/edge gap stays documented, the message
+now tells the truth.
+
+F12-6, src/refdes/build.py: _make_source_resolver takes a one-slot
+span_context flag; _run_item_calcs sets it around _run_inline_span in
+the (sequential) event loop. Span-form miss now says key discovery
+reads calc fences only, the span form is never pinned, write the line
+in a calc fence (fetch named as the follow-up that then works). Fence
+form keeps the original advice; tests pin both.
+
+docs/math.md: stale-warning display rule sentence after the warning
+example; the known-gaps paragraph now says the fetch advice from the
+span is a dead end and that the diagnostics point at the fence form.
+
+Tests: three regression tests appended to tests/test_inline_calc.py,
+each asserting the exact new message plus the fence-form control in
+the same test (clean build / original advice).
+
+Verification: full suite PYTHONPATH=$PWD/src <venv> -m pytest -q ->
+4177 passed, 2 skipped. ruff check on the three touched py files
+--select E9,F -> clean (repo-wide ruff baseline is not clean by
+design, left alone).
+
+Finished: committed, pushed, PR opened. Not merged (per task).

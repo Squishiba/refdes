@@ -235,6 +235,50 @@ def triggered_spans(body: str) -> list[InlineSpan]:
     return spans
 
 
+_PLAIN_NUMBER_RE = re.compile(r"[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?")
+
+
+def _half_of_place(text: str) -> Decimal:
+    """Half of one unit of a decimal text's last written place: `4.436`
+    -> 0.0005, `4` -> 0.5, `1.235e+06` -> 500. This is the rounding
+    interval a reader reads a displayed number with."""
+    mantissa, _, exp_text = text.partition("e")
+    if not exp_text:
+        mantissa, _, exp_text = text.partition("E")
+    whole, dot, frac = mantissa.lstrip("+-").partition(".")
+    decimals = len(frac) if dot else 0
+    exp = int(exp_text) if exp_text else 0
+    return Decimal(5).scaleb(exp - decimals - 1)
+
+
+def _stale_message(
+    span: InlineSpan,
+    computed_text: str,
+    computed_dec: Decimal,
+    stored_dec: Decimal,
+    half: Decimal,
+) -> str:
+    """The stale-result warning. The displayed computed value must not
+    read as accepted: when the rounded display lands inside the stored
+    literal's window -- run-12 F12-4, a raw 3.4495 shown as `3.45 V`
+    against stored `3.5 V`, which the author then reads as passing the
+    3.5 +/- 0.05 window -- the raw value replaces it, and the gap is
+    visible. What is *accepted* is the window rule above, decided on
+    full values; this decides only what is *shown*."""
+    text = computed_text.strip()
+    number = _PLAIN_NUMBER_RE.match(text)
+    if number is not None:
+        shown = Decimal(number.group())
+        shown_half = _half_of_place(number.group())
+        inside_window = not (
+            shown + shown_half < stored_dec - half
+            or shown - shown_half > stored_dec + half
+        )
+        if inside_window:
+            text = f"{computed_dec.normalize():f}{text[number.end():]}"
+    return f"stored result says {span.result}, now computes {text}"
+
+
 def compare_stored(value: calc.Value, span: InlineSpan, computed_text: str) -> str | None:
     """Verify a span's stored literal against the evaluated value.
 
@@ -249,7 +293,9 @@ def compare_stored(value: calc.Value, span: InlineSpan, computed_text: str) -> s
     nominal to that place on the decimal text, halves away from zero,
     and accept only when the rounded value equals the stored literal.
     Comparison is numeric -- `project.sigfigs` formats the recomputed
-    quantity for the message only.
+    quantity for the message only, widened to full precision whenever
+    the rounded display would itself sit inside the window (see
+    `_stale_message`); the window rule is unchanged.
     """
     literal = LITERAL_RE.match(span.result)
     num = literal.group(1)
@@ -286,7 +332,7 @@ def compare_stored(value: calc.Value, span: InlineSpan, computed_text: str) -> s
         if abs(diff) < half:
             return None
         if abs(diff) > half:
-            return f"stored result says {span.result}, now computes {computed_text}"
+            return _stale_message(span, computed_text, computed_dec, stored_dec, half)
         # Boundary tie: round the computed nominal to the stored place,
         # halves away from zero, and accept only an exact match.
         rounded = computed_dec.quantize(
@@ -294,4 +340,4 @@ def compare_stored(value: calc.Value, span: InlineSpan, computed_text: str) -> s
         )
         if rounded == stored_dec:
             return None
-        return f"stored result says {span.result}, now computes {computed_text}"
+        return _stale_message(span, computed_text, computed_dec, stored_dec, half)

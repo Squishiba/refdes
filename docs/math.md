@@ -294,6 +294,11 @@ span's line; the source is never rewritten:
 WARNING items/log.md:7 [LOG-001] — inline calc Vout: stored result says 4.52 V, now computes 4.436 V
 ```
 
+The warning never shows a number that looks accepted: when the project's
+rounding of the computed value would itself fit the stored literal's window
+— a raw 3.4495 displayed as `3.45`, inside the window of a stored `3.5` —
+the warning shows the raw value instead.
+
 The trigger is a **single-backtick** code span whose content contains `:=`.
 A span without `:=` is ordinary code (`V_cl = 0.8 V` stays a label), and a
 wider ``double-backtick`` span is never triggered — the escape hatch when
@@ -310,9 +315,12 @@ is an ordinary unknown-name error. The span itself stays literal code in
 the published page.
 
 Known gaps in this first slice: the build's cross-item evaluation order and
-`refdes fetch`'s key discovery read calc **fences** only, so a cross-item
-reference or `source()` used *only* in an inline span can evaluate before
-its target or be left unpinned. Keep such uses in a fence for now.
+`refdes fetch`'s key discovery read calc **fences** only. A cross-item
+reference used *only* in an inline span can evaluate before its target, and
+a `source()` used *only* in an inline span can never be pinned — `refdes
+fetch` hashes the file and extracts no keys, so running it from the span's
+advice is a dead end. The diagnostics at the span's line name the gap and
+point at the fence form; keep such uses in a fence for now.
 
 ## Writing units
 

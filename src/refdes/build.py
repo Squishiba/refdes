@@ -1569,9 +1569,24 @@ def _make_calc_resolver(project: Project, by_key: dict[str, Item]):
             raise calc.CalcError(
                 f"cannot resolve {reference!r}: {display}'s own calc failed"
             )
-        value = getattr(target, "_env", {}).get(name)
+        if not hasattr(target, "_env"):
+            # The scheduler's edges come from fence lines only
+            # (docs/math.md, known gaps), so a reference that lives only
+            # in an inline span runs before its target is evaluated.
+            # Listing what the target "defines" from its empty env would
+            # blame the target for a value it does define -- run-12
+            # F12-5: `DEC-001 does not define 'V_in' (it defines no calc
+            # values)` for a target whose fence defines V_in, exactly.
+            raise calc.CalcError(
+                f"cross-item reference {reference!r}: {display} has not "
+                "been evaluated yet -- a reference used only in an "
+                "inline span creates no evaluation-order edge, so this "
+                "span can run before the target's calc; keep this "
+                "reference in a calc fence"
+            )
+        value = target._env.get(name)
         if value is None:
-            defined = sorted(getattr(target, "_env", {}))
+            defined = sorted(target._env)
             listing = (
                 "it defines: " + ", ".join(defined) if defined
                 else "it defines no calc values"
@@ -1585,7 +1600,14 @@ def _make_calc_resolver(project: Project, by_key: dict[str, Item]):
     return resolve
 
 
-def _make_source_resolver(project: Project, item, records: dict, resolved: dict, uses: list):
+def _make_source_resolver(
+    project: Project,
+    item,
+    records: dict,
+    resolved: dict,
+    uses: list,
+    inline_span: list[bool] | None = None,
+):
     """The resolver a `source("path", "key")` line calls: authorization by the
     same-item citation rule, then the value the lockfile pinned. It never opens
     the cited file (docs/design/calc-sources.md §5) -- a file that changed
@@ -1594,7 +1616,11 @@ def _make_source_resolver(project: Project, item, records: dict, resolved: dict,
 
     `resolved` maps the authored (path, key) to (canonical path, locked text or
     None) for the row's provenance badge; `uses` accumulates every use for the
-    content hash, `None` standing for a value that did not resolve."""
+    content hash, `None` standing for a value that did not resolve.
+    `inline_span`, when given, is a one-slot flag the caller sets while an
+    inline span is evaluating: key discovery reads calc fences only, so the
+    span form's miss needs the fence-form advice, not a fetch it can never
+    complete (run-12 F12-6)."""
 
     def resolve(path: str, key: str) -> str:
         canon, problem = citations_mod.authorize_source_path(project, item, path)
@@ -1605,6 +1631,14 @@ def _make_source_resolver(project: Project, item, records: dict, resolved: dict,
         resolved[(path, key)] = (canon, text)
         uses.append((canon, key, text))
         if text is None:
+            if inline_span is not None and inline_span[0]:
+                raise calc.CalcError(
+                    f"source({path!r}, {key!r}) has no locked value -- "
+                    "key discovery reads calc fences only, so a source() "
+                    "used only in an inline span is never pinned; write "
+                    f"the line in a calc fence and run 'refdes fetch "
+                    f"--path {canon}'"
+                )
             raise calc.CalcError(
                 f"source({path!r}, {key!r}) has no locked value -- run "
                 f"'refdes fetch --path {canon}' to extract and pin it"
@@ -1697,10 +1731,15 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
         project._lockfile_problem = problem
     source_resolved: dict[tuple[str, str], tuple[str, str | None]] = {}
     item._source_uses = []
+    # True while an inline span is evaluating, so the source resolver can
+    # tell the span form's dead end from a fence form's fixable miss
+    # (run-12 F12-6); the event loop below is sequential, so a list is
+    # enough -- no locking.
+    span_context = [False]
     env: dict[str, calc.Value] = {
         calc.RESOLVER_KEY: _make_calc_resolver(project, by_key),
         calc.SOURCE_RESOLVER_KEY: _make_source_resolver(
-            project, item, records, source_resolved, item._source_uses
+            project, item, records, source_resolved, item._source_uses, span_context
         ),
     }
     # name -> line first assigned, threaded across every block of this item
@@ -1765,8 +1804,12 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
     events.sort(key=lambda event: event[0])
     for _offset, event in events:
         if isinstance(event, inline_calc.InlineSpan):
-            if _run_inline_span(project, item, event, env, origins):
-                failed = True
+            span_context[0] = True
+            try:
+                if _run_inline_span(project, item, event, env, origins):
+                    failed = True
+            finally:
+                span_context[0] = False
             continue
         block, block_id = event
         start_line = item.body_line + _offset if item.body_line is not None else None
