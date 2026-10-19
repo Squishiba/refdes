@@ -46,4 +46,5 @@ site:
     - themes
     - cli-reference
     - output
+    - performance
     - troubleshooting
