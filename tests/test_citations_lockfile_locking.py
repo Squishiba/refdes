@@ -20,6 +20,10 @@ the window is closed rather than a description of it:
   (`test_a_write_that_landed_during_the_gate...`);
 * the accept's own pin write happens inside the lock
   (`test_the_accepts_lockfile_write...`);
+* the lockfile's replace is a check-and-replace that consumes the landing
+  section's own read: a writer that bypasses the lock and lands between
+  that read and the replace's read is refused and its bytes stand
+  (`test_a_lockfile_moved_between_the_landing_read_and_the_swap...`);
 * `refdes fetch` -- the CLI writer -- writes while holding the lock, and a
   second holder keeps it out of the file until that holder leaves
   (`test_refdes_fetch_holds...`, `test_a_second_holder_keeps_fetch...`).
@@ -149,9 +153,9 @@ def test_no_writer_lands_between_the_lockfiles_write_and_its_restore(
             lock_file.write_bytes(landed)
         finished.set()
 
-    def replace(path, payload):
+    def replace(path, payload, *args, **kwargs):
         if os.path.basename(path) != "decisions.yaml":
-            return real_replace(path, payload)
+            return real_replace(path, payload, *args, **kwargs)
         # The lockfile landed a moment ago, under this lock, and this replace
         # is about to fail. Start the writer and assert the negative: while
         # this thread holds the project lock -- which it does, from the
@@ -221,6 +225,39 @@ def test_a_write_that_landed_during_the_gate_is_not_clobbered_by_the_refusal(
     assert "other" in lock(root)["citations"][CSV_PATH]["values"]
 
 
+def test_a_lockfile_moved_between_the_landing_read_and_the_swap_refuses_the_pair(
+    tmp_path, monkeypatch
+):
+    # The lockfile half of the landing section, the window its own read
+    # leaves open before the replace consumes it: this writer lands on
+    # citations.yaml after the landing section read the file under the
+    # lock, before the replace reads it. The check inside the replace
+    # consumes that read, so the pair lands nowhere, the refusal asks for
+    # a fresh accept, and the outside bytes stand -- a writer spelled with
+    # a write that takes no lock, on purpose.
+    root = make_root(tmp_path)
+    fetch(root)
+    lock_file = root / ".refdes" / "citations.yaml"
+    item_file = root / ITEM
+    item_before = item_file.read_bytes()
+    landed = another_pin(root)
+
+    real_replace = edit_mod._atomic_replace
+
+    def outside_writer_lands_in_the_window(path, payload, *args, **kwargs):
+        if os.path.basename(path) == "citations.yaml":
+            lock_file.write_bytes(landed)  # outside the project lock, on purpose
+        return real_replace(path, payload, *args, **kwargs)
+
+    monkeypatch.setattr(edit_mod, "_atomic_replace", outside_writer_lands_in_the_window)
+    result = accept(root)
+
+    assert isinstance(result, Refused), result
+    assert "re-accept" in result.reason
+    assert lock_file.read_bytes() == landed, "the refused accept clobbered the outside writer"
+    assert item_file.read_bytes() == item_before, "the refused accept wrote the body"
+
+
 # ------------------------------------------------------------ the other writers
 
 
@@ -234,9 +271,9 @@ def test_the_accepts_lockfile_write_happens_inside_the_project_write_lock(tmp_pa
     held = {}
     real_replace = edit_mod._atomic_replace
 
-    def spy(path, payload):
+    def spy(path, payload, *args, **kwargs):
         held[os.path.basename(path)] = lock_is_held(root)
-        return real_replace(path, payload)
+        return real_replace(path, payload, *args, **kwargs)
 
     monkeypatch.setattr(edit_mod, "_atomic_replace", spy)
     result = accept(root)

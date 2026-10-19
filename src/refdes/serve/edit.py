@@ -37,6 +37,10 @@ journal, which is a later slice):
    editor exists;
 7. write atomically -- temp file in the same directory, flush, fsync,
    `os.replace` -- then re-read and confirm the bytes are the planned bytes.
+   Step 3's revision check is the swap's last word: `expected_revision` is
+   threaded into the write and compared against the bytes the replace itself
+   reads, so a file a writer outside the lock moved during step 6's gate is
+   the same `Conflict`, with nothing written;
 
 One save writes two files. A `set_body` carrying `pin` (docs/design/
 editor-source-picker.md §4 -- the editor's source-value picker accepting a
@@ -319,6 +323,14 @@ def apply_edit(project_root: str, request: EditRequest, config_path: str | None 
     Returns `Applied` | `Conflict` | `Refused` | `Invalid`. Authoring outcomes
     are values; only a genuinely unexpected internal fault raises, and the
     write path itself restores the original bytes if a replacement half-fails.
+
+    The save's last revision check is the replace's own read: the expected
+    revision is threaded into the atomic swap and compared against the bytes
+    the swap reads, so a file a writer OUTSIDE the project lock moved between
+    the gate and the swap is refused as the same `Conflict`, with nothing
+    written. The irreducible gap between the swap's own read and its
+    `os.replace` stays open -- the same residual `create_item`'s docstring
+    names, and no check-and-replace on a plain file closes it.
     """
     root = os.path.abspath(project_root)
     config = os.path.abspath(config_path) if config_path else os.path.join(root, CONFIG_NAME)
@@ -490,7 +502,12 @@ def _apply_locked(config: str, request: EditRequest):
         return Invalid(who, ref, tuple(blocking), path=path)
 
     # The candidate gate can take seconds. Another server may have saved since
-    # the first check, so check again under the cross-process write lock.
+    # the first check, so check again under the cross-process write lock. The
+    # check's last word is the replace's own read: `expected_revision` is
+    # threaded into `_atomic_replace` below, so a file a writer OUTSIDE the
+    # lock moved between the fast check and the replace's read is this same
+    # `Conflict`, with nothing written -- the replace consumes the bytes its
+    # own check names (see `create_item` for the residual gap that remains).
     #
     # The pair lands in this one section: the pins (if this is an accept)
     # first, then the body, with nothing between them and no lock release
@@ -511,7 +528,18 @@ def _apply_locked(config: str, request: EditRequest):
                 reason = _land_lockfile(before, accept)
                 if reason is not None:
                     return Refused(who, ref, reason, path=path)
-            failure = _atomic_replace(path, new_text.encode("utf-8"))
+            try:
+                failure = _atomic_replace(
+                    path, new_text.encode("utf-8"), request.expected_revision
+                )
+            except _Moved as moved:
+                # The file moved after the fast check above, before the
+                # replace read it: the same Conflict the check spells, named
+                # from the bytes this replace saw. The pins -- if this was an
+                # accept -- landed a moment ago under this lock and must go
+                # back with the body that never lands.
+                _restore_lockfile(accept)
+                return _conflict(who, ref, path, before, request, moved.current)
             if failure is not None:
                 _restore_lockfile(accept)
                 return Refused(who, ref, failure, path=path)
@@ -636,6 +664,14 @@ def _land_lockfile(before: Project, accept: _Acceptance) -> str | None:
             current = fh.read()
     except OSError:
         current = None
+    # The replace's check consumes the read above: `expected_sha` names
+    # these exact bytes, so a writer OUTSIDE the lock that lands on the
+    # file between this read and the replace's own read is a refusal, not
+    # a clobber -- the pair lands nowhere and the outside bytes stand. The
+    # replace's read-to-swap gap is the module-wide residual (see
+    # `create_item`). Named apart from `expected` below, the pin-value map
+    # -- the check consumes the bytes, not the pins.
+    expected_sha = None if current is None else hashlib.sha256(current).hexdigest()
     if current == lock.staged:
         return None
     if current != lock.previous:
@@ -688,11 +724,17 @@ def _land_lockfile(before: Project, accept: _Acceptance) -> str | None:
         # is the same extraction under the same policy -- the reader's
         # answer, not a second copy of anything.
         accept.pinned = tuple(pinned)
-    failure = (
-        _atomic_replace(lock.path, lock.staged)
-        if current is not None
-        else _atomic_create(lock.path, lock.staged)
-    )
+    try:
+        failure = (
+            _atomic_replace(lock.path, lock.staged, expected_sha)
+            if current is not None
+            else _atomic_create(lock.path, lock.staged)
+        )
+    except _Moved:
+        return (
+            f"{lock.path} changed on disk while this accept was landing; "
+            "the pair landed nowhere -- re-accept against the current lockfile"
+        )
     if failure is not None:
         return failure
     lock.landed = True
@@ -1035,7 +1077,16 @@ class _Moved(Exception):
     the replace read it is not the bytes the caller planned against, so
     nothing was written. Raised, not returned: the return of
     `_atomic_replace` stays the reason string its callers already treat, and
-    only a caller that passes `expected` can ever see this."""
+    only a caller that passes `expected` can ever see this. It carries the
+    sha256 of the bytes that read took in, so the revision a conflict names
+    is the one the replace itself saw; the conflict's diff and draft come
+    from a later read of the file by `_conflict`, which may see the file
+    moved again -- the save is refused either way, so no bytes ride on the
+    two agreeing."""
+
+    def __init__(self, current: str) -> None:
+        super().__init__(current)
+        self.current = current
 
 
 def _atomic_replace(
@@ -1050,12 +1101,12 @@ def _atomic_replace(
     says so.
 
     With `expected` (the sha256 of the bytes the caller planned against --
-    what a create read before it planned its append), the destination is
-    checked against it on the read below, before a byte is written: a
-    destination that moved since the caller's plan raises `_Moved` and
-    writes nothing. The check consumes the exact
-    bytes this function will replace and protect, which is the narrowest
-    window a plain file allows -- the gap between this read and
+    the revision an apply's client saw, what a create read before it
+    planned its append), the destination is checked against it on the read
+    below, before a byte is written: a destination that moved since the
+    caller's plan raises `_Moved` and writes nothing. The check consumes the
+    exact bytes this function will replace and protect, which is the
+    narrowest window a plain file allows -- the gap between this read and
     `os.replace` (the temp write and fsync in between) is the irreducible
     part, and no check-and-replace on a plain file closes it."""
     directory = os.path.dirname(path)
@@ -1065,8 +1116,10 @@ def _atomic_replace(
             original = fh.read()
     except OSError as exc:
         return f"could not read {path} before writing: {exc}"
-    if expected is not None and hashlib.sha256(original).hexdigest() != expected:
-        raise _Moved()
+    if expected is not None:
+        current = hashlib.sha256(original).hexdigest()
+        if current != expected:
+            raise _Moved(current)
 
     try:
         fd, tmp = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.refdes-tmp-", dir=directory)
@@ -1282,10 +1335,10 @@ def create_item(project_root: str, request: CreateRequest, config_path: str | No
     in between) a writer that does not take the project's write lock can
     still land, and its bytes are lost. The check shrinks a create's
     exposure from the whole candidate gate (two project loads, easily
-    seconds) to that irreducible gap; it is a narrower posture than
-    `apply_edit`'s last-moment revision check (whose read and swap are
-    separate calls), and it is not a conflict guarantee against
-    uncooperating writers. A destination planned as a new file needs none
+    seconds) to that irreducible gap; it shares `apply_edit`'s posture (the
+    apply threads its `expected_revision` into its replace too), and it is
+    not a conflict guarantee against uncooperating writers. A destination
+    planned as a new file needs none
     of this: `_atomic_create` links rather than replaces, so a file that
     appeared underneath is already a refusal."""
     root = os.path.abspath(project_root)

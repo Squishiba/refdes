@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 from conftest import write_project_config
 from helpers import _build_at
+from test_serve_create import replace_gap_writer
 
 from refdes import build as build_mod
 from refdes import citations as citations_mod
@@ -201,6 +202,93 @@ def test_change_after_candidate_gate_conflicts_without_overwriting(project_root,
     assert isinstance(result, Conflict), result
     assert "# another author's change" in read(path)
     assert "status: draft" not in read(path)
+
+
+def late_writer(monkeypatch, path, blocks):
+    """Land an outside append strictly between the landing section's fast
+    revision check and `_atomic_replace`'s own read of the file.
+
+    The seam is `edit_mod.file_revision`: the landing section calls it on
+    the target under the lock, so the block queued for `path` is appended
+    on the way out of the second call -- the first is the early check
+    before the gate, the second is the landing section's -- which makes the
+    check pass on bytes the replace then finds moved. This stands in for a
+    writer that never takes the project's write lock (a cooperating writer
+    is serialised out of the window by the lock itself), and it is the
+    window PR #241 closed for creates that `apply_edit` used to leave open."""
+    real = edit_mod.file_revision
+    pending = list(blocks)
+    seen = []
+
+    def racing(p):
+        revision = real(p)
+        if os.path.abspath(p) == os.path.abspath(str(path)):
+            seen.append(p)
+            if len(seen) >= 2 and pending:
+                with open(p, "a", encoding="utf-8", newline="") as fh:
+                    fh.write(pending.pop(0))
+        return revision
+
+    monkeypatch.setattr(edit_mod, "file_revision", racing)
+
+
+def test_a_file_moved_between_the_last_check_and_the_replace_is_a_conflict(
+    project_root, monkeypatch
+):
+    """EDITOR-API-007's edit-path window, closed: a writer outside the lock
+    that lands after the landing section's fast check, before the replace
+    reads the file, is refused as the same `Conflict` the check spells --
+    naming the revision the replace saw, with the outside bytes standing
+    and the refused edit's span nowhere on disk. Before the check consumed
+    the replace's own read (see `_atomic_replace`), this interleaving
+    silently replaced the outside bytes and reported `Applied`."""
+    path = target(project_root)
+    request = req(("REQ-001", SetField("status", "draft"), path))
+    before_tree = tree(project_root, "items", ".refdes")
+    late_writer(monkeypatch, path, ["# written after the check, before the swap\n"])
+
+    result = edit_mod.apply_edit(str(project_root), request)
+
+    assert isinstance(result, Conflict), result.message
+    assert result.current_revision == edit_mod.file_revision(path)
+    after = read(path)
+    assert "# written after the check, before the swap" in after, (
+        "the refused edit silently replaced the outside writer's bytes"
+    )
+    assert "status: draft" not in after, "the refused edit still wrote its span"
+    after_tree = tree(project_root, "items", ".refdes")
+    assert {k: v for k, v in after_tree.items() if k != "items/reqs.yaml"} == {
+        k: v for k, v in before_tree.items() if k != "items/reqs.yaml"
+    }, "the refused edit touched a file outside the target"
+
+
+def test_the_gap_between_the_replaces_read_and_the_swap_is_the_residual_loss(
+    project_root, monkeypatch
+):
+    """The edit path's documented limit, pinned as a test (mirrors the
+    create path's canary). A writer that lands strictly between
+    `_atomic_replace`'s own read of the target and the `os.replace` that
+    swaps the planned bytes in is still lost, and the save reports
+    `Applied` -- on a plain file no check-and-replace closes that gap, and
+    `apply_edit`'s docstring does not claim it does. The same bytes written
+    one notch earlier -- between the fast check and the replace's read --
+    are refused, see
+    `test_a_file_moved_between_the_last_check_and_the_replace_is_a_conflict`.
+    If the gap is ever closed for real (a true CAS), this test fails and
+    says so."""
+    path = target(project_root)
+    request = req(("REQ-001", SetField("status", "draft"), path))
+    replace_gap_writer(monkeypatch, path, ["# written after the last read\n"])
+
+    result = edit_mod.apply_edit(str(project_root), request)
+
+    assert isinstance(result, Applied), result.message
+    after = read(path)
+    assert "status: draft" in after
+    assert "# written after the last read" not in after, (
+        "the read-to-swap gap closed -- update the docs: the apply path now "
+        "closes the window fully, not just to the replace's own read"
+    )
 
 
 def test_atomic_replace_uses_unique_temps_and_cleans_failed_write(project_root, monkeypatch):
