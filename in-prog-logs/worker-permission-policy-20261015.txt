@@ -1,4 +1,4 @@
-CURRENT STATE (2026-10-19): docs-only round 4 is the latest round; earlier test counts and notes below are superseded by it.
+CURRENT STATE (2026-10-19): round 5 is the latest round below; it supersedes all earlier test counts and notes.
 Task: reduce repeated external_directory approval prompts from Sol's Qwen
 refdes fix workers (PROGRESS.md row "Automatic review of Sol Qwen
 external-directory permissions"). Branch fix/worker-permission-policy-20261015,
@@ -134,3 +134,15 @@ the metacharacter rejection; added \ $ " ' ; to the rejected set (round-3
 probe list plus these), with per-character loop assertions and the
 "..\/etc" / "a\b" / "$HOME/x" probes. 20/20 node --test, tsc clean.
 Pushed; not merged, not installed.
+
+ROUND 5 (2026-10-18/19, closing the chunk-3 P1 in code):
+wildcards narrowed to a final '*' segment only (**, mid-path *, a*b ->
+pending); for <dir>/* the classifier asks the resolver
+childSymlinkEscapes(dir, roots) - the fs one lists dir (readdir+lstat,
+>5000 -> too-many -> pending), realpath's each symlink child, and
+reports an escape when a target leaves the roots; missing dir -> clear,
+any other fs error -> pending. Identity default cannot answer wildcards
+(pending); index.server.ts passes fs-resolver.ts. Docs/plugin.json/
+README updated to the new truth; round-4 'wildcards may match symlinked
+children' sentences removed. 25/25 node --test (incl. a real-fs probe
+with a temp dir + real link -> /etc under ./.scratch/) + tsc clean.

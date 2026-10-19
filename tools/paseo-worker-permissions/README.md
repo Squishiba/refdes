@@ -24,7 +24,7 @@ passes; everything else is left pending for a human. Nothing is auto-denied.
 | --- | --- |
 | Provider/request | `agent.provider === "opencode"`, `request.provider === "opencode"`, `request.kind === "tool"`, `request.name === "external_directory"` |
 | Identity | `agent.parentAgentId` is on the dispatcher allowlist loaded from `parents.json` (below; absent/invalid file = empty list = nothing approved), **or** `agent.title` starts with `"Review PR "` (the PR-review plugin's reviewer agents) |
-| Scope | `request.input.patterns` is a **non-empty array of strings** and **every** entry passes: absolute, no `..` segment, no glob metacharacter other than `*` (the downstream matcher expands `[..]`, `{..,..}`, `?`, `!`, `(`, `)`, and backslash escapes, so those plus `$`, quotes, and `;` are rejected), and inside one of the roots below at a path-segment boundary (the root itself, or `root + "/..."`). The directory prefix is then realpath'd (symlinks resolved): the deepest existing ancestor must resolve inside the realpath'd roots — a symlink pointing outside a root is rejected; any resolver failure is rejected. All patterns must pass; one bad entry rejects the whole request |
+| Scope | `request.input.patterns` is a **non-empty array of strings** and **every** entry passes: absolute, no `..` segment, no glob metacharacter other than `*` (the downstream matcher expands `[..]`, `{..,..}`, `?`, `!`, `(`, `)`, and backslash escapes, so those plus `$`, quotes, and `;` are rejected), and `*` is allowed **only as the exact final path segment** (`<dir>/*`; `**`, a mid-path `*`, and `a*b` are rejected). It sits inside one of the roots below at a path-segment boundary (the root itself, or `root + "/..."`); the literal prefix is realpath'd and the deepest existing ancestor must resolve inside the realpath'd roots. For a `<dir>/*` pattern the **direct children** of `<dir>` are enumerated at decision time: a child symlink whose real target lies outside the roots rejects the request, a directory with more than 5000 entries is rejected, and any fs error is rejected (missing dir = no children = passes). All patterns must pass; one bad entry rejects the whole request |
 
 Allowed roots (hard-coded in `shared/classifier.ts`):
 
@@ -36,7 +36,8 @@ Allowed roots (hard-coded in `shared/classifier.ts`):
 - `/home/jorb/work/venv-refdes` — the project venv
 
 Everything else fails closed, including: patterns with `..`, glob
-metacharacters other than `*` (`[.][.]/etc/passwd`, `{..,x}/y`), root-prefix
+metacharacters other than `*` (`[.][.]/etc/passwd`, `{..,x}/y`), wildcards
+in any shape other than a final `*` (`**`, `/src*/x`, `a*b`), root-prefix
 lookalikes (`/home/jorb/work/refdes-evil`), relative patterns, `/home/jorb/.paseo/*`
 and `/home/jorb/.paseo/worktrees/*` (other projects, daemon config),
 missing/empty `patterns`, non-string entries, any other provider, permission
@@ -59,7 +60,8 @@ same as everything else; writes inside the roots are in scope by design.
 
 (the daemon's `plugin-settings/<plugin-id>` convention; override the whole
 path with the env var `REFDES_WORKER_PERMISSIONS_PARENTS_FILE`, or the
-`.paseo` home with `PASEO_HOME`). Format:
+`.paseo` home with `PASEO_HOME`; an **empty-string** value of either is
+treated as unset). Format:
 
 ```json
 {
@@ -105,7 +107,7 @@ Node **22.18 or newer** is required: native TypeScript type-stripping for
 cd tools/paseo-worker-permissions
 npm install
 npm run typecheck   # tsc --noEmit against @getpaseo/plugin 0.11.2
-npm test            # node --test, 20 tests
+npm test            # node --test, 25 tests
 ```
 
 The suite is red on the pre-fix classifier. Key cases: wildcard
@@ -114,13 +116,17 @@ scope decided by patterns, not metadata; positives (worktree subpath,
 checkout subpath, venv bin, exact roots); `..` segments, lookalike roots,
 `/home/jorb/.paseo/*` and `.../worktrees/*`, outside-root paths,
 mixed allowed+disallowed, missing/empty/non-string/blank patterns → pending;
-every glob metacharacter other than `*` (incl. the `[.][.]/etc/passwd` and
-`{..,x}/y` probes) → pending while `*` patterns stay allowed; symlink
-resolvers (escaping symlink → pending, in-root symlink → allow, throwing
-resolver → pending, relocated root → allow); `policy.roots` flips decisions
-both ways; foreign/null parent → pending; empty allowlist (config absent) →
-nothing; Claude+Sol both accepted; reviewer title-prefix matching incl.
-near-miss titles; command text alone approves nothing.
+every glob metacharacter other than `*` (incl. the `[.][.]/etc/passwd`,
+`{..,x}/y`, `..\/etc`, `$HOME/x` probes) → pending; wildcards outside the
+final-segment form (`**`, mid-path `*`, `a*b`) → pending, while `<dir>/*`
+is checked for escaping child symlinks (fake resolvers: clear → allow,
+escape/too-many/throw → pending; a real `fs` resolver test against a temp
+dir with a real `link -> /etc` symlink in `./.scratch/`); plain
+non-wildcard patterns unchanged under the identity default (wildcards
+pending there); `policy.roots` flips decisions both ways; foreign/null
+parent → pending; empty allowlist (config absent) → nothing; Claude+Sol
+both accepted; reviewer title-prefix matching incl. near-miss titles;
+command text alone approves nothing.
 
 ## Presentation (human only)
 
@@ -146,21 +152,23 @@ the install; existing sessions resume on their next request.
   The first root is the project's whole worktrees directory, so an approved
   worker can write into any sibling worktree under it; accepted design
   (2026-10-18).
-- The realpath check covers the **literal directory prefix** (everything up
-  to the first `*`) **at check time**: symlinks in that literal prefix fail
-  closed. It does not enumerate what a wildcard matches — `probe/*`,
-  `probe/**`, `probe/*/*/*` stay allowed when the prefix resolves inside a
-  root, even where a symlinked child (`probe/link -> /etc`) is what the
-  daemon's matcher would expand to; the daemon matcher's own symlink and
-  dot-segment handling of `*` and `**` is not verified by this plugin
-  (pinned by a test as documented behavior, not a guarantee).
-- Symlinks are resolved **at check time**. A symlink (or directory) swapped
-  to point outside a root *after* the check, before the tool actually opens
-  the path, is a check/use race the plugin cannot close; the roots are
-  local, human-owned directories.
+- A wildcard is allowed **only as a final `*`** (`<dir>/*`); `**`, a
+  mid-path `*`, and `a*b` are never approved. For `<dir>/*` the direct
+  children of `<dir>` are listed at decision time and a child symlink whose
+  real target lies outside the roots rejects the request; directories with
+  more than 5000 entries are rejected (pending), as is any fs error during
+  the listing (a missing directory has no children and passes).
+- Symlinks are resolved **at check time**. A symlink (or directory) created
+  or swapped to point outside a root *after* the check, before the tool
+  actually opens the path, is a check/use race the plugin cannot close; the
+  roots are local, human-owned directories. The daemon matcher's own
+  semantics for `*` (dot entries, ordering) are not verified by this
+  plugin — only the direct-children listing is.
 - The default `PathResolver` is the identity (lexical checks only) when a
-  caller omits it; `index.server.ts` always passes the `fs.realpathSync`
-  one. The identity default is for unit tests, not deployment.
+  caller omits it, and it cannot answer wildcard child inspections — so
+  wildcard patterns stay **pending** under the default; `index.server.ts`
+  always passes the fs-backed resolver. The identity default is for unit
+  tests, not deployment.
 - A missing or unparseable `parents.json` approves **nothing, silently**
   (fail closed, no warning at install). The
   `REFDES_WORKER_PERMISSIONS_PARENTS_FILE` / `PASEO_HOME` environment

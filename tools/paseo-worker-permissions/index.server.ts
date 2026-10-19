@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
@@ -7,16 +7,17 @@ import {
   classifyWorkerPermissionRequest,
   type WorkerPermissionPolicy,
 } from "./shared/classifier";
+import { createFsResolver } from "./fs-resolver";
 
 /**
  * Server-only plugin: answers OpenCode `external_directory` permission
  * requests of refdes workers ONLY when the requesting agent is a child of a
  * dispatcher on the parents.json allowlist (or a PR-review reviewer by
  * title) AND every entry of the request's `input.patterns` — the scope that
- * is actually released — is glob-safe (no metacharacters beyond `*`) and
- * sits inside the allowlisted roots, symlinks resolved via realpath at
- * check time. Every other request is left pending for a human. Nothing is
- * auto-denied.
+ * is actually released — is glob-safe (`*` only as the final segment), sits
+ * inside the allowlisted roots, symlinks resolved via realpath at check
+ * time, and (for `<dir>/*`) has no direct child symlink escaping the roots.
+ * Every other request is left pending for a human. Nothing is auto-denied.
  */
 
 const PLUGIN_ID = "refdes-worker-permissions";
@@ -52,6 +53,7 @@ function readParentAgentIds(): readonly string[] {
 
 export default function contribute(server: PluginServerContext) {
   const remove = server.on("agent.permission_requested", async (event, context) => {
+    const resolver = createFsResolver();
     const policy: WorkerPermissionPolicy = {
       ...WORKER_PERMISSION_POLICY,
       parentAgentIds: readParentAgentIds(),
@@ -69,7 +71,7 @@ export default function contribute(server: PluginServerContext) {
         input: event.request.input,
       },
       policy,
-      (pathToResolve) => realpathSync(pathToResolve),
+      resolver,
     );
     if (decision.action !== "allow") {
       return;

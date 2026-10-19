@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   classifyWorkerPermissionRequest,
   WORKER_PERMISSION_POLICY,
   type ClassifierAgent,
   type ClassifierRequest,
+  type PathResolver,
   type WorkerPermissionPolicy,
 } from "./classifier.ts";
+import { createFsResolver } from "../fs-resolver.ts";
 
 const CLAUDE = "f3993852-557c-4a4e-989b-6490584ef5c8";
 const SOL = "d86b9967-5a0c-41e5-8635-fca6170fdeaa";
@@ -15,6 +20,9 @@ const PROGRESS = "/home/jorb/work/refdes/.scratch/PROGRESS.md";
 const WORKTREE_ROOT = "/home/jorb/.paseo/worktrees/16msma8v";
 
 const POLICY: WorkerPermissionPolicy = { ...WORKER_PERMISSION_POLICY, parentAgentIds: [CLAUDE, SOL] };
+
+/** Identity resolver whose inspected directories always report "clear". */
+const CLEAR: PathResolver = { realpath: (p) => p, childSymlinkEscapes: () => "clear" };
 
 function agent(
   over: Partial<Pick<ClassifierAgent, "provider" | "parentAgentId" | "title">> = {},
@@ -32,7 +40,7 @@ function externalDirectory(input: Record<string, unknown> | undefined): Classifi
 }
 
 function allow(input: Record<string, unknown> | undefined, a = agent()) {
-  return classifyWorkerPermissionRequest(a, externalDirectory(input), POLICY);
+  return classifyWorkerPermissionRequest(a, externalDirectory(input), POLICY, CLEAR);
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +218,7 @@ test("both allowlisted parents (Claude primary, Sol backup) are accepted", () =>
       agent({ parentAgentId }),
       externalDirectory({ patterns: ["/home/jorb/work/refdes/*"] }),
       POLICY,
+      CLEAR,
     );
     assert.equal(decision.action, "allow");
   }
@@ -218,7 +227,7 @@ test("both allowlisted parents (Claude primary, Sol backup) are accepted", () =>
 test("reviewer agents match by title prefix 'Review PR '", () => {
   const reviewer = agent({ parentAgentId: null, title: "Review PR #269 (chunk 1/2)" });
   assert.equal(
-    classifyWorkerPermissionRequest(reviewer, externalDirectory({ patterns: ["/home/jorb/work/refdes/*"] }), POLICY)
+    classifyWorkerPermissionRequest(reviewer, externalDirectory({ patterns: ["/home/jorb/work/refdes/*"] }), POLICY, CLEAR)
       .action,
     "allow",
   );
@@ -282,7 +291,7 @@ test("glob metacharacters other than * are rejected; * stays allowed", () => {
     const decision = allow({ patterns: [`${base}a${bad}b`] });
     assert.equal(decision.action, "pending", `expected pending for metachar ${JSON.stringify(bad)}`);
   }
-  for (const ok of [`${base}.scratch/*`, `${base}src/**`, WORKTREE_ROOT + "/*"]) {
+  for (const ok of [`${base}.scratch/*`, `${base}src/refdes/*`, WORKTREE_ROOT + "/*"]) {
     assert.equal(allow({ patterns: [ok] }).action, "allow", `expected allow for ${ok}`);
   }
 });
@@ -301,47 +310,124 @@ test("glob-encoded .. probes are pending", () => {
 
 test("symlink escapes are caught by the injected resolver", () => {
   const realRoot = "/home/jorb/work/refdes";
-  const classifyWith = (
-    patterns: string[],
-    resolve: (path: string) => string,
-  ) => classifyWorkerPermissionRequest(agent(), externalDirectory({ patterns }), POLICY, resolve).action;
+  const mk = (realpath: (path: string) => string): PathResolver => ({
+    realpath,
+    childSymlinkEscapes: () => "clear",
+  });
+  const classifyWith = (patterns: string[], resolve: PathResolver) =>
+    classifyWorkerPermissionRequest(agent(), externalDirectory({ patterns }), POLICY, resolve).action;
 
-  const escaping = (path: string): string =>
-    path === `${realRoot}/link` ? "/outside/x" : path;
+  const escaping = mk((path) => (path === `${realRoot}/link` ? "/outside/x" : path));
   assert.equal(classifyWith([`${realRoot}/link/*`], escaping), "pending");
 
-  const internal = (path: string): string =>
-    path === `${realRoot}/link` ? `${realRoot}/in-prog-logs` : path;
+  const internal = mk((path) => (path === `${realRoot}/link` ? `${realRoot}/in-prog-logs` : path));
   assert.equal(classifyWith([`${realRoot}/link/*`], internal), "allow");
 
-  const throwing = (path: string): string => {
-    throw new Error(`ENOENT ${path}`);
-  };
+  const throwing = mk(() => {
+    throw new Error("ENOENT");
+  });
   assert.equal(classifyWith([`${realRoot}/x/*`], throwing), "pending");
 
-  const relocated = (path: string): string =>
-    path === realRoot ? "/data/refdes" : path.startsWith(`${realRoot}/`) ? `/data/refdes${path.slice(realRoot.length)}` : path;
+  const relocated = mk((path) =>
+    path === realRoot ? "/data/refdes" : path.startsWith(`${realRoot}/`) ? `/data/refdes${path.slice(realRoot.length)}` : path,
+  );
   assert.equal(classifyWith([`${realRoot}/in-prog-logs/*`], relocated), "allow");
 
-  assert.equal(classifyWith([`${realRoot}/.scratch/*`], (path) => path), "allow");
+  assert.equal(classifyWith([`${realRoot}/.scratch/*`], mk((path) => path)), "allow");
 });
 
-test("documented limit: wildcards matching symlinked children stay allowed", () => {
-  // probe/link -> /etc is invisible to the prefix-only realpath check:
-  // "probe" itself resolves inside the root, so probe/*, probe/** and
-  // probe/*/*/* are ALLOWED. Pinned as documented behavior (README "Known
-  // limits"), NOT a guarantee about what the daemon's matcher expands to.
-  const realRoot = "/home/jorb/work/refdes";
-  const resolve = (path: string): string => path;
-  for (const pattern of [
-    `${realRoot}/probe/*`,
-    `${realRoot}/probe/**`,
-    `${realRoot}/probe/*/*/*`,
+// ---------------------------------------------------------------------------
+// Round 5 (P1): wildcards are narrowed to a final `*`, and the directory's
+// direct children are checked for symlinks escaping the roots.
+// ---------------------------------------------------------------------------
+
+test("wildcard allowed only as the exact final segment", () => {
+  const base = "/home/jorb/work/refdes";
+  for (const patterns of [
+    [`${base}/**`],
+    [`${base}/src/**/*`],
+    [`${base}/a*/b`],
+    [`${base}/src*`],
+    [`${base}/*.ts`],
+    [`${base}/in-prog-logs/*/../x`],
   ]) {
-    assert.equal(
-      classifyWorkerPermissionRequest(agent(), externalDirectory({ patterns: [pattern] }), POLICY, resolve).action,
-      "allow",
-      `documented limit: ${pattern} must stay allowed`,
-    );
+    assert.equal(allow({ patterns }).action, "pending", `expected pending for ${patterns.join(",")}`);
   }
+  assert.equal(allow({ patterns: [`${base}/src/*`] }).action, "allow");
+});
+
+test("wildcard dir child check: clear/escape/inside/too-many/throw", () => {
+  const base = "/home/jorb/work/refdes";
+  const mk = (childSymlinkEscapes: PathResolver["childSymlinkEscapes"]): PathResolver => ({
+    realpath: (path) => path,
+    childSymlinkEscapes,
+  });
+  const classifyWith = (patterns: string[], resolve: PathResolver) =>
+    classifyWorkerPermissionRequest(agent(), externalDirectory({ patterns }), POLICY, resolve).action;
+
+  // no symlink children -> allowed
+  assert.equal(classifyWith([`${base}/.scratch/*`], mk(() => "clear")), "allow");
+  // escaping symlink child -> pending
+  assert.equal(classifyWith([`${base}/.scratch/*`], mk(() => "escape")), "pending");
+  // symlink child staying inside the roots: the fs resolver reports "clear"
+  // for that dir (a target inside the roots is not an escape) -> allowed
+  const insideChild: PathResolver = {
+    realpath: (path) => path,
+    childSymlinkEscapes: (dir, roots) =>
+      roots.some((root) => dir === root || dir.startsWith(`${root}/`)) ? "clear" : "escape",
+  };
+  assert.equal(classifyWith([`${base}/probe/*`], insideChild), "allow");
+  // too many entries -> pending
+  assert.equal(classifyWith([`${base}/.scratch/*`], mk(() => "too-many")), "pending");
+  // resolver throwing (fs error) -> pending
+  assert.equal(
+    classifyWith(
+      [`${base}/.scratch/*`],
+      mk(() => {
+        throw new Error("EIO");
+      }),
+    ),
+    "pending",
+  );
+});
+
+test("default resolver: plain patterns unchanged, wildcards pending", () => {
+  const classify = (patterns: string[]) =>
+    classifyWorkerPermissionRequest(agent(), externalDirectory({ patterns }), POLICY).action;
+  assert.equal(classify([`${PROGRESS}`]), "allow");
+  assert.equal(classify([`${WORKTREE_ROOT}/feat-x/in-prog-logs/*`]), "pending");
+});
+
+test("round-4 limit is now enforced: probe/* with an escaping child is pending", () => {
+  const realRoot = "/home/jorb/work/refdes";
+  const resolver: PathResolver = {
+    realpath: (path) => path,
+    childSymlinkEscapes: (dir) => (dir === `${realRoot}/probe` ? "escape" : "clear"),
+  };
+  const classify = (patterns: string[]) =>
+    classifyWorkerPermissionRequest(agent(), externalDirectory({ patterns }), POLICY, resolver).action;
+  assert.equal(classify([`${realRoot}/probe/*`]), "pending");
+  assert.equal(classify([`${realRoot}/probe/**`]), "pending");
+  assert.equal(classify([`${realRoot}/probe/*/*/*`]), "pending");
+  assert.equal(classify([`${realRoot}/other/*`]), "allow");
+});
+
+test("real fs resolver: symlinked child escaping to /etc blocks the wildcard", () => {
+  const scratch = fileURLToPath(new URL("../../../.scratch", import.meta.url));
+  mkdirSync(scratch, { recursive: true });
+  const base = realpathSync(mkdtempSync(path.join(scratch, "fs-resolver-")));
+  const probe = path.join(base, "probe");
+  const clean = path.join(base, "clean");
+  mkdirSync(probe);
+  mkdirSync(clean);
+  symlinkSync("/etc", path.join(probe, "link"));
+  const resolver = createFsResolver();
+  assert.equal(resolver.childSymlinkEscapes(probe, [base]), "escape");
+  assert.equal(resolver.childSymlinkEscapes(clean, [base]), "clear");
+  assert.equal(resolver.childSymlinkEscapes(path.join(base, "missing"), [base]), "clear");
+  const localPolicy: WorkerPermissionPolicy = { ...POLICY, roots: [base] };
+  const classify = (patterns: string[]) =>
+    classifyWorkerPermissionRequest(agent(), externalDirectory({ patterns }), localPolicy, resolver).action;
+  assert.equal(classify([`${probe}/*`]), "pending");
+  assert.equal(classify([`${clean}/*`]), "allow");
 });

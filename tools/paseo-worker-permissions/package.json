@@ -9,6 +9,7 @@
     "paseo-plugin.json",
     "README.md",
     "index.server.ts",
+    "fs-resolver.ts",
     "parents.example.json",
     "shared/",
     "!shared/*.test.ts"

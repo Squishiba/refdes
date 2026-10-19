@@ -15,15 +15,17 @@
  *  - Scope: `request.input.patterns` is a non-empty array of strings; every
  *    entry is absolute, has no ".." segment, contains no glob metacharacter
  *    other than `*`, and sits inside one of the allowlisted roots at a
- *    path-segment boundary (root itself, or root + "/..."). The LITERAL
- *    directory prefix (everything up to the first "*") is additionally
- *    realpath'd (injectable PathResolver): a symlink in the literal prefix
- *    that points outside a root fails closed. The check does NOT enumerate
- *    what a wildcard matches: `probe/*` can match a symlinked child
- *    (`probe/link -> /etc`), and the daemon matcher's own symlink and
- *    dot-segment handling of `*` and `**` is not verified by this plugin
- *    (README "Known limits"). A request is approved only when ALL patterns
- *    pass.
+ *    path-segment boundary (root itself, or root + "/..."). A `*` is allowed
+ *    ONLY as the exact final path segment (`<dir>/*`): `**`, a mid-path `*`,
+ *    and `a*b` are pending. The LITERAL directory prefix is realpath'd
+ *    (injectable PathResolver): a symlink in the literal prefix that points
+ *    outside a root fails closed. For a `<dir>/*` pattern the resolver is
+ *    additionally asked whether any DIRECT child of <dir> is a symlink whose
+ *    real target lies outside the roots (escape / too-many / resolver error
+ *    -> pending; a resolver that cannot answer wildcards -> pending; missing
+ *    dir = no children = clear). The default resolver answers no wildcard
+ *    checks, so wildcards are pending unless the caller supplies a real one.
+ *    A request is approved only when ALL patterns pass.
  *
  * The old metadata-keyed cases are retired: the root allowlist subsumes the
  * exact-progress-file case, and a command text is no longer an approval key
@@ -63,15 +65,29 @@ export type ClassifierDecision =
   | { action: "pending"; reason: string };
 
 /**
- * Resolves a path through symlinks (fs.realpathSync in production). Throws
- * for paths that do not exist; the classifier then walks up to the deepest
- * existing ancestor. Default: identity (lexical checks only).
+ * Filesystem view used by the scope checks (fs-backed in production).
+ * - realpath: resolves a path through symlinks; THROWS for paths that do
+ *   not exist (the classifier then walks up to the deepest existing
+ *   ancestor).
+ * - childSymlinkEscapes: inspects DIRECT children of `dir` (realpath'd,
+ *   passed as `resolvedRoots`): "escape" if any child symlink resolves
+ *   outside the roots, "clear" if none does (a missing dir has no children
+ *   = "clear"), "too-many" above the entry budget, THROWS when the answer
+ *   cannot be determined (a resolver error fails closed).
+ * The default resolver is identity and answers no wildcard checks, so a
+ * wildcard pattern stays pending unless the caller supplies a real resolver.
  */
-export type PathResolver = (path: string) => string;
-
-function identityResolve(path: string): string {
-  return path;
+export interface PathResolver {
+  realpath(path: string): string;
+  childSymlinkEscapes(dir: string, resolvedRoots: readonly string[]): "clear" | "escape" | "too-many";
 }
+
+const DEFAULT_PATH_RESOLVER: PathResolver = {
+  realpath: (path: string) => path,
+  childSymlinkEscapes: () => {
+    throw new Error("resolver cannot inspect child symlinks");
+  },
+};
 
 /** Structural subset of the hook's PluginHookAgent. */
 export interface ClassifierAgent {
@@ -106,7 +122,10 @@ function insideRoots(path: string, roots: readonly string[]): boolean {
  * character classes, braces, `?`, `!`, and extglob groups, so
  * `[.][.]/etc` and `{..,x}/y` smuggle traversal past a lexical check, and
  * backslash escapes the next character. `$`, quotes, and `;` are rejected
- * too: no legitimate pattern needs them (round-3b probe review).
+ * too: no legitimate pattern needs them (round-3b probe review). `*` is
+ * allowed ONLY as the exact final path segment (round-5 P1: a wildcard is
+ * the only shape whose matched set the classifier can bound, by listing
+ * the directory's direct children).
  */
 function patternScope(pattern: string, roots: readonly string[]): string | null {
   if (pattern.length === 0) return "empty pattern";
@@ -119,32 +138,35 @@ function patternScope(pattern: string, roots: readonly string[]): string | null 
   if (meta !== null) {
     return `pattern has a glob metacharacter other than *: ${pattern}`;
   }
+  const star = pattern.indexOf("*");
+  if (star !== -1 && !(star === pattern.length - 1 && pattern.endsWith("/*"))) {
+    return `wildcard only allowed as the final segment: ${pattern}`;
+  }
   return null;
 }
 
-/** Literal directory prefix: everything up to the last "/" before the first "*". */
+/** Directory of the pattern: literal prefix, with the final "/*" stripped. */
 function scopePrefix(pattern: string): string {
-  const star = pattern.indexOf("*");
-  const prefix = star === -1 ? pattern : pattern.slice(0, pattern.lastIndexOf("/", star) + 1);
-  return prefix.length > 1 ? prefix.replace(/\/+$/, "") : "/";
+  const base = pattern.endsWith("/*") ? pattern.slice(0, -2) : pattern;
+  return base.length > 1 ? base.replace(/\/+$/, "") : "/";
 }
 
 /**
- * Resolve a pattern's LITERAL directory prefix (up to the first "*")
- * through symlinks: realpath the deepest existing ancestor and check it
- * against the realpaths of the roots. Resolver failure on every ancestor
- * (unresolvable) -> null -> pending. Wildcard-matched children below the
- * prefix are not enumerated here.
+ * Resolve a pattern's directory prefix through symlinks: realpath the
+ * deepest existing ancestor and check it against the realpaths of the
+ * roots. For a `<dir>/*` pattern the resolver is also asked whether any
+ * direct child of the resolved directory is a symlink escaping the roots.
+ * Any resolver error (unresolvable prefix, unknown child answer) -> pending.
  */
 function resolveScope(
   pattern: string,
   roots: readonly string[],
-  resolvePath: PathResolver,
+  resolver: PathResolver,
 ): { ok: true } | { ok: false; reason: string } {
   const resolvedRoots: string[] = [];
   for (const root of roots) {
     try {
-      resolvedRoots.push(resolvePath(root));
+      resolvedRoots.push(resolver.realpath(root));
     } catch {
       return { ok: false, reason: `allowlisted root cannot be resolved: ${root}` };
     }
@@ -153,7 +175,7 @@ function resolveScope(
   for (;;) {
     let resolved: string;
     try {
-      resolved = resolvePath(cursor);
+      resolved = resolver.realpath(cursor);
     } catch {
       if (cursor === "/") {
         return { ok: false, reason: `pattern has no resolvable ancestor: ${pattern}` };
@@ -164,6 +186,25 @@ function resolveScope(
     }
     if (!insideRoots(resolved, resolvedRoots)) {
       return { ok: false, reason: `pattern resolves outside the allowlisted roots: ${pattern} -> ${resolved}` };
+    }
+    if (pattern.includes("*")) {
+      let children: "clear" | "escape" | "too-many";
+      try {
+        children = resolver.childSymlinkEscapes(resolved, resolvedRoots);
+      } catch (error) {
+        return {
+          ok: false,
+          reason: `child symlinks of ${resolved} cannot be inspected: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        };
+      }
+      if (children === "escape") {
+        return { ok: false, reason: `a direct child symlink of ${resolved} escapes the allowlisted roots` };
+      }
+      if (children === "too-many") {
+        return { ok: false, reason: `too many entries in ${resolved} to inspect safely` };
+      }
     }
     return { ok: true };
   }
@@ -186,7 +227,7 @@ export function classifyWorkerPermissionRequest(
   agent: ClassifierAgent,
   request: ClassifierRequest,
   policy: WorkerPermissionPolicy = WORKER_PERMISSION_POLICY,
-  resolvePath: PathResolver = identityResolve,
+  resolver: PathResolver = DEFAULT_PATH_RESOLVER,
 ): ClassifierDecision {
   if (agent.provider !== policy.provider) {
     return { action: "pending", reason: `provider not ${policy.provider}: ${agent.provider}` };
@@ -221,7 +262,7 @@ export function classifyWorkerPermissionRequest(
     if (error !== null) {
       return { action: "pending", reason: error };
     }
-    const resolved = resolveScope(pattern, policy.roots, resolvePath);
+    const resolved = resolveScope(pattern, policy.roots, resolver);
     if (!resolved.ok) {
       return { action: "pending", reason: resolved.reason };
     }
