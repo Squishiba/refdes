@@ -1078,9 +1078,11 @@ class _Moved(Exception):
     nothing was written. Raised, not returned: the return of
     `_atomic_replace` stays the reason string its callers already treat, and
     only a caller that passes `expected` can ever see this. It carries the
-    sha256 of the bytes that read took in, so a caller spelling a revision
-    conflict can name the revision it found without a third read of a file a
-    writer outside the lock may have moved again by then."""
+    sha256 of the bytes that read took in, so the revision a conflict names
+    is the one the replace itself saw; the conflict's diff and draft come
+    from a later read of the file by `_conflict`, which may see the file
+    moved again -- the save is refused either way, so no bytes ride on the
+    two agreeing."""
 
     def __init__(self, current: str) -> None:
         super().__init__(current)
@@ -1099,13 +1101,12 @@ def _atomic_replace(
     says so.
 
     With `expected` (the sha256 of the bytes the caller planned against --
-    the revision an apply's client saw, what a create read before it planned
-    its append), the destination is
-    checked against it on the read below, before a byte is written: a
-    destination that moved since the caller's plan raises `_Moved` and
-    writes nothing. The check consumes the exact
-    bytes this function will replace and protect, which is the narrowest
-    window a plain file allows -- the gap between this read and
+    the revision an apply's client saw, what a create read before it
+    planned its append), the destination is checked against it on the read
+    below, before a byte is written: a destination that moved since the
+    caller's plan raises `_Moved` and writes nothing. The check consumes the
+    exact bytes this function will replace and protect, which is the
+    narrowest window a plain file allows -- the gap between this read and
     `os.replace` (the temp write and fsync in between) is the irreducible
     part, and no check-and-replace on a plain file closes it."""
     directory = os.path.dirname(path)

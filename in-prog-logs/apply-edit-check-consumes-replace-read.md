@@ -24,9 +24,10 @@ check consuming that read.
   it read — when the hash is not `expected`.
 - `_apply_locked` threads `request.expected_revision` into the target replace.
   A `_Moved` there restores the entry pins (`_restore_lockfile(accept)`) and
-  returns a `Conflict` whose `current_revision` is the replace's own read —
-  no third read of the file, so the conflict reports exactly the bytes that
-  defeated the swap.
+  returns a `Conflict` (409) whose `current_revision` is the replace's own
+  read; `_conflict` then re-reads the file to build the diff and draft, which
+  may see the file moved again — the save is refused either way, so no bytes
+  ride on the revision and the diff agreeing.
 - `_land_lockfile` computes `expected = sha256(current)` from the bytes it
   read under the lock and threads it into the lockfile replace. A `_Moved`
   returns the refusal "…changed on disk while this accept was landing; the
