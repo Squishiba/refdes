@@ -325,3 +325,23 @@ test("symlink escapes are caught by the injected resolver", () => {
 
   assert.equal(classifyWith([`${realRoot}/.scratch/*`], (path) => path), "allow");
 });
+
+test("documented limit: wildcards matching symlinked children stay allowed", () => {
+  // probe/link -> /etc is invisible to the prefix-only realpath check:
+  // "probe" itself resolves inside the root, so probe/*, probe/** and
+  // probe/*/*/* are ALLOWED. Pinned as documented behavior (README "Known
+  // limits"), NOT a guarantee about what the daemon's matcher expands to.
+  const realRoot = "/home/jorb/work/refdes";
+  const resolve = (path: string): string => path;
+  for (const pattern of [
+    `${realRoot}/probe/*`,
+    `${realRoot}/probe/**`,
+    `${realRoot}/probe/*/*/*`,
+  ]) {
+    assert.equal(
+      classifyWorkerPermissionRequest(agent(), externalDirectory({ patterns: [pattern] }), POLICY, resolve).action,
+      "allow",
+      `documented limit: ${pattern} must stay allowed`,
+    );
+  }
+});

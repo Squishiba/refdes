@@ -146,10 +146,26 @@ the install; existing sessions resume on their next request.
   The first root is the project's whole worktrees directory, so an approved
   worker can write into any sibling worktree under it; accepted design
   (2026-10-18).
-- Symlinks are resolved with realpath **at check time**. A symlink (or
-  directory) swapped to point outside a root *after* the check, before the
-  tool actually opens the path, is a check/use race the plugin cannot close;
-  the roots are local, human-owned directories.
+- The realpath check covers the **literal directory prefix** (everything up
+  to the first `*`) **at check time**: symlinks in that literal prefix fail
+  closed. It does not enumerate what a wildcard matches — `probe/*`,
+  `probe/**`, `probe/*/*/*` stay allowed when the prefix resolves inside a
+  root, even where a symlinked child (`probe/link -> /etc`) is what the
+  daemon's matcher would expand to; the daemon matcher's own symlink and
+  dot-segment handling of `*` and `**` is not verified by this plugin
+  (pinned by a test as documented behavior, not a guarantee).
+- Symlinks are resolved **at check time**. A symlink (or directory) swapped
+  to point outside a root *after* the check, before the tool actually opens
+  the path, is a check/use race the plugin cannot close; the roots are
+  local, human-owned directories.
+- The default `PathResolver` is the identity (lexical checks only) when a
+  caller omits it; `index.server.ts` always passes the `fs.realpathSync`
+  one. The identity default is for unit tests, not deployment.
+- A missing or unparseable `parents.json` approves **nothing, silently**
+  (fail closed, no warning at install). The
+  `REFDES_WORKER_PERMISSIONS_PARENTS_FILE` / `PASEO_HOME` environment
+  overrides are an extra trust input: whoever controls the daemon's
+  environment controls the allowlist path.
 - Dispatcher ids live in `parents.json`; a rotation is a file edit, no code
   change, no reinstall.
 - The `"Review PR "` title prefix is an accepted identity key: **any**

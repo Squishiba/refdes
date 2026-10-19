@@ -15,10 +15,15 @@
  *  - Scope: `request.input.patterns` is a non-empty array of strings; every
  *    entry is absolute, has no ".." segment, contains no glob metacharacter
  *    other than `*`, and sits inside one of the allowlisted roots at a
- *    path-segment boundary (root itself, or root + "/..."). The directory
- *    prefix is additionally realpath'd (injectable PathResolver) so a
- *    symlink pointing outside a root fails closed. A request is approved
- *    only when ALL patterns pass.
+ *    path-segment boundary (root itself, or root + "/..."). The LITERAL
+ *    directory prefix (everything up to the first "*") is additionally
+ *    realpath'd (injectable PathResolver): a symlink in the literal prefix
+ *    that points outside a root fails closed. The check does NOT enumerate
+ *    what a wildcard matches: `probe/*` can match a symlinked child
+ *    (`probe/link -> /etc`), and the daemon matcher's own symlink and
+ *    dot-segment handling of `*` and `**` is not verified by this plugin
+ *    (README "Known limits"). A request is approved only when ALL patterns
+ *    pass.
  *
  * The old metadata-keyed cases are retired: the root allowlist subsumes the
  * exact-progress-file case, and a command text is no longer an approval key
@@ -125,9 +130,11 @@ function scopePrefix(pattern: string): string {
 }
 
 /**
- * Resolve a pattern's directory prefix through symlinks: realpath the
- * deepest existing ancestor and check it against the realpaths of the roots.
- * Resolver failure on every ancestor (unresolvable) -> null -> pending.
+ * Resolve a pattern's LITERAL directory prefix (up to the first "*")
+ * through symlinks: realpath the deepest existing ancestor and check it
+ * against the realpaths of the roots. Resolver failure on every ancestor
+ * (unresolvable) -> null -> pending. Wildcard-matched children below the
+ * prefix are not enumerated here.
  */
 function resolveScope(
   pattern: string,

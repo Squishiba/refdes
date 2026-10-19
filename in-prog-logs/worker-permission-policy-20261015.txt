@@ -1,3 +1,4 @@
+CURRENT STATE (2026-10-19): docs-only round 4 is the latest round; earlier test counts and notes below are superseded by it.
 Task: reduce repeated external_directory approval prompts from Sol's Qwen
 refdes fix workers (PROGRESS.md row "Automatic review of Sol Qwen
 external-directory permissions"). Branch fix/worker-permission-policy-20261015,
