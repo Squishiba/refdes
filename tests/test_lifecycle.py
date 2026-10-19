@@ -455,6 +455,7 @@ def test_default_off_a_dirty_project_stamps_exactly_the_main_shape(tmp_path):
         "unaccepted_workspace_moves": "pass",
         "open_tasks": "skipped",
         "captured_edits": "skipped",
+        "inline_calc_results": "pass",
     }
     # stamped output: the stamped items are exactly the project's items,
     # unchanged in shape by the new rules
@@ -741,3 +742,131 @@ def test_revision_half_can_be_enabled_for_both_rules_through_the_overlay(tmp_pat
     assert results["captured_edits"].status == "pass"
     outcome = lifecycle.stamp(project, kind="revision", name="rev-a")
     assert outcome.status == "gate_failed"
+
+
+# ------------------------------------------------- inline_calc_results
+
+IC_CONFIG = (
+    "site: { title: IC, out: _site }\n"
+    "types: { decision: { prefix: DEC, fields: {} } }\n"
+)
+
+# Stored 4.52 V, computes 4.436 V: outside the stored literal's half-place
+# window (docs/math.md "Inline calc") -- the canonical stale span.
+IC_STALE_BODY = "The divider gives `Vout := 0.8 V * (1 + 10 kohm/2.2 kohm) | V = 4.52 V`.\n"
+IC_FRESH_BODY = "The divider gives `Vout := 0.8 V * (1 + 10 kohm/2.2 kohm) | V = 4.436 V`.\n"
+
+
+def _ic_rebuild(tmp_path):
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    keys.mint_missing(project)
+    build_mod.build(project)
+    return project
+
+
+def _ic_project(tmp_path, body, extra_config=""):
+    write_project_config(tmp_path, IC_CONFIG + extra_config)
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "dec.md").write_text(
+        f"---\nid: DEC-001\ntype: decision\n---\n\n{body}", encoding="utf-8"
+    )
+    _ic_rebuild(tmp_path)  # key-minting rewrite: line numbers must match disk
+    return _ic_rebuild(tmp_path)
+
+
+def test_inline_calc_results_stale_editable_span_blocks_release(tmp_path):
+    project = _ic_project(tmp_path, IC_STALE_BODY)
+    assert any("stored result says" in d.message for d in project.warnings)
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].enabled is True
+    assert results["inline_calc_results"].status == "FAIL"
+    # the span's own line on disk (after the key-minting rewrite), not a
+    # magic number -- same contract as open_tasks' clickable offender
+    text = (tmp_path / "items" / "dec.md").read_text(encoding="utf-8").splitlines()
+    line = next(i for i, ln in enumerate(text, start=1) if "Vout :=" in ln)
+    assert results["inline_calc_results"].offenders == [
+        f"DEC-001: inline calc Vout (items/dec.md:{line})"
+    ]
+    outcome = lifecycle.stamp(project, kind="release", name="rel-a")
+    assert outcome.status == "gate_failed"
+    assert not os.path.isfile(lifecycle.baseline_path(project, "rel-a"))
+    # the revision half defaults off: the revision stamps through it
+    revision = lifecycle.stamp(project, kind="revision", name="rev-a")
+    assert revision.status == "stamped"
+
+
+def test_inline_calc_results_off_passes(tmp_path):
+    project = _ic_project(
+        tmp_path, IC_STALE_BODY, "release_gate:\n  inline_calc_results: { release: false }\n"
+    )
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].enabled is False
+    assert results["inline_calc_results"].status == "skipped"
+    outcome = lifecycle.stamp(project, kind="release", name="rel-a")
+    assert outcome.status == "stamped"
+
+
+def test_inline_calc_results_fresh_span_passes(tmp_path):
+    project = _ic_project(tmp_path, IC_FRESH_BODY)
+    assert not project.warnings
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].status == "pass"
+    assert lifecycle.stamp(project, kind="release", name="rel-a").status == "stamped"
+
+
+def test_inline_calc_results_exempt_captured_history(tmp_path):
+    """A captured log entry with a stale span keeps its warning and passes
+    the gate: the design exempts frozen text (docs/design/inline-calc.md §2)."""
+    write_project_config(
+        tmp_path,
+        "site: { title: IC, out: _site }\n"
+        "standard: { base: hardware, version: 3 }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "log.yaml").write_text(
+        "items:\n"
+        "  - id: LOG-001\n"
+        "    type: log\n"
+        "    date: 2026-10-19\n"
+        "    summary: Divider settled.\n"
+        "    body: |\n"
+        "      Settled at `Vfb := 0.8 V * (1 + 10 kohm/2.2 kohm) | V = 9.9 V`.\n",
+        encoding="utf-8",
+    )
+    project = _ic_rebuild(tmp_path)
+    history.capture(str(tmp_path), project.item_by_id("LOG-001"))
+    project = _ic_rebuild(tmp_path)
+    assert any("stored result says" in d.message for d in project.warnings)
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].status == "pass"
+    assert lifecycle.stamp(project, kind="release", name="rel-a").status == "stamped"
+
+
+def test_inline_calc_results_exempt_build_seal(tmp_path):
+    """A sealed (build-locked) entry keeps its stale warning and passes the
+    gate: the body is locked text, not editable prose (the exemption mirrors
+    the captured-history one -- docs/design/inline-calc.md §2)."""
+    from refdes import seal as seal_mod
+
+    write_project_config(
+        tmp_path,
+        "site: { title: IC, out: _site }\n"
+        "types:\n"
+        "  decision: { prefix: DEC, append_only: true, fields: {} }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\n---\n\n" + IC_STALE_BODY, encoding="utf-8"
+    )
+    project = _ic_rebuild(tmp_path)
+    seal_mod.verify(project, write=True)
+    project = _ic_rebuild(tmp_path)
+    assert seal_mod.is_sealed(project, project.item_by_id("DEC-001"))
+    assert any("stored result says" in d.message for d in project.warnings)
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].status == "pass"
+    assert lifecycle.stamp(project, kind="release", name="rel-a").status == "stamped"

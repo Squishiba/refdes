@@ -43,6 +43,7 @@ release_gate:
   unaccepted_workspace_moves:  { release: true,  revision: false }
   open_tasks:                  { release: false, revision: false }
   captured_edits:              { release: false, revision: false }
+  inline_calc_results:         { release: true,  revision: false }
 ```
 
 Only list the keys you want to change — this is an overlay on the defaults
@@ -61,6 +62,7 @@ against the rule names.
 | `unaccepted_workspace_moves` | an item's workspace differs from `.refdes/boards.yaml`'s `workspaces:` key ([workspaces](workspaces.md)) |
 | `open_tasks` | a thread tip carries an open task (its fold lists one; a tip whose fold is ambiguous counts too, said as a conflicting list) |
 | `captured_edits` | an item's current content differs from its captured snapshot (the same fact as the "edited after captured" warning; ticking a task on a captured entry is one such edit — task rows are part of the fields the history digest covers) |
+| `inline_calc_results` | a local, editable item's inline-calc span has a stored result that no longer computes — the same fact as the build's "inline calc Vout: stored result says 4.52 V, now computes 4.436 V" warning ([math](math.md#inline-calc)). An entry already protected as a build seal or captured history is exempt: its warning stays visible, the gate stays silent |
 
 **Why `open_tasks` and `captured_edits` default off.** Both are living-notes
 gate rules, but not the same one: `open_tasks` is worklist binding rule 5 of
@@ -74,6 +76,15 @@ overlay. `open_tasks` reads the same task fold as `refdes thread` and
 counts only the author's own task rows — derived worklist rows (an
 uncovered requirement, a failing check) are each already their own rule
 above and are never re-counted as tasks.
+
+**Why `inline_calc_results` defaults on for `release`.** A release is a
+frozen readiness claim, and a stored result that no longer computes is a
+false number inside the artifact — the design fact the gate exists to catch
+(docs/design/inline-calc.md §2, decided Q5). Frozen text is exempt: an entry
+the build locks as a seal, or one captured into history, keeps its visible
+warning and stamps past the gate; rewriting history to satisfy a freshness
+rule is not what the rule is for. Nothing defaults on for `revision` — the
+checkpoint stays unconditional.
 
 **Why `unverified_requirements` defaults off.** This is a hardware tool:
 boards frequently go to fab specifically so they *can* be tested. Requiring
@@ -125,6 +136,7 @@ release 'rev-b' blocked -- not stamped:
   pass     unaccepted_workspace_moves
   skipped  open_tasks
   skipped  captured_edits
+  pass     inline_calc_results
 ```
 
 The table lists every rule in `release_gate:`'s order — passes and skips
@@ -137,7 +149,8 @@ genuinely shouldn't apply to this project.
 An `open_tasks` offender names the tip it sits at, the task to go tick, and
 the source line of the task row, so the failure is clickable;
 `captured_edits` names the item the warning above the table already speaks
-for (real output, the two rules enabled through the overlay):
+for; `inline_calc_results` names the item, the span, and the span's line (real
+output, the two rules enabled through the overlay):
 
 ```console
 $ refdes release rel-c
@@ -155,6 +168,7 @@ release 'rel-c' blocked -- not stamped:
   pass     unaccepted_workspace_moves
   FAIL     open_tasks  LOG-A-002: open task T-thermal-model (items/log.yaml:8)
   FAIL     captured_edits  LOG-A-001
+  pass     inline_calc_results
 ```
 
 ```console
@@ -213,6 +227,7 @@ gate:
   unaccepted_workspace_moves: pass
   open_tasks: skipped
   captured_edits: skipped
+  inline_calc_results: pass
 
 items:
   CMP-PWR-001: {hash: 673e6ba11269f350, type: component, title: "Buck converter",

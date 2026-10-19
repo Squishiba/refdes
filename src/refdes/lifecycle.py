@@ -33,7 +33,7 @@ from . import build as build_mod
 from . import chains as chains_mod
 from . import history as history_mod
 from . import keys as keys_mod
-from . import model, textio
+from . import model, seal as seal_mod, textio
 from .model import INFO, RELEASE_GATE_DEFAULTS, Item, Project, SchemaError
 from .parse import read_store_text, yaml_safe_load
 
@@ -751,6 +751,50 @@ def _rule_captured_edits(project: Project) -> list[str]:
     )
 
 
+def _rule_inline_calc_results(project: Project) -> list[str]:
+    """Inline calc freshness (docs/design/inline-calc.md §2, decided Q5): a
+    release blocks while an editable item carries a stale stored result --
+    the build's own warning (`build.py:_run_inline_span`, tagged
+    `model.INLINE_CALC_STALE`), read as it is, never recomputed. Offenders
+    name the item, the span, and the span's line ("LOG-001: inline calc Vout
+    (items/log.md:7)"), so the failure is clickable where the CLI is.
+
+    The exemptions are the design's: an item the build locks (a build seal,
+    `seal.is_sealed`) and an item frozen into captured history
+    (`history.capture_index`) are not editable prose a release can demand
+    fresher -- the stale warning stays visible, the gate stays silent. An
+    imported item's stale span is the other project's problem, skipped like
+    every other rule. Fail open on a store that refuses to be read: the
+    rule yields no offenders at all, the posture `_rule_captured_edits`
+    takes for the same store -- the build's own warning already says the
+    check declined, and a release is never blocked on text the tool
+    couldn't prove editable.
+    """
+    try:
+        captured = set(history_mod.capture_index(project))
+    except (history_mod.HistoryError, OSError):
+        return []
+    local = {id(item) for item in project.local_items}
+    offenders: set[str] = set()
+    for diagnostic in project.warnings:
+        if diagnostic.code != model.INLINE_CALC_STALE:
+            continue
+        item = project.item_by_id(diagnostic.item_id) if diagnostic.item_id else None
+        if item is None or id(item) not in local:
+            continue
+        if seal_mod.is_sealed(project, item) or (item.key and item.key in captured):
+            continue
+        location = (
+            f" ({diagnostic.file}:{diagnostic.line})"
+            if diagnostic.file and diagnostic.line
+            else ""
+        )
+        # The warning's own head, "inline calc Vout", is the span name.
+        span = diagnostic.message.split(": ", 1)[0]
+        offenders.add(f"{item.id or item.key}: {span}{location}")
+    return sorted(offenders)
+
+
 _RULES: dict[str, Callable[[Project], list[str]]] = {
     "draft_items": _rule_draft_items,
     "unpinned_citations": _rule_unpinned_citations,
@@ -762,6 +806,7 @@ _RULES: dict[str, Callable[[Project], list[str]]] = {
     "unaccepted_workspace_moves": _rule_unaccepted_workspace_moves,
     "open_tasks": _rule_open_tasks,
     "captured_edits": _rule_captured_edits,
+    "inline_calc_results": _rule_inline_calc_results,
 }
 
 # Fixed order, matching the table in docs/design/lifecycle.md §1 -- also the

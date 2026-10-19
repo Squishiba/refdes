@@ -35,6 +35,7 @@ from .model import (
     CHECK_VIOLATION,
     ERROR,
     INFO,
+    INLINE_CALC_STALE,
     INVALIDATE,
     RETIRED_UNIT_SPELLING,
     TASK_STATES,
@@ -1712,6 +1713,7 @@ def _run_inline_span(project: Project, item, span, env, origins) -> bool:
             project.warn(
                 f"inline calc {label}: {stale}",
                 file=item.source_file, line=line_number, item_id=item.id,
+                code=INLINE_CALC_STALE,
             )
     return failed
 

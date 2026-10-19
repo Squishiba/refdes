@@ -131,16 +131,19 @@ value equals the stored literal; carry tests at the half-place boundary.
 | Result within its precision window | No diagnostic. |
 
 A stale value is reported on every verification run, including an old
-append-only entry; that historical text is not rewritten (D1). The proposed
-`release_gate.inline_calc_results` rule would fail a **release** for stale
+append-only entry; that historical text is not rewritten (D1). The
+`release_gate.inline_calc_results` rule fails a **release** for stale
 editable items, with default `{release: true, revision: false}`. An item
 already protected as a build seal or captured history is exempt from this
-freshness gate, while its warning remains visible. This is a new rule, not a
-current option: `src/refdes/model.py:RELEASE_GATE_DEFAULTS` does not list it,
-and `refdes release --help` lists the current rules. Under this proposal,
-missing results and calc errors enter the ordinary build error floor. `refdes revision --help`
-describes the revision as unconditional apart from that floor; the proposed
-revision half defaults false.
+freshness gate, while its warning remains visible. Landed:
+`src/refdes/model.py:RELEASE_GATE_DEFAULTS` lists it,
+`src/refdes/lifecycle.py:_rule_inline_calc_results` reads the build's stale
+warning (tagged `model.INLINE_CALC_STALE`) and exempts entries
+`seal.is_sealed` and `history.capture_index` report, and
+`refdes release --help` lists the rule. Missing results and calc errors enter
+the ordinary build error floor. `refdes revision --help` describes the
+revision as unconditional apart from that floor; the revision half defaults
+false.
 
 ## 3. Hashes, dependencies, and historical entries
 

@@ -299,6 +299,17 @@ rounding of the computed value would itself fit the stored literal's window
 — a raw 3.4495 displayed as `3.45`, inside the window of a stored `3.5` —
 the warning shows the raw value instead.
 
+A stale result is a readiness fact too: by default `refdes release` fails on
+one (`release_gate.inline_calc_results: { release: true, revision: false }` —
+see [lifecycle](lifecycle.md#the-readiness-gate)). The offender names the
+item, the span, and the line, so the fix is clickable: correct the stored
+result and run again. A build seal, or a capture whose live content still
+matches its snapshot, is exempt from the gate — its warning stays visible,
+and a release stamps past it. Editing an item after capture restores the
+live text to editable prose, so a stale span in the edited entry blocks.
+`refdes revision` is unaffected: a revision stays a
+checkpoint, not a readiness claim.
+
 The trigger is a **single-backtick** code span whose content contains `:=`.
 A span without `:=` is ordinary code (`V_cl = 0.8 V` stays a label), and a
 wider ``double-backtick`` span is never triggered — the escape hatch when

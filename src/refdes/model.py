@@ -83,6 +83,12 @@ CHECK_VIOLATION = "check_violation"
 # rewrite's pre-flight validation tolerates them -- no other error may hide
 # behind that exemption.
 RETIRED_UNIT_SPELLING = "retired_unit_spelling"
+# An inline calc span whose stored result sits outside its precision window
+# (`inline_calc.compare_stored`, warned by `build.py:_run_inline_span`).
+# Build-not-blocking by design (docs/design/inline-calc.md §2), and the one
+# diagnostic `release_gate.inline_calc_results` reads by code -- the gate
+# must not string-match the warning's prose.
+INLINE_CALC_STALE = "inline_calc_stale"
 
 
 # refdes-project.yaml: project-level presentation/behaviour settings, distinct
@@ -94,9 +100,11 @@ RETIRED_UNIT_SPELLING = "retired_unit_spelling"
 ITEM_LAYOUTS = ("flat", "workspace")
 BASELINE_IDENTITIES = ("os_user", "git_identity")
 
-# The eight configurable release-gate rules from docs/design/lifecycle.md §1
+# The configurable release-gate rules from docs/design/lifecycle.md §1
 # (unaccepted_workspace_moves added alongside its board-move counterpart,
-# see docs/lifecycle.md), with their shipped (release, revision) defaults.
+# open_tasks/captured_edits from living-notes §H8, and inline_calc_results
+# from docs/design/inline-calc.md §2; see docs/lifecycle.md), with their
+# shipped (release, revision) defaults.
 RELEASE_GATE_DEFAULTS: dict[str, dict[str, bool]] = {
     "draft_items":                {"release": True,  "revision": False},
     "unpinned_citations":         {"release": True,  "revision": False},
@@ -112,6 +120,11 @@ RELEASE_GATE_DEFAULTS: dict[str, dict[str, bool]] = {
     # release_gate: overlay, not a new floor.
     "open_tasks":                   {"release": False, "revision": False},
     "captured_edits":               {"release": False, "revision": False},
+    # Inline calc freshness (docs/design/inline-calc.md §2, decided Q5): on
+    # for release, off for revision -- a stale stored result is a frozen
+    # claim a release must not ship past, and the revision help's
+    # "unconditional apart from the error floor" stays true.
+    "inline_calc_results":          {"release": True,  "revision": False},
 }
 
 

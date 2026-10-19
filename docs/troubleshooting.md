@@ -450,6 +450,15 @@ text, rendered as an unresolved link. Use one of the listed names. If the
 target's blocks are all unnamed, the warning says so and names the fix — add
 `id="..."` to the fence; a target with no calc blocks says that instead.
 
+**`inline calc Vout: stored result says 4.52 V, now computes 4.436 V`**
+A warning. The span's stored result is outside the window of its own written
+precision — usually an upstream value moved and the prose wasn't re-run. Fix
+the stored literal to the recomputed value (the source is never rewritten for
+you). By default this also blocks `refdes release`
+(`release_gate.inline_calc_results`; see [lifecycle](lifecycle.md)); a
+protected entry — build seal or captured history — keeps the warning and
+stamps past it. See [inline calc](math.md#inline-calc).
+
 ## Checks
 
 **`check refers to 'P_dens', which no calc block defines`**
