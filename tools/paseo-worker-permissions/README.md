@@ -24,15 +24,19 @@ passes; everything else is left pending for a human. Nothing is auto-denied.
 | --- | --- |
 | Provider/request | `agent.provider === "opencode"`, `request.provider === "opencode"`, `request.kind === "tool"`, `request.name === "external_directory"` |
 | Identity | `agent.parentAgentId` is on the dispatcher allowlist loaded from `parents.json` (below; absent/invalid file = empty list = nothing approved), **or** `agent.title` starts with `"Review PR "` (the PR-review plugin's reviewer agents) |
-| Scope | `request.input.patterns` is a **non-empty array of strings** and **every** entry passes: absolute, no `..` segment, and inside one of the roots below at a path-segment boundary (the root itself, or `root + "/..."`). All patterns must pass; one bad entry rejects the whole request |
+| Scope | `request.input.patterns` is a **non-empty array of strings** and **every** entry passes: absolute, no `..` segment, no glob metacharacter other than `*` (a downstream matcher expands `[..]`, `{..,..}`, `?`, `!`, `(`, `)`, so they are rejected), and inside one of the roots below at a path-segment boundary (the root itself, or `root + "/..."`). The directory prefix is then realpath'd (symlinks resolved): the deepest existing ancestor must resolve inside the realpath'd roots — a symlink pointing outside a root is rejected; any resolver failure is rejected. All patterns must pass; one bad entry rejects the whole request |
 
 Allowed roots (hard-coded in `shared/classifier.ts`):
 
-- `/home/jorb/.paseo/worktrees/16msma8v` — this project's Paseo worktrees only
+- `/home/jorb/.paseo/worktrees/16msma8v` — the **whole** worktrees directory
+  of this project: an approved worker can read/write any sibling worktree
+  under it, not just its own. This is the accepted design (2026-10-18);
+  per-worktree isolation was explicitly not required.
 - `/home/jorb/work/refdes` — the refdes checkout
 - `/home/jorb/work/venv-refdes` — the project venv
 
-Everything else fails closed, including: patterns with `..`, root-prefix
+Everything else fails closed, including: patterns with `..`, glob
+metacharacters other than `*` (`[.][.]/etc/passwd`, `{..,x}/y`), root-prefix
 lookalikes (`/home/jorb/work/refdes-evil`), relative patterns, `/home/jorb/.paseo/*`
 and `/home/jorb/.paseo/worktrees/*` (other projects, daemon config),
 missing/empty `patterns`, non-string entries, any other provider, permission
@@ -93,15 +97,15 @@ Any missing/unexpected payload shape fails closed to pending.
 
 ## Tests
 
-Node **>= 22.6** is required (native TypeScript type-stripping for
-`node --test`); `package.json` declares `engines`.
+Node **22.18 or newer** is required: native TypeScript type-stripping for
+`node --test` is flag-free only from 22.18 (below that `npm test` fails with
+`Unknown file extension ".ts"`); `package.json` declares `engines`.
 
 ```sh
 cd tools/paseo-worker-permissions
-export PATH=/home/jorb/.local/node22/bin:$PATH   # node 20 cannot run these
 npm install
 npm run typecheck   # tsc --noEmit against @getpaseo/plugin 0.11.2
-npm test            # node --test, 17 tests
+npm test            # node --test, 20 tests
 ```
 
 The suite is red on the pre-fix classifier. Key cases: wildcard
@@ -110,11 +114,15 @@ scope decided by patterns, not metadata; positives (worktree subpath,
 checkout subpath, venv bin, exact roots); `..` segments, lookalike roots,
 `/home/jorb/.paseo/*` and `.../worktrees/*`, outside-root paths,
 mixed allowed+disallowed, missing/empty/non-string/blank patterns → pending;
-foreign/null parent → pending; empty allowlist (config absent) → nothing;
-Claude+Sol both accepted; reviewer title-prefix matching incl. near-miss
-titles; command text alone approves nothing.
+every glob metacharacter other than `*` (incl. the `[.][.]/etc/passwd` and
+`{..,x}/y` probes) → pending while `*` patterns stay allowed; symlink
+resolvers (escaping symlink → pending, in-root symlink → allow, throwing
+resolver → pending, relocated root → allow); `policy.roots` flips decisions
+both ways; foreign/null parent → pending; empty allowlist (config absent) →
+nothing; Claude+Sol both accepted; reviewer title-prefix matching incl.
+near-miss titles; command text alone approves nothing.
 
-## Presentation (install only after review — human act, deliberately not done here)
+## Presentation (human only)
 
 ```sh
 paseo plugin install <path-to-repo>/tools/paseo-worker-permissions
@@ -135,11 +143,21 @@ the install; existing sessions resume on their next request.
 - Writes inside the allowed roots (incl. the main checkout) are approved by
   design — the root allowlist is the security boundary, replacing the first
   revision's narrower metadata cases at Jared's direction (2026-10-17).
+  The first root is the project's whole worktrees directory, so an approved
+  worker can write into any sibling worktree under it; accepted design
+  (2026-10-18).
+- Symlinks are resolved with realpath **at check time**. A symlink (or
+  directory) swapped to point outside a root *after* the check, before the
+  tool actually opens the path, is a check/use race the plugin cannot close;
+  the roots are local, human-owned directories.
 - Dispatcher ids live in `parents.json`; a rotation is a file edit, no code
   change, no reinstall.
-- The reviewer gate trusts agent titles; anyone who can name an agent
-  "Review PR ..." with in-root work gets worker approvals. Accepted
-  trade-off: dispatch of reviewers is already trusted with the same roots.
+- The `"Review PR "` title prefix is an accepted identity key: **any**
+  opencode agent whose title starts with it is approved for in-root
+  patterns. Accepted because titles are set by the orchestrators/humans who
+  are already trusted to run agents over exactly these roots, the gate adds
+  no scope (scope stays root-checked), and the reviewer plugin's agents
+  cannot be created by the workers the plugin serves.
 - `respondToPermission` on an already-answered request fails; the plugin
   logs and moves on (human wins the race — safe).
 - Relative patterns are rejected (fail-closed); observed OpenCode

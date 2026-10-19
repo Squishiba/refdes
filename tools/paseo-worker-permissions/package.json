@@ -3,14 +3,15 @@
   "private": true,
   "version": "0.0.0",
   "engines": {
-    "node": ">=22.6"
+    "node": ">=22.18.0"
   },
   "files": [
     "paseo-plugin.json",
     "README.md",
     "index.server.ts",
     "parents.example.json",
-    "shared/"
+    "shared/",
+    "!shared/*.test.ts"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -19,7 +20,6 @@
   "devDependencies": {
     "@getpaseo/plugin": "0.11.2",
     "@types/node": "^22.13.10",
-    "typescript": "^5.9.3",
-    "zod": "^4.4.3"
+    "typescript": "^5.9.3"
   }
 }

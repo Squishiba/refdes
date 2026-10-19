@@ -271,3 +271,54 @@ test("metadata filepath outside the roots does not veto in-root patterns (docume
   });
   assert.equal(decision.action, "allow");
 });
+
+// ---------------------------------------------------------------------------
+// Round 3: glob metacharacters other than *, and symlink escapes.
+// ---------------------------------------------------------------------------
+
+test("glob metacharacters other than * are rejected; * stays allowed", () => {
+  const base = "/home/jorb/work/refdes/";
+  for (const bad of ["[", "]", "{", "}", "?", "!", "(", ")", "`", "~", "\0", "\n"]) {
+    const decision = allow({ patterns: [`${base}a${bad}b`] });
+    assert.equal(decision.action, "pending", `expected pending for metachar ${JSON.stringify(bad)}`);
+  }
+  for (const ok of [`${base}.scratch/*`, `${base}src/**`, WORKTREE_ROOT + "/*"]) {
+    assert.equal(allow({ patterns: [ok] }).action, "allow", `expected allow for ${ok}`);
+  }
+});
+
+test("glob-encoded .. probes are pending", () => {
+  for (const patterns of [
+    ["/home/jorb/work/refdes/[.][.]/etc/passwd"],
+    ["/home/jorb/work/refdes/{..,x}/y"],
+  ]) {
+    assert.equal(allow({ patterns }).action, "pending", `expected pending for ${patterns.join(",")}`);
+  }
+});
+
+test("symlink escapes are caught by the injected resolver", () => {
+  const realRoot = "/home/jorb/work/refdes";
+  const classifyWith = (
+    patterns: string[],
+    resolve: (path: string) => string,
+  ) => classifyWorkerPermissionRequest(agent(), externalDirectory({ patterns }), POLICY, resolve).action;
+
+  const escaping = (path: string): string =>
+    path === `${realRoot}/link` ? "/outside/x" : path;
+  assert.equal(classifyWith([`${realRoot}/link/*`], escaping), "pending");
+
+  const internal = (path: string): string =>
+    path === `${realRoot}/link` ? `${realRoot}/in-prog-logs` : path;
+  assert.equal(classifyWith([`${realRoot}/link/*`], internal), "allow");
+
+  const throwing = (path: string): string => {
+    throw new Error(`ENOENT ${path}`);
+  };
+  assert.equal(classifyWith([`${realRoot}/x/*`], throwing), "pending");
+
+  const relocated = (path: string): string =>
+    path === realRoot ? "/data/refdes" : path.startsWith(`${realRoot}/`) ? `/data/refdes${path.slice(realRoot.length)}` : path;
+  assert.equal(classifyWith([`${realRoot}/in-prog-logs/*`], relocated), "allow");
+
+  assert.equal(classifyWith([`${realRoot}/.scratch/*`], (path) => path), "allow");
+});

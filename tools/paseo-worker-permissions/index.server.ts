@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
@@ -13,8 +13,10 @@ import {
  * requests of refdes workers ONLY when the requesting agent is a child of a
  * dispatcher on the parents.json allowlist (or a PR-review reviewer by
  * title) AND every entry of the request's `input.patterns` — the scope that
- * is actually released — sits inside the allowlisted roots. Every other
- * request is left pending for a human. Nothing is auto-denied.
+ * is actually released — is glob-safe (no metacharacters beyond `*`) and
+ * sits inside the allowlisted roots, symlinks resolved via realpath at
+ * check time. Every other request is left pending for a human. Nothing is
+ * auto-denied.
  */
 
 const PLUGIN_ID = "refdes-worker-permissions";
@@ -67,6 +69,7 @@ export default function contribute(server: PluginServerContext) {
         input: event.request.input,
       },
       policy,
+      (pathToResolve) => realpathSync(pathToResolve),
     );
     if (decision.action !== "allow") {
       return;

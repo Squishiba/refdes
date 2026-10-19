@@ -13,9 +13,12 @@
  *    nothing approved), or the agent's title starts with the PR-review
  *    reviewer prefix ("Review PR "), exposed by PluginHookAgent.title.
  *  - Scope: `request.input.patterns` is a non-empty array of strings; every
- *    entry is absolute, has no ".." segment, and sits inside one of the
- *    allowlisted roots at a path-segment boundary (root itself, or
- *    root + "/..."). A request is approved only when ALL patterns pass.
+ *    entry is absolute, has no ".." segment, contains no glob metacharacter
+ *    other than `*`, and sits inside one of the allowlisted roots at a
+ *    path-segment boundary (root itself, or root + "/..."). The directory
+ *    prefix is additionally realpath'd (injectable PathResolver) so a
+ *    symlink pointing outside a root fails closed. A request is approved
+ *    only when ALL patterns pass.
  *
  * The old metadata-keyed cases are retired: the root allowlist subsumes the
  * exact-progress-file case, and a command text is no longer an approval key
@@ -54,6 +57,17 @@ export type ClassifierDecision =
   | { action: "allow"; reason: string }
   | { action: "pending"; reason: string };
 
+/**
+ * Resolves a path through symlinks (fs.realpathSync in production). Throws
+ * for paths that do not exist; the classifier then walks up to the deepest
+ * existing ancestor. Default: identity (lexical checks only).
+ */
+export type PathResolver = (path: string) => string;
+
+function identityResolve(path: string): string {
+  return path;
+}
+
 /** Structural subset of the hook's PluginHookAgent. */
 export interface ClassifierAgent {
   provider: string;
@@ -81,7 +95,12 @@ function insideRoots(path: string, roots: readonly string[]): boolean {
   return roots.some((root) => path === root || path.startsWith(`${root}/`));
 }
 
-/** One pattern entry: absolute, no traversal, at or inside one of the roots. */
+/**
+ * One pattern entry: absolute, no traversal, at or inside one of the roots,
+ * and no glob metacharacter other than `*` — the daemon matcher expands
+ * character classes, braces, `?`, `!`, and extglob groups, so
+ * `[.][.]/etc` and `{..,x}/y` smuggle traversal past a lexical check.
+ */
 function patternScope(pattern: string, roots: readonly string[]): string | null {
   if (pattern.length === 0) return "empty pattern";
   if (!pattern.startsWith("/")) return `pattern is not absolute: ${pattern}`;
@@ -89,7 +108,56 @@ function patternScope(pattern: string, roots: readonly string[]): string | null 
   if (!insideRoots(pattern, roots)) {
     return `pattern is outside the allowlisted roots: ${pattern}`;
   }
+  const meta = /[[\]{}?!()`~\0\r\n]/.exec(pattern);
+  if (meta !== null) {
+    return `pattern has a glob metacharacter other than *: ${pattern}`;
+  }
   return null;
+}
+
+/** Literal directory prefix: everything up to the last "/" before the first "*". */
+function scopePrefix(pattern: string): string {
+  const star = pattern.indexOf("*");
+  const prefix = star === -1 ? pattern : pattern.slice(0, pattern.lastIndexOf("/", star) + 1);
+  return prefix.length > 1 ? prefix.replace(/\/+$/, "") : "/";
+}
+
+/**
+ * Resolve a pattern's directory prefix through symlinks: realpath the
+ * deepest existing ancestor and check it against the realpaths of the roots.
+ * Resolver failure on every ancestor (unresolvable) -> null -> pending.
+ */
+function resolveScope(
+  pattern: string,
+  roots: readonly string[],
+  resolvePath: PathResolver,
+): { ok: true } | { ok: false; reason: string } {
+  const resolvedRoots: string[] = [];
+  for (const root of roots) {
+    try {
+      resolvedRoots.push(resolvePath(root));
+    } catch {
+      return { ok: false, reason: `allowlisted root cannot be resolved: ${root}` };
+    }
+  }
+  let cursor = scopePrefix(pattern);
+  for (;;) {
+    let resolved: string;
+    try {
+      resolved = resolvePath(cursor);
+    } catch {
+      if (cursor === "/") {
+        return { ok: false, reason: `pattern has no resolvable ancestor: ${pattern}` };
+      }
+      const cut = cursor.lastIndexOf("/");
+      cursor = cut <= 0 ? "/" : cursor.slice(0, cut);
+      continue;
+    }
+    if (!insideRoots(resolved, resolvedRoots)) {
+      return { ok: false, reason: `pattern resolves outside the allowlisted roots: ${pattern} -> ${resolved}` };
+    }
+    return { ok: true };
+  }
 }
 
 function identityReason(
@@ -109,6 +177,7 @@ export function classifyWorkerPermissionRequest(
   agent: ClassifierAgent,
   request: ClassifierRequest,
   policy: WorkerPermissionPolicy = WORKER_PERMISSION_POLICY,
+  resolvePath: PathResolver = identityResolve,
 ): ClassifierDecision {
   if (agent.provider !== policy.provider) {
     return { action: "pending", reason: `provider not ${policy.provider}: ${agent.provider}` };
@@ -142,6 +211,10 @@ export function classifyWorkerPermissionRequest(
     const error = patternScope(pattern, policy.roots);
     if (error !== null) {
       return { action: "pending", reason: error };
+    }
+    const resolved = resolveScope(pattern, policy.roots, resolvePath);
+    if (!resolved.ok) {
+      return { action: "pending", reason: resolved.reason };
     }
   }
   return {

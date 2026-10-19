@@ -116,3 +116,14 @@ REVIEW ROUND 2 (2026-10-18, chunk-2 lows, all in tools/paseo-worker-permissions)
 - Removed unused test helpers (decide, pending).
 - 17/17 node --test + tsc --noEmit clean (Node 22). PR body test count
   updated 16/16 -> 17/17. Pushed; not merged, not installed.
+
+REVIEW ROUND 3 (2026-10-18): later rounds supersede the older test counts
+and the Sol-id note above (parents now come from parents.json). Security:
+patternScope rejects glob metacharacters other than * (probes
+"[.][.]/etc/passwd", "{..,x}/y" were lexical-gate escapes); symlinks are
+resolved via an injectable PathResolver (index.server.ts: realpathSync),
+resolved prefix must stay inside realpath'd roots, resolver failure ->
+pending. engines >=22.18.0 (flag-free TS stripping), zod dep dropped,
+lock regenerated, *.test.ts excluded from files. README: worktrees-root
+and title-prefix design stated plainly, anchor fixed, race limit added.
+20/20 node --test + tsc clean. Pushed; not merged, not installed.
