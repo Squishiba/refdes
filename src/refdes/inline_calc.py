@@ -7,10 +7,12 @@ span that fails the grammar is an error at its line -- it never falls back
 to ordinary code. A span without ``:=`` stays ordinary code; multi-backtick
 spans are the author's escape hatch and are never triggered.
 
-This module is the grammar only: extraction, the trigger, and the parse.
-Evaluation threads the parsed span through the existing calc evaluator
-(`src/refdes/calc.py`) in `build._run_item_calcs`; stored-result
-verification lives in `compare_stored` here.
+This module is the grammar only: extraction, the trigger, the parse, and
+the grammar-level discovery of what a parsed span's right-hand side names
+(a cross-item reference, a `source()` call). Evaluation threads the parsed
+span through the existing calc evaluator (`src/refdes/calc.py`) in
+`build._run_item_calcs`; stored-result verification lives in
+`compare_stored` here.
 """
 
 from __future__ import annotations
@@ -119,16 +121,21 @@ def first_trigger_index(text: str) -> int:
     return -1
 
 
-def code_spans(line: str) -> list[str]:
-    """The single-backtick code spans of one line, in order.
+def code_span_ranges(line: str) -> list[tuple[int, int]]:
+    """The ``(start, end)`` content ranges of a line's single-backtick code
+    spans, in order.
 
     Markdown code-span rules: a span opens on a run of N backticks and
     closes on the next run of exactly N. Only N == 1 runs produce spans
     here -- a multi-backtick span's content (including any single
     backticks inside it) is skipped untouched, which is exactly the
-    author's escape hatch the design names.
+    author's escape hatch the design names. An unclosed backtick run is
+    literal text; scanning resumes right after it.
+
+    The ranges are what a rewriter needs to know where a span sits in the
+    line (links._calc_ref_rewrites); `code_spans` is the content view.
     """
-    spans: list[str] = []
+    spans: list[tuple[int, int]] = []
     i = 0
     n = len(line)
     while i < n:
@@ -150,14 +157,12 @@ def code_spans(line: str) -> list[str]:
                 run_end += 1
             if run_end - close == run:
                 if run == 1:
-                    spans.append(line[i:close])
+                    spans.append((i, close))
                 i = run_end
                 closed = True
                 break
             close = run_end
         if not closed:
-            # An unclosed backtick run is literal text; `i` already sits
-            # right after it, so scanning resumes from there.
             pass
     return spans
 
@@ -200,6 +205,12 @@ def _result_equals_positions(text: str) -> list[int]:
     return hits
 
 
+def code_spans(line: str) -> list[str]:
+    """The single-backtick code spans of one line, in order (the content
+    view of `code_span_ranges`)."""
+    return [line[start:end] for start, end in code_span_ranges(line)]
+
+
 def _split_readings(text: str, positions: list[int]) -> list[tuple[int, str, str, str]]:
     """Every split of `text` at a result-separator candidate that parses as
     ``name := rhs [| unit] = result``: a ``(cut, name, rhs_unit, result)``
@@ -219,6 +230,29 @@ def _split_readings(text: str, positions: list[int]) -> list[tuple[int, str, str
         if match is not None and tail and LITERAL_RE.match(tail):
             readings.append((cut, match.group(1), match.group(2).strip(), tail))
     return readings
+
+
+def span_cross_ref(span: InlineSpan) -> re.Match[str] | None:
+    """The cross-item reference a parsed span's RHS is -- `TARGET.NAME` as
+    the whole (unit-stripped) right-hand side, matched with the evaluator's
+    own `CROSS_REF_RE`, so a span is a reference here exactly when it is one
+    in `evaluate_block`. None for a malformed span and for every other RHS."""
+    if span.error:
+        return None
+    return calc.CROSS_REF_RE.match(span.rhs.strip())
+
+
+def span_source_call(span: InlineSpan) -> tuple[str, str] | None:
+    """`(path, key)` for a parsed span whose RHS is a well-formed `source()`
+    call, None otherwise -- the span counterpart of `calc.source_calls_in_block`
+    (the pipe unit is already split off by `parse_span`, as the evaluator
+    strips it for a fence line)."""
+    if span.error:
+        return None
+    if not calc.SOURCE_START_RE.match(span.rhs.strip()):
+        return None
+    parsed = calc.parse_source_call(span.rhs)
+    return (parsed[0], parsed[1]) if parsed else None
 
 
 def parse_span(line_offset: int, content: str) -> InlineSpan:
@@ -314,18 +348,18 @@ def parse_span(line_offset: int, content: str) -> InlineSpan:
     return span
 
 
-def _scan_comment_line(line: str, in_comment: bool) -> tuple[list[str], bool, bool]:
-    """Single-backtick code spans of one line that sit outside an HTML
-    comment, given the comment state entering the line.
+def _scan_comment_line(line: str, in_comment: bool) -> tuple[list[tuple[int, int]], bool, bool]:
+    """Content ranges of the single-backtick code spans of one line that sit
+    outside an HTML comment, given the comment state entering the line.
 
-    Returns ``(spans, in_comment_out, opened_on_this_line)``. Scanning is
+    Returns ``(ranges, in_comment_out, opened_on_this_line)``. Scanning is
     left-to-right and interleaves the two inline constructs, so each is
     literal text inside the other: a `<!--` inside a code span is ordinary
     span text, a backtick inside a comment never opens a span. A code span
-    is captured with the same delimiter-run rule as `code_spans` (only runs
-    of exactly one backtick); an unclosed run is literal text and scanning
-    resumes right after it."""
-    spans: list[str] = []
+    is captured with the same delimiter-run rule as `code_span_ranges` (only
+    runs of exactly one backtick); an unclosed run is literal text and
+    scanning resumes right after it."""
+    spans: list[tuple[int, int]] = []
     n = len(line)
     i = 0
     opened = False
@@ -357,7 +391,7 @@ def _scan_comment_line(line: str, in_comment: bool) -> tuple[list[str], bool, bo
                     run_end += 1
                 if run_end - close == run:
                     if run == 1:
-                        spans.append(line[i:close])
+                        spans.append((i, close))
                     i = run_end
                     break
                 close = run_end
@@ -368,9 +402,12 @@ def _scan_comment_line(line: str, in_comment: bool) -> tuple[list[str], bool, bo
     return spans, in_comment, opened
 
 
-def _scan_body(body: str) -> tuple[list[InlineSpan], int | None]:
-    """Every triggered inline-calc span of one item body (source order), and
-    the 0-indexed line of an unclosed `<!--` opener (else None).
+def _scan_body(lines: list[str]) -> tuple[list[tuple[int, int, int, str]], int | None]:
+    """The triggered inline-calc spans of the given lines (source order), as
+    ``(line_offset, content_start, content_end, content)`` -- positions
+    included, so a rewriter can replace a span's content in place (the
+    link-target expansion of `links._calc_ref_rewrites`) -- and the 0-indexed
+    line of an unclosed `<!--` opener (else None).
 
     Lines inside fenced code, indented code blocks, and HTML comments are
     skipped -- a span in any of them is inert (run-12 F12-1). A fence opened
@@ -379,12 +416,17 @@ def _scan_body(body: str) -> tuple[list[InlineSpan], int | None]:
     the two inert regions never open inside each other. A `<!--` with no
     `-->` treats the rest of the body as comment text and reports its line
     once, mirroring the unclosed-fence warning; it never swallows the body
-    silently."""
-    spans: list[InlineSpan] = []
+    silently.
+
+    Fences and comments are *assumed* self-contained within the slice handed
+    in -- an item body satisfies this (and callers must not hand in front
+    matter, where an unclosed fence marker in a block scalar is valid YAML),
+    so a body slice needs no inert-region context from outside the slice."""
+    found: list[tuple[int, int, int, str]] = []
     fence: str | None = None
     in_comment = False
     comment_open_line: int | None = None
-    for offset, line in enumerate(body.splitlines()):
+    for offset, line in enumerate(lines):
         if fence is not None:
             close = FENCE_CLOSE_RE.match(line)
             if close and close.group(1)[0] == fence[0] and len(close.group(1)) >= len(fence):
@@ -408,10 +450,22 @@ def _scan_body(body: str) -> tuple[list[InlineSpan], int | None]:
                 comment_open_line = offset
         else:
             comment_open_line = None
-        for content in line_spans:
+        for start, end in line_spans:
+            content = line[start:end]
             if contains_trigger(content):
-                spans.append(parse_span(offset, content))
-    return spans, (comment_open_line if in_comment else None)
+                found.append((offset, start, end, content))
+    return found, (comment_open_line if in_comment else None)
+
+
+def iter_triggered_spans(lines: list[str]) -> list[tuple[int, int, int, str]]:
+    """The triggered inline spans of the given lines, in source order, as
+    ``(line_offset, content_start, content_end, content)`` -- the positioned
+    view of `_scan_body` (its second return value, the unclosed-comment
+    line, is the build's warning business, not the rewriter's).
+
+    Fences and comments are *assumed* self-contained within the slice handed
+    in -- see `_scan_body`."""
+    return _scan_body(lines)[0]
 
 
 def triggered_spans(body: str) -> list[InlineSpan]:
@@ -420,7 +474,10 @@ def triggered_spans(body: str) -> list[InlineSpan]:
     Lines inside fenced code, indented code blocks and HTML comments are
     skipped; only single-backtick spans carrying an unquoted `:=` are parsed.
     """
-    return _scan_body(body)[0]
+    return [
+        parse_span(line_offset, content)
+        for line_offset, _start, _end, content in _scan_body(body.splitlines())[0]
+    ]
 
 
 def unclosed_comment_offset(body: str) -> int | None:
@@ -428,7 +485,7 @@ def unclosed_comment_offset(body: str) -> int | None:
 
     The build warns there so a comment that never closes cannot silently
     stop the body's spans from being checked (run-12 F12-1)."""
-    return _scan_body(body)[1]
+    return _scan_body(body.splitlines())[1]
 
 
 _PLAIN_NUMBER_RE = re.compile(r"[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?")

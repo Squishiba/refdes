@@ -2292,15 +2292,31 @@ def _hash_blob(payload: dict[str, object]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
-def calc_hash_for(item: Item) -> str | None:
-    """A hash of just item's ```calc block(s) -- the second, narrower probe
-    docs/design/stale-arithmetic-signal.md needs alongside content_hash, so
-    lifecycle.diff_against can tell "the calc block changed" apart from "the
-    item changed" without storing the block's actual text anywhere.
+def _inline_span_calc_text(span: inline_calc.InlineSpan) -> str:
+    """One triggered span's arithmetic as the calc_hash probe sees it: name,
+    RHS and unit assertion, stored result excluded (docs/design/inline-calc.md
+    section 3 -- a result-only edit must leave this probe fixed). A malformed
+    span has no meaningful name/RHS/unit, so its raw text is the arithmetic
+    it declared; the build reports it as an error at the line anyway."""
+    if span.error:
+        return span.raw
+    text = f"{span.name} := {span.rhs}"
+    if span.unit:
+        text += f" | {span.unit}"
+    return text
 
-    None (not a hash of an empty payload) when the item has no calc block at
-    all -- most items -- so lifecycle._items_map can omit the baseline field
-    entirely rather than recording a hash that can never mean anything.
+
+def calc_hash_for(item: Item) -> str | None:
+    """A hash of just item's ```calc block(s) and inline calc spans -- the
+    second, narrower probe docs/design/stale-arithmetic-signal.md needs
+    alongside content_hash, so lifecycle.diff_against can tell "the calc
+    block changed" apart from "the item changed" without storing the block's
+    actual text anywhere.
+
+    None (not a hash of an empty payload) when the item has no calc block and
+    no inline span at all -- most items -- so lifecycle._items_map can omit
+    the baseline field entirely rather than recording a hash that can never
+    mean anything.
 
     Normalized the same way _hash_payload normalizes body text (collapse
     whitespace, strip), so reflowing a calc block's comments or indentation
@@ -2310,11 +2326,25 @@ def calc_hash_for(item: Item) -> str | None:
     results, which is what "the arithmetic" means for this signal. A result
     changing because an upstream value moved, with this item's own block
     untouched, is a different question this function doesn't answer.
+
+    Inline spans enter as name/RHS/unit, in source order with the fences
+    (docs/design/inline-calc.md section 3), so an inline-only item has a
+    calc_hash and a stored-result edit leaves it fixed. An item with no
+    inline spans hashes exactly as it did when the probe was blocks-only,
+    so old baselines do not churn; an item whose old probe predates its own
+    spans no longer matches, and _stale_arithmetic's verdict-change signal
+    stays silent for it -- a false negative, never a false positive.
     """
-    blocks = calc.extract_blocks(item.body)
-    if not blocks:
+    blocks = calc.extract_blocks_with_lines(item.body)
+    spans = inline_calc.triggered_spans(item.body)
+    if not blocks and not spans:
         return None
-    normalized = [re.sub(r"\s+", " ", block).strip() for block in blocks]
+    events: list[tuple[int, str]] = [
+        (offset, block) for block, offset, _block_id in blocks
+    ]
+    events += [(span.line_offset, _inline_span_calc_text(span)) for span in spans]
+    events.sort(key=lambda event: event[0])
+    normalized = [re.sub(r"\s+", " ", text).strip() for _offset, text in events]
     return _hash_blob({"calc_blocks": normalized})
 
 
