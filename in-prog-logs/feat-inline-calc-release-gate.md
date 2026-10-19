@@ -87,7 +87,10 @@ are exempt and keep their warning; default `{release: true, revision: false}`.
 
 ## Verification
 
-- Full suite: `PYTHONPATH=$PWD/src ... pytest -q` — see result below.
+- Full suite: `PYTHONPATH=$PWD/src ... pytest -q` — 4186 passed, 2 skipped.
+  One anchor failure surfaced mid-run (`docs/math.md` linked
+  `lifecycle.md#the-configurable-layer`; the heading is "The readiness
+  gate") — fixed, anchors test green.
 - `ruff check <touched files> --select E9,F` — clean.
 
 Task finished: yes.
