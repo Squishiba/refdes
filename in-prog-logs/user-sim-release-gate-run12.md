@@ -18,20 +18,21 @@ only. Findings are reported, not fixed.
 All three shipped surfaces do what their changelog fragments promise, and all
 four run-11 findings (R11-F1..F4) are verified fixed. The inline-calc sweep is
 the deep one: the evaluation, window, scope, and round-trip behavior matches
-`docs/math.md` closely enough to ship. Seven findings, one Medium; the sweep
-3 cosmetic nit flagged in the task brief (three-character naming in the
+`docs/math.md` closely enough to ship. Six findings, all Low; the sweep 3
+cosmetic nit flagged in the task brief (three-character naming in the
 unclosed-fence message for `~~~`) did **not** reproduce -- the shipped message
-is generic and correct.
+is generic and correct. (Review round 1: an original Medium finding that
+triple-backtick spans trigger was withdrawn as a fixture artifact -- see
+section 6.)
 
 | # | Sev | Surface | One-line summary |
 |---|-----|---------|------------------|
-| F12-1 | Medium | inline calc | triple-backtick code spans trigger; docs say the trigger is a single-backtick span |
-| F12-2 | Low | inline calc | a span inside an HTML comment is validated (commented-out math still errors) |
-| F12-3 | Low | inline calc | filenames containing `:=` (`src=a:=b.csv`) trigger the grammar and become parse errors |
-| F12-4 | Low | inline calc | result separator needs literal spaces: `1 V*4\|V=4 V` reports "stored result missing" |
-| F12-5 | Low | inline calc | stale warning's displayed computed value is rounded to look accepted (3.4495 shown as "3.45 V") |
-| F12-6 | Low | inline calc | cross-item span-only gap error blames the target ("it defines no calc values") when the target defines it in a fence |
-| F12-7 | Low | inline calc | span-form `source()` advice "run 'refdes fetch'" leads to a dead end after fetch |
+| F12-1 | Low | inline calc | a span inside an HTML comment is validated (commented-out math still errors) |
+| F12-2 | Low | inline calc | filenames containing `:=` (`src=a:=b.csv`) trigger the grammar and become parse errors |
+| F12-3 | Low | inline calc | result separator needs literal spaces: `1 V*4\|V=4 V` reports "stored result missing" |
+| F12-4 | Low | inline calc | stale warning's displayed computed value is rounded to look accepted (3.4495 shown as "3.45 V") |
+| F12-5 | Low | inline calc | cross-item span-only gap error blames the target ("it defines no calc values") when the target defines it in a fence |
+| F12-6 | Low | inline calc | span-form `source()` advice "run 'refdes fetch'" leads to a dead end after fetch |
 | -- | -- | init gitignore | zero findings: all 9 shapes match the fragment, checked against `git check-ignore -v` |
 | -- | -- | create/preview | zero findings: R11-F4 gate fires with the exact `/api/items` message |
 | -- | -- | unclosed fence | zero findings: fires on every unclosed shape, silent on every closed one, lines correct |
@@ -86,7 +87,8 @@ Docs promises from `docs/math.md:281-315`; all held:
   error (`calc 'W2': unknown name 'Vlate'`), matching
   "evaluated in source order across both".
 - Non-triggers per docs: span without `:=` is ordinary code; ``double-backtick``
-  span never triggers (the documented escape hatch) -- verified inert; a span
+  span never triggers (the documented escape hatch) -- verified inert, and the
+  same holds for triple-backtick spans (section 2.2); a span
   whose `:=` is quoted (`t = "q:=1"`) is inert; spans inside ```` ```text ````
   fences are inert; a span inside a blockquote, a list item, link text, and a
   list-file (`items:` mapping in YAML) all fire, with the list-file diagnostic
@@ -113,27 +115,24 @@ Docs promises from `docs/math.md:281-315`; all held:
   the full text preserved:
   `Vout := 0.8 V * (1 + 10 kohm/2.2 kohm) | V = 4.436 V`.
 
-### 2.2 F12-1 (Medium) -- triple-backtick spans trigger
+### 2.2 Checked: triple-backtick spans never trigger (review-round correction)
 
 Docs, `docs/math.md:297-299`: "The trigger is a **single-backtick** code span
 whose content contains `:=`... a wider ``double-backtick`` span is never
-triggered -- the escape hatch when you want the literal text."
+triggered -- the escape hatch when you want the literal text." Triple
+backticks are undefined there. This report originally filed a Medium finding
+that they trigger; review round 1 disproved it -- the fixture
+(`SHAPE-E7.md`) carried a single-backtick control span on its own line, and
+the warning seen in sweep 1 came from that control line, not from the triple
+span. Re-checked in a fresh project (`e7`) with one item containing *only*
+`` ```Vout := 1 V * 2 = 99 V``` `` and a separate single-backtick control:
+the triple-span item yields no diagnostic, the control warns. The parser
+emits spans only for delimiter runs of exactly one backtick, so triple
+behaves like double. The remaining docs gap -- triple-backtick spans get no
+documented status -- is a Low-severity authoring-docs note, not a parser
+finding; it is kept in section 6's observations.
 
-Repro (`s1/items/pwr/SHAPE-E7.md`): a span delimited by triple backticks,
-
-```
-The doc says ```` ``` ````Vout := 1 V * 2 = 99 V```` ``` ```` literally.
-```
-
-(fixture content: ``` ```Vout := 1 V * 2 = 99 V``` ```) fires the full
-validation: `inline calc Vout: stored result says 99 V, now computes 2 V`.
-CommonMark treats `` ``` `` as a valid code-span delimiter, so the parser's
-reading is defensible, but the docs' two named escapes (single=trigger,
-double=never) leave triple undefined, and an author who reaches for a
-wider fence-style span to *show* a span's text verbatim gets a validation
-error on it. The docs promise a boundary the parser does not enforce.
-
-### 2.3 F12-2 (Low) -- commented-out spans are validated
+### 2.3 F12-1 (Low) -- commented-out spans are validated
 
 Repro (`SHAPE-E4.md`): `<!-- Vout := 1 V * 2 = 99 V -->` -- the span inside
 the HTML comment is evaluated and warns at the comment's line. An author
@@ -142,7 +141,7 @@ build" reflex) gets a warning they cannot silence without deleting the line.
 No docs sentence addresses comments; the docs describe the trigger purely as
 "its content contains `:=`", so this is letter-compliant, spirit-violating.
 
-### 2.4 F12-3 (Low) -- filenames containing `:=`
+### 2.4 F12-2 (Low) -- filenames containing `:=`
 
 Repro (`SHAPE-Q1.md`): `` `src=a:=b.csv` `` triggers the grammar and dies with
 `inline calc Vout: ... stored result missing; write '= <quantity>'` (the span
@@ -153,7 +152,7 @@ the "unquoted `:=`" grammar exactly -- the friction is that a bare
 the only escape is the double-backtick hatch, which the docs introduce for a
 different purpose.
 
-### 2.5 F12-4 (Low) -- `= result` requires surrounding spaces
+### 2.5 F12-3 (Low) -- `= result` requires surrounding spaces
 
 Repro (`SHAPE-R3.md`): `` `x := 1 V*4|V=4 V` `` (tight, fence-style spacing)
 reports `inline calc x: stored result missing; write '= <quantity>'`. The
@@ -165,7 +164,7 @@ inline spacing is stricter, and the docs example uses ` | V = 4.436 V` with
 spaces everywhere without calling the requirement out. Advice is actionable,
 so: Low.
 
-### 2.6 F12-5 (Low) -- the stale warning displays a computed value that looks accepted
+### 2.6 F12-4 (Low) -- the stale warning displays a computed value that looks accepted
 
 Repro (`SHAPE-C2.md`): `x := 6.899 V / 2 = 3.5 V`. Raw computed 3.4495 V,
 stored literal `3.5 V`; the message is
@@ -178,7 +177,7 @@ warning's own rounded display hides the reason. Showing more digits when the
 computed value is near the boundary (or showing the raw value) would make the
 warning self-explanatory.
 
-### 2.7 F12-6 (Low) -- cross-item span-only gap message blames the target
+### 2.7 F12-5 (Low) -- cross-item span-only gap message blames the target
 
 `s3c` reproduces the documented slice-1 gap (math.md:313-315): a cross-item
 reference used *only* in an inline span, reader-first load order, fails
@@ -189,7 +188,7 @@ fixture (`s3d`) builds clean. Telling the author the target defines nothing
 sends them to the wrong file; the gap note's "keep such uses in a fence" is
 the actual fix and the message doesn't say it.
 
-### 2.8 F12-7 (Low) -- `source()` span-form advice dead-ends
+### 2.8 F12-6 (Low) -- `source()` span-form advice dead-ends
 
 `s3` (span-only `source('analysis/bud.csv', 'k1')`, unfetched CSV): check
 errors with `source('analysis/bud.csv', 'k1') has no locked value -- run
@@ -278,6 +277,14 @@ character. Zero findings.
 - `refdes rename` refuses a type rename that produces an unknown type and
   leaves the project files untouched (refuse-and-rollback as documented in
   `docs/cli-reference.md`).
+- Docs gap, Low-severity authoring-docs note (from the review-round
+  correction in section 2.2): `docs/math.md:297-299` names single-backtick
+  spans as the trigger and double-backtick spans as the escape hatch;
+  triple-backtick spans -- which CommonMark also accepts as code-span
+  delimiters -- are undefined, and the parser treats them like the double
+  case (never triggered, `inline_calc.py code_spans` emits only delimiter
+  runs of exactly one backtick). Behavior is sane; the docs leave the
+  boundary unstated.
 - The serve API takes the launch token in `X-Refdes-Token` (docs-conformant);
   `/preview/` needs the cookie. `set_body` with identical text is byte-clean
   (§2.1 round-trips).
@@ -291,4 +298,4 @@ worktree (every `.scratch` path is repo-nested), so the git-stub proxy (g6)
 stands in for "a git that can't answer"; design-doc behaviors not in the
 shipped docs (gate rule) were noted, not asserted.
 
-Findings: 7 (1 Medium, 6 Low). Fixes verified: R11-F1..F4.
+Findings: 6 (all Low). Fixes verified: R11-F1..F4.
