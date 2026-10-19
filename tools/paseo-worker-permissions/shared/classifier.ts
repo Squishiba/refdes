@@ -99,7 +99,9 @@ function insideRoots(path: string, roots: readonly string[]): boolean {
  * One pattern entry: absolute, no traversal, at or inside one of the roots,
  * and no glob metacharacter other than `*` — the daemon matcher expands
  * character classes, braces, `?`, `!`, and extglob groups, so
- * `[.][.]/etc` and `{..,x}/y` smuggle traversal past a lexical check.
+ * `[.][.]/etc` and `{..,x}/y` smuggle traversal past a lexical check, and
+ * backslash escapes the next character. `$`, quotes, and `;` are rejected
+ * too: no legitimate pattern needs them (round-3b probe review).
  */
 function patternScope(pattern: string, roots: readonly string[]): string | null {
   if (pattern.length === 0) return "empty pattern";
@@ -108,7 +110,7 @@ function patternScope(pattern: string, roots: readonly string[]): string | null 
   if (!insideRoots(pattern, roots)) {
     return `pattern is outside the allowlisted roots: ${pattern}`;
   }
-  const meta = /[[\]{}?!()`~\0\r\n]/.exec(pattern);
+  const meta = /[[\]{}?!()`~$"';\\\0\r\n]/.exec(pattern);
   if (meta !== null) {
     return `pattern has a glob metacharacter other than *: ${pattern}`;
   }

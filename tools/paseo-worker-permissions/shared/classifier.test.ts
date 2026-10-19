@@ -278,7 +278,7 @@ test("metadata filepath outside the roots does not veto in-root patterns (docume
 
 test("glob metacharacters other than * are rejected; * stays allowed", () => {
   const base = "/home/jorb/work/refdes/";
-  for (const bad of ["[", "]", "{", "}", "?", "!", "(", ")", "`", "~", "\0", "\n"]) {
+  for (const bad of ["[", "]", "{", "}", "?", "!", "(", ")", "`", "~", "\\", "$", '"', "'", ";", "\0", "\n"]) {
     const decision = allow({ patterns: [`${base}a${bad}b`] });
     assert.equal(decision.action, "pending", `expected pending for metachar ${JSON.stringify(bad)}`);
   }
@@ -291,6 +291,9 @@ test("glob-encoded .. probes are pending", () => {
   for (const patterns of [
     ["/home/jorb/work/refdes/[.][.]/etc/passwd"],
     ["/home/jorb/work/refdes/{..,x}/y"],
+    ["/home/jorb/work/refdes/..\\/etc"],
+    ["/home/jorb/work/refdes/a\\b"],
+    ["/home/jorb/work/refdes/$HOME/x"],
   ]) {
     assert.equal(allow({ patterns }).action, "pending", `expected pending for ${patterns.join(",")}`);
   }

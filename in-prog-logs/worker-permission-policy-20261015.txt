@@ -127,3 +127,9 @@ pending. engines >=22.18.0 (flag-free TS stripping), zod dep dropped,
 lock regenerated, *.test.ts excluded from files. README: worktrees-root
 and title-prefix design stated plainly, anchor fixed, race limit added.
 20/20 node --test + tsc clean. Pushed; not merged, not installed.
+
+REVIEW ROUND 3b (2026-10-18): probe review found backslash and $ passing
+the metacharacter rejection; added \ $ " ' ; to the rejected set (round-3
+probe list plus these), with per-character loop assertions and the
+"..\/etc" / "a\b" / "$HOME/x" probes. 20/20 node --test, tsc clean.
+Pushed; not merged, not installed.
