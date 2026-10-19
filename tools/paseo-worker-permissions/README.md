@@ -101,7 +101,7 @@ cd tools/paseo-worker-permissions
 export PATH=/home/jorb/.local/node22/bin:$PATH   # node 20 cannot run these
 npm install
 npm run typecheck   # tsc --noEmit against @getpaseo/plugin 0.11.2
-npm test            # node --test, 16 tests
+npm test            # node --test, 17 tests
 ```
 
 The suite is red on the pre-fix classifier. Key cases: wildcard

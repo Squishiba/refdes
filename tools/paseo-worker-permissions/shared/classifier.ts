@@ -81,12 +81,12 @@ function insideRoots(path: string, roots: readonly string[]): boolean {
   return roots.some((root) => path === root || path.startsWith(`${root}/`));
 }
 
-/** One pattern entry: absolute, no traversal, strictly inside a root. */
-function patternScope(pattern: string): string | null {
+/** One pattern entry: absolute, no traversal, at or inside one of the roots. */
+function patternScope(pattern: string, roots: readonly string[]): string | null {
   if (pattern.length === 0) return "empty pattern";
   if (!pattern.startsWith("/")) return `pattern is not absolute: ${pattern}`;
   if (hasDotSegment(pattern)) return `pattern has a .. segment: ${pattern}`;
-  if (!insideRoots(pattern, WORKER_PERMISSION_POLICY.roots)) {
+  if (!insideRoots(pattern, roots)) {
     return `pattern is outside the allowlisted roots: ${pattern}`;
   }
   return null;
@@ -139,7 +139,7 @@ export function classifyWorkerPermissionRequest(
     if (typeof pattern !== "string") {
       return { action: "pending", reason: `pattern entry is not a string: ${JSON.stringify(pattern)}` };
     }
-    const error = patternScope(pattern);
+    const error = patternScope(pattern, policy.roots);
     if (error !== null) {
       return { action: "pending", reason: error };
     }

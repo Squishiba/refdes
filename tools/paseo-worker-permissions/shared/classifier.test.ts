@@ -31,15 +31,7 @@ function externalDirectory(input: Record<string, unknown> | undefined): Classifi
   return { provider: "opencode", name: "external_directory", kind: "tool", input };
 }
 
-function decide(input: Record<string, unknown> | undefined, a = agent()): ClassifierRequest | never {
-  return externalDirectory(input);
-}
-
 function allow(input: Record<string, unknown> | undefined, a = agent()) {
-  return classifyWorkerPermissionRequest(a, externalDirectory(input), POLICY);
-}
-
-function pending(input: Record<string, unknown> | undefined, a = agent()) {
   return classifyWorkerPermissionRequest(a, externalDirectory(input), POLICY);
 }
 
@@ -147,6 +139,21 @@ test("mixed allowed+disallowed patterns are rejected as a whole", () => {
     patterns: ["/home/jorb/work/refdes/in-prog-logs/x", "/home/jorb/.ssh/id_ed25519"],
   });
   assert.equal(decision.action, "pending");
+});
+
+test("policy.roots (not hard-coded defaults) decide: flips both ways", () => {
+  const custom: WorkerPermissionPolicy = {
+    ...POLICY,
+    roots: ["/srv/other", "/home/jorb/work/venv-refdes/bin"],
+  };
+  const classify = (patterns: string[], p: WorkerPermissionPolicy) =>
+    classifyWorkerPermissionRequest(agent(), externalDirectory({ patterns }), p).action;
+  const inDefault = ["/home/jorb/work/refdes/in-prog-logs/x"];
+  const inCustom = ["/home/jorb/work/venv-refdes/bin", "/srv/other/x"];
+  assert.equal(classify(inDefault, POLICY), "allow");
+  assert.equal(classify(inDefault, custom), "pending");
+  assert.equal(classify(inCustom, custom), "allow");
+  assert.equal(classify(inCustom, POLICY), "pending");
 });
 
 test("missing, empty, non-string, blank patterns fail closed", () => {

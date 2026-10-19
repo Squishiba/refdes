@@ -1,7 +1,7 @@
 {
   "id": "refdes-worker-permissions",
   "name": "refdes worker permissions",
-  "description": "Auto-answers only Sol-dispatched OpenCode workers' external_directory requests for the shared PROGRESS.md file and read-only in-prog-logs evidence commands; everything else stays pending.",
+  "description": "Auto-approves OpenCode workers' external_directory requests only when the agent is dispatched by an allowlisted parent (or titled 'Review PR ') and every request pattern is absolute, has no '..', and sits inside one of the three allowlisted roots; everything else stays pending.",
   "media": [],
   "requirements": {
     "paseo": ">=0.11.2"

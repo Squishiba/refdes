@@ -106,3 +106,13 @@ same. Fixed by making the scope the whole policy:
   unchanged, marked human act.
 
 Status: done, pushed to the branch, NOT merged, NOT installed.
+
+REVIEW ROUND 2 (2026-10-18, chunk-2 lows, all in tools/paseo-worker-permissions):
+- paseo-plugin.json description rewritten to the real contract (scope gate
+  + parents allowlist + reviewer title); matched README wording.
+- classifier.ts patternScope now uses the passed policy.roots (was
+  hard-coded defaults); "strictly inside" comment fixed to "at or inside";
+  new test flips decisions both ways under custom roots.
+- Removed unused test helpers (decide, pending).
+- 17/17 node --test + tsc --noEmit clean (Node 22). PR body test count
+  updated 16/16 -> 17/17. Pushed; not merged, not installed.
