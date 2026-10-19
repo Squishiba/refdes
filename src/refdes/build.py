@@ -1504,11 +1504,14 @@ def compute_coverage(project: Project, chain_graph=None) -> None:
 
 
 def _calc_reference_targets(item) -> list[str]:
-    """The target strings of every cross-item reference in this item's calc
-    blocks, in source order, deduped -- the dependency edges the scheduler
-    walks. Parsed with the same regexes `evaluate_block` uses (pipe unit
-    stripped first), so a line is a dependency edge here exactly when it is a
-    reference line there."""
+    """The target strings of every cross-item reference in this item -- calc
+    blocks and inline calc spans -- in source order, deduped: the dependency
+    edges the scheduler walks. Parsed with the same regexes `evaluate_block`
+    uses (pipe unit stripped first; a span's whole right-hand side must be
+    the reference, same `CROSS_REF_RE` as the evaluator), so a line is a
+    dependency edge here exactly when it is a reference there -- run-12
+    F12-5: an edge from a fence line only was the gap that let a span
+    reference run before its target's calc."""
     targets: list[str] = []
     for block in calc.extract_blocks(item.body):
         for raw_line in block.splitlines():
@@ -1524,6 +1527,10 @@ def _calc_reference_targets(item) -> list[str]:
             ref = calc.CROSS_REF_RE.match(match.group(2).strip())
             if ref and ref.group("target") not in targets:
                 targets.append(ref.group("target"))
+    for span in inline_calc.triggered_spans(item.body):
+        ref = inline_calc.span_cross_ref(span)
+        if ref and ref.group("target") not in targets:
+            targets.append(ref.group("target"))
     return targets
 
 
@@ -1570,21 +1577,12 @@ def _make_calc_resolver(project: Project, by_key: dict[str, Item]):
             raise calc.CalcError(
                 f"cannot resolve {reference!r}: {display}'s own calc failed"
             )
-        if not hasattr(target, "_env"):
-            # The scheduler's edges come from fence lines only
-            # (docs/math.md, known gaps), so a reference that lives only
-            # in an inline span runs before its target is evaluated.
-            # Listing what the target "defines" from its empty env would
-            # blame the target for a value it does define -- run-12
-            # F12-5: `DEC-001 does not define 'V_in' (it defines no calc
-            # values)` for a target whose fence defines V_in, exactly.
-            raise calc.CalcError(
-                f"cross-item reference {reference!r}: {display} has not "
-                "been evaluated yet -- a reference used only in an "
-                "inline span creates no evaluation-order edge, so this "
-                "span can run before the target's calc; keep this "
-                "reference in a calc fence"
-            )
+        # `not hasattr(target, "_env")` is unreachable here: the scheduler
+        # walks `_calc_reference_targets`, which names every cross-item
+        # reference of the item -- fence lines and inline spans alike -- so
+        # a resolvable, non-external, non-failed target is always evaluated
+        # (or cycle-marked, caught above) before this resolver runs. Run-12
+        # F12-5's "has not been evaluated yet" message died with the gap.
         value = target._env.get(name)
         if value is None:
             defined = sorted(target._env)
@@ -1607,7 +1605,6 @@ def _make_source_resolver(
     records: dict,
     resolved: dict,
     uses: list,
-    inline_span: list[bool] | None = None,
 ):
     """The resolver a `source("path", "key")` line calls: authorization by the
     same-item citation rule, then the value the lockfile pinned. It never opens
@@ -1617,11 +1614,11 @@ def _make_source_resolver(
 
     `resolved` maps the authored (path, key) to (canonical path, locked text or
     None) for the row's provenance badge; `uses` accumulates every use for the
-    content hash, `None` standing for a value that did not resolve.
-    `inline_span`, when given, is a one-slot flag the caller sets while an
-    inline span is evaluating: key discovery reads calc fences only, so the
-    span form's miss needs the fence-form advice, not a fetch it can never
-    complete (run-12 F12-6)."""
+    content hash, `None` standing for a value that did not resolve. The span
+    form is the same call with the same advice: `collect_source_uses` reads
+    spans too (slice 2), so `refdes fetch` pins what a span names, and the
+    run-12 F12-6 fence-form-only dead end is gone.
+    """
 
     def resolve(path: str, key: str) -> str:
         canon, problem = citations_mod.authorize_source_path(project, item, path)
@@ -1632,14 +1629,6 @@ def _make_source_resolver(
         resolved[(path, key)] = (canon, text)
         uses.append((canon, key, text))
         if text is None:
-            if inline_span is not None and inline_span[0]:
-                raise calc.CalcError(
-                    f"source({path!r}, {key!r}) has no locked value -- "
-                    "key discovery reads calc fences only, so a source() "
-                    "used only in an inline span is never pinned; write "
-                    f"the line in a calc fence and run 'refdes fetch "
-                    f"--path {canon}'"
-                )
             raise calc.CalcError(
                 f"source({path!r}, {key!r}) has no locked value -- run "
                 f"'refdes fetch --path {canon}' to extract and pin it"
@@ -1733,15 +1722,10 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
         project._lockfile_problem = problem
     source_resolved: dict[tuple[str, str], tuple[str, str | None]] = {}
     item._source_uses = []
-    # True while an inline span is evaluating, so the source resolver can
-    # tell the span form's dead end from a fence form's fixable miss
-    # (run-12 F12-6); the event loop below is sequential, so a list is
-    # enough -- no locking.
-    span_context = [False]
     env: dict[str, calc.Value] = {
         calc.RESOLVER_KEY: _make_calc_resolver(project, by_key),
         calc.SOURCE_RESOLVER_KEY: _make_source_resolver(
-            project, item, records, source_resolved, item._source_uses, span_context
+            project, item, records, source_resolved, item._source_uses
         ),
     }
     # name -> line first assigned, threaded across every block of this item
@@ -1820,12 +1804,8 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
     events.sort(key=lambda event: event[0])
     for _offset, event in events:
         if isinstance(event, inline_calc.InlineSpan):
-            span_context[0] = True
-            try:
-                if _run_inline_span(project, item, event, env, origins):
-                    failed = True
-            finally:
-                span_context[0] = False
+            if _run_inline_span(project, item, event, env, origins):
+                failed = True
             continue
         block, block_id = event
         start_line = item.body_line + _offset if item.body_line is not None else None
@@ -1913,15 +1893,19 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
 
 
 def run_calcs(project: Project) -> None:
-    """Evaluate every local item's calc blocks in dependency order.
+    """Evaluate every local item's calc blocks and inline calc spans in
+    dependency order.
 
     A cross-item reference (`V_in = DEC-PWR-001.V_in`, finding 35) makes the
     per-item passes of the past a graph over items: the reference edges are
     walked first and each item is evaluated only after everything it reads
-    from, so a target's `env` is ready when the resolver asks for it. Each
-    item's env is computed exactly once and cached on the item (`_env`),
-    which is the whole state, so the scheduler is a memoised DFS post-order
-    and `run_checks` keeps finding `_env` where it always did.
+    from, so a target's `env` is ready when the resolver asks for it. The edges
+    come from fence lines *and* inline span references
+    (docs/design/inline-calc.md section 3), so a reference lives in whichever
+    form an author chose. Each item's env is computed exactly once and cached
+    on the item (`_env`), which is the whole state, so the scheduler is a
+    memoised DFS post-order and `run_checks` keeps finding `_env` where it
+    always did.
 
     A cycle is an error naming the full path (`a -> b -> a`), following the
     `blocked_by cycle:` (blocked.py) and `equation cycle:` (calc.py) shapes.
@@ -2203,10 +2187,26 @@ def run_checks(project: Project) -> None:
 #      never recorded image digests, and reconstructing formats <= 4 ignores
 #      images, which is what keeps the bump from making any existing item or
 #      seal look edited (the keys.md §5(c) carry-forward rule).
+#   6 (2026-10-19, docs/design/inline-calc.md section 3) -- inline calc spans
+#      join the dependency scans and the hash: a span whose whole rhs is a
+#      cross-item reference (`v := DEC-001.V_in`) is a real dependency, so the
+#      scheduler orders the target first, the reference's resolved key and
+#      resolved value enter the calc-reference hash, and the body reduces the
+#      reference's target half to that key exactly as a fence line's does; a
+#      span's source() call joins the source-inputs hash. The arithmetic of
+#      every triggered span (name, rhs, unit -- never the author's stored
+#      result) joins the narrow arithmetic probe, so an inline-only item
+#      finally gets a calc_hash. An item with no triggered span has the exact
+#      same payload as format 5, so no existing item's hash moves; spans with
+#      only literal arithmetic keep their old content hash (they gain only a
+#      probe, which content hashing never sees). Reconstruction of formats
+#      <= 5 ignores span inputs, which is what keeps the bump from making any
+#      existing baseline entry, seal, or audit look edited (the keys.md §5(c)
+#      carry-forward rule).
 # Recorded per baseline entry (lifecycle.py) so a partially-migrated baseline
 # stays precisely describable; consulted by the migration in
 # lifecycle.py/seal.py/keys.py, never by an ordinary build.
-HASH_FORMAT = 5
+HASH_FORMAT = 6
 
 
 def _hash_payload(
@@ -2439,14 +2439,19 @@ def _checks_hash_value(by_key: dict[str, Item], project: Project, entries) -> ob
     return reduced
 
 
-def _calc_reference_values(by_key: dict[str, Item], project: Project, item: Item):
-    """Every cross-item calc reference in ``item``'s blocks, in source order,
-    as ``(target text, name, resolved target item or None, resolved Value or
-    None)``. The one place a reference line is resolved against the *evaluated*
-    project, shared by the content hash (`_calc_refs_hash_value`) and the
-    baseline snapshot (`calc_reference_snapshot`) so the two can never disagree
-    about what a reference resolved to. Unresolvable pieces come back ``None``;
-    the build has already reported them at the referring line."""
+def _calc_reference_values(
+    by_key: dict[str, Item], project: Project, item: Item, include_inline: bool = False
+):
+    """Every cross-item calc reference in ``item``'s blocks -- and, with
+    ``include_inline``, its inline calc spans too -- as ``(target text, name,
+    resolved target item or None, resolved Value or None)``, fence lines
+    first in source order, then spans in source order. The one place a
+    reference is resolved against the *evaluated* project, shared by the
+    content hash (`_calc_refs_hash_value`, gated by hash format) and the
+    baseline snapshot (`calc_reference_snapshot`, always current) so the two
+    can never disagree about what a reference resolved to. Unresolvable
+    pieces come back ``None``; the build has already reported them at the
+    referring line."""
     out = []
     for block in calc.extract_blocks(item.body):
         for raw_line in block.splitlines():
@@ -2463,6 +2468,16 @@ def _calc_reference_values(by_key: dict[str, Item], project: Project, item: Item
             if target is not None and not target.external:
                 value = getattr(target, "_env", {}).get(ref.group("name"))
             out.append((ref.group("target"), ref.group("name"), target, value))
+    if include_inline:
+        for span in inline_calc.triggered_spans(item.body):
+            ref = inline_calc.span_cross_ref(span)
+            if ref is None:
+                continue
+            target = resolve_link_target(by_key, project, ref.group("target"))
+            value = None
+            if target is not None and not target.external:
+                value = getattr(target, "_env", {}).get(ref.group("name"))
+            out.append((ref.group("target"), ref.group("name"), target, value))
     return out
 
 
@@ -2472,10 +2487,17 @@ def calc_reference_snapshot(project: Project, item: Item) -> dict[str, str]:
     can say *which* upstream value moved and from what (finding 35 §4). Keyed
     on the target's key (its display id, when keyless), so an upstream rename
     does not look like a moved value; the text is the readable result and
-    bounds, e.g. ``12 V (11.4 V … 12.6 V)``. Empty for an item with none."""
+    bounds, e.g. ``12 V (11.4 V … 12.6 V)``. Empty for an item with none.
+
+    Inline spans enter the snapshot under the same format gate as the content
+    hash (``HASH_FORMAT >= 6``), so a stamped snapshot records exactly the
+    references the stamp's own format hashes.
+    """
     by_key = _key_index(project)
     snapshot: dict[str, str] = {}
-    for _target_str, name, target, value in _calc_reference_values(by_key, project, item):
+    for _target_str, name, target, value in _calc_reference_values(
+        by_key, project, item, include_inline=HASH_FORMAT >= 6
+    ):
         if target is None or value is None:
             continue
         text = calc.format_value(value, project.sigfigs)
@@ -2484,9 +2506,15 @@ def calc_reference_snapshot(project: Project, item: Item) -> dict[str, str]:
     return snapshot
 
 
-def _calc_refs_hash_value(by_key: dict[str, Item], project: Project, item: Item):
+def _calc_refs_hash_value(
+    by_key: dict[str, Item], project: Project, item: Item, include_inline: bool = False
+):
     """What an item's cross-item calc references contribute to its content
-    hash (HASH_FORMAT 4, finding 35 §4), or ``None`` when it has none.
+    hash (HASH_FORMAT 4, finding 35 §4), or ``None`` when it has none. With
+    ``include_inline`` (HASH_FORMAT 6, docs/design/inline-calc.md section 3),
+    an inline span's whole-right-hand-side reference counts as one of those
+    references, and its target half is reduced to the same token in the
+    hashed body text.
 
     Returns ``(body_text, resolved)``. ``resolved`` lists, in source order,
     each reference's ``[target token, name, value signature]``: the target
@@ -2504,7 +2532,7 @@ def _calc_refs_hash_value(by_key: dict[str, Item], project: Project, item: Item)
     reports that as an error at the referring line, this only has to be
     deterministic and distinct from any real value.
     """
-    refs = _calc_reference_values(by_key, project, item)
+    refs = _calc_reference_values(by_key, project, item, include_inline=include_inline)
     if not refs:
         return None
     tokens = {t: _link_hash_token(by_key, project, t) for t, *_ in refs}
@@ -2519,7 +2547,9 @@ def _calc_refs_hash_value(by_key: dict[str, Item], project: Project, item: Item)
     from . import links as links_mod
 
     body_lines = item.body.splitlines()
-    links_mod._calc_ref_rewrites(body_lines, 0, len(body_lines), tokens)
+    links_mod._calc_ref_rewrites(
+        body_lines, 0, len(body_lines), tokens, include_inline=include_inline
+    )
     return "\n".join(body_lines), resolved
 
 
@@ -2704,6 +2734,10 @@ def hash_payload_builder(project: Project, hash_format: int):
     Format 5 (editor-image-upload.md §15.6, 2026-09-25): format 4, plus an
     item's referenced images hash as resolved path + content digest
     (_image_inputs_hash_value); an item with none is identical to format 4.
+    Format 6 (docs/design/inline-calc.md section 3, 2026-10-19): format 5,
+    plus an inline calc span's cross-item reference counts as a calc
+    reference (_calc_refs_hash_value with ``include_inline``); an item with
+    no such span is identical to format 5.
     """
     if hash_format <= 1:
         return lambda item, spec: _hash_payload(
@@ -2716,8 +2750,11 @@ def hash_payload_builder(project: Project, hash_format: int):
         (lambda entries: _checks_hash_value(by_key, project, entries))
         if hash_format >= 3 else _checks_display_only
     )
+    include_inline = hash_format >= 6
     calc_refs = (
-        (lambda item: _calc_refs_hash_value(by_key, project, item))
+        (lambda item: _calc_refs_hash_value(
+            by_key, project, item, include_inline=include_inline
+        ))
         if hash_format >= 4 else None
     )
     source_inputs = _source_inputs_hash_value if hash_format >= 4 else None

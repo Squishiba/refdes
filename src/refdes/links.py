@@ -1043,19 +1043,60 @@ def _report_missing_checks(project: Project, count: int) -> None:
 
 
 def _calc_ref_rewrites(
-    lines: list[str], start: int, end: int, replacements: dict[str, str]
+    lines: list[str],
+    start: int,
+    end: int,
+    replacements: dict[str, str],
+    include_inline: bool = False,
 ) -> set[str]:
     """Rewrite bare calc-reference targets inside one item's line span, and
     refresh stale composite display halves, in place. Operates only on the
     target half of a `name = TARGET.NAME` line (pipe unit stripped first), so
     ordinary expressions and comments are never touched. Returns the *old
     target strings* actually rewritten -- what the caller attributes back to
-    the item so in-memory state follows only real file changes."""
+    the item so in-memory state follows only real file changes.
+
+    With ``include_inline``, the target half of an inline calc span's
+    cross-item reference (`TARGET.NAME` as the span's whole right-hand side)
+    gets the same treatment: a span sitting in prose outside any fence, its
+    content replaced in place so the author's surrounding text, the stored
+    result and the line count all survive exactly. Fence lines stay the
+    fence loop's; `iter_triggered_spans` never reports a span inside a
+    fence."""
     from . import calc as calc_mod
 
     applied: set[str] = set()
+    inline_entries: dict[int, list[tuple[int, int, str, str]]] = {}
+    if include_inline:
+        from . import inline_calc as inline_calc_mod
+        for offset, span_start, span_end, content in inline_calc_mod.iter_triggered_spans(
+            lines[start:end]
+        ):
+            span = inline_calc_mod.parse_span(0, content)
+            ref = inline_calc_mod.span_cross_ref(span)
+            if ref is None:
+                continue
+            target = ref.group("target")
+            new_target = replacements.get(target)
+            if new_target is None:
+                continue
+            inline_entries.setdefault(start + offset, []).append(
+                (span_start, span_end, content.replace(target, new_target, 1), target)
+            )
     for i in range(start, end):
         raw = lines[i]
+        edits = inline_entries.get(i)
+        if edits:
+            # Right-to-left, so each edit's positions stay valid after the
+            # ones to its right are applied.
+            new_raw = raw
+            for span_start, span_end, new_content, _target in sorted(
+                edits, key=lambda e: e[0], reverse=True
+            ):
+                new_raw = new_raw[:span_start] + new_content + new_raw[span_end:]
+            if new_raw != raw:
+                lines[i] = new_raw
+                applied.update(target for *_rest, target in edits)
         code, hash_sign, comment = raw.partition("#")
         line = code.rstrip()
         if not line.strip():
@@ -1155,7 +1196,7 @@ def plan_calc_ref_expansion(
             repl = replacements_by_item.get(id(item))
             if repl:
                 applied_by_item[id(item)] |= _calc_ref_rewrites(
-                    lines, start, end, repl
+                    lines, start, end, repl, include_inline=True
                 )
 
         after = source.render(lines)
@@ -1215,7 +1256,7 @@ def expand_missing_calc_refs(
         # the text the file now holds (line counts are preserved, so every
         # other item's positions stay valid).
         body_lines = item.body.splitlines()
-        _calc_ref_rewrites(body_lines, 0, len(body_lines), replacements)
+        _calc_ref_rewrites(body_lines, 0, len(body_lines), replacements, include_inline=True)
         item.body = "\n".join(body_lines) + ("\n" if item.body.endswith("\n") else "")
 
     if plan.remaining:

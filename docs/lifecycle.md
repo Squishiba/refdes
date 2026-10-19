@@ -244,9 +244,9 @@ gate:
 
 items:
   CMP-PWR-001: {hash: 673e6ba11269f350, type: component, title: "Buck converter",
-    hash_format: 5, key: pktmysgxn8x, verdict: selected}
+    hash_format: 6, key: pktmysgxn8x, verdict: selected}
   LOG-PWR-001: {hash: a1b2c3d4e5f60718, type: log, title: "LDO vs. buck for 3V3 rail",
-    hash_format: 5, key: fd24s541bbt, verdict: accepted, calc_hash: d73ecea8e6f01f1e}
+    hash_format: 6, key: fd24s541bbt, verdict: accepted, calc_hash: d73ecea8e6f01f1e}
   # ... one entry per local item
 ```
 
@@ -264,8 +264,8 @@ project, as `id:` under a surrogate map key once `refdes keys adopt` has run
 (the key *is* the map key there). A pre-keys baseline entry, or a keyless
 item, carries neither. The rest only when they apply —
 `verdict` for a type with a verdict-bearing status field,
-`calc_hash`/`calc_refs` for an item with calc blocks or cross-item calc
-references.
+`calc_hash`/`calc_refs` for an item with calc blocks, inline calc spans, or
+cross-item calc references.
 
 Scoped to local items only, matching every other manifest in the project
 (imports are read-only, and not this project's readiness question).
@@ -281,9 +281,9 @@ does.
 
 ### Hash format versioning
 
-Each baseline entry records `hash_format` (currently **5**).
+Each baseline entry records `hash_format` (currently **6**).
 
-Five definitions so far, oldest first. Format 1 hashed display-id link
+Six definitions so far, oldest first. Format 1 hashed display-id link
 targets. Format 2 switched those to resolved keys and left `checks: against:`
 raw. Format 3 reduced `checks: against:` to keys too. Format 4 added
 cross-item calc references, hashing each one's resolved key and the value it
@@ -291,10 +291,17 @@ resolved to, and joined to the same format number `source()` values: an item
 with a `source("path", "key")` calc line hashes each (canonical path, key,
 locked text) it resolved. Format 5 added images: every local image an item's
 body references hashes its resolved project-relative path and content digest.
+Format 6 added inline calc spans: a span whose whole right-hand side is a
+cross-item reference (`v := DEC-001.V_in`) is hashed like a fence line's
+reference, and a span's `source()` call hashes like a fence's, so the item's
+dependencies and its arithmetic probe cover inline spans, not just fenced
+ones.
 
 An item with no cross-item calc reference and no `source()` line hashes
-exactly as it did under format 3, and an item with no image hashes exactly as
-it did under format 4, so those additions cost an ordinary item nothing.
+exactly as it did under format 3, an item with no image hashes exactly as
+it did under format 4, and an item with no triggered inline span hashes
+exactly as it did under format 5, so those additions cost an ordinary item
+nothing.
 
 When the hash definition evolves, a baseline read for a diff or a stamp
 migrates itself. Each legacy-format entry's hash is recomputed under its

@@ -14,6 +14,7 @@ from __future__ import annotations
 from conftest import write_project_config
 
 from refdes import build as build_mod
+from refdes import cli as cli_mod
 from refdes import inline_calc, parse
 from refdes.schema import load_project
 
@@ -491,11 +492,13 @@ def test_stale_display_never_shows_a_value_that_looks_accepted(tmp_path):
     )
 
 
-def test_span_only_cross_item_reference_names_the_ordering_gap(tmp_path):
-    # F12-5: the scheduler reads dependency edges from fence lines only, so
-    # a reference that lives only in a span runs before its target is
-    # evaluated -- and the old message blamed the target ("it defines no
-    # calc values") for a name its fence defines.
+def test_span_only_cross_item_reference_creates_an_ordering_edge(tmp_path):
+    # F12-5, closed by slice 2 (docs/design/inline-calc.md section 3): the
+    # scheduler's edges come from fence lines and inline spans alike, so a
+    # reference that lives only in a span runs after its target's calc and
+    # resolves. The gap this test pinned -- the span running first, the old
+    # message blaming the target ("it defines no calc values") for a name
+    # its fence defines -- is now the scheduler's job.
     project = _build_items(
         tmp_path,
         {
@@ -505,13 +508,10 @@ def test_span_only_cross_item_reference_names_the_ordering_gap(tmp_path):
             "```calc\nV_in = 2 V\n```\n",
         },
     )
-    assert _inline_messages(project) == [
-        "inline calc v: cross-item reference 'DEC-002.V_in': DEC-002 has "
-        "not been evaluated yet -- a reference used only in an inline span "
-        "creates no evaluation-order edge, so this span can run before the "
-        "target's calc; keep this reference in a calc fence"
-    ]
-    # The fence form is the control: same reference, scheduler edge, clean.
+    assert project.errors == []
+    assert _inline_messages(project) == []
+    assert "2 V" in _item(project).body_html
+    # The fence form is the control: same reference, same clean result.
     project = _build_items(
         tmp_path,
         {
@@ -525,11 +525,13 @@ def test_span_only_cross_item_reference_names_the_ordering_gap(tmp_path):
     assert "2 V" in _item(project).body_html
 
 
-def test_span_source_advice_points_at_the_fence_form(tmp_path):
-    # F12-6: a span-only source() can never be pinned -- key discovery
-    # reads calc fences, so `refdes fetch` hashes the file, extracts no
-    # key, and the same error returns forever. The advice says so and
-    # points at the fence form; the fence form keeps the fetch advice.
+def test_span_source_is_pinned_by_fetch(tmp_path):
+    # F12-6, closed by slice 2 (docs/design/inline-calc.md section 3): key
+    # discovery reads inline spans, so the span's own miss carries the
+    # standard fetch advice, `refdes fetch` pins the key a span names, and
+    # the span resolves -- the fence-form dead end this test pinned (fetch
+    # hashed the file, extracted no key, the same error returned forever)
+    # is gone.
     write_project_config(
         tmp_path,
         "site: { title: T, out: _site }\n"
@@ -548,15 +550,28 @@ def test_span_source_advice_points_at_the_fence_form(tmp_path):
         "  - path: analysis/budget.csv\n---\n\n" + span_body,
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
-    parse.load_items(project)
-    build_mod.build(project)
+    config = str(tmp_path / "refdes-project.yaml")
+
+    def build():
+        project = load_project(config_path=config)
+        parse.load_items(project)
+        build_mod.build(project)
+        return project
+
+    # Before the fetch the span is just an unpinned use: the advice the
+    # fence form gets, the fix the fence form gets.
+    project = build()
     assert _inline_messages(project) == [
         "inline calc k1: source('analysis/budget.csv', 'k1') has no locked "
-        "value -- key discovery reads calc fences only, so a source() used "
-        "only in an inline span is never pinned; write the line in a calc "
-        "fence and run 'refdes fetch --path analysis/budget.csv'"
+        "value -- run 'refdes fetch --path analysis/budget.csv' to extract "
+        "and pin it"
     ]
+    # Discovery reads the span: the fetch pins the key, no fence needed.
+    assert cli_mod.main(["-c", config, "fetch"]) == 0
+    project = build()
+    assert _inline_messages(project) == []
+    assert "5 V" in project.item_by_id("DEC-001").body_html
+
     # The fence form is the control: fetch genuinely can pin it from there.
     (items / "a.md").write_text(
         "---\nid: DEC-001\ntype: decision\ncitations:\n"
@@ -926,4 +941,3 @@ def test_ambiguous_span_is_reported_not_resolved(monkeypatch):
     assert span.error is not None
     assert "ambiguous" in span.error
     assert "a := 1 = 2 V" in span.error and "a := 1 = 2 V = 3 V" not in span.error
-

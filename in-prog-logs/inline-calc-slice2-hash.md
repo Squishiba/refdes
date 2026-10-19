@@ -29,16 +29,63 @@ block-only hash byte-identical to the blocks-only formula, positional
 ordering, malformed-span probe, stale-signal silent/active). Full affected
 suites: 257 passed.
 
-## Remaining steps
+## Step 2 (done)
 
-2. Cross-item span refs as dependency edges: `_calc_reference_targets` /
-   `_calc_reference_values` / `_calc_refs_hash_value` (gated format >= 6),
-   `links._calc_ref_rewrites` span-aware.
-3. `source()` spans: `citations.collect_source_uses` span discovery, retire
-   the obsolete span source advice, docs.
-4. `HASH_FORMAT` 5 -> 6 with golden no-inline-span byte-identity recorded
-   from `origin/main` code via `.scratch/main-src`, old baseline/seal
-   survival, adversarial (cycle/missing/sealed/multi-span) tests, changelog.
+Cross-item span refs as dependency edges and hash inputs (all gated
+`HASH_FORMAT >= 6` so reconstruction of formats <= 5 ignores spans):
+`_calc_reference_targets` includes span targets (scheduler orders them —
+F12-5 updated to a passing ordering-edge test); the obsolete "span
+reference not yet evaluated" branch in `_make_calc_resolver` is gone;
+`_calc_reference_values` / `_calc_refs_hash_value` /
+`calc_reference_snapshot` / `hash_payload_builder` take `include_inline`;
+`links._calc_ref_rewrites` rewrites span target halves so expansion
+(`plan_calc_ref_expansion`, `expand_missing_calc_refs`) covers spans.
+Full suite: 4196 passed, 2 skipped.
+
+## Step 3 (done)
+
+`source()` in spans: `citations.collect_source_uses` discovers span
+`source()` calls (so `refdes fetch` pins the keys a span names),
+`serve/sources.py:body_source_pairs` shows them; the obsolete
+"move to the fence form" advice in `_make_source_resolver` is retired
+(F12-6 rewritten as a fetch-pins-the-span test); `docs/math.md` and the
+design doc status updated. Full suite: 4196 passed, 2 skipped.
+
+## Step 4 (this commit; steps 2-3 ride in it — their build.py hunks
+## interleave with the bump's, and the full suite ran green at each step)
+
+`HASH_FORMAT` 5 -> 6. Evidence, all green:
+
+- (a) Golden byte-identity: `.scratch/record_golden.py` builds a fixture
+  with the archived `origin/main` code (format 5), then the branch code
+  rebuilds the same on-disk state — all five items' content hashes, the
+  baseline, the release baseline and the seal file are byte-identical;
+  the inline-span item's content hash is identical (its span is
+  result-only; it gains only a probe). Committed mirror of the rule:
+  `test_block_only_calc_hash_is_the_block_only_hash`,
+  `test_format5_reconstruction_excludes_span_inputs`.
+- (b) Old seal + old baseline (recorded by the main code, no probes,
+  no span refs) verify clean under the new code: no
+  `modified since it was sealed`, no new diagnostics, carry-forward
+  migration silent (`_stale_arithmetic`/`_moved_refs` silent for the
+  missing fields — tests in `tests/test_inline_calc_hash.py`).
+- (c) Editing the referenced value moves the span item's hash and the
+  stale verdict signal fires; a result-only edit moves the content hash
+  (body invalidates) but not the probe
+  (`test_editing_a_referenced_value_moves_the_span_item`,
+  `test_result_only_edit_keeps_the_span_probe`).
+- (d) `fetch` + `fetch --update` of a span's `source()` input moves the
+  item's hash (`test_span_source_edit_moves_the_item`).
+- (e) Adversarial: cycle via a span errors with the cycle path, missing
+  span target gets the standard "does not exist" error, sealed item
+  verifies clean (above), three spans on one item all enter the probe
+  and snapshot (`test_span_reference_cycle_is_reported`,
+  `test_span_missing_target_is_a_clean_error`,
+  `test_several_spans_one_item_all_enter_the_snapshot`).
+
+Docs: `HASH_FORMAT` history comment in `build.py`, `docs/lifecycle.md`
+(format list + baseline examples), `docs/change-tracking.md`,
+`changelog.d/inline-calc-spans-hash.changed.md`.
 
 ## Notes
 

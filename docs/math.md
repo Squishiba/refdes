@@ -346,13 +346,14 @@ is the ordinary "assigned twice" error citing both lines, and a forward use
 is an ordinary unknown-name error. The span itself stays literal code in
 the published page.
 
-Known gaps in this first slice: the build's cross-item evaluation order and
-`refdes fetch`'s key discovery read calc **fences** only. A cross-item
-reference used *only* in an inline span can evaluate before its target, and
-a `source()` used *only* in an inline span can never be pinned — `refdes
-fetch` hashes the file and extracts no keys, so running it from the span's
-advice is a dead end. The diagnostics at the span's line name the gap and
-point at the fence form; keep such uses in a fence for now.
+A cross-item reference or a `source()` call in a span is read exactly as it
+is in a fence: the build evaluates the referenced item first, `refdes fetch`
+pins the key the span names, and a moved upstream value or a re-pinned
+source value moves the item's content hash — an inline span is a dependency
+like a fence line, with no fence-only forms left. The span's arithmetic
+(name, right-hand side, unit assertion) is what the build's arithmetic
+probe and baselines track; the stored result is body text like any other
+edit, so correcting it is a real source change.
 
 ## Writing units
 

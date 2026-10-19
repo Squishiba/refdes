@@ -63,6 +63,7 @@ from pathlib import Path
 
 from .. import calc as calc_mod
 from .. import citations as citations_mod
+from .. import inline_calc
 from .. import sources as sources_mod
 from ..model import Item, Project
 
@@ -998,6 +999,13 @@ def body_source_pairs(project: Project, item: Item, body: str) -> set[tuple[str,
             canon, why = citations_mod.authorize_source_path(project, item, raw_path)
             if not why:
                 pairs.add((canon, key))
+    for span in inline_calc.triggered_spans(body):
+        call = inline_calc.span_source_call(span)
+        if call is None:
+            continue
+        canon, why = citations_mod.authorize_source_path(project, item, call[0])
+        if not why:
+            pairs.add((canon, call[1]))
     return pairs
 
 

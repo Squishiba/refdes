@@ -60,6 +60,7 @@ import yaml
 
 from . import boards as boards_mod
 from . import calc as calc_mod
+from . import inline_calc
 from . import sources as sources_mod
 from . import textio
 from .model import CitationSpec, CitationStatus, Item, PartUsage, Project
@@ -1525,6 +1526,11 @@ class SourceUse:
 
 
 def collect_source_uses(project: Project) -> list[SourceUse]:
+    """Every `source()` call the project's items ask for -- fence lines and
+    inline calc spans (docs/design/inline-calc.md section 3) -- so `refdes
+    fetch` pins the keys a span uses exactly as it pins a fence line's.
+    Discovery is grammar-only, like the evaluator's own read of a span
+    (`inline_calc.span_source_call`)."""
     out: list[SourceUse] = []
     for item in project.local_items:
         for block, offset, _block_id in calc_mod.extract_blocks_with_lines(item.body):
@@ -1535,6 +1541,16 @@ def collect_source_uses(project: Project) -> list[SourceUse]:
                 )
                 canon, problem = authorize_source_path(project, item, path)
                 out.append(SourceUse(item, name, path, key, line, canon, problem))
+        for span in inline_calc.triggered_spans(item.body):
+            call = inline_calc.span_source_call(span)
+            if call is None:
+                continue
+            line = (
+                item.body_line + span.line_offset
+                if item.body_line is not None else None
+            )
+            canon, problem = authorize_source_path(project, item, call[0])
+            out.append(SourceUse(item, span.name, call[0], call[1], line, canon, problem))
     return out
 
 
