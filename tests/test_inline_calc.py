@@ -566,12 +566,6 @@ def test_span_source_is_pinned_by_fetch(tmp_path):
         "value -- run 'refdes fetch --path analysis/budget.csv' to extract "
         "and pin it"
     ]
-    # Discovery reads the span: the fetch pins the key, no fence needed.
-    assert cli_mod.main(["-c", config, "fetch"]) == 0
-    project = build()
-    assert _inline_messages(project) == []
-    assert "5 V" in project.item_by_id("DEC-001").body_html
-
     # The fence form is the control: fetch genuinely can pin it from there.
     (items / "a.md").write_text(
         "---\nid: DEC-001\ntype: decision\ncitations:\n"
@@ -587,6 +581,17 @@ def test_span_source_is_pinned_by_fetch(tmp_path):
         "-- run 'refdes fetch --path analysis/budget.csv' to extract and "
         "pin it"
     ) in [d.message for d in project.diagnostics]
+
+    # Discovery reads the span: the fetch pins the key, no fence needed.
+    (items / "a.md").write_text(
+        "---\nid: DEC-001\ntype: decision\ncitations:\n"
+        "  - path: analysis/budget.csv\n---\n\n" + span_body,
+        encoding="utf-8",
+    )
+    assert cli_mod.main(["-c", config, "fetch"]) == 0
+    project = build()
+    assert _inline_messages(project) == []
+    assert "5 V" in project.item_by_id("DEC-001").body_html
 
 
 # =================================================================== run-12
