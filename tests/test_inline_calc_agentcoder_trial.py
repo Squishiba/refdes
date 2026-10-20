@@ -9,9 +9,9 @@ Base-state note (probe, not assumption): the trigger/verify slice (sections
 old-behavior controls, green on the base. The section-3 slice -- calc_hash
 extension, cross-item/source() dependency scans over spans -- is what #347
 adds: those tests are EXPECTED RED on this base and are marked EXPECTED-RED
-in their docstrings. The `release_gate.inline_calc_results` rule is #345's
-(not merged at this head, not #347's work): the gate pair below integrates
-against it and skips until it lands (see GATE_INTEGRATION). Unresolved
+in their docstrings. The `release_gate.inline_calc_results` rule is
+#345's (merged c3073c6, not #347's work): the gate pair below integrates
+#347's spans against it (see GATE_INTEGRATION). Unresolved
 oracles (exact tie boundary, gate message wording, span-ref display-half
 refresh after rename) are deliberately not asserted.
 
@@ -26,12 +26,13 @@ Validated-copy note (adjusted at the #347 head, rebased on #351):
   cases are adapted to the whole-RHS form the contract specifies
   (docs/math.md, "Inline calc": the RHS is the ordinary calc-line grammar
   "with the same restrictions"; docs/design/inline-calc.md section 3).
-- the gate pair is skipped at this head (see GATE_INTEGRATION): the rule
-  name is a configuration error until #345 merges. The exemption case was
-  adapted at #345's head: the blind copy authored the stale result AFTER
-  the capture, and #345's implemented exemption is deliberately narrow --
-  a post-capture edit leaves the live item editable, so only a capture
-  taken IN the stale state (digest matching, no later edit) is frozen.
+- the gate pair integrates against #345's `release_gate.inline_calc_results`
+  rule (merged c3073c6; GATE_INTEGRATION skips it only on checkouts
+  predating that merge). The exemption case was adapted at #345's head:
+  the blind copy authored the stale result AFTER the capture, and #345's
+  implemented exemption is deliberately narrow -- a post-capture edit
+  leaves the live item editable, so only a capture taken IN the stale
+  state (digest matching, no later edit) is frozen.
 """
 
 from __future__ import annotations
@@ -48,19 +49,20 @@ from refdes import cli as cli_mod
 from refdes.model import RELEASE_GATE_DEFAULTS
 
 # The gate pair below integrates against #345's `release_gate.inline_calc_results`
-# rule, which does not exist at this head (not merged): the rule name is a
-# configuration error here, so the pair skips -- not a #347 defect surface.
-# The skip is CONDITIONAL (round-3/round-5 review, chunk 2): it tests for
-# the RULE ITSELF in the rule registry (`RELEASE_GATE_DEFAULTS`,
-# src/refdes/model.py) -- NOT for a module name: #345 adds no module, it
-# extends `model.py`/`lifecycle.py`, so a `find_spec` for a hypothetical
-# release_gate.py would stay true forever and the pair would skip silently
-# forever. Testing registry membership, the pair starts running -- against
-# the real rule -- the moment #345 lands in this checkout.
+# rule (merged: c3073c6) -- an integration of #347's spans against that
+# gate, not a #347-only defect surface. The skip is CONDITIONAL
+# (round-3/round-5 review, chunk 2): it tests for the RULE ITSELF in the
+# rule registry (`RELEASE_GATE_DEFAULTS`, src/refdes/model.py) -- NOT for
+# a module name: #345 added no module, it extended `model.py`/
+# `lifecycle.py`, so a `find_spec` for a hypothetical release_gate.py
+# would stay true forever and the pair would skip silently forever.
+# Testing registry membership, the pair runs wherever the rule exists
+# (this head: it does) and skips only on checkouts that predate it.
 GATE_INTEGRATION = pytest.mark.skipif(
     "inline_calc_results" not in RELEASE_GATE_DEFAULTS,
     reason="integrates #347 spans against #345's release_gate.inline_calc_results"
-    " rule (github issue/PR #345); runs automatically once #345 is merged",
+    " rule (github issue/PR #345, merged c3073c6); runs wherever the rule"
+    " exists, skips only on checkouts predating it",
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "agentcoder347"

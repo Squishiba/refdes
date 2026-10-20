@@ -990,6 +990,14 @@ def body_source_pairs(project: Project, item: Item, body: str) -> set[tuple[str,
     `citations.stage_source_pins` is about to pin one, and a pin nothing cites is
     dead state in a tracked file (editor-source-picker.md §4).
 
+    Both source forms are walked, as in `collect_source_uses`: `source()` calls
+    in calc fences, and calls inside inline calc spans -- the span loop's
+    `inline_calc.span_source_call` applies the same evaluator-order rules the
+    spans get at build time, so a span's `source()` is a pair here exactly when
+    it is one to the evaluator. The authorization check is shared: the same
+    citations field authorizes both forms, and a span names no new reader
+    (docs/design/inline-calc.md §3).
+
     A path this item does not cite is not a pair, and is not reported here: that
     is the validator's error to make, on the line that made it.
     """

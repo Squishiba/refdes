@@ -1506,10 +1506,11 @@ def compute_coverage(project: Project, chain_graph=None) -> None:
 def _calc_reference_targets(item) -> list[str]:
     """The target strings of every cross-item reference in this item -- calc
     blocks and inline calc spans -- fence lines first, then spans, each group
-    in source order, deduped: the dependency edges the scheduler walks. Parsed with the same regexes `evaluate_block`
-    uses (pipe unit stripped first; a span's whole right-hand side must be
-    the reference, same `CROSS_REF_RE` as the evaluator), so a line is a
-    dependency edge here exactly when it is a reference there -- run-12
+    in source order, deduped: the dependency edges the scheduler walks.
+    Parsed with the same regexes `evaluate_block` uses (pipe unit stripped
+    first; a span's whole right-hand side must be the reference, same
+    `CROSS_REF_RE` as the evaluator), so a line is a dependency edge here
+    exactly when it is a reference there -- run-12
     F12-5: an edge from a fence line only was the gap that let a span
     reference run before its target's calc."""
     targets: list[str] = []

@@ -23,17 +23,16 @@ passed.
 Cross-item span refs as dependency edges and hash inputs (gated
 `HASH_FORMAT >= 6`): `_calc_reference_targets` includes span targets
 (scheduler orders them -- F12-5 is now a passing ordering-edge test), the
-"span reference not yet evaluated" branch in `_make_calc_resolver` is
-gone, the ref-scan/hash helpers take `include_inline`, and
-`links._calc_ref_rewrites` rewrites span target halves so expansion covers
-spans. Full suite: 4196 passed, 2 skipped.
+"span reference not yet evaluated" resolver branch is gone, the
+ref-scan/hash helpers take `include_inline`, and `links._calc_ref_rewrites`
+rewrites span target halves so expansion covers spans. Full suite: 4196.
 
 ## Step 3 (done)
 
 `source()` in spans: `citations.collect_source_uses` discovers span
 `source()` calls (fetch pins them), `serve/sources.py:body_source_pairs`
 shows them; the "move to the fence form" advice is retired (F12-6
-rewritten as a fetch-pins-the-span test); docs updated.
+rewritten). Docs updated.
 
 ## Step 4 (this commit; steps 2-3 ride in it — their build.py hunks
 interleave with the bump's, and the full suite ran green at each step)
@@ -43,16 +42,13 @@ interleave with the bump's, and the full suite ran green at each step)
 - (a) Golden byte-identity: `.scratch/record_golden.py` builds a fixture
   with the archived `origin/main` code (format 5), then the branch code
   rebuilds the same on-disk state — all five items' content hashes, the
-  baseline, the release baseline and the seal file are byte-identical;
-  the inline-span item's content hash is identical (its span is
-  result-only; it gains only a probe). Committed mirror of the rule:
+  baseline, the release baseline and the seal file are byte-identical
+  (the result-only span item gains only a probe). Committed mirror:
   `test_block_only_calc_hash_is_the_block_only_hash`,
   `test_format5_reconstruction_excludes_span_inputs`.
-- (b) Old seal + old baseline (recorded by the main code, no probes,
-  no span refs) verify clean under the new code: no
-  `modified since it was sealed`, no new diagnostics, carry-forward
-  migration silent (`_stale_arithmetic`/`_moved_refs` silent for the
-  missing fields — tests in `tests/test_inline_calc_hash.py`).
+- (b) Old seal + old baseline (recorded by the main code) verify clean
+  under the new code: no `modified since it was sealed`, no new
+  diagnostics, carry-forward migration silent (tests).
 - (c) Editing the referenced value moves the span item's hash and fires
   the stale signal; a result-only edit moves the content hash, not the
   probe. (d) `fetch`/`fetch --update` of a span's `source()` input moves
@@ -62,29 +58,26 @@ interleave with the bump's, and the full suite ran green at each step)
   occurrence. Docs: `build.py` format-history comment, `docs/lifecycle.md`,
   `docs/change-tracking.md`, `changelog.d/inline-calc-spans-hash.changed.md`.
 
-## Review round (PR #347 head c5c3b8d)
+## Review round 1 (at the first review head of PR #347)
 
 Three cross-model reviewers (chunks: docs+build / inline_calc / links+serve);
-chunks 2 and 3 returned CHANGES REQUESTED, chunk 1 no findings. Fixes, each
-with a red-on-this-head test first:
+chunks 2 and 3 CHANGES REQUESTED, chunk 1 none. Fixes, each with a
+red-on-this-head test first:
 
 - RHS-comment parity (chunk 2): `span_cross_ref`/`span_source_call` strip a
   trailing `#` comment with the evaluator's quote-aware `split_comment`
-  before matching (`evaluate_block` strips it before the ref/source
-  regexes) -- raw-text matching hid commented references from the scheduler
-  (F12-5 AttributeError leak) and from `fetch` (F12-6 dead end).
+  before matching -- raw-text matching hid commented references from the
+  scheduler (F12-5 leak) and from `fetch` (F12-6 dead end).
 - Span-scan geometry (chunk 3): `links._calc_ref_rewrites` takes
-  `inline_start`; `plan_calc_ref_expansion` bounds the span scan to
-  `item.body_line` (was `source_line`-1, the front-matter fence). A front
-  matter ending in an unclosed fence marker used to hide every body span
-  (silent non-expansion); a span in front matter used to be rewritten on
-  disk while the in-memory pass rewrote only `item.body`.
+  `inline_start`; the plan bounds the span scan to `item.body_line` (was
+  `source_line`-1, the front-matter fence). An unclosed fence marker at
+  front-matter end hid every body span; a front-matter span was rewritten
+  on disk while the in-memory pass rewrote only `item.body`.
 - Direct coverage (chunk 3): `body_source_pairs` span branch tested in
   `tests/test_serve_sources_accept.py`. Stale comments/labels fixed.
 
-Verified: the 4 new tests fail on `c5c3b8d`, pass after; full suite 4207
-passed, 2 skipped; ruff `--select E9,F` clean on touched files; golden (a)
-byte-identical.
+Verified: the 4 new tests fail on the round-1 head, pass after; full suite
+4207 passed, 2 skipped; ruff clean on touched files; golden byte-identical.
 
 ## Round 2 + rebase onto main (#351) + AgentCoder pilot triage
 
@@ -106,43 +99,51 @@ evaluator only resolves for a whole-RHS ref (calc.py
 `CROSS_REF_RE.match(expression.strip())`) -- a fence control fails
 identically. Verdict: test assumptions, not slice-2 defects; adapted to
 whole-RHS form, gate tests deferred to #345. Strengthened the review's
-weak assertions (span-pin pins the content-hash move; snapshot dedup split
-from probe coverage; malformed-span probe mutation). F1 (reproduced in
-`.scratch/f1verify/`): a pre-slice-2-code fetch rewrites the lockfile
-whole and drops a span's `values:` pins -- recorded as a rollout caveat in
-the changelog fragment (recoverable by a new-code fetch).
+weak assertions. F1 (reproduced in `.scratch/f1verify/`): a pre-slice-2
+fetch rewrites the lockfile whole, dropping a span's `values:` pins --
+changelog rollout caveat.
 
-## Round 3 (head 7f533f6, reviewed at 938f044: chunks 1-2 APPROVE)
+## Round 3 (at the round-2 head; chunks 1-2 APPROVE at the next head)
 
-- Chunk 2 MEDIUM: `parse_span` splits `| unit` BEFORE stripping the
-  trailing `#` comment, the evaluator does the reverse; a comment
-  containing `|` (the unit class excludes `|`) lands the split on the
-  comment's pipe and hides the ref/`source()` from the scans -- reviving
-  the F12-5 leak. `_evaluator_rhs` rebuilds the evaluator's order for the
-  two scan helpers; parse_span's hash field text untouched. The red test
-  needs span-before-target in FILE order (probe project pinned it).
+- Chunk 2 MEDIUM: a comment containing `|` hid the ref/`source()` from
+  the scans (parse_span splits the pipe before the comment is stripped,
+  the evaluator's reverse), reviving the F12-5 leak; `_evaluator_rhs`
+  rebuilds the evaluator's order for the scan helpers. Red needs
+  span-before-target in FILE order (probe project pinned it).
 - Chunk 3 MEDIUM: the in-memory pass of `expand_missing_calc_refs`
-  expanded list-file spans the file path excludes -- first-run
-  calc_hash/rendering not reproducible from the same bytes. Gate:
-  `include_inline=body_line is not None`; red on two-run hash stability.
-  LOW: the fence pass recomputed from the stale `raw` after span edits
-  and clobbered them while `applied` counted them -- re-anchor `raw`.
-- LOW/nits: gate skips `skipif` on `refdes.release_gate` (auto-run when
-  #345 lands); agentcoder docstring dropped its gitignored `.scratch`
-  pointer; `iter_triggered_spans` -> `triggered_span_events`; front-
-  matter line-number comment.
+  expanded list-file spans the file path excludes -- first-run probe
+  not reproducible from the same bytes; gated on `body_line`. LOW: the
+  fence pass clobbered span edits on a line that is both shapes;
+  re-anchor on the span-edited line.
+- LOW/nits: gate skips `skipif` rule presence (see round 5); agentcoder
+  docstring dropped its gitignored `.scratch` pointer;
+  `iter_triggered_spans` -> `triggered_span_events`; front-matter
+  line-number comment.
 
-## Round 4 (head 938f044, chunk 3 CHANGES REQUESTED)
+## Round 4 (at the round-3 head; chunk 3 CHANGES REQUESTED)
 
 The round-2 list-file span skip ran BEFORE `_planned_target` in
 `plan_calc_ref_expansion`, and that call is where the crossed-reference
-refusal-and-warn (keys.md §3 case 2) is emitted -- a stale composite
-span target in a YAML-list-file item (`DEC-001@<key-of-DEC-002>`,
-DEC-001 a different live item) lost the warning the fence-line twin
-keeps (build resolves by key: page shows DEC-002, source says DEC-001,
-only the warning flags the bad merge). Moved the call above the skip
-(skip now only suppresses the WRITE); red on current head (span bytes
-stay unwritten, warning asserted), green after. Suite 4274 passed,
-4 skipped. Red-green method: swap HEAD copies of the module in place --
-`tests/conftest.py` hard-prepends `src`, so a PYTHONPATH overlay is
-ignored under pytest.
+refusal-and-warn (keys.md §3 case 2) is emitted -- a stale composite span
+target in a YAML-list-file item lost the warning its fence-line twin
+keeps (build resolves by key: page shows the key's item, source says
+another; only the warning flags the bad merge). Call now runs first, skip
+only suppresses the WRITE. Red on the round-3 head, green after. Red-green
+method all rounds: swap HEAD module copies in place (conftest hard-prepends
+`src`, so a PYTHONPATH overlay is inert under pytest).
+
+## Round 5 (round-4-head findings; #345 merged, rebased)
+
+#345 merged to main (c3073c6); rebased, resolving the design-doc status
+block. The round-3 `find_spec` gate skip keyed on a module #345 never
+adds -- it skipped forever; now `skipif` on
+`"inline_calc_results" in RELEASE_GATE_DEFAULTS`, and the pair RUNS
+green against the merged rule (18 passed). Blind exemption oracle
+adapted to #345's implemented narrow exemption (capture taken IN the
+stale state, no edit after). Control fence made valid calc so exit 1 can
+only be the citation rule, which the test now names. Ordering test
+observes the resolved value via the stale-result warning.
+`named-calc-blocks.md` node-id/HASH_FORMAT citations re-pinned at 6;
+`body_source_pairs` docstring covers the span walk;
+`_replace_ref_target` span arg typed; long docstring line rewrapped;
+branch-self SHAs stripped from this log (AGENTS policy).
