@@ -1,0 +1,51 @@
+# editor source picker user guide (docs gap, release-readiness audit §5)
+
+Goal: the editor CSV/PDF source-value picker had no user page. Add one
+concise, verified guide section to an existing docs page, plus a changelog
+fragment. Chose `docs/markdown.md` (new `## Picking a source value in the
+browser editor`, after "Citing a datasheet") — same placement pattern as
+the image-upload editor section, and the picker's prerequisite (citations)
+lives on that page.
+
+Verified, not recalled:
+- Panel placement and wiring: item.js appends editor.sourcePicker under the
+  body textarea; editor.js insertSourceLine (caret-in-fence rule, last-fence
+  fallback, no-fence refusal); unit `unit.value = ''` comment "never
+  pre-select a unit"; Accept disabled until unit filled (static tests).
+- Labels read from sourcepicker.js: "Insert source value", "Filter keys…",
+  "Review", "Accept and save", "Unit", "Variable name", "Source key",
+  "Numeric candidates (choose one)", "Whole row", "Quoted row to record",
+  "Column header guess".
+- File-list problems and states: files_payload / _pin_state in
+  serve/sources.py (xlsx "can extract named keys…", remote-without-kept-copy,
+  escapes-root, no-reader, unpinned detail naming `refdes fetch --path`,
+  hash_mismatch detail, missing).
+- PDF: opens at cited page: / resolved section: (page_payload,
+  tests/test_serve_pdf_sources.py); per-page caps and panel-state details
+  (32 MiB, 1000 spans, 200 candidates) in sources.py; remote source()
+  refusal text in citations.authorize_source_path.
+- Accept semantics: one op writes body + pin (test_serve_sources_accept.py
+  "accept_writes_the_body_and_the_lockfile_together",
+  "resolves_with_no_cli_step_in_between", pins the reader's value, sealed /
+  imported / --no-write refusals, changed-file -> fetch --update).
+- Commands run: `refdes serve --help`; `refdes --no-write serve` global flag
+  confirmed in cli.py.
+
+Test runs (venv-refdes, PYTHONPATH=src from this worktree; main checkout is
+at the same commit):
+- tests/test_serve_static.py -k "picker wired / unit field / no csv parse" 4
+  passed; tests/test_serve_sources.py + tests/test_serve_sources_accept.py:
+  67 passed; tests/test_docs_anchors.py: 2 passed (new math.md anchor ok).
+
+Wording fix in review: first draft said rebinding "a key that already names
+another file's value" is refused — the tested rule (citations.py, PDF accept)
+is "already names a different confirmed PDF candidate"; narrowed the sentence
+to match the test.
+
+Scope kept: CSV/PDF picker only (no image picker), no new page, no index.md
+nav change (precedent: the image-upload docs pass didn't touch it).
+Changelog fragment: changelog.d/editor-source-picker-user-guide.added.md,
+category `added`, following the image-upload docs fragment's example.
+
+Status: done — docs section, fragment, and this log committed; branch pushed
+and PR opened.
