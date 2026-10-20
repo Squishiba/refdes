@@ -133,9 +133,11 @@ value equals the stored literal; carry tests at the half-place boundary.
 A stale value is reported on every verification run, including an old
 append-only entry; that historical text is not rewritten (D1). The
 `release_gate.inline_calc_results` rule fails a **release** for stale
-editable items, with default `{release: true, revision: false}`. An item
-already protected as a build seal or captured history is exempt from this
-freshness gate, while its warning remains visible. Landed:
+editable items, with default `{release: true, revision: false}`. An item the
+build locks as a seal, and an item whose live content still matches a capture
+(`capture_index[key][1] is False`), is exempt from this freshness gate, while
+its warning remains visible. A post-capture edit leaves the live item
+editable, so the exemption does not apply to the edited entry. Landed:
 `src/refdes/model.py:RELEASE_GATE_DEFAULTS` lists it,
 `src/refdes/lifecycle.py:_rule_inline_calc_results` reads the build's stale
 warning (tagged `model.INLINE_CALC_STALE`) and exempts entries

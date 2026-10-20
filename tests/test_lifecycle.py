@@ -845,6 +845,52 @@ def test_inline_calc_results_exempt_captured_history(tmp_path):
     assert lifecycle.stamp(project, kind="release", name="rel-a").status == "stamped"
 
 
+def test_inline_calc_results_captured_then_edited_span_blocks_release(tmp_path):
+    """Capturing an entry freezes the captured snapshot, not every future
+    edit. A post-capture edit leaves the live item editable, so a stale span
+    in the edited text must block release (captured_edits' default-off rule
+    is not a substitute for this gate)."""
+    write_project_config(
+        tmp_path,
+        "site: { title: IC, out: _site }\n"
+        "standard: { base: hardware, version: 3 }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    log = items / "log.yaml"
+    log.write_text(
+        "items:\n"
+        "  - id: LOG-001\n"
+        "    type: log\n"
+        "    date: 2026-10-19\n"
+        "    summary: Divider settled.\n"
+        "    body: |\n"
+        "      Settled at `Vfb := 0.8 V * (1 + 10 kohm/2.2 kohm) | V = 9.9 V`.\n",
+        encoding="utf-8",
+    )
+    project = _ic_rebuild(tmp_path)
+    history.capture(str(tmp_path), project.item_by_id("LOG-001"))
+    log.write_text(
+        log.read_text(encoding="utf-8").replace(
+            "summary: Divider settled.",
+            "summary: Divider settled, post-capture edit.",
+        ),
+        encoding="utf-8",
+    )
+    project = _ic_rebuild(tmp_path)
+    assert any("stored result says" in d.message for d in project.warnings)
+    assert any("edited after captured" in d.message for d in project.warnings)
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    stale = next(d for d in project.warnings if "stored result says" in d.message)
+    assert results["inline_calc_results"].status == "FAIL"
+    assert results["inline_calc_results"].offenders == [
+        f"LOG-001: inline calc Vfb ({stale.file}:{stale.line})"
+    ]
+    outcome = lifecycle.stamp(project, kind="release", name="rel-a")
+    assert outcome.status == "gate_failed"
+    assert not os.path.isfile(lifecycle.baseline_path(project, "rel-a"))
+
+
 def test_inline_calc_results_exempt_build_seal(tmp_path):
     """A sealed (build-locked) entry keeps its stale warning and passes the
     gate: the body is locked text, not editable prose (the exemption mirrors

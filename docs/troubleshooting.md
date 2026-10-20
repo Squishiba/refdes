@@ -455,9 +455,11 @@ A warning. The span's stored result is outside the window of its own written
 precision — usually an upstream value moved and the prose wasn't re-run. Fix
 the stored literal to the recomputed value (the source is never rewritten for
 you). By default this also blocks `refdes release`
-(`release_gate.inline_calc_results`; see [lifecycle](lifecycle.md)); a
-protected entry — build seal or captured history — keeps the warning and
-stamps past it. See [inline calc](math.md#inline-calc).
+(`release_gate.inline_calc_results`; see [lifecycle](lifecycle.md)). A build
+seal, or an unedited capture whose live content still matches its snapshot,
+keeps the warning and stamps past the gate; editing the item after capture
+makes the live text editable again, so the gate applies. See [inline
+calc](math.md#inline-calc).
 
 ## Checks
 

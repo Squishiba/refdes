@@ -16,15 +16,11 @@ are exempt and keep their warning; default `{release: true, revision: false}`.
   `_run_inline_span` now tags `code=INLINE_CALC_STALE`.
 - `src/refdes/lifecycle.py`: `_rule_inline_calc_results` registered in
   `_RULES`. Reads `project.warnings` (the build already ran), resolves the
-  item by `item_id`, skips imported items, exempts items where
-  `seal.is_sealed(project, item)` or the item's key is in
-  `history.capture_index(project)`. Fail open: unreadable history store =>
-  captured set empty => entries that *are* captured get exempted via
-  is_sealed? No — fail open means the store error exempts nothing, which
-  would block on captured entries. Mirror of `_rule_captured_edits`:
-  HistoryError/OSError => return []. Kept `captured = set()`, which exempts
-  nothing on a broken store; the build's own warning already says the store
-  declined, same posture as captured_edits. Offenders:
+  item by `item_id`, skips imported items, and exempts build-sealed items.
+  Captures are exempt only when `capture_index` reports their edited flag
+  false; an edit after capture leaves the live text editable and blocks.
+  History-store read failures return no offenders, matching the fail-open
+  posture of `_rule_captured_edits`. Offenders use
   `ID: inline calc <span> (file:line)`.
 - `src/refdes/schema.py`: nothing to change — validation is
   `RELEASE_GATE_DEFAULTS`-driven, so `{release, revision}` mapping accepted,
@@ -34,12 +30,12 @@ are exempt and keep their warning; default `{release: true, revision: false}`.
 
 ## Judgment calls
 
-- Exemption = "already protected", read from the live seals/history store,
-  not from type metadata (a history-sealed log entry is only frozen once
-  captured). Captured-history set from `capture_index` (same read the
-  captured_edits rule uses). Fail-open posture copied from
-  `_rule_captured_edits` (store unreadable => no offenders => release not
-  blocked on a historical entry, per the task's fail-open rule).
+- Exemption = frozen text, read from the live seals/history store, not from
+  type metadata. Build seals are immutable while the release build checks
+  them. Captures are frozen only while their live digest matches the
+  snapshot; `capture_index`'s edited flag makes that distinction explicit.
+  Fail-open posture copied from `_rule_captured_edits` (store unreadable =>
+  no offenders), per the task's fail-open rule.
 - Imported items skipped (their stale spans are the other project's
   problem), like every other rule.
 - Offender carries the warning's own file:line (the span line, clickable)
@@ -71,11 +67,11 @@ are exempt and keep their warning; default `{release: true, revision: false}`.
 
 ## Tests
 
-- `tests/test_lifecycle.py`: 5 new tests (stale editable span blocks +
+- `tests/test_lifecycle.py`: 6 new tests (stale editable span blocks +
   names item/span/line + revision stamps through it; rule off passes;
-  fresh span passes; captured-history exempt; build-seal exempt); the
-  full-gate-block baseline assert now includes
-  `"inline_calc_results": "pass"`.
+  fresh span passes; unedited capture exempt; captured-then-edited span
+  blocks; build-seal exempt); the full-gate-block baseline assert now
+  includes `"inline_calc_results": "pass"`.
 - `tests/test_project_settings.py`: defaults dict updated; new test asserts
   the `{release, revision}` mapping is accepted for the new rule and an
   unknown subkey errors like the others.
@@ -94,3 +90,18 @@ are exempt and keep their warning; default `{release: true, revision: false}`.
 - `ruff check <touched files> --select E9,F` — clean.
 
 Task finished: yes.
+
+## Review round 1 (PR #345, reviewer 46737de9)
+
+- Finding: presence in `capture_index` included edited-after-capture items,
+  so a stale span added after capture was exempt. Fixed by using the index's
+  edited flag; only unedited captures are frozen.
+- Added a regression test that was red on head `575d4fe` and passes after
+  the fix; unedited capture and build-seal tests remain green.
+- Rebased on `origin/main` and reran focused/full tests; results recorded
+  below.
+
+## Review-round verification
+
+- Focused inline-calc tests: see command output recorded after rebase.
+- Full suite: see command output recorded after rebase.

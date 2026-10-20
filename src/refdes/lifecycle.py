@@ -759,19 +759,26 @@ def _rule_inline_calc_results(project: Project) -> list[str]:
     name the item, the span, and the span's line ("LOG-001: inline calc Vout
     (items/log.md:7)"), so the failure is clickable where the CLI is.
 
-    The exemptions are the design's: an item the build locks (a build seal,
-    `seal.is_sealed`) and an item frozen into captured history
-    (`history.capture_index`) are not editable prose a release can demand
-    fresher -- the stale warning stays visible, the gate stays silent. An
-    imported item's stale span is the other project's problem, skipped like
-    every other rule. Fail open on a store that refuses to be read: the
-    rule yields no offenders at all, the posture `_rule_captured_edits`
-    takes for the same store -- the build's own warning already says the
-    check declined, and a release is never blocked on text the tool
-    couldn't prove editable.
+    The exemptions are the design's, read narrowly: an item the build locks
+    (a build seal, `seal.is_sealed`) and an item frozen into captured history
+    are not editable prose a release can demand fresher. The history half
+    uses `history.capture_index`'s edited flag, not merely its presence: only
+    a capture whose live digest still matches the snapshot (flag false) is
+    frozen. A post-capture edit leaves the live item editable, so its stale
+    warning remains a release offender -- `captured_edits` defaults off and
+    cannot be relied on to catch that prose. Imported items' stale spans are
+    the other project's problem, skipped like every other rule. Fail open on
+    a store that refuses to be read: the rule yields no offenders at all, the
+    posture `_rule_captured_edits` takes for the same store -- the build's
+    own warning already says the check declined, and a release is never
+    blocked on text the tool couldn't prove editable.
     """
     try:
-        captured = set(history_mod.capture_index(project))
+        frozen_captures = {
+            key
+            for key, (_event, edited) in history_mod.capture_index(project).items()
+            if not edited
+        }
     except (history_mod.HistoryError, OSError):
         return []
     local = {id(item) for item in project.local_items}
@@ -782,7 +789,7 @@ def _rule_inline_calc_results(project: Project) -> list[str]:
         item = project.item_by_id(diagnostic.item_id) if diagnostic.item_id else None
         if item is None or id(item) not in local:
             continue
-        if seal_mod.is_sealed(project, item) or (item.key and item.key in captured):
+        if seal_mod.is_sealed(project, item) or (item.key and item.key in frozen_captures):
             continue
         location = (
             f" ({diagnostic.file}:{diagnostic.line})"
