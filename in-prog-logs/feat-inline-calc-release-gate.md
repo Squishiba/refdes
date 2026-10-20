@@ -96,7 +96,7 @@ Task finished: yes.
 - Finding: presence in `capture_index` included edited-after-capture items,
   so a stale span added after capture was exempt. Fixed by using the index's
   edited flag; only unedited captures are frozen.
-- Added a regression test that was red on head `575d4fe` and passes after
+- Added a regression test that was red on the pre-fix head and passes after
   the fix; unedited capture and build-seal tests remain green.
 - Rebased on `origin/main` and reran focused/full tests; results recorded
   below.
@@ -118,9 +118,10 @@ Task finished: yes.
 
 ## Review-round verification
 
-- Round 1 regression test was red on `575d4fe` and green after the fix.
-- Round 2 regression test was red on `4e89eab` (gate `pass`, expected `FAIL`)
-  and green after the source-location fix.
+- Round 1 regression test was red on the pre-fix head and green after the
+  fix.
+- Round 2 regression test was red on the pre-fix head (gate `pass`, expected
+  `FAIL`) and green after the source-location fix.
 - Focused rebased run: 7 inline-calc lifecycle tests, 7 release-gate
   settings tests, and 2 docs-anchor tests passed.
 - Full rebased suite: 4194 passed, 2 skipped.
