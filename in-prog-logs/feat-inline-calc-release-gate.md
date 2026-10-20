@@ -103,5 +103,9 @@ Task finished: yes.
 
 ## Review-round verification
 
-- Focused inline-calc tests: see command output recorded after rebase.
-- Full suite: see command output recorded after rebase.
+- The regression test was red on `575d4fe` (the gate reported `pass` where
+  the expected result is `FAIL`) and green after the lifecycle fix.
+- Focused rebased run: 6 inline-calc lifecycle tests, 7 release-gate
+  settings tests, and 2 docs-anchor tests passed.
+- Full rebased suite: 4193 passed, 2 skipped.
+- `ruff check <touched files> --select E9,F`: clean.
