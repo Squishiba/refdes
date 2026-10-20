@@ -795,25 +795,49 @@ def _rule_inline_calc_results(project: Project) -> list[str]:
     frozen. A post-capture edit leaves the live item editable, so its stale
     warning remains a release offender -- `captured_edits` defaults off and
     cannot be relied on to catch that prose. Imported items' stale spans are
-    the other project's problem, skipped like every other rule. Fail open on
-    a store that refuses to be read: the rule yields no offenders at all, the
-    posture `_rule_captured_edits` takes for the same store -- the build's
-    own warning already says the check declined, and a release is never
-    blocked on text the tool couldn't prove editable.
+    the other project's problem, skipped like every other rule. Unlike
+    `_rule_captured_edits`, this rule fails CLOSED when the history store
+    cannot be read and it has stale spans to adjudicate: a silent exemption
+    would let a stale editable result pass precisely when the tool cannot
+    prove the frozen-text exemption. Sealed items remain exempt by their seal,
+    imported spans by scope, and a broken store with no inline-calc work is
+    not this rule's business.
     """
+    stale = [d for d in project.warnings if d.code == model.INLINE_CALC_STALE]
+    if not stale:
+        return []
+    local = {id(item) for item in project.local_items}
     try:
         frozen_captures = {
             key
             for key, (_event, edited) in history_mod.capture_index(project).items()
             if not edited
         }
-    except (history_mod.HistoryError, OSError):
+    except (history_mod.HistoryError, OSError) as exc:
+        for diagnostic in stale:
+            matches = _inline_calc_items(project, diagnostic)
+            local_matches = [item for item in matches if id(item) in local]
+            if local_matches:
+                if all(seal_mod.is_sealed(project, item) for item in local_matches):
+                    continue
+                return [
+                    "history: inline calc freshness cannot be checked: "
+                    f"history store unreadable ({exc})"
+                ]
+            if any(not item.external for item in matches):
+                return [
+                    "history: inline calc freshness cannot be checked: "
+                    f"history store unreadable ({exc})"
+                ]
+            if diagnostic.item_id and project.item_by_id(diagnostic.item_id):
+                continue
+            return [
+                "history: inline calc freshness cannot be checked: "
+                f"history store unreadable ({exc})"
+            ]
         return []
-    local = {id(item) for item in project.local_items}
     offenders: set[str] = set()
-    for diagnostic in project.warnings:
-        if diagnostic.code != model.INLINE_CALC_STALE:
-            continue
+    for diagnostic in stale:
         for item in _inline_calc_items(project, diagnostic):
             if id(item) not in local:
                 continue

@@ -934,6 +934,107 @@ def test_inline_calc_results_captured_then_edited_span_blocks_release(tmp_path):
     assert not os.path.isfile(lifecycle.baseline_path(project, "rel-a"))
 
 
+def test_inline_calc_results_unreadable_history_store_fails_closed(tmp_path):
+    """The inline-calc gate cannot use a broken store to prove that captured
+    history is exempt. With a stale editable span present, an unreadable
+    store is a release failure, not a silent exemption."""
+    project = _ic_project(tmp_path, IC_STALE_BODY)
+    events = tmp_path / ".refdes" / "history" / "events"
+    events.mkdir(parents=True)
+    (events / "bad.yaml").write_text("kind: [unclosed\n", encoding="utf-8")
+    project = _ic_rebuild(tmp_path)
+    with pytest.raises(history.HistoryError):
+        history.capture_index(project)
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].status == "FAIL"
+    assert len(results["inline_calc_results"].offenders) == 1
+    offender = results["inline_calc_results"].offenders[0]
+    assert offender.startswith("history: inline calc freshness cannot be checked")
+    assert "history store unreadable" in offender
+    outcome = lifecycle.stamp(project, kind="release", name="rel-a")
+    assert outcome.status == "gate_failed"
+    assert not os.path.isfile(lifecycle.baseline_path(project, "rel-a"))
+
+
+def test_inline_calc_results_unreadable_history_store_fails_closed_captured(
+    tmp_path,
+):
+    """A capture cannot prove itself unedited after the store that holds its
+    snapshot becomes unreadable; a stale span in that item fails closed."""
+    write_project_config(
+        tmp_path,
+        "site: { title: IC, out: _site }\n"
+        "standard: { base: hardware, version: 3 }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "log.yaml").write_text(
+        "items:\n"
+        "  - id: LOG-001\n"
+        "    type: log\n"
+        "    date: 2026-10-19\n"
+        "    summary: Divider settled.\n"
+        "    body: |\n"
+        "      Settled at `Vfb := 0.8 V * (1 + 10 kohm/2.2 kohm) | V = 9.9 V`.\n",
+        encoding="utf-8",
+    )
+    project = _ic_rebuild(tmp_path)
+    history.capture(str(tmp_path), project.item_by_id("LOG-001"))
+    events = tmp_path / ".refdes" / "history" / "events"
+    (events / "bad.yaml").write_text("kind: [unclosed\n", encoding="utf-8")
+    project = _ic_rebuild(tmp_path)
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].status == "FAIL"
+    assert "history store unreadable" in results["inline_calc_results"].offenders[0]
+    outcome = lifecycle.stamp(project, kind="release", name="rel-a")
+    assert outcome.status == "gate_failed"
+
+
+def test_inline_calc_results_unreadable_history_store_keeps_seal_exempt(tmp_path):
+    """Corrupting the history store must not widen the gate past what it
+    checks: a build-sealed item remains exempt by the seal alone."""
+    from refdes import seal as seal_mod
+
+    write_project_config(
+        tmp_path,
+        "site: { title: IC, out: _site }\n"
+        "types:\n"
+        "  decision: { prefix: DEC, append_only: true, fields: {} }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\n---\n\n" + IC_STALE_BODY, encoding="utf-8"
+    )
+    project = _ic_rebuild(tmp_path)
+    seal_mod.verify(project, write=True)
+    events = tmp_path / ".refdes" / "history" / "events"
+    events.mkdir(parents=True)
+    (events / "bad.yaml").write_text("kind: [unclosed\n", encoding="utf-8")
+    project = _ic_rebuild(tmp_path)
+    with pytest.raises(history.HistoryError):
+        history.capture_index(project)
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].status == "pass"
+    assert lifecycle.stamp(project, kind="release", name="rel-a").status == "stamped"
+
+
+def test_inline_calc_results_unreadable_history_store_without_stale_span_passes(
+    tmp_path,
+):
+    """A broken history store is not a global release gate; the inline-calc
+    rule fails closed only when its own stale-span check is in play."""
+    project = _ic_project(tmp_path, IC_FRESH_BODY)
+    events = tmp_path / ".refdes" / "history" / "events"
+    events.mkdir(parents=True)
+    (events / "bad.yaml").write_text("kind: [unclosed\n", encoding="utf-8")
+    project = _ic_rebuild(tmp_path)
+    assert not any(d.code == "inline_calc_stale" for d in project.warnings)
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].status == "pass"
+    assert lifecycle.stamp(project, kind="release", name="rel-a").status == "stamped"
+
+
 def test_inline_calc_results_exempt_build_seal(tmp_path):
     """A sealed (build-locked) entry keeps its stale warning and passes the
     gate: the body is locked text, not editable prose (the exemption mirrors

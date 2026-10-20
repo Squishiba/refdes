@@ -136,14 +136,22 @@ append-only entry; that historical text is not rewritten (D1). The
 editable items, with default `{release: true, revision: false}`. An item the
 build locks as a seal, and an item whose live content still matches a capture
 (`capture_index[key][1] is False`), is exempt from this freshness gate, while
-its warning remains visible. A post-capture edit leaves the live item
+its warning remains visible. The capture exemption follows the entry's captured
+text, not the upstream inputs it referred to; a later upstream move can make
+the frozen prose describe a different calculation, and the gate remains silent.
+A post-capture edit leaves the live item
 editable, so the exemption does not apply to the edited entry. Landed:
 `src/refdes/model.py:RELEASE_GATE_DEFAULTS` lists it,
 `src/refdes/lifecycle.py:_rule_inline_calc_results` reads the build's stale
 warning (tagged `model.INLINE_CALC_STALE`), resolves it by display id and,
 for permanently id-less continuations whose diagnostic has an empty id, by
 exact source location, and exempts entries
-`seal.is_sealed` and `history.capture_index` report, and
+`seal.is_sealed` and `history.capture_index` report. With a stale span in
+play, the rule fails closed on an unreadable history store and names that
+store; the store's read failure has its existing ordinary `check`/`build`
+warning posture, while the release gate refuses the unprovable exemption.
+The rule reports the warning's own source line: the span line in Markdown,
+falling back to the item's entry line for a list-file `body:` key.
 `refdes release --help` lists the rule. Missing results and calc errors enter
 the ordinary build error floor. `refdes revision --help` describes the
 revision as unconditional apart from that floor; the revision half defaults

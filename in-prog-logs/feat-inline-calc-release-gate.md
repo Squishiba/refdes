@@ -15,12 +15,13 @@ are exempt and keep their warning; default `{release: true, revision: false}`.
 - `src/refdes/build.py`: the stale-result `project.warn` in
   `_run_inline_span` now tags `code=INLINE_CALC_STALE`.
 - `src/refdes/lifecycle.py`: `_rule_inline_calc_results` registered in
-  `_RULES`. Reads `project.warnings` (the build already ran), resolves the
-  item by `item_id`, skips imported items, and exempts build-sealed items.
+  `_RULES`. Reads `project.warnings` (the build already ran), resolves stale
+  warnings by display id (with exact-location lookup for id-less
+  continuations), skips imported items, and exempts build-sealed items.
   Captures are exempt only when `capture_index` reports their edited flag
   false; an edit after capture leaves the live text editable and blocks.
-  History-store read failures return no offenders, matching the fail-open
-  posture of `_rule_captured_edits`. Offenders use
+  With a stale span in play, an unreadable history store fails the gate
+  closed and names the store. Offenders use
   `ID: inline calc <span> (file:line)`.
 - `src/refdes/schema.py`: nothing to change — validation is
   `RELEASE_GATE_DEFAULTS`-driven, so `{release, revision}` mapping accepted,
@@ -34,12 +35,13 @@ are exempt and keep their warning; default `{release: true, revision: false}`.
   type metadata. Build seals are immutable while the release build checks
   them. Captures are frozen only while their live digest matches the
   snapshot; `capture_index`'s edited flag makes that distinction explicit.
-  Fail-open posture copied from `_rule_captured_edits` (store unreadable =>
-  no offenders), per the task's fail-open rule.
+  The release gate is fail-closed for an unreadable store because a missing
+  store cannot prove the frozen-text exemption.
 - Imported items skipped (their stale spans are the other project's
   problem), like every other rule.
-- Offender carries the warning's own file:line (the span line, clickable)
-  and the span name from the warning head.
+- Offender carries the warning's own file:line (span line in Markdown;
+  list-file `body:` keys report the item-entry line) and the span name from
+  the warning head.
 
 ## Hand-run (./.scratch/inline-gate-log/demo, hardware@3)
 
@@ -126,3 +128,22 @@ Task finished: yes.
   settings tests, and 2 docs-anchor tests passed.
 - Full rebased suite: 4194 passed, 2 skipped.
 - `ruff check <touched files> --select E9,F`: clean.
+
+## Adversarial review round (PR #345, P1 fail-open)
+
+- Reproduced a stale, never-captured editable item passing release when
+  `.refdes/history/events` was unreadable. The gate's history read returned
+  no offenders, silently claiming the capture exemption.
+- Fixed `inline_calc_results` to fail closed on `HistoryError`/`OSError` when
+  stale spans are in play. The release failure names the unreadable store.
+  Sealed stale items and readable unedited captures remain exempt; no stale
+  span leaves the broken store out of this rule's scope.
+- Added four tests: never-captured and captured-store corruption fail closed,
+  seal remains exempt, no-stale remains pass. The first two were red on the
+  pre-fix head.
+- Hand-run with a corrupt event file: `refdes release` exits 1 and names the
+  unreadable store.
+- P2 assessments documented: list-file bodies report the item-entry line;
+  capture exemption follows captured text, not later upstream moves.
+- Verification: 11 focused lifecycle tests, 20 lifecycle/settings/docs tests,
+  full suite 4198 passed / 2 skipped, and targeted ruff clean.

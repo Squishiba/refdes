@@ -303,11 +303,16 @@ A stale result is a readiness fact too: by default `refdes release` fails on
 one (`release_gate.inline_calc_results: { release: true, revision: false }` —
 see [lifecycle](lifecycle.md#the-readiness-gate)). The offender names the
 item's display id — its surrogate key when it is permanently id-less — the
-span, and the line, so the fix is clickable: correct the stored
+span, and the warning's reported source line (the span's line in Markdown,
+falling back to the item's entry line for a list-file `body:` key), so the
+fix is clickable: correct the stored
 result and run again. A build seal, or a capture whose live content still
 matches its snapshot, is exempt from the gate — its warning stays visible,
-and a release stamps past it. Editing an item after capture restores the
+and a release stamps past it. The exemption follows the captured text, not
+upstream values that move afterward. Editing an item after capture restores the
 live text to editable prose, so a stale span in the edited entry blocks.
+If a stale span is in play and the history store cannot be read, the release
+gate fails closed and names the unreadable store.
 `refdes revision` is unaffected: a revision stays a
 checkpoint, not a readiness claim.
 

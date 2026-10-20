@@ -457,8 +457,11 @@ the stored literal to the recomputed value (the source is never rewritten for
 you). By default this also blocks `refdes release`
 (`release_gate.inline_calc_results`; see [lifecycle](lifecycle.md)). A build
 seal, or an unedited capture whose live content still matches its snapshot,
-keeps the warning and stamps past the gate; editing the item after capture
-makes the live text editable again, so the gate applies. See [inline
+keeps the warning and stamps past the gate; the exemption follows the captured
+text, not upstream values that move afterward. Editing the item after capture
+makes the live text editable again, so the gate applies. A stale span in play
+with an unreadable history store fails the release gate closed and names the
+store. See [inline
 calc](math.md#inline-calc).
 
 ## Checks
