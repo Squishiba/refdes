@@ -751,13 +751,41 @@ def _rule_captured_edits(project: Project) -> list[str]:
     )
 
 
+def _inline_calc_items(project: Project, diagnostic) -> list[Item]:
+    """Items owning a stale inline-calc warning, including permanently
+    id-less continuations.
+
+    A warning's display id is the normal lookup. An id-less item has
+    ``item_id=""``, and ``item_by_id("")`` is deliberately None, so use the
+    warning's exact file/line (the build emits the span's body line, falling
+    back to the item's source line for list-file bodies) plus its empty id.
+    Exact matches are intentionally plural: duplicate-source handles can put
+    two items at the same location, and each owns its warning.
+    """
+    if diagnostic.item_id:
+        item = project.item_by_id(diagnostic.item_id)
+        if item is not None:
+            return [item]
+    if not diagnostic.file or diagnostic.line is None:
+        return []
+    return [
+        item
+        for item in project.local_items
+        if item.source_file == diagnostic.file
+        and item.id == diagnostic.item_id
+        and (item.source_line == diagnostic.line or item.body_line == diagnostic.line)
+    ]
+
+
 def _rule_inline_calc_results(project: Project) -> list[str]:
     """Inline calc freshness (docs/design/inline-calc.md §2, decided Q5): a
     release blocks while an editable item carries a stale stored result --
     the build's own warning (`build.py:_run_inline_span`, tagged
     `model.INLINE_CALC_STALE`), read as it is, never recomputed. Offenders
     name the item, the span, and the span's line ("LOG-001: inline calc Vout
-    (items/log.md:7)"), so the failure is clickable where the CLI is.
+    (items/log.md:7)"), so the failure is clickable where the CLI is. An
+    id-less continuation has no display id on its diagnostic, so lookup falls
+    back to its exact source location and the offender names its key.
 
     The exemptions are the design's, read narrowly: an item the build locks
     (a build seal, `seal.is_sealed`) and an item frozen into captured history
@@ -786,19 +814,21 @@ def _rule_inline_calc_results(project: Project) -> list[str]:
     for diagnostic in project.warnings:
         if diagnostic.code != model.INLINE_CALC_STALE:
             continue
-        item = project.item_by_id(diagnostic.item_id) if diagnostic.item_id else None
-        if item is None or id(item) not in local:
-            continue
-        if seal_mod.is_sealed(project, item) or (item.key and item.key in frozen_captures):
-            continue
-        location = (
-            f" ({diagnostic.file}:{diagnostic.line})"
-            if diagnostic.file and diagnostic.line
-            else ""
-        )
-        # The warning's own head, "inline calc Vout", is the span name.
-        span = diagnostic.message.split(": ", 1)[0]
-        offenders.add(f"{item.id or item.key}: {span}{location}")
+        for item in _inline_calc_items(project, diagnostic):
+            if id(item) not in local:
+                continue
+            if seal_mod.is_sealed(project, item) or (
+                item.key and item.key in frozen_captures
+            ):
+                continue
+            location = (
+                f" ({diagnostic.file}:{diagnostic.line})"
+                if diagnostic.file and diagnostic.line
+                else ""
+            )
+            # The warning's own head, "inline calc Vout", is the span name.
+            span = diagnostic.message.split(": ", 1)[0]
+            offenders.add(f"{item.id or item.key}: {span}{location}")
     return sorted(offenders)
 
 

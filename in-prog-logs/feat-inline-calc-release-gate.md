@@ -101,11 +101,27 @@ Task finished: yes.
 - Rebased on `origin/main` and reran focused/full tests; results recorded
   below.
 
+## Review round 2 (PR #345, reviewer 13709193)
+
+- Finding: the gate resolved stale warnings by display id only. A valid
+  id-less continuation emits `item_id=""`, so `item_by_id("")` returned None
+  and the stale span bypassed the release gate.
+- Reproduced on the pre-fix head through real `refdes release`: the stale
+  warning was visible and the release stamped.
+- Fix: resolve by display id first; for an empty id, match the diagnostic's
+  exact file and source/body line to a local item with the same empty id.
+  Sealed and unedited-capture exemptions remain applied per resolved item.
+- Added `test_inline_calc_results_id_less_continuation_span_blocks_release`,
+  red on the pre-fix head and green after the fix. Docs/changelog now name
+  the surrogate-key offender shape.
+- Rebased on latest `origin/main` and reran required gates; see below.
+
 ## Review-round verification
 
-- The regression test was red on `575d4fe` (the gate reported `pass` where
-  the expected result is `FAIL`) and green after the lifecycle fix.
-- Focused rebased run: 6 inline-calc lifecycle tests, 7 release-gate
+- Round 1 regression test was red on `575d4fe` and green after the fix.
+- Round 2 regression test was red on `4e89eab` (gate `pass`, expected `FAIL`)
+  and green after the source-location fix.
+- Focused rebased run: 7 inline-calc lifecycle tests, 7 release-gate
   settings tests, and 2 docs-anchor tests passed.
-- Full rebased suite: 4193 passed, 2 skipped.
+- Full rebased suite: 4194 passed, 2 skipped.
 - `ruff check <touched files> --select E9,F`: clean.

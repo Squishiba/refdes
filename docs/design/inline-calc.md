@@ -140,7 +140,9 @@ its warning remains visible. A post-capture edit leaves the live item
 editable, so the exemption does not apply to the edited entry. Landed:
 `src/refdes/model.py:RELEASE_GATE_DEFAULTS` lists it,
 `src/refdes/lifecycle.py:_rule_inline_calc_results` reads the build's stale
-warning (tagged `model.INLINE_CALC_STALE`) and exempts entries
+warning (tagged `model.INLINE_CALC_STALE`), resolves it by display id and,
+for permanently id-less continuations whose diagnostic has an empty id, by
+exact source location, and exempts entries
 `seal.is_sealed` and `history.capture_index` report, and
 `refdes release --help` lists the rule. Missing results and calc errors enter
 the ordinary build error floor. `refdes revision --help` describes the

@@ -302,7 +302,8 @@ the warning shows the raw value instead.
 A stale result is a readiness fact too: by default `refdes release` fails on
 one (`release_gate.inline_calc_results: { release: true, revision: false }` —
 see [lifecycle](lifecycle.md#the-readiness-gate)). The offender names the
-item, the span, and the line, so the fix is clickable: correct the stored
+item's display id — its surrogate key when it is permanently id-less — the
+span, and the line, so the fix is clickable: correct the stored
 result and run again. A build seal, or a capture whose live content still
 matches its snapshot, is exempt from the gate — its warning stays visible,
 and a release stamps past it. Editing an item after capture restores the

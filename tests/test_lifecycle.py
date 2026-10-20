@@ -845,6 +845,49 @@ def test_inline_calc_results_exempt_captured_history(tmp_path):
     assert lifecycle.stamp(project, kind="release", name="rel-a").status == "stamped"
 
 
+def test_inline_calc_results_id_less_continuation_span_blocks_release(tmp_path):
+    """An id-less continuation is editable prose like any other item. Its
+    diagnostic has an empty display id, so the gate must resolve it from the
+    warning's source location as well as by display id."""
+    write_project_config(
+        tmp_path,
+        "site: { title: IC, out: _site }\n"
+        "standard: { base: hardware, version: 3 }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "log.yaml").write_text(
+        "items:\n"
+        "  - id: LOG-001\n"
+        "    type: log\n"
+        "    date: 2026-10-19\n"
+        "    summary: First.\n"
+        "  - type: log\n"
+        "    date: 2026-10-19\n"
+        "    summary: Continuation.\n"
+        "    follows: LOG-001\n"
+        "    body: |\n"
+        "      Settled at `Vfb := 0.8 V * (1 + 10 kohm/2.2 kohm) | V = 9.9 V`.\n",
+        encoding="utf-8",
+    )
+    _ic_rebuild(tmp_path)  # mint the continuation's key and rewrite follows
+    project = _ic_rebuild(tmp_path)
+    stale = next(d for d in project.warnings if "stored result says" in d.message)
+    assert stale.item_id == ""
+    continuation = next(
+        item for item in project.local_items
+        if item.id == "" and item.source_file == stale.file
+    )
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].status == "FAIL"
+    assert results["inline_calc_results"].offenders == [
+        f"{continuation.key}: inline calc Vfb ({stale.file}:{stale.line})"
+    ]
+    outcome = lifecycle.stamp(project, kind="release", name="rel-a")
+    assert outcome.status == "gate_failed"
+    assert not os.path.isfile(lifecycle.baseline_path(project, "rel-a"))
+
+
 def test_inline_calc_results_captured_then_edited_span_blocks_release(tmp_path):
     """Capturing an entry freezes the captured snapshot, not every future
     edit. A post-capture edit leaves the live item editable, so a stale span
