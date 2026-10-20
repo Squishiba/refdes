@@ -180,6 +180,10 @@ class _Item:
     ref: str
     index: int
     shape: str
+    # Every plain-scalar identity a request may name this item by: its
+    # `id:` and `key:` values (see `_alias_refs`). `ref` is the first of
+    # them -- the spelling plans, refusals and the projection index use.
+    aliases: tuple[str, ...] = ()
     node: yaml.Node | None = None  # the item's MappingNode (yaml / front matter)
     base: int = 0  # char offset the node's marks are relative to
     key_line: int = 1  # 1-indexed source line of the item's first line
@@ -214,7 +218,10 @@ def plan_patch(text: str, ref: str, op: Any, *, path: str | None = None) -> Patc
     """Plan one edit to the item `ref` in `text`, or refuse with a reason.
 
     `ref` is the item's display id or its surrogate key, matched against the
-    parsed value of `id:`/`key:` in this file. `op` is a `SetField` or a
+    parsed value of `id:`/`key:` in this file. An item carrying both answers
+    to both spellings; a spelling that names two of them (a hand-authored
+    `key:` repeating a sibling's `id:`) is refused as ambiguous, never
+    guessed. `op` is a `SetField` or a
     `SetBody`. Pure: nothing is read from or written to disk, and `text` is not
     modified.
     """
@@ -480,10 +487,11 @@ def _load_yaml(text: str, eol: str) -> _File:
         if _only_key(entry, "section"):
             continue
         fields, keys = _field_values(entry)
-        ref = _ref_of(fields, i)
+        aliases = _alias_refs(fields, i)
         items.append(
             _Item(
-                ref=ref,
+                ref=aliases[0],
+                aliases=aliases,
                 index=i,
                 shape="yaml-item",
                 node=entry,
@@ -528,11 +536,12 @@ def _load_markdown(text: str, eol: str) -> _File:
         if not isinstance(node, yaml.MappingNode):
             raise _LocateError("front-matter must be a mapping", open_i + 2)
         fields, keys = _field_values(node)
-        ref = _ref_of(fields, i)
+        aliases = _alias_refs(fields, i)
         nxt = item_blocks[i + 1][0] if i + 1 < len(item_blocks) else len(lines)
         items.append(
             _Item(
-                ref=ref,
+                ref=aliases[0],
+                aliases=aliases,
                 index=i,
                 shape="md-front-matter",
                 node=node,
@@ -581,12 +590,49 @@ def _field_values(node: yaml.MappingNode) -> tuple[dict[str, Any], dict[str, Any
     return out, keys
 
 
-def _ref_of(fields: dict[str, Any], index: int) -> str:
+def _alias_refs(fields: dict[str, Any], index: int) -> tuple[str, ...]:
+    """Every plain-scalar identity a request may name this item by: the
+    parsed values of its `id:` and of its `key:`, id first.
+
+    A keyed item carries both spellings, and the editor addresses it by the
+    one the read API hands out -- the surrogate key (serve/filters.py's row
+    handle is the `project.items` dict key, docs/design/threads.md §2) --
+    while plans, refusals and the projection index are written against the
+    canonical id. Both spellings have to reach the same item, and each on
+    its own, so a file where one item's `key:` repeats a sibling's `id:`
+    leaves the bare spelling matching two items and `_find` refuses it
+    rather than guessing which half was meant. (Surrogate keys are
+    dash-free and display ids carry `-<digits>`, so minted keys and real
+    ids cannot collide; the hand-authored `key:` is the corruption case,
+    and the refusal is the answer there.)
+
+    A repeated `id:`/`key:` key (a list of value nodes) contributes no
+    alias -- the patcher cannot tell which repeat a spelling names, and
+    `#<index>` is the only address left -- and `_plain_scalar` runs on
+    every alias, so an anchored or tagged id/key is a refusal, not a
+    spelling to match against.
+    """
+    out: list[str] = []
     for name in ("id", "key"):
         node = fields.get(name)
         if isinstance(node, yaml.ScalarNode) and node.value:
-            return _plain_scalar(node)
-    return f"#{index}"
+            value = _plain_scalar(node)
+            if value not in out:
+                out.append(value)
+    return tuple(out) if out else (f"#{index}",)
+
+
+def _find(f: _File, ref: str) -> _Item | Refusal:
+    matches = [i for i in f.items if ref in i.aliases]
+    if not matches:
+        known = ", ".join(sorted(i.ref for i in f.items)) or "none"
+        return Refusal(f"no item {ref!r} in this file (it holds: {known})")
+    if len(matches) > 1:
+        return Refusal(
+            f"{ref!r} names {len(matches)} items in this file; the patch cannot tell them apart",
+            line=matches[0].key_line,
+        )
+    return matches[0]
 
 
 def _plain_scalar(node: yaml.ScalarNode) -> str:
@@ -598,19 +644,6 @@ def _plain_scalar(node: yaml.ScalarNode) -> str:
             node.start_mark.line + 1,
         )
     return node.value
-
-
-def _find(f: _File, ref: str) -> _Item | Refusal:
-    matches = [i for i in f.items if i.ref == ref]
-    if not matches:
-        known = ", ".join(sorted(i.ref for i in f.items)) or "none"
-        return Refusal(f"no item {ref!r} in this file (it holds: {known})")
-    if len(matches) > 1:
-        return Refusal(
-            f"{ref!r} names {len(matches)} items in this file; the patch cannot tell them apart",
-            line=matches[0].key_line,
-        )
-    return matches[0]
 
 
 # --------------------------------------------------------------- field plans

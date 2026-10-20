@@ -1,0 +1,77 @@
+EDIT-01 — editor save by surrogate-key handle (fix/editor-key-handle-save-20261020)
+
+Problem. The browser editor lists rows from /api/items, whose `handle` field
+(filters.handle_map -> model handle_map) is the item's surrogate key when the
+project has been minted. editor.js posts to /api/item/<handle>/edit. The GET
+routes resolved that spelling (model._find_item: display id, key, retired
+ids), so the form opened fine; the POST reached serve/edit.apply_edit, which
+resolved the ref at the model too (api._find_item / edit._find_item), then
+passed the *raw request spelling* to patcher.plan_patch. The patcher parses
+the file's own identity spellings and matched only `id:`-first refs
+(_ref_of), so a save addressed by key died with
+`refused: no item '<key>' in this file (it holds: REQ-001, REQ-002)`.
+Read says the item exists, write says it does not: same item, two spellings,
+only one accepted at the patch boundary.
+
+Repro (red on base). .scratch/edit01/repro.py starts the real EditorApp over
+a minted project (HTTP, not library calls), pins PYTHONPATH=$PWD/src, and
+asserts refdes.__file__ is the worktree's (the installed refdes points at
+/home/jorb/work/refdes without the pin). On base: GET /api/item/<key> -> 200,
+POST /api/item/<key>/edit -> 422 for the YAML-list item and the Markdown
+front-matter item. After the fix the same script prints 200/applied for all
+three items.
+
+Decision. Canonicalize in the patcher (alias match), not at the serve
+boundary. plan_patch's docstring already promises "display id ... or
+surrogate key" matched against parsed id:/key: — the patcher is the
+component that parses the file's identity spellings, and both raw-ref call
+sites (apply and the conflict draft) go through it, so the fix lands where
+the contract already lives. Serve-boundary canonicalization would fix the
+apply path and leave _conflict's draft plan failing on the same spelling.
+
+Fix (src/refdes/patcher.py).
+- _Item gains `aliases: tuple[str, ...]` — every plain-scalar identity
+  spelling the file carries for that item: id first, then key. _alias_refs
+  reads them; _plain_scalar refuses anchored/tagged spellings (a key whose
+  scalar carries syntax is not silently trusted as an address).
+- _load_yaml / _load_markdown set aliases per item; ref stays aliases[0]
+  (canonical id) so existing messages and `describe` output are unchanged.
+- _find matches `ref in i.aliases`. A spelling that matches two items (a
+  hand-authored key equal to a sibling id) is refused with "names 2 items",
+  never guessed. A spelling matching nothing keeps the old
+  "no item ... (it holds: ...)" refusal — keyless provisional `~file:line`
+  handles stay in that family, pinned by tests.
+- No alias for a repeated id:/key: node (duplicate identity stays refused
+  upstream), no alias for non-scalar spellings.
+
+Tests. tests/test_patcher.py: set_field by key on an id+key item (YAML list),
+set_field+set_body by key in Markdown front matter, key-equals-sibling-id
+refused not guessed, anchored key line refused.
+tests/test_serve_edit_http.py: HTTP tests over the shipped UI shape — the
+handle taken from the /api/items row (the exact spelling editor.js puts in
+the URL) saves the YAML item and the Markdown body; a stale revision by key
+handle returns a 409 whose draft diff was planned against the key spelling
+(base produced a diff-less conflict there); identity refusal by key says
+"identity"; the enum gate answers "invalid" with diagnostics by key (base
+answered the find-failure "refused"); controls pinning preserved behavior:
+display-id save on a minted project, keyless `~` handle refused with the
+bytes unchanged.
+
+Red/green. The 8 key-handle tests fail on a 1d6d325 worktree with the new
+tests copied in; the 3 controls (display-id, keyless, anchored-key refusal)
+pass on base and after. Focused suites green: test_patcher, test_patcher_links,
+test_keys_restore, test_serve_edit (300 tests).
+
+First full-suite run caught two broken new tests (the fix code was fine):
+the minted fixture puts `key:` before `id:` so `- id: REQ-001` never appears
+after minting, and serve_support's notes.md body carries a literal `---`
+rule the patcher's md-body rule refuses — so the Markdown HTTP test now
+drives set_field on front matter (clean-body md set_body is covered in
+test_patcher.py). Second full-suite run: 4239 passed, 2 skipped.
+
+ruff: the touched files carry exactly the base findings (16), no new ones.
+CHANGELOG: entry added under [Unreleased] -> Fixed.
+
+Scope notes. One endpoint only. EDIT-02 (trailing-comment insertion) and
+EDIT-03 (retired-id parity) untouched; key_restore passes item.id, which is
+the first alias, so plan_key_restore is unaffected.
