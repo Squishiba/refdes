@@ -450,6 +450,21 @@ text, rendered as an unresolved link. Use one of the listed names. If the
 target's blocks are all unnamed, the warning says so and names the fix — add
 `id="..."` to the fence; a target with no calc blocks says that instead.
 
+**`inline calc Vout: stored result says 4.52 V, now computes 4.436 V`**
+A warning. The span's stored result is outside the window of its own written
+precision. Fix
+the stored literal to the recomputed value (the source is never rewritten for
+you). By default this also blocks `refdes release`
+(`release_gate.inline_calc_results`; see [lifecycle](lifecycle.md)). A build
+seal, or an unedited capture whose live content still matches its snapshot,
+keeps the warning and stamps past the gate; the exemption follows the captured
+text, not upstream values that move afterward. Editing the item after capture
+makes the live text editable again, so the gate applies. A stale span in an
+editable, unsealed item, with an unreadable history store, fails the release
+gate closed and names the store; a coded stale warning that resolves to no
+local item fails closed too. See [inline
+calc](math.md#inline-calc).
+
 ## Checks
 
 **`check refers to 'P_dens', which no calc block defines`**

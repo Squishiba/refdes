@@ -90,6 +90,7 @@ def test_project_settings_absent_file_matches_pre_config_defaults(tmp_path):
         "unaccepted_workspace_moves": {"release": True,  "revision": False},
         "open_tasks":                 {"release": False, "revision": False},
         "captured_edits":             {"release": False, "revision": False},
+        "inline_calc_results":        {"release": True,  "revision": False},
     }
 
 
@@ -488,3 +489,25 @@ def test_format_date_rejects_an_unsupported_format():
 
     with pytest.raises(ValueError):
         dates.format_date(date(2026, 2, 7), "YYYY/DD")
+
+
+def test_project_settings_release_gate_accepts_inline_calc_results_mapping(tmp_path):
+    """The inline-calc freshness rule (docs/design/inline-calc.md §2, decided
+    Q5) is a rule like every other: the overlay accepts its {release,
+    revision} mapping, and an unknown subkey errors exactly as for the
+    others."""
+    config = _write_minimal_project(
+        tmp_path,
+        "release_gate:\n  inline_calc_results: { release: true, revision: true }\n",
+    )
+    project = load_project(config_path=str(config))
+    assert project.release_gate["inline_calc_results"] == {
+        "release": True,
+        "revision": True,
+    }
+    config = _write_minimal_project(
+        tmp_path,
+        "release_gate:\n  inline_calc_results: { relase: true }\n",  # typo
+    )
+    with pytest.raises(SchemaError, match="release_gate.inline_calc_results.relase"):
+        load_project(config_path=str(config))

@@ -34,6 +34,7 @@ from . import chains as chains_mod
 from . import history as history_mod
 from . import keys as keys_mod
 from . import model, textio
+from . import seal as seal_mod
 from .model import INFO, RELEASE_GATE_DEFAULTS, Item, Project, SchemaError
 from .parse import read_store_text, yaml_safe_load
 
@@ -751,6 +752,141 @@ def _rule_captured_edits(project: Project) -> list[str]:
     )
 
 
+def _inline_calc_local_items(
+    project: Project, diagnostic, local: set[int]
+) -> list[Item]:
+    """Local items owning a stale inline-calc warning, including permanently
+    id-less continuations.
+
+    A warning's display id is the normal lookup. An id-less item has
+    ``item_id=""``, and ``item_by_id("")`` is deliberately None, so invert the
+    build's location rule: a Markdown span is located anywhere inside its
+    body range, while a list-file ``body:`` key reports the item's source
+    line. Matching the whole body range is required for a continuation whose
+    span is not the first body line. Matches are intentionally plural:
+    duplicate-source handles can put two items at the same location, and each
+    owns its warning.
+    """
+
+    def local_only(matches: list[Item]) -> list[Item]:
+        return [item for item in matches if id(item) in local]
+
+    if diagnostic.item_id:
+        item = project.item_by_id(diagnostic.item_id)
+        return local_only([item]) if item is not None else []
+    if not diagnostic.file or diagnostic.line is None:
+        return []
+    return [
+        item
+        for item in project.local_items
+        if item.source_file == diagnostic.file
+        and item.id == diagnostic.item_id
+        and (
+            (
+                item.body_line is not None
+                and item.body_line
+                <= diagnostic.line
+                < item.body_line + len(item.body.splitlines())
+            )
+            or (item.body_line is None and diagnostic.line == item.source_line)
+        )
+    ]
+
+
+def _inline_calc_span(diagnostic) -> str:
+    """The warning's own head, "inline calc Vout", is the span name."""
+    return diagnostic.message.split(": ", 1)[0]
+
+
+def _inline_calc_location(diagnostic) -> str:
+    if diagnostic.file and diagnostic.line is not None:
+        return f" ({diagnostic.file}:{diagnostic.line})"
+    return ""
+
+
+def _unreadable_history_offender(exc: Exception) -> str:
+    """One gate-table-safe line for a store that cannot be read. History
+    errors can include multi-line parser context; the gate row must stay one
+    row."""
+    detail = " ".join(str(exc).split())
+    prefix = (
+        "history: inline calc freshness cannot be checked: "
+        "history store unreadable"
+    )
+    return f"{prefix} ({detail})"
+
+
+def _rule_inline_calc_results(project: Project) -> list[str]:
+    """Inline calc freshness (docs/design/inline-calc.md §2, decided Q5): a
+    release blocks while an editable item carries a stale stored result --
+    the build's own warning (`build.py:_run_inline_span`, tagged
+    `model.INLINE_CALC_STALE`), read as it is, never recomputed. Offenders
+    name the item, the span, and the span's line ("LOG-001: inline calc Vout
+    (items/log.md:7)"), so the failure is clickable where the CLI is. An
+    id-less continuation has no display id on its diagnostic, so lookup falls
+    back to the body range containing that line (list-file bodies report the
+    item's source line) and the offender names its key. A coded stale warning
+    that resolves to no local item fails closed too, so the gate cannot turn
+    a resolver miss into a silent exemption.
+
+    The exemptions are the design's, read narrowly: an item the build locks
+    (a build seal, `seal.is_sealed`) and an item frozen into captured history
+    are not editable prose a release can demand fresher. The history half
+    uses `history.capture_index`'s edited flag, not merely its presence: only
+    an unedited capture whose live digest still matches the snapshot (flag
+    false) is
+    frozen. A post-capture edit leaves the live item editable, so its stale
+    warning remains a release offender -- `captured_edits` defaults off and
+    cannot be relied on to catch that prose. Imported items' stale spans are
+    the other project's problem, skipped like every other rule. Unlike
+    `_rule_captured_edits`, this rule fails CLOSED when the history store
+    cannot be read and it has stale spans to adjudicate: a silent exemption
+    would let a stale editable result pass precisely when the tool cannot
+    prove the frozen-text exemption. Sealed items remain exempt by their seal,
+    imported spans by scope, and a broken store with no inline-calc work is
+    not this rule's business.
+    """
+    stale = [d for d in project.warnings if d.code == model.INLINE_CALC_STALE]
+    if not stale:
+        return []
+    local = {id(item) for item in project.local_items}
+    try:
+        frozen_captures = {
+            key
+            for key, (_event, edited) in history_mod.capture_index(project).items()
+            if not edited
+        }
+    except (history_mod.HistoryError, OSError) as exc:
+        for diagnostic in stale:
+            items = _inline_calc_local_items(project, diagnostic, local)
+            if not items:
+                if diagnostic.item_id and project.item_by_id(diagnostic.item_id):
+                    continue
+                return [_unreadable_history_offender(exc)]
+            if all(seal_mod.is_sealed(project, item) for item in items):
+                continue
+            return [_unreadable_history_offender(exc)]
+        return []
+    offenders: set[str] = set()
+    for diagnostic in stale:
+        items = _inline_calc_local_items(project, diagnostic, local)
+        span = _inline_calc_span(diagnostic)
+        location = _inline_calc_location(diagnostic)
+        if not items:
+            if diagnostic.item_id and project.item_by_id(diagnostic.item_id):
+                continue
+            offenders.add(f"{span}: did not resolve to a local item{location}")
+            continue
+        for item in items:
+            if seal_mod.is_sealed(project, item) or (
+                item.key and item.key in frozen_captures
+            ):
+                continue
+            # The warning's own head, "inline calc Vout", is the span name.
+            offenders.add(f"{item.id or item.key}: {span}{location}")
+    return sorted(offenders)
+
+
 _RULES: dict[str, Callable[[Project], list[str]]] = {
     "draft_items": _rule_draft_items,
     "unpinned_citations": _rule_unpinned_citations,
@@ -762,6 +898,7 @@ _RULES: dict[str, Callable[[Project], list[str]]] = {
     "unaccepted_workspace_moves": _rule_unaccepted_workspace_moves,
     "open_tasks": _rule_open_tasks,
     "captured_edits": _rule_captured_edits,
+    "inline_calc_results": _rule_inline_calc_results,
 }
 
 # Fixed order, matching the table in docs/design/lifecycle.md §1 -- also the
