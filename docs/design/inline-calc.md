@@ -1,5 +1,6 @@
 Status: **Partially landed.** The source form, parser, evaluator, and
-`check`/`build` diagnostics are on `main`. This PR lands the §2 release gate.
+`check`/`build` diagnostics are on `main`. The §2 release gate lands in this
+PR; it is not on `main` until this PR merges.
 The §3 hash, dependency-scan, and `source()` discovery changes remain
 proposed; PR #347 is open and not merged. The owner decided the four open
 questions on 2026-10-17; the decisions are recorded under each question below.
@@ -40,8 +41,9 @@ Later directions are parked in
   `calc_hash` only for its verdict-change signal, not for stored-result
   verification.
 - `refdes check --help`, `refdes build --help`, `refdes release --help`, and
-  `refdes revision --help` confirm the present commands. Their §1/§2 behavior
-  is shipped; §3 is not. `refdes schema` emitted the current project's merged
+  `refdes revision --help` confirm the present commands. Their §1/§2 warning
+  behavior is on `main`; the §2 release gate is added by this PR, and §3 is
+  not. `refdes schema` emitted the current project's merged
   JSON Schema; the §2 gate rule is added by this PR.
 
 ## 1. Source form and trigger
@@ -126,7 +128,7 @@ the computed nominal to the stored literal's last written decimal place on the
 decimal text, rounding halves away from zero, and accept only when the rounded
 value equals the stored literal; carry tests at the half-place boundary.
 
-| Condition | Landed severity and message shape |
+| Condition | Landed warning severity; release-gate behavior added by this PR |
 |---|---|
 | Missing `= result`, malformed triggered span, evaluation failure, incompatible unit | **Error**, file:line plus name and specific fix; ordinary `check`/`build` fail. Example: `inline calc Vout: stored result missing; write '= <quantity>'`. |
 | Parsed result outside its precision window | **Warning** at `check`/`build`; by default `release_gate.inline_calc_results` also fails a release for an editable item. Example: `inline calc Vout: stored result says 4.436 V, now computes 4.52 V`. |
@@ -143,7 +145,7 @@ its warning remains visible. The capture exemption follows the entry's captured
 text, not the upstream inputs it referred to; a later upstream move can make
 the frozen prose describe a different calculation, and the gate remains silent.
 A post-capture edit leaves the live item
-editable, so the exemption does not apply to the edited entry. Landed:
+editable, so the exemption does not apply to the edited entry. On this branch:
 `src/refdes/model.py:RELEASE_GATE_DEFAULTS` lists it,
 `src/refdes/lifecycle.py:_rule_inline_calc_results` reads the build's stale
 warning (tagged `model.INLINE_CALC_STALE`), resolves it by display id and,

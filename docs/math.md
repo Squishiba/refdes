@@ -302,7 +302,8 @@ the warning shows the raw value instead.
 A stale result is a readiness fact too: by default `refdes release` fails on
 one (`release_gate.inline_calc_results: { release: true, revision: false }` —
 see [lifecycle](lifecycle.md#the-readiness-gate)). The offender names the
-item's display id — its surrogate key when it is permanently id-less — the
+item's display id — for a permanently id-less item, its surrogate key when
+one has been minted, otherwise the warning's file and line — the
 span, and the warning's reported source line (the span's line in Markdown,
 falling back to the item's entry line for a list-file `body:` key), so the
 fix is clickable: correct the stored

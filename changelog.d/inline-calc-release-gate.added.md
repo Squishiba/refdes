@@ -2,7 +2,8 @@
   `{release: true, revision: false}`): a stale inline-calc stored result in
   an editable item — the build's `inline calc Vout: stored result says X,
   now computes Y` warning — now fails `refdes release`, naming the item's
-  display id (or surrogate key for an id-less continuation), the span, and
+  display id (for an id-less continuation, its surrogate key when one has been
+  minted, otherwise the warning's file and line), the span, and
   the warning's reported source line (the span's line in Markdown, falling
   back to the item's entry line for a list-file `body:` key). A build seal,
   or an unedited capture whose

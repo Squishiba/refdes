@@ -62,7 +62,7 @@ against the rule names.
 | `unaccepted_workspace_moves` | an item's workspace differs from `.refdes/boards.yaml`'s `workspaces:` key ([workspaces](workspaces.md)) |
 | `open_tasks` | a thread tip carries an open task (its fold lists one; a tip whose fold is ambiguous counts too, said as a conflicting list) |
 | `captured_edits` | an item's current content differs from its captured snapshot (the same fact as the "edited after captured" warning; ticking a task on a captured entry is one such edit — task rows are part of the fields the history digest covers) |
-| `inline_calc_results` | a local, editable item's inline-calc span has a stored result that no longer computes — the same fact as the build's "inline calc Vout: stored result says 4.52 V, now computes 4.436 V" warning ([math](math.md#inline-calc)), including a permanently id-less continuation, which is named by its surrogate key. A build seal, or an unedited capture whose live content still matches its snapshot, is exempt: its warning stays visible, the gate stays silent. Editing an item after capture makes the live text editable again, so a stale span there blocks. A coded stale warning that resolves to no local item, and a stale span in play when the history store cannot be read, both fail closed |
+| `inline_calc_results` | a local, editable item's inline-calc span has a stored result that no longer computes — the same fact as the build's "inline calc Vout: stored result says 4.52 V, now computes 4.436 V" warning ([math](math.md#inline-calc)), including a permanently id-less continuation, named by its surrogate key when one has been minted and by its file and line otherwise. A build seal, or an unedited capture whose live content still matches its snapshot, is exempt: its warning stays visible, the gate stays silent. Editing an item after capture makes the live text editable again, so a stale span there blocks. A coded stale warning that resolves to no local item, and a stale span in play when the history store cannot be read, both fail closed |
 
 **Why `open_tasks` and `captured_edits` default off.** Both are living-notes
 gate rules, but not the same one: `open_tasks` is worklist binding rule 5 of
@@ -158,7 +158,8 @@ An `open_tasks` offender names the tip it sits at, the task to go tick, and
 the source line of the task row, so the failure is clickable;
 `captured_edits` names the item the warning above the table already speaks
 for; `inline_calc_results` names the item's display id (a permanently
-id-less continuation names its surrogate key), the span, and the warning's
+id-less continuation is named by its surrogate key when one has been minted,
+otherwise by the warning's file and line), the span, and the warning's
 reported source line — the span's line in Markdown, falling back to the
 item's entry line for a list-file `body:` key (real
 output, the two rules enabled through the overlay):

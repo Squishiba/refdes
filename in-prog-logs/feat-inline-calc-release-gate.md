@@ -120,10 +120,12 @@ Task finished: yes.
   `RETIRED_UNIT_SPELLING` in the `Diagnostic.code` comment.
 - Clarified the inline-calc design header and section statuses against `main`,
   this PR, and open PR #347.
+- Qualified id-less inline-calc release offenders as keyed only when a
+  surrogate key has been minted, with file-and-line as the cold fallback.
 
 ## Review verification
 
-- Location fallback and unresolved-warning fail-closed controls: 14
-  inline-calc lifecycle tests.
-- Combined lifecycle/settings/docs: 20 tests.
-- Full suite and ruff results are recorded in the PR body.
+- Snapshot at the prior round: location fallback and unresolved-warning
+  fail-closed controls ran 14 inline-calc lifecycle tests.
+- Snapshot: combined lifecycle/settings/docs ran 20 tests.
+- Snapshot: full suite and ruff results are recorded in the PR body.
