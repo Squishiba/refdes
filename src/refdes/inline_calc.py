@@ -237,15 +237,17 @@ def _split_readings(text: str, positions: list[int]) -> list[tuple[int, str, str
 def _evaluator_rhs(span: InlineSpan) -> str:
     """The span's right-hand side exactly as the evaluator sees it.
 
-    `parse_span` splits the `| unit` first and a trailing `#` comment
-    second; `evaluate_block` strips the comment off the whole line *before*
-    it splits the unit. The orders differ whenever the comment contains a
-    `|`: `PIPE_UNIT_RE`'s unit is `[^|]+`, so the split lands on the
-    comment's pipe and the comment's text lands in `span.rhs`. Rebuild the
-    joined text and strip in the evaluator's order -- comment, then unit --
-    so a span is a reference (or a `source()`) here exactly when it is one
-    in the evaluator. Read-only: `span.rhs`/`span.unit` keep the field text
-    the hash renders."""
+    `parse_span` splits the `| unit` and never strips the `#` comment -- a
+    comment survives inside `span.rhs`/`span.unit`; `evaluate_block` strips
+    the comment off the whole line *before* it splits the unit. The orders
+    differ whenever the comment contains a `|`: `PIPE_UNIT_RE`'s unit is
+    `[^|]+`, so the split lands on the comment's pipe and the comment's text
+    lands in `span.rhs`. Rebuild the joined text and strip in the
+    evaluator's order -- comment, then unit -- so a span is a reference (or a
+    `source()`) here exactly when it is one in the evaluator. Read-only:
+    `span.rhs`/`span.unit` keep the field text the hash renders (which is
+    why a comment edit moves `calc_hash` -- as it does for fence blocks,
+    whose comments are hashed too)."""
     text = f"{span.rhs} | {span.unit}" if span.unit else span.rhs
     text = calc.split_comment(text)[0].strip()
     pipe = calc.PIPE_UNIT_RE.match(text)

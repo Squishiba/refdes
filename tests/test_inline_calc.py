@@ -515,6 +515,25 @@ def test_span_only_cross_item_reference_creates_an_ordering_edge(tmp_path):
     # interpolated). The old `"2 V" in body_html` was a substring of the
     # span's own text, true whatever the build did.
     assert "<code>v := DEC-002.V_in = 2 V</code>" in _item(project).body_html
+    # The resolved value is observable through the stale-result warning:
+    # author a WRONG stored result, and the build quotes what the span
+    # actually computed -- 2 V, the target's fence value -- which is only
+    # computable if the scheduler ran the target first and the span's
+    # reference resolved (a clean `errors == []` with a literal `<code>`
+    # render is true even if the span were scanned but never evaluated).
+    project = _build_items(
+        tmp_path,
+        {
+            "a.md": "---\nid: DEC-001\ntype: decision\n---\n\n"
+            "`v := DEC-002.V_in = 3 V`\n",
+            "b.md": "---\nid: DEC-002\ntype: decision\n---\n\n"
+            "```calc\nV_in = 2 V\n```\n",
+        },
+    )
+    assert project.errors == []
+    stale = [m for m in _inline_messages(project) if "stored result says" in m]
+    assert len(stale) == 1, _inline_messages(project)
+    assert "stored result says 3 V, now computes 2 V" in stale[0]
     # The fence form is the control: same reference, same clean result.
     project = _build_items(
         tmp_path,

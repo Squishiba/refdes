@@ -7,11 +7,13 @@ base.
 Base-state note (probe, not assumption): the trigger/verify slice (sections
 1-2) is already merged on the base (#333/#341), so the section-1/2 tests are
 old-behavior controls, green on the base. The section-3 slice -- calc_hash
-extension, cross-item/source() dependency scans over spans, the
-release_gate.inline_calc_results rule -- is what #347 adds: those tests are
-EXPECTED RED on this base and are marked EXPECTED-RED in their docstrings.
-Unresolved oracles (exact tie boundary, gate message wording, span-ref
-display-half refresh after rename) are deliberately not asserted.
+extension, cross-item/source() dependency scans over spans -- is what #347
+adds: those tests are EXPECTED RED on this base and are marked EXPECTED-RED
+in their docstrings. The `release_gate.inline_calc_results` rule is #345's
+(not merged at this head, not #347's work): the gate pair below integrates
+against it and skips until it lands (see GATE_INTEGRATION). Unresolved
+oracles (exact tie boundary, gate message wording, span-ref display-half
+refresh after rename) are deliberately not asserted.
 
 Validated-copy note (adjusted at the #347 head, rebased on #351):
 - the cross-item cases were authored with the reference inside an
@@ -25,13 +27,16 @@ Validated-copy note (adjusted at the #347 head, rebased on #351):
   (docs/math.md, "Inline calc": the RHS is the ordinary calc-line grammar
   "with the same restrictions"; docs/design/inline-calc.md section 3).
 - the gate pair is skipped at this head (see GATE_INTEGRATION): the rule
-  name is a configuration error until #345 merges.
+  name is a configuration error until #345 merges. The exemption case was
+  adapted at #345's head: the blind copy authored the stale result AFTER
+  the capture, and #345's implemented exemption is deliberately narrow --
+  a post-capture edit leaves the live item editable, so only a capture
+  taken IN the stale state (digest matching, no later edit) is frozen.
 """
 
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import shutil
 from pathlib import Path
 
@@ -40,15 +45,20 @@ import yaml
 from conftest import write_project_config
 
 from refdes import cli as cli_mod
+from refdes.model import RELEASE_GATE_DEFAULTS
 
 # The gate pair below integrates against #345's `release_gate.inline_calc_results`
 # rule, which does not exist at this head (not merged): the rule name is a
 # configuration error here, so the pair skips -- not a #347 defect surface.
-# The skip is CONDITIONAL (round-3 review, chunk 2): it tests for the module
-# itself, so the pair starts running -- against the real rule -- the moment
-# #345 lands in this checkout, instead of skipping silently forever.
+# The skip is CONDITIONAL (round-3/round-5 review, chunk 2): it tests for
+# the RULE ITSELF in the rule registry (`RELEASE_GATE_DEFAULTS`,
+# src/refdes/model.py) -- NOT for a module name: #345 adds no module, it
+# extends `model.py`/`lifecycle.py`, so a `find_spec` for a hypothetical
+# release_gate.py would stay true forever and the pair would skip silently
+# forever. Testing registry membership, the pair starts running -- against
+# the real rule -- the moment #345 lands in this checkout.
 GATE_INTEGRATION = pytest.mark.skipif(
-    importlib.util.find_spec("refdes.release_gate") is None,
+    "inline_calc_results" not in RELEASE_GATE_DEFAULTS,
     reason="integrates #347 spans against #345's release_gate.inline_calc_results"
     " rule (github issue/PR #345); runs automatically once #345 is merged",
 )
@@ -482,10 +492,14 @@ def test_accepted_source_update_marks_item_changed(tmp_path, capsys):
 
 
 def test_span_source_without_same_item_citation_is_error(tmp_path, capsys):
+    # the fence is a CONTROL: valid calc (`x = 1`) so exit 1 can only come
+    # from the citation rule -- `x := 1 = 1` was invalid calc, and the CLI's
+    # "expected an assignment of the form" error would let `code == 1` pass
+    # on the wrong cause (round-5 review, chunk 2).
     files = {
         "LOG-C.md": log_item(
             "LOG-C",
-            "```calc\nx := 1 = 1\n```",
+            "```calc\nx = 1\n```",
             extra_front="citations:\n  - path: analysis/pb.csv\n",
         ),
         "LOG-D.md": log_item("LOG-D", SPAN_SRC),  # cites nothing
@@ -496,9 +510,15 @@ def test_span_source_without_same_item_citation_is_error(tmp_path, capsys):
     code = cli(cfg, "check")
     text = out(capsys)
     # the existing same-item citation rule is kept (contract: no new reader,
-    # no new authorization) -- assert the loud failure, not its wording
+    # no new authorization) -- with the control fence valid, the only error
+    # is that rule; name it, don't just count the exit code
     assert code == 1
     assert "inline calc eff" in text and "analysis/pb.csv" in text
+    assert "does not cite 'analysis/pb.csv'" in text, text
+    assert "expected an assignment" not in text, (
+        "control fence must be valid calc: a syntax error lets code == 1 "
+        "pass on the wrong cause"
+    )
 
 
 # ---------------------------------------------------------------- Case 6
@@ -602,14 +622,20 @@ def test_release_gate_fails_stale_editable_revision_passes(tmp_path, capsys):
 
 @GATE_INTEGRATION
 def test_release_gate_exempt_for_captured_history(tmp_path, capsys):
+    # Adapted at the #345 head: the blind copy authored the stale result
+    # AFTER the capture (an edit-after-capture), which #345's implemented
+    # exemption is deliberately narrow about -- a post-capture edit leaves
+    # the live item editable (`captured_edits` defaults off), so its stale
+    # span stays a release offender. The frozen shape is a capture taken IN
+    # the stale state with no later edit: digest matches the snapshot, the
+    # item is not editable prose, the gate exempts it.
     cfg = setup(
         tmp_path,
         config=GATE_CONFIG,
-        items={"LOG-V.md": log_item("LOG-V", "`Vv := 2 V + 2 V = 4 V`")},
+        items={"LOG-V.md": log_item("LOG-V", "`Vv := 2 V + 2 V = 5 V`")},
     )
     assert cli(cfg, "history", "capture", "LOG-V") == 0
     out(capsys)
-    edit_file(tmp_path, "LOG-V.md", "= 4 V", "= 5 V")
     code = cli(cfg, "release", "relgate2")
     text = out(capsys)
     assert "not a known rule" not in text, "EXPECTED-RED: rule absent on base"
