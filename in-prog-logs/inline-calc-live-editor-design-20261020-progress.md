@@ -22,12 +22,13 @@ type". Docs-only; no product code. Deliverable:
   editor JS (`editor.js` insert helpers write `area.value` directly —
   the native-undo problem; `api.js` has no signal support; `app.js`
   2 s revision poll).
-- Branch/PR landscape: main `d620ab5` has slice 1 (#333); #347 (slice 2,
+- Branch/PR landscape: main `d620ab5` had slice 1 (#333); #347 (slice 2,
   hash format 6) adds `code_span_ranges` — the positional view the
   design's replacement ranges need — and retires the F12-5 cross-item
-  ordering error (`build.py:1580-1586` on main, confirmed live in a
-  probe); #345 (release gate) is orthogonal; the grammar branch
-  `fix/inline-calc-f12-grammar-20261020` is cut at main with no commits.
+  ordering error (`build.py:1581-1587`, confirmed live in a probe);
+  #345 (release gate) is orthogonal; the grammar branch
+  `fix/inline-calc-f12-grammar-20261020` was cut at main during the
+  design work and has since merged as #351 (main `1d6d325`).
 - Probed in `.scratch/inline-calc-live-20261020/probe/` (CLI via
   `PYTHONPATH=src python -m refdes.cli` — the venv `refdes` on PATH
   points at `/home/jorb/work/refdes`, a different checkout; that bit me
@@ -58,8 +59,19 @@ type". Docs-only; no product code. Deliverable:
 - v1 = body spans only: no fences panel, no fields bag, no iframe
   refresh (D2), no browser grammar (D3).
 
+## Review round 1 (CHANGES REQUESTED)
+
+Fixed broken internal §-references (the probes are §7, slices §5, and
+the `indexOf`-exception note is §3.1, not the nonexistent §4.3);
+updated the sequencing premise to main `1d6d325` (#351 merged, #347/
+#345 still open) and re-checked the shifted `inline_calc.py`/`build.py`
+line cites against it; rephrased "no route accepts body text" (the edit
+route does — what is missing is a route that *evaluates* unsaved text).
+Design proposal and owner-choice questions unchanged.
+
 ## Status
 
-Finished: design + this log committed; docs-only PR opened; not merged
-(no self-review). No product code touched, no tests run (nothing
-functional changed).
+Finished: design + this log committed; docs-only PR opened; review round
+1 fixes pushed; not merged (no self-review, merge hold until Jared
+chooses the auto-fill vs Fill-only behavior). No product code touched,
+no tests run (nothing functional changed).
