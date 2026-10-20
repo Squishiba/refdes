@@ -376,6 +376,19 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- In the browser editor, saving a keyed item failed: `POST
+  /api/item/<handle>/edit` answered `refused: no item '<key>' in this file`
+  for exactly the handle `GET /api/items` hands the browser (the surrogate
+  key), so opening a keyed item worked and saving it did not. The read side
+  resolves an item by every spelling the model carries; the write side
+  handed the raw request spelling to the patcher, which matches the file's
+  own `id:`-first refs. The patcher now matches any plain-scalar identity
+  spelling the file holds for the item -- `id:` and `key:` alike -- at both
+  the apply and the conflict-draft plan, so the key the list shows is the
+  key the save accepts, for YAML-list items and Markdown front matter
+  alike. A spelling that names two items (a hand-authored `key:` equal to a
+  sibling `id:`) is refused, never guessed, and keyless items keep their
+  provisional `~file:line` handle refused at the patch, as before.
 - An image whose filename carries an `&` (`![board](a&b.png)` beside a real
   `a&b.png`) resolved two ways at once: the content-hash pass read the
   markdown-it token src -- the authored spelling the file is named in --

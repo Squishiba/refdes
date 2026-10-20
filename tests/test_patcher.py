@@ -79,6 +79,64 @@ def test_set_scalar_by_surrogate_key():
     assert yaml.safe_load(new)["items"][0]["title"] == "Renamed"
 
 
+# The keyed item: `id:` and `key:` are one identity with two spellings, and
+# the editor addresses items by the one the read API hands out (the surrogate
+# key, tests/test_serve_edit_http.py), so a plan addressed by the key must
+# land on exactly the same span as the plan addressed by the id.
+
+KEYED_LIST_FILE = """\
+items:
+  - id: REQ-001
+    key: xbgnhtc6ctn
+    title: First
+    priority: high
+  - id: REQ-002
+    key: 4r4nvyh147k
+    title: Second
+"""
+
+
+def test_set_field_by_key_on_an_item_that_also_has_an_id():
+    by_key, key_plan = edited(KEYED_LIST_FILE, "xbgnhtc6ctn", SetField("priority", "low"))
+    by_id, id_plan = edited(KEYED_LIST_FILE, "REQ-001", SetField("priority", "low"))
+    assert by_key == by_id
+    assert key_plan.ref == id_plan.ref == "REQ-001"
+    assert yaml.safe_load(by_key)["items"][0]["priority"] == "low"
+    assert "key: xbgnhtc6ctn" in by_key
+
+
+def test_set_field_and_body_by_key_in_markdown_front_matter():
+    text = "---\nid: DEC-001\nkey: xmsrw454t9f\ntitle: Chosen\n---\n\nProse.\n"
+    field, _ = edited(text, "xmsrw454t9f", SetField("title", "Renamed"))
+    assert yaml.safe_load(text.split("---")[1])["key"] == "xmsrw454t9f"
+    assert "title: Renamed" in field
+    body, got = edited(text, "xmsrw454t9f", SetBody("Rewritten.\n"))
+    assert got.shape == "md-body"
+    assert body.endswith("---\nRewritten.\n")
+    assert "key: xmsrw454t9f" in body
+
+
+def test_a_key_that_repeats_a_sibling_id_is_refused_not_guessed():
+    text = (
+        "items:\n"
+        "  - id: REQ-001\n"
+        "    key: REQ-002\n"  # corruption: a hand-authored key spelling an id
+        "    title: First\n"
+        "  - id: REQ-002\n"
+        "    title: Second\n"
+    )
+    bad = refuse(text, "REQ-002", SetField("title", "Renamed"))
+    assert "names 2 items" in bad.reason
+    new, _ = edited(text, "REQ-001", SetField("title", "Renamed"))
+    assert yaml.safe_load(new)["items"][0]["title"] == "Renamed"
+
+
+def test_an_anchor_on_the_key_line_is_refused_even_when_the_id_is_clean():
+    text = "items:\n  - id: REQ-001\n    key: &anchor abc\n    title: T\n"
+    bad = refuse(text, "REQ-001", SetField("title", "U"))
+    assert "anchor" in bad.reason
+
+
 def test_set_front_matter_field_in_markdown():
     new, got = edited(MD_FILE, "DEC-001", SetField("status", "superseded"))
     assert got.shape == "md-front-matter"
