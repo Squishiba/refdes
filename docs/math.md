@@ -306,8 +306,9 @@ item's display id — its surrogate key when it is permanently id-less — the
 span, and the warning's reported source line (the span's line in Markdown,
 falling back to the item's entry line for a list-file `body:` key), so the
 fix is clickable: correct the stored
-result and run again. A build seal, or a capture whose live content still
-matches its snapshot, is exempt from the gate — its warning stays visible,
+result and run again. A build seal, or an unedited capture whose live content
+still matches its snapshot, is exempt from the gate — its warning stays
+visible,
 and a release stamps past it. The exemption follows the captured text, not
 upstream values that move afterward. Editing an item after capture restores the
 live text to editable prose, so a stale span in the edited entry blocks.

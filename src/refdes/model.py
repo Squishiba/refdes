@@ -85,9 +85,10 @@ CHECK_VIOLATION = "check_violation"
 RETIRED_UNIT_SPELLING = "retired_unit_spelling"
 # An inline calc span whose stored result sits outside its precision window
 # (`inline_calc.compare_stored`, warned by `build.py:_run_inline_span`).
-# Build-not-blocking by design (docs/design/inline-calc.md §2), and the one
-# diagnostic `release_gate.inline_calc_results` reads by code -- the gate
-# must not string-match the warning's prose.
+# This is a warning at `check`/`build` time, not an ordinary build error
+# (docs/design/inline-calc.md §2), and the one diagnostic
+# `release_gate.inline_calc_results` reads by code -- the gate must not
+# string-match the warning's prose.
 INLINE_CALC_STALE = "inline_calc_stale"
 
 
@@ -150,10 +151,11 @@ class Diagnostic:
     item_id: str | None = None
     # A stable machine-readable tag for the *kind* of finding, set only where
     # something needs to reason about a diagnostic rather than print it.
-    # Today that is one case: CHECK_VIOLATION, which `refdes revise` and
+    # Today those are `CHECK_VIOLATION`, which `refdes revise` and
     # `refdes standard upgrade` must be able to tell apart from a project
-    # that does not parse or validate. Everything else leaves it None rather
-    # than growing a taxonomy nothing reads.
+    # that does not parse or validate, and `INLINE_CALC_STALE`, which
+    # `release_gate.inline_calc_results` reads. Everything else leaves it
+    # None rather than growing a taxonomy nothing reads.
     code: str | None = None
 
     @property

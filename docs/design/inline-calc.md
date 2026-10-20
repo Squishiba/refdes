@@ -134,7 +134,8 @@ A stale value is reported on every verification run, including an old
 append-only entry; that historical text is not rewritten (D1). The
 `release_gate.inline_calc_results` rule fails a **release** for stale
 editable items, with default `{release: true, revision: false}`. An item the
-build locks as a seal, and an item whose live content still matches a capture
+build locks as a seal, and an item whose live content still matches an
+unedited capture
 (`capture_index[key][1] is False`), is exempt from this freshness gate, while
 its warning remains visible. The capture exemption follows the entry's captured
 text, not the upstream inputs it referred to; a later upstream move can make
@@ -145,10 +146,14 @@ editable, so the exemption does not apply to the edited entry. Landed:
 `src/refdes/lifecycle.py:_rule_inline_calc_results` reads the build's stale
 warning (tagged `model.INLINE_CALC_STALE`), resolves it by display id and,
 for permanently id-less continuations whose diagnostic has an empty id, by
-exact source location, and exempts entries
+the body range containing the span (with a list-file entry-line fallback),
+and exempts entries
 `seal.is_sealed` and `history.capture_index` report. With a stale span in
-play, the rule fails closed on an unreadable history store and names that
-store; the store's read failure has its existing ordinary `check`/`build`
+play, the rule deliberately fails closed on an unreadable history store and
+names that
+store: a release cannot stamp a readiness claim while the tool is unable to
+prove the frozen-text exemption. The store's read failure has its existing
+ordinary `check`/`build`
 warning posture, while the release gate refuses the unprovable exemption.
 The rule reports the warning's own source line: the span line in Markdown,
 falling back to the item's entry line for a list-file `body:` key.

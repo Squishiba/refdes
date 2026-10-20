@@ -33,7 +33,8 @@ from . import build as build_mod
 from . import chains as chains_mod
 from . import history as history_mod
 from . import keys as keys_mod
-from . import model, seal as seal_mod, textio
+from . import model, textio
+from . import seal as seal_mod
 from .model import INFO, RELEASE_GATE_DEFAULTS, Item, Project, SchemaError
 from .parse import read_store_text, yaml_safe_load
 
@@ -756,11 +757,13 @@ def _inline_calc_items(project: Project, diagnostic) -> list[Item]:
     id-less continuations.
 
     A warning's display id is the normal lookup. An id-less item has
-    ``item_id=""``, and ``item_by_id("")`` is deliberately None, so use the
-    warning's exact file/line (the build emits the span's body line, falling
-    back to the item's source line for list-file bodies) plus its empty id.
-    Exact matches are intentionally plural: duplicate-source handles can put
-    two items at the same location, and each owns its warning.
+    ``item_id=""``, and ``item_by_id("")`` is deliberately None, so invert the
+    build's location rule: a Markdown span is located anywhere inside its
+    body range, while a list-file ``body:`` key reports the item's source
+    line. Matching the whole body range is required for a continuation whose
+    span is not the first body line. Matches are intentionally plural:
+    duplicate-source handles can put two items at the same location, and each
+    owns its warning.
     """
     if diagnostic.item_id:
         item = project.item_by_id(diagnostic.item_id)
@@ -773,8 +776,28 @@ def _inline_calc_items(project: Project, diagnostic) -> list[Item]:
         for item in project.local_items
         if item.source_file == diagnostic.file
         and item.id == diagnostic.item_id
-        and (item.source_line == diagnostic.line or item.body_line == diagnostic.line)
+        and (
+            (
+                item.body_line is not None
+                and item.body_line
+                <= diagnostic.line
+                < item.body_line + len(item.body.splitlines())
+            )
+            or (item.body_line is None and diagnostic.line == item.source_line)
+        )
     ]
+
+
+def _unreadable_history_offender(exc: Exception) -> str:
+    """One gate-table-safe line for a store that cannot be read. History
+    errors can include multi-line parser context; the gate row must stay one
+    row."""
+    detail = " ".join(str(exc).split())
+    prefix = (
+        "history: inline calc freshness cannot be checked: "
+        "history store unreadable"
+    )
+    return f"{prefix} ({detail})"
 
 
 def _rule_inline_calc_results(project: Project) -> list[str]:
@@ -785,13 +808,15 @@ def _rule_inline_calc_results(project: Project) -> list[str]:
     name the item, the span, and the span's line ("LOG-001: inline calc Vout
     (items/log.md:7)"), so the failure is clickable where the CLI is. An
     id-less continuation has no display id on its diagnostic, so lookup falls
-    back to its exact source location and the offender names its key.
+    back to the body range containing that line (list-file bodies report the
+    item's source line) and the offender names its key.
 
     The exemptions are the design's, read narrowly: an item the build locks
     (a build seal, `seal.is_sealed`) and an item frozen into captured history
     are not editable prose a release can demand fresher. The history half
     uses `history.capture_index`'s edited flag, not merely its presence: only
-    a capture whose live digest still matches the snapshot (flag false) is
+    an unedited capture whose live digest still matches the snapshot (flag
+    false) is
     frozen. A post-capture edit leaves the live item editable, so its stale
     warning remains a release offender -- `captured_edits` defaults off and
     cannot be relied on to catch that prose. Imported items' stale spans are
@@ -820,21 +845,12 @@ def _rule_inline_calc_results(project: Project) -> list[str]:
             if local_matches:
                 if all(seal_mod.is_sealed(project, item) for item in local_matches):
                     continue
-                return [
-                    "history: inline calc freshness cannot be checked: "
-                    f"history store unreadable ({exc})"
-                ]
+                return [_unreadable_history_offender(exc)]
             if any(not item.external for item in matches):
-                return [
-                    "history: inline calc freshness cannot be checked: "
-                    f"history store unreadable ({exc})"
-                ]
+                return [_unreadable_history_offender(exc)]
             if diagnostic.item_id and project.item_by_id(diagnostic.item_id):
                 continue
-            return [
-                "history: inline calc freshness cannot be checked: "
-                f"history store unreadable ({exc})"
-            ]
+            return [_unreadable_history_offender(exc)]
         return []
     offenders: set[str] = set()
     for diagnostic in stale:

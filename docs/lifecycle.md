@@ -62,7 +62,7 @@ against the rule names.
 | `unaccepted_workspace_moves` | an item's workspace differs from `.refdes/boards.yaml`'s `workspaces:` key ([workspaces](workspaces.md)) |
 | `open_tasks` | a thread tip carries an open task (its fold lists one; a tip whose fold is ambiguous counts too, said as a conflicting list) |
 | `captured_edits` | an item's current content differs from its captured snapshot (the same fact as the "edited after captured" warning; ticking a task on a captured entry is one such edit — task rows are part of the fields the history digest covers) |
-| `inline_calc_results` | a local, editable item's inline-calc span has a stored result that no longer computes — the same fact as the build's "inline calc Vout: stored result says 4.52 V, now computes 4.436 V" warning ([math](math.md#inline-calc)), including a permanently id-less continuation, which is named by its surrogate key. A build seal, or a capture whose live content still matches its snapshot, is exempt: its warning stays visible, the gate stays silent. Editing an item after capture makes the live text editable again, so a stale span there blocks. If a stale span is in play and the history store cannot be read, the gate fails closed and names the unreadable store |
+| `inline_calc_results` | a local, editable item's inline-calc span has a stored result that no longer computes — the same fact as the build's "inline calc Vout: stored result says 4.52 V, now computes 4.436 V" warning ([math](math.md#inline-calc)), including a permanently id-less continuation, which is named by its surrogate key. A build seal, or an unedited capture whose live content still matches its snapshot, is exempt: its warning stays visible, the gate stays silent. Editing an item after capture makes the live text editable again, so a stale span there blocks. If a stale span is in play and the history store cannot be read, the gate fails closed and names the unreadable store |
 
 **Why `open_tasks` and `captured_edits` default off.** Both are living-notes
 gate rules, but not the same one: `open_tasks` is worklist binding rule 5 of
@@ -81,7 +81,8 @@ above and are never re-counted as tasks.
 frozen readiness claim, and a stored result that no longer computes is a
 false number inside the artifact — the design fact the gate exists to catch
 (docs/design/inline-calc.md §2, decided Q5). Frozen text is exempt: an entry
-the build locks as a seal, or one whose live content still matches a capture,
+the build locks as a seal, or one whose live content still matches an
+unedited capture,
 keeps its visible warning and stamps past the gate; rewriting history to
 satisfy a freshness rule is not what the rule is for. The exemption follows
 that entry's captured text, not the upstream values it referred to, so an

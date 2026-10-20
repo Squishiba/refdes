@@ -16,8 +16,8 @@ are exempt and keep their warning; default `{release: true, revision: false}`.
   `_run_inline_span` now tags `code=INLINE_CALC_STALE`.
 - `src/refdes/lifecycle.py`: `_rule_inline_calc_results` registered in
   `_RULES`. Reads `project.warnings` (the build already ran), resolves stale
-  warnings by display id (with exact-location lookup for id-less
-  continuations), skips imported items, and exempts build-sealed items.
+  warnings by display id, with body-range location lookup for id-less
+  continuations, skips imported items, and exempts build-sealed items.
   Captures are exempt only when `capture_index` reports their edited flag
   false; an edit after capture leaves the live text editable and blocks.
   With a stale span in play, an unreadable history store fails the gate
@@ -93,57 +93,25 @@ are exempt and keep their warning; default `{release: true, revision: false}`.
 
 Task finished: yes.
 
-## Review round 1 (PR #345, reviewer 46737de9)
+## Review rounds (PR #345)
 
-- Finding: presence in `capture_index` included edited-after-capture items,
-  so a stale span added after capture was exempt. Fixed by using the index's
-  edited flag; only unedited captures are frozen.
-- Added a regression test that was red on the pre-fix head and passes after
-  the fix; unedited capture and build-seal tests remain green.
-- Rebased on `origin/main` and reran focused/full tests; results recorded
-  below.
-
-## Review round 2 (PR #345, reviewer 13709193)
-
-- Finding: the gate resolved stale warnings by display id only. A valid
-  id-less continuation emits `item_id=""`, so `item_by_id("")` returned None
-  and the stale span bypassed the release gate.
-- Reproduced on the pre-fix head through real `refdes release`: the stale
-  warning was visible and the release stamped.
-- Fix: resolve by display id first; for an empty id, match the diagnostic's
-  exact file and source/body line to a local item with the same empty id.
-  Sealed and unedited-capture exemptions remain applied per resolved item.
-- Added `test_inline_calc_results_id_less_continuation_span_blocks_release`,
-  red on the pre-fix head and green after the fix. Docs/changelog now name
-  the surrogate-key offender shape.
-- Rebased on latest `origin/main` and reran required gates; see below.
-
-## Review-round verification
-
-- Round 1 regression test was red on the pre-fix head and green after the
-  fix.
-- Round 2 regression test was red on the pre-fix head (gate `pass`, expected
-  `FAIL`) and green after the source-location fix.
-- Focused rebased run: 7 inline-calc lifecycle tests, 7 release-gate
-  settings tests, and 2 docs-anchor tests passed.
-- Full rebased suite: 4194 passed, 2 skipped.
-- `ruff check <touched files> --select E9,F`: clean.
-
-## Adversarial review round (PR #345, P1 fail-open)
-
-- Reproduced a stale, never-captured editable item passing release when
-  `.refdes/history/events` was unreadable. The gate's history read returned
-  no offenders, silently claiming the capture exemption.
-- Fixed `inline_calc_results` to fail closed on `HistoryError`/`OSError` when
-  stale spans are in play. The release failure names the unreadable store.
-  Sealed stale items and readable unedited captures remain exempt; no stale
-  span leaves the broken store out of this rule's scope.
-- Added four tests: never-captured and captured-store corruption fail closed,
-  seal remains exempt, no-stale remains pass. The first two were red on the
-  pre-fix head.
-- Hand-run with a corrupt event file: `refdes release` exits 1 and names the
-  unreadable store.
+- Review 1: mere capture presence included edited-after-capture items. Fixed
+  to use `capture_index`'s edited flag; only unedited captures are frozen.
+- Review 2: id-less continuation has `item_id=""`, so display-id lookup missed
+  it. Added empty-id location fallback and surrogate-key naming.
+- Review 3: Markdown continuation diagnostics are emitted at the span line,
+  which can be deeper in the body. Exact source/body-line matching missed
+  them. The fallback now inverts the build's location rule: body range for
+  Markdown, source line for list-file bodies.
+- Independent P1: unreadable history store produced no offenders, letting a
+  stale never-captured item stamp. The gate deliberately fails closed now and
+  names the store. Multiline parser context is collapsed into one gate row.
+  Sealed and readable unedited-capture exemptions remain.
 - P2 assessments documented: list-file bodies report the item-entry line;
   capture exemption follows captured text, not later upstream moves.
-- Verification: 11 focused lifecycle tests, 20 lifecycle/settings/docs tests,
-  full suite 4198 passed / 2 skipped, and targeted ruff clean.
+
+## Review verification
+
+- Location fallback: 12 inline-calc lifecycle tests.
+- Combined lifecycle/settings/docs: 20 tests.
+- Full suite and ruff results are recorded in the PR body.

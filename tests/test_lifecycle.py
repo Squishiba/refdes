@@ -888,6 +888,63 @@ def test_inline_calc_results_id_less_continuation_span_blocks_release(tmp_path):
     assert not os.path.isfile(lifecycle.baseline_path(project, "rel-a"))
 
 
+def test_inline_calc_results_id_less_markdown_continuation_span_blocks_release(
+    tmp_path,
+):
+    """The id-less lookup must cover a Markdown continuation's whole body,
+    not only its first body line: the diagnostic is the span's absolute line,
+    while the item is located by its front-matter/body start."""
+    write_project_config(
+        tmp_path,
+        "site: { title: IC, out: _site }\n"
+        "standard: { base: hardware, version: 3 }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "log.yaml").write_text(
+        "items:\n"
+        "  - id: LOG-001\n"
+        "    type: log\n"
+        "    date: 2026-10-18\n"
+        "    summary: First.\n",
+        encoding="utf-8",
+    )
+    (items / "notes.md").write_text(
+        "---\n"
+        "type: log\n"
+        "date: 2026-10-19\n"
+        "summary: Continuation.\n"
+        "follows: LOG-001\n"
+        "---\n"
+        "\n"
+        "Settled.\n"
+        "`Vfb := 0.8 V * (1 + 10 kohm/2.2 kohm) | V = 9.9 V`.\n",
+        encoding="utf-8",
+    )
+    _ic_rebuild(tmp_path)  # mint the continuation's key and rewrite follows
+    project = _ic_rebuild(tmp_path)
+    stale = next(d for d in project.warnings if "stored result says" in d.message)
+    continuation = next(
+        item
+        for item in project.local_items
+        if item.id == "" and item.source_file == stale.file
+    )
+    assert stale.item_id == ""
+    assert stale.file == "items/notes.md"
+    text = (tmp_path / "items" / "notes.md").read_text(encoding="utf-8").splitlines()
+    span_line = next(i for i, ln in enumerate(text, start=1) if "Vfb :=" in ln)
+    assert stale.line == span_line
+    assert continuation.source_line < continuation.body_line < stale.line
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].status == "FAIL"
+    assert results["inline_calc_results"].offenders == [
+        f"{continuation.key}: inline calc Vfb ({stale.file}:{stale.line})"
+    ]
+    outcome = lifecycle.stamp(project, kind="release", name="rel-a")
+    assert outcome.status == "gate_failed"
+    assert not os.path.isfile(lifecycle.baseline_path(project, "rel-a"))
+
+
 def test_inline_calc_results_captured_then_edited_span_blocks_release(tmp_path):
     """Capturing an entry freezes the captured snapshot, not every future
     edit. A post-capture edit leaves the live item editable, so a stale span
@@ -951,6 +1008,7 @@ def test_inline_calc_results_unreadable_history_store_fails_closed(tmp_path):
     offender = results["inline_calc_results"].offenders[0]
     assert offender.startswith("history: inline calc freshness cannot be checked")
     assert "history store unreadable" in offender
+    assert "\n" not in offender
     outcome = lifecycle.stamp(project, kind="release", name="rel-a")
     assert outcome.status == "gate_failed"
     assert not os.path.isfile(lifecycle.baseline_path(project, "rel-a"))
