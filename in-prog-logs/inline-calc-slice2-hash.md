@@ -146,5 +146,4 @@ LOW: lifecycle baseline docstring "HASH_FORMAT -- currently 5" -> 6;
 `keys.hash_in_format` opening claim "exactly as hash-format would
 compute" is false for an author-composite span target (the
 reconstruction strips it) -- rewritten as the canonical single
-reconstruction vs the hashes_in_format comparison set. Full suite 4318
-passed, 2 skipped. Task finished.
+reconstruction vs the hashes_in_format comparison set. Full suite 4318 passed, 2 skipped. Task finished.
