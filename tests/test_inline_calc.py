@@ -454,9 +454,9 @@ def test_check_and_build_report_the_same_thing(tmp_path):
     assert levels.count("warning") == 1  # the stale value
 
 # ------------------------------------------- the run-12 message defects
-# (in-prog-logs/user-sim-release-gate-run12.md F12-4..F12-6): each test
-# pins the message a user-sim run found dishonest, with the fence form as
-# the control wherever the span form is the gap.
+# (in-prog-logs/user-sim-release-gate-run12.md F12-4..F12-6): F12-4 pins
+# the message a user-sim run found dishonest; F12-5 and F12-6, closed by
+# slice 2, pin the fixed behaviour, with the fence form as the control.
 
 
 def _build_items(tmp_path, files, config=BASIC_CONFIG):

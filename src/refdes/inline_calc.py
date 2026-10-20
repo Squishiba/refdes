@@ -163,6 +163,8 @@ def code_span_ranges(line: str) -> list[tuple[int, int]]:
                 break
             close = run_end
         if not closed:
+            # An opening run with no matching closer on the line is literal
+            # text, not a span -- nothing to record.
             pass
     return spans
 
@@ -236,22 +238,35 @@ def span_cross_ref(span: InlineSpan) -> re.Match[str] | None:
     """The cross-item reference a parsed span's RHS is -- `TARGET.NAME` as
     the whole (unit-stripped) right-hand side, matched with the evaluator's
     own `CROSS_REF_RE`, so a span is a reference here exactly when it is one
-    in `evaluate_block`. None for a malformed span and for every other RHS."""
+    in `evaluate_block`. None for a malformed span and for every other RHS.
+
+    The RHS is matched with a trailing `#` comment stripped by the
+    evaluator's own quote-aware `split_comment`: `evaluate_block` splits the
+    comment off the line before `CROSS_REF_RE` runs, so a reference carrying
+    a comment is a reference to the evaluator and must be one here too --
+    matching the raw text made such a span invisible to the scheduler, which
+    ran it before its target."""
     if span.error:
         return None
-    return calc.CROSS_REF_RE.match(span.rhs.strip())
+    rhs = calc.split_comment(span.rhs)[0].strip()
+    return calc.CROSS_REF_RE.match(rhs)
 
 
 def span_source_call(span: InlineSpan) -> tuple[str, str] | None:
     """`(path, key)` for a parsed span whose RHS is a well-formed `source()`
     call, None otherwise -- the span counterpart of `calc.source_calls_in_block`
     (the pipe unit is already split off by `parse_span`, as the evaluator
-    strips it for a fence line)."""
+    strips it for a fence line). The RHS is matched with a trailing `#`
+    comment stripped by the evaluator's own quote-aware `split_comment`, so
+    a `source()` call carrying a comment is a call here exactly when it is
+    one to the evaluator: `fetch` must pin a commented call's key, not leave
+    the evaluator demanding a value fetch never takes (the F12-6 dead end)."""
     if span.error:
         return None
-    if not calc.SOURCE_START_RE.match(span.rhs.strip()):
+    rhs = calc.split_comment(span.rhs)[0].strip()
+    if not calc.SOURCE_START_RE.match(rhs):
         return None
-    parsed = calc.parse_source_call(span.rhs)
+    parsed = calc.parse_source_call(rhs)
     return (parsed[0], parsed[1]) if parsed else None
 
 

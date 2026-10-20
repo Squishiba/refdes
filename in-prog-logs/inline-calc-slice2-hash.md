@@ -94,3 +94,37 @@ Docs: `HASH_FORMAT` history comment in `build.py`, `docs/lifecycle.md`
 - Tree shared with concurrent sessions: staged by explicit paths, no
   stash. `origin/main` gained `c9ecc30` (docs) after branch point; rebase
   before push.
+
+## Review round (PR #347 head c5c3b8d)
+
+Three cross-model reviewers (chunks: docs+build / inline_calc / links+serve).
+Chunk 2 and chunk 3 returned CHANGES REQUESTED; chunk 1 ended without a
+verdict (no findings). Fixes, each with a red-on-this-head test first:
+
+- RHS-comment parity (chunk 2): `span_cross_ref`/`span_source_call` now
+  strip a trailing `#` comment with the evaluator's own quote-aware
+  `split_comment` before matching -- `evaluate_block` strips it before
+  `CROSS_REF_RE`/`SOURCE_START_RE`, so matching raw text made a commented
+  reference invisible to the scheduler (span ran before its target, leaked
+  an internal AttributeError) and to `fetch` (F12-6 dead end).
+- Span-scan geometry (chunk 3): `links._calc_ref_rewrites` takes
+  `inline_start`; `plan_calc_ref_expansion` bounds the span scan to
+  `item.body_line` (was `source_line`-1, the front-matter fence). A
+  front matter ending in an unclosed fence marker used to hide every body
+  span (silent non-expansion, no report); a span in front matter used to
+  be rewritten on disk while the in-memory pass rewrote only `item.body`.
+- Direct coverage (chunk 3): `body_source_pairs` span branch tested in
+  `tests/test_serve_sources_accept.py` (fence branch as control).
+- Stale comments/labels fixed (`iter_triggered_spans` docstring is now an
+  explicit assumption, `code_span_ranges` dead branch, `links.py` range
+  justification, run-12 test header, test section renumbering, `= 24 V`).
+
+Verified: the 4 new geometry/parity tests fail on `c5c3b8d` and pass after;
+full suite 4207 passed, 2 skipped; ruff `--select E9,F` clean on touched
+files; golden (a) rebuild byte-identical (all five item hashes, baseline,
+release, seal).
+
+Scope note: a source() span with `#` before the pipe (`source(...) # note
+| V = 5 V`) is broken in the evaluator itself (the comment swallows the
+unit declaration) -- the fix restores discovery parity; the evaluator's
+unit rule for that shape is out of scope.

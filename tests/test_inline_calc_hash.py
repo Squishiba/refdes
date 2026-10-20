@@ -259,7 +259,106 @@ def test_span_reference_cycle_is_reported(tmp_path):
     assert "DEC-001 -> DEC-002 -> DEC-001" in cycles[0]
 
 
-# ------------------------------ 5. slice 2 evidence (c)/(d)/(e) in a project
+def test_span_reference_with_a_rhs_comment_expands(tmp_path):
+    """Review chunk 2: the evaluator strips `#` comments before it matches
+    a cross-reference, so a span whose reference carries a trailing
+    comment is the same dependency edge -- it schedules after its target
+    and expands to composite form like a comment-free span. Matching the
+    raw RHS made it invisible to the scans: the span ran before its
+    target and leaked an internal AttributeError instead of resolving."""
+    import re
+
+    files = {
+        "a.md": "---\nid: DEC-001\ntype: decision\n---\n\n"
+        "`v := DEC-002.V_in # note = 2 V`\n",
+        "b.md": SPAN_REF["b.md"],
+    }
+    project = _build(tmp_path, files)
+    assert not project.errors, _errors(project)
+    text = (tmp_path / "items" / "a.md").read_text(encoding="utf-8")
+    assert re.search(r"DEC-002@[A-Za-z0-9_-]+\.V_in", text), text
+
+
+def test_span_source_with_a_rhs_comment_is_discovered(tmp_path):
+    """Review chunk 2, the same parity for `source()`: the evaluator's
+    discovery walk (`calc.source_calls_in_block`) strips a trailing `#`
+    comment with the quote-aware `split_comment` before it matches the
+    call, and `evaluate_block` strips it from the span's RHS before it
+    evaluates -- a commented span is a live `source()` to both. `fetch`
+    must pin the key it names: a span `fetch` does not see is a value
+    the build demands and fetch never takes (the F12-6 dead end)."""
+    import yaml
+
+    from refdes import cli as cli_mod
+
+    config = (
+        "site: { title: T, out: _site }\n"
+        "types:\n  decision:\n    prefix: DEC\n    fields:\n"
+        "      citations: { type: citations, on_change: invalidate }\n"
+    )
+    files = {
+        "a.md": "---\nid: DEC-001\ntype: decision\ncitations:\n"
+        "  - path: analysis/budget.csv\n---\n\n"
+        '`k := source("analysis/budget.csv", "k1") # note | V = 5 V`\n'
+    }
+    config_path = _setup(tmp_path, files, config)
+    (tmp_path / "analysis").mkdir(exist_ok=True)
+    (tmp_path / "analysis" / "budget.csv").write_text("key,value\nk1,5.0\n", encoding="utf-8")
+
+    assert cli_mod.main(["-c", config_path, "fetch"]) == 0
+    lock = yaml.safe_load(
+        (tmp_path / ".refdes" / "citations.yaml").read_text(encoding="utf-8")
+    )
+    assert "k1" in lock["citations"]["analysis/budget.csv"]["values"], lock
+
+
+# ------------------------------------------------- 3. scan geometry (review)
+
+
+FRONT_MATTER_FENCE = (
+    "---\nid: DEC-001\ntype: decision\nsummary: |\n  ```\n---\n\n"
+    "`v := DEC-002.V_in = 2 V`\n"
+)
+
+
+def test_unclosed_fence_in_front_matter_does_not_hide_the_span(tmp_path):
+    """Review chunk 3: the file scan was bounded at the front-matter fence
+    line, so front matter ending in an unclosed fence marker (valid YAML
+    in a block scalar) left the span scan's fence state open across the
+    body -- every span of the item silently stopped being a reference:
+    no expansion, no report, forever. The scan is bounded to the body."""
+    import re
+
+    files = {"a.md": FRONT_MATTER_FENCE, "b.md": SPAN_REF["b.md"]}
+    project = _build(tmp_path, files)
+    assert not project.errors, _errors(project)
+    text = (tmp_path / "items" / "a.md").read_text(encoding="utf-8")
+    assert re.search(r"DEC-002@[A-Za-z0-9_-]+\.V_in", text), text
+
+
+def test_span_in_front_matter_is_not_rewritten(tmp_path):
+    """Review chunk 3, the other side of the bound: a triggered span inside
+    front matter is no span consumer's business -- body, hash and
+    citations all scan the body -- so the on-disk rewrite must leave it
+    alone; rewriting it while the in-memory pass rewrites only
+    `item.body` splits file and memory apart. The item's body carries a
+    reference to the same target, which is what puts the item in the
+    plan and starts the scan."""
+    import re
+
+    files = {
+        "a.md": '---\nid: DEC-001\ntype: decision\nsummary: "see `x := DEC-002.V_in = 1 V`"\n---\n\n'
+        "body: `v := DEC-002.V_in = 1 V`\n",
+        "b.md": "---\nid: DEC-002\ntype: decision\n---\n\n```calc\nV_in = 1 V\n```\n",
+    }
+    project = _build(tmp_path, files)
+    assert not project.errors, _errors(project)
+    text = (tmp_path / "items" / "a.md").read_text(encoding="utf-8")
+    assert re.search(r"body: `v := DEC-002@[A-Za-z0-9_-]+\.V_in = 1 V`", text), text
+    assert 'summary: "see `x := DEC-002.V_in = 1 V`"' in text, text
+
+
+# ------------------------------ 4. slice 2 evidence (c)/(d)/(e) in a project
 
 
 CROSS_SPAN = {
@@ -272,7 +371,7 @@ def test_editing_a_referenced_value_moves_the_span_item(tmp_path):
     """Evidence (c): the value a span reads is a real dependency -- editing
     the upstream number moves the span item's content hash, and the
     scheduler ordered the build so the span resolved against the new value
-    (no stale `= 24 V` verdict change, which the probe reports)."""
+    (no stale `= 12 V` verdict change, which the probe reports)."""
     project = _build(tmp_path, CROSS_SPAN)
     assert not project.errors, _errors(project)
     before = _hashes(project)

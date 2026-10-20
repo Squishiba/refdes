@@ -1048,6 +1048,7 @@ def _calc_ref_rewrites(
     end: int,
     replacements: dict[str, str],
     include_inline: bool = False,
+    inline_start: int = 0,
 ) -> set[str]:
     """Rewrite bare calc-reference targets inside one item's line span, and
     refresh stale composite display halves, in place. Operates only on the
@@ -1062,7 +1063,13 @@ def _calc_ref_rewrites(
     content replaced in place so the author's surrounding text, the stored
     result and the line count all survive exactly. Fence lines stay the
     fence loop's; `iter_triggered_spans` never reports a span inside a
-    fence."""
+    fence. The span scan covers `lines[inline_start:end]`, not the whole
+    item slice: a caller slicing from `source_line` (front matter included)
+    must pass the body-bound start, because the fence tracking in
+    `iter_triggered_spans` assumes fences are self-contained in a body --
+    an unclosed fence in front matter would otherwise hide every body span,
+    and a span in front matter (no span consumer reads front matter) must
+    not be rewritten where the in-memory pass rewrites only `item.body`."""
     from . import calc as calc_mod
 
     applied: set[str] = set()
@@ -1070,7 +1077,7 @@ def _calc_ref_rewrites(
     if include_inline:
         from . import inline_calc as inline_calc_mod
         for offset, span_start, span_end, content in inline_calc_mod.iter_triggered_spans(
-            lines[start:end]
+            lines[inline_start:end]
         ):
             span = inline_calc_mod.parse_span(0, content)
             ref = inline_calc_mod.span_cross_ref(span)
@@ -1080,7 +1087,7 @@ def _calc_ref_rewrites(
             new_target = replacements.get(target)
             if new_target is None:
                 continue
-            inline_entries.setdefault(start + offset, []).append(
+            inline_entries.setdefault(inline_start + offset, []).append(
                 (span_start, span_end, content.replace(target, new_target, 1), target)
             )
     for i in range(start, end):
@@ -1178,10 +1185,12 @@ def plan_calc_ref_expansion(
         lines = source.lines
 
         # Spans are item-to-item, not `_item_spans`: that helper bounds a
-        # markdown item at its first fence (link fields live in front matter),
-        # and calc lines are inside the fence. Bleeding is impossible here --
-        # `_calc_ref_rewrites` only touches lines matching the strict
-        # `name = TARGET.NAME` assignment grammar.
+        # markdown item at its first fence (link fields live in front
+        # matter), and calc lines are inside the fence. Bleeding is
+        # impossible for the fence loop -- it only touches lines matching
+        # the strict `name = TARGET.NAME` assignment grammar -- and the
+        # span scan is bounded to the item's body lines below, the shape
+        # `iter_triggered_spans` documents (see `_calc_ref_rewrites`).
         file_items = sorted(
             (i for i in project.local_items if i.source_file == rel),
             key=lambda i: i.source_line,
@@ -1195,8 +1204,20 @@ def plan_calc_ref_expansion(
             )
             repl = replacements_by_item.get(id(item))
             if repl:
+                # `source_line` is the front matter's opening fence line;
+                # the span scan starts at the body (`body_line` is the
+                # body's first line, 1-based) -- None means no known
+                # position, and an unbounded scan is worse than a silent
+                # no-op for spans, which every other consumer also skips
+                # when the body has no position.
+                inline_start = (
+                    max(item.body_line - 1, start)
+                    if item.body_line is not None
+                    else end
+                )
                 applied_by_item[id(item)] |= _calc_ref_rewrites(
-                    lines, start, end, repl, include_inline=True
+                    lines, start, end, repl, include_inline=True,
+                    inline_start=inline_start,
                 )
 
         after = source.render(lines)
