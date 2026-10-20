@@ -397,6 +397,67 @@ def test_insert_leaves_other_items_untouched():
     assert {k: v for k, v in after[0].items() if k != "owner"} == before[0]
 
 
+# A scalar's end_mark stops before its same-line trailing comment, so the
+# insertion point walked back from the last value lands ahead of the `#` and
+# the new key splices in between the value and its comment, re-homing the
+# comment onto the new field. These pin that the comment stays on its own
+# line in every shape the insertion runs on.
+
+INSERT_COMMENT_YAML = "items:\n  - id: REQ-001\n    text: Repro item.   # note on REQ-001 text\n"
+INSERT_COMMENT_MD = "---\nid: DEC-001\ntext: Chosen.  # a note on DEC-001\n---\n\nprose\n"
+
+
+def test_insert_keeps_a_trailing_comment_on_its_own_line():
+    new, got = inserted(INSERT_COMMENT_YAML, "REQ-001", SetField("status", "approved"), "\n", "approved")
+    assert new == (
+        "items:\n"
+        "  - id: REQ-001\n"
+        "    text: Repro item.   # note on REQ-001 text\n"
+        "    status: approved\n"
+    )
+    # the reported offsets are the line the insertion actually lands on
+    assert INSERT_COMMENT_YAML[: got.start].endswith("# note on REQ-001 text")
+    assert got.start_line == 3 and got.end_line == 3
+
+
+def test_insert_after_trailing_comment_all_line_ending_variants():
+    for key, text in _line_break_variants(INSERT_COMMENT_YAML).items():
+        eol = "\r\n" if "crlf" in key else "\n"
+        new, _ = inserted(text, "REQ-001", SetField("status", "approved"), eol, "approved")
+        assert f"text: Repro item.   # note on REQ-001 text{eol}" in new
+        assert f"{eol}    status: approved" in new
+
+
+def test_insert_in_front_matter_keeps_trailing_comment_all_line_ending_variants():
+    for key, text in _line_break_variants(INSERT_COMMENT_MD).items():
+        eol = "\r\n" if "crlf" in key else "\n"
+        new, _ = inserted(text, "DEC-001", SetField("status", "approved"), eol, "approved")
+        assert f"text: Chosen.  # a note on DEC-001{eol}" in new
+        assert f"{eol}status: approved" in new
+
+
+def test_insert_control_a_comment_free_last_line_is_untouched():
+    new, _ = edited(INSERT_YAML, "REQ-001", SetField("status", "approved"))
+    assert new == INSERT_YAML.replace(
+        "    priority: high\n",
+        "    priority: high\n    status: approved\n",
+        1,
+    )
+
+
+def test_insert_after_block_scalar_does_not_mistake_a_hash_for_a_comment():
+    text = "items:\n  - id: REQ-001\n    body: |\n      prose # not a comment\n"
+    new, _ = edited(text, "REQ-001", SetField("status", "approved"))
+    assert new == (
+        "items:\n"
+        "  - id: REQ-001\n"
+        "    body: |\n"
+        "      prose # not a comment\n"
+        "    status: approved\n"
+    )
+    assert yaml.safe_load(new)["items"][0]["body"] == "prose # not a comment\n"
+
+
 def test_an_insertion_offset_inside_a_break_is_refused():
     """Sabotage the other way: a plan whose zero-width offset lands between the
     CR and the LF must be refused, not spliced into a broken pair."""

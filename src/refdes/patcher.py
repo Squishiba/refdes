@@ -651,6 +651,21 @@ def _plan_insert(f: _File, item: _Item, name: str, value: Any, what: str) -> Pat
         pos -= 1
     if pos <= item.base + node.start_mark.index:
         return Refusal(f"cannot find where item {item.ref} ends", ref=item.ref, field=name)
+    # A scalar's end_mark stops before its same-line trailing comment, so the
+    # point above lands *ahead* of the `#`: inserting there splices the new key
+    # between the value and the comment and re-homes the comment onto the new
+    # field. A comment runs to the end of its line, so carry the insertion point
+    # past it to the line's end. The `#` must be space-preceded (that is what
+    # makes it a comment, not a `#` inside the scalar's own text), and a block
+    # scalar's last content line has no comment to cross -- what follows its
+    # walk-backed end is the break itself, so the sweep stays put. Stopping
+    # before the `\r` of a CRLF keeps the pair whole, as in the walk-back above.
+    probe = pos
+    while probe < len(f.text) and f.text[probe] in " \t":
+        probe += 1
+    if probe > pos and probe < len(f.text) and f.text[probe] == "#":
+        while pos < len(f.text) and f.text[pos] not in "\r\n":
+            pos += 1
     indent = " " * (node.value[0][0].start_mark.column)
     emitted, note = _emit_scalar(
         value, style=None, indent=len(indent), eol=f.eol, allow_block=True, original=""

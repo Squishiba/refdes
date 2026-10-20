@@ -123,6 +123,13 @@ def test_add_link_inserts_a_missing_verb_at_the_end_of_the_item():
     assert new == f"items:\n  - id: D\n    title: T\n    satisfies: {NEW}\n"
 
 
+def test_add_link_missing_verb_keeps_trailing_comment_on_its_line():
+    text = "items:\n  - id: D\n    title: T   # a note on the title\n"
+    new, got = edited(text, "D", AddLink("satisfies", NEW))
+    assert got.op == "insert"
+    assert new == f"items:\n  - id: D\n    title: T   # a note on the title\n    satisfies: {NEW}\n"
+
+
 def test_add_link_refuses_a_target_that_is_already_there():
     for ref in ("DEC-001", "DEC-002", "DEC-003"):
         got = refuse(LINK_SCALAR, ref, AddLink("satisfies", "REQ-001"))

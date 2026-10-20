@@ -1,0 +1,57 @@
+EDIT-02: patcher insertion rehomes the last field's same-line trailing comment
+
+Task: `POST set_field status=approved` on an item whose last field carries a
+same-line trailing YAML comment inserted the new key *before* the `#`, so the
+comment moved onto the new field's line. Audit's live repro:
+`text: Repro item.   # note on REQ-030 text` -> after the edit the comment sat
+on `status: approved`.
+
+Live repro (real EditorApp HTTP, this worktree's src asserted via
+`refdes.__file__`): `.scratch/edit02/repro.py` boots a real EditorApp over a
+keyed mini-project, POSTs `/api/item/<ref>/edit`, records original/after bytes
+and the response. On base (1d6d325) all insertion shapes returned 200 with the
+comment rehomed: YAML LF, YAML CRLF, Markdown front matter LF and CRLF.
+Controls on base: comment-free insertion placed the key on its own line
+(correct); the replace path (`set_field text=...`) kept the comment (correct).
+`add_link` over HTTP first refused on the key-policy layer (target without a
+minted artifact key -- separate seam, EDIT-01 territory); after minting keys
+via `refdes check` the add_link insert reproduced identically on base.
+
+Root cause: `patcher._plan_insert` computed the insertion point as
+`item.base + last_value.end_mark.index` and walked *back* over whitespace.
+A scalar's end_mark stops before its trailing comment, so the point landed
+between the value and the `#`.
+
+Fix (one seam, `src/refdes/patcher.py` `_plan_insert`): after the walk-back
+and the bounds check, if the text at the insertion point is a space-preceded
+`#`, carry the point forward to the end of that line (before the break). The
+comment keeps its line; the new key lands on a fresh line after it. The sweep
+requires a space before the `#` (that is what makes it a comment, not scalar
+text) and stops at `\r`, so CRLF pairs stay whole; a block scalar's last
+content line is followed directly by the break, so its geometry is untouched.
+PatchPlan start/end/start_line/end_line are computed from the final point, so
+the reported offsets name the line the insertion actually lands on.
+
+Tests (red on base, green after; `tests/test_patcher.py`,
+`tests/test_patcher_links.py`):
+- test_insert_keeps_a_trailing_comment_on_its_own_line (YAML list, byte-exact
+  + truthful start_line == comment line)
+- test_insert_after_trailing_comment_all_line_ending_variants (LF/CRLF, with
+  and without final break, via the `inserted` four-guarantee helper)
+- test_insert_in_front_matter_keeps_trailing_comment_all_line_ending_variants
+- test_add_link_missing_verb_keeps_trailing_comment_on_its_line (same seam
+  through AddLink)
+- controls, green on base and after: comment-free insertion byte-exact
+  unchanged; `#` inside a block-scalar line not treated as a comment.
+
+Red-on-base proof: copied the fixed patcher aside, `git checkout 1d6d325 --
+src/refdes/patcher.py`, the four comment tests fail (comment on the new
+line), both controls pass; restored the fix (no stash used).
+
+Verification: focused patcher+serve-edit suites 306 passed; full suite
+4234 passed / 2 skipped; scoped `ruff check` on the three touched files shows
+the same 11 pre-existing findings as base (zero delta). Live repro re-run
+after the fix: 200 + comment on its own line in all five insertion shapes,
+controls unchanged.
+
+Status: finished. Not self-merged; PR carries the evidence.
