@@ -132,7 +132,7 @@ def test_block_only_calc_hash_is_the_block_only_hash(tmp_path):
     import re
 
     blocks = [re.sub(r"\s+", " ", b).strip() for b in
-              re.findall(r"```calc\n(.*?)```", body, re.S)]
+              re.findall(r"```calc\n(.*?)```", body, re.DOTALL)]
     expected = hashlib.sha256(
         json.dumps({"calc_blocks": blocks}, sort_keys=True).encode()
     ).hexdigest()[:16]
@@ -154,10 +154,17 @@ def test_calc_hash_orders_spans_and_fences_by_source(tmp_path):
 def test_malformed_span_has_a_probe_at_all(tmp_path):
     """A triggered span with no arithmetic to name still gets a probe (its
     raw text) -- the span is arithmetic the author declared, and the build
-    reports it as an error at the line."""
-    project = _build(tmp_path, {"a.md": _item("DEC-001", "`x := 1 V`\n")})
+    reports it as an error at the line. Sabotage: rewriting the malformed
+    span's raw text moves the probe, so the probe is the span's text, not
+    a constant standing in for it."""
+    files = {"a.md": _item("DEC-001", "`x := 1 V`\n")}
+    project = _build(tmp_path, files)
     assert any("stored result missing" in m for m in _errors(project))
-    assert build_mod.calc_hash_for(project.item_by_id("DEC-001")) is not None
+    probe = build_mod.calc_hash_for(project.item_by_id("DEC-001"))
+    assert probe is not None
+    _edit(tmp_path, "a.md", "`x := 1 V`", "`x := 2 V`")
+    project2 = _rebuild(tmp_path)
+    assert build_mod.calc_hash_for(project2.item_by_id("DEC-001")) != probe
 
 
 def test_stale_arithmetic_signal_silent_for_baseline_without_probe(tmp_path):
@@ -299,7 +306,7 @@ def test_span_source_with_a_rhs_comment_is_discovered(tmp_path):
     files = {
         "a.md": "---\nid: DEC-001\ntype: decision\ncitations:\n"
         "  - path: analysis/budget.csv\n---\n\n"
-        '`k := source("analysis/budget.csv", "k1") # note | V = 5 V`\n'
+        '`k := source("analysis/budget.csv", "k1") | V # note = 5 V`\n'
     }
     config_path = _setup(tmp_path, files, config)
     (tmp_path / "analysis").mkdir(exist_ok=True)
@@ -310,6 +317,15 @@ def test_span_source_with_a_rhs_comment_is_discovered(tmp_path):
         (tmp_path / ".refdes" / "citations.yaml").read_text(encoding="utf-8")
     )
     assert "k1" in lock["citations"]["analysis/budget.csv"]["values"], lock
+    # and the commented span is a live calc: the build evaluates it clean.
+    # (The `# note | V` shape -- comment BEFORE the unit -- is NOT the
+    # parity shape: the evaluator's comment strip swallows the unit, so it
+    # demands an explicit unit at build. The unit is part of the
+    # expression grammar; the comment follows it.)
+    project = load_project(config_path=config_path)
+    parse.load_items(project)
+    build_mod.build(project)
+    assert not project.errors, _errors(project)
 
 
 # ------------------------------------------------- 3. scan geometry (review)
@@ -453,8 +469,12 @@ def test_span_missing_target_is_a_clean_error(tmp_path):
 
 def test_several_spans_one_item_all_enter_the_snapshot(tmp_path):
     """Evidence (e): an item with three spans referencing two upstreams
-    puts all three refs in the baseline snapshot in source order, and the
-    probe covers all three."""
+    contributes every distinct target to the baseline snapshot's
+    `calc_refs` (the snapshot set is deduplicated -- the repeated
+    `DEC-001.V_in` names one target once), and the probe covers all three
+    spans: the probe is span-ordered per occurrence, so dropping the
+    duplicated third span moves it even though the snapshot set is
+    unchanged."""
     files = {
         "up1.md": _item("DEC-001", "```calc\nV_in = 12 V\n```\n"),
         "up2.md": _item("DEC-002", "```calc\nI_in = 2 A\n```\n"),
@@ -473,6 +493,17 @@ def test_several_spans_one_item_all_enter_the_snapshot(tmp_path):
     assert entry["calc_hash"] == build_mod.calc_hash_for(
         project.item_by_id("DEC-003")
     )
+    import re
+
+    path = tmp_path / "items" / "mid.md"
+    text = path.read_text(encoding="utf-8")
+    trimmed = re.sub(r" and `c := DEC-001@[^.]+\.V_in = 12 V`", "", text)
+    assert trimmed != text, text
+    path.write_text(trimmed, encoding="utf-8")
+    project2 = _rebuild(tmp_path)
+    entry2 = lifecycle._items_map(project2)["DEC-003"]
+    assert entry2["calc_refs"] == entry["calc_refs"]  # snapshot set: deduped
+    assert entry2["calc_hash"] != entry["calc_hash"]  # probe: all three spans
 
 
 def test_format5_reconstruction_excludes_span_inputs(tmp_path):
@@ -489,3 +520,138 @@ def test_format5_reconstruction_excludes_span_inputs(tmp_path):
     assert build_mod.hash_for_format(fence, project, 6) == fence.content_hash
     assert build_mod.hash_for_format(spanned, project, 6) == spanned.content_hash
     assert build_mod.hash_for_format(spanned, project, 5) != spanned.content_hash
+
+
+# ------------------------- 5. the HIGH fix: format-5 reconstruction of an
+# expanded span (round-2 review)
+
+
+APPEND_CONFIG = (
+    "site: { title: T, out: _site }\n"
+    "types:\n  decision: { prefix: DEC, append_only: true, fields: {} }\n"
+)
+
+# The old-code seal of the CROSS_SPAN fixture, recorded by running main
+# (d620ab5, HASH_FORMAT 5) over it on 2026-10-20. The test cannot
+# regenerate it -- that is the point: it is the value a real project has
+# stored in its seal file, and the format-5 reconstruction must reproduce
+# it from the *expanded* text the slice-2 rewriter leaves on disk.
+SEALED_UNDER_FORMAT5 = {
+    "DEC-001": "e44d58abd0c521ca",
+    "DEC-002": "c564abc555f17ffa",
+}
+
+
+def test_expanded_span_keeps_verifying_an_old_format5_seal(tmp_path):
+    """HIGH (round-2 review): slice 2 rewrites a span's target to the
+    composite form on disk, which moves the item's text -- so verifying a
+    seal recorded at format 5 must reconstruct the format-5 body with the
+    expanded span target stripped back to its display half. Before the
+    fix, a project sealed on main failed its very next build with
+    'DEC-002 is append-only and has been modified since it was sealed'
+    purely because the rewriter touched it. Format 6 moves the hash
+    (that is the designed migration); format-5 reconstruction must not."""
+    _setup(tmp_path, CROSS_SPAN, APPEND_CONFIG)
+    (tmp_path / ".refdes").mkdir(exist_ok=True)
+    (tmp_path / ".refdes" / "log-seal.yaml").write_text(
+        "sealed:\n"
+        f"  DEC-001: {SEALED_UNDER_FORMAT5['DEC-001']}\n"
+        f"  DEC-002: {SEALED_UNDER_FORMAT5['DEC-002']}\n",
+        encoding="utf-8",
+    )
+    project = _rebuild(tmp_path)
+    assert not project.errors, _errors(project)
+    assert project.seal_violations == []
+    spanned = project.item_by_id("DEC-002")
+    # the designed migration: the current (6) hash moved, the 5-reconstruction
+    # is the stored seal.
+    assert spanned.content_hash != SEALED_UNDER_FORMAT5["DEC-002"]
+    assert build_mod.hash_for_format(spanned, project, 5) == SEALED_UNDER_FORMAT5["DEC-002"]
+    fence = project.item_by_id("DEC-001")
+    assert fence.content_hash == SEALED_UNDER_FORMAT5["DEC-001"]
+
+
+def test_sealed_span_item_round_trips_then_detects_a_real_edit(tmp_path):
+    """Sealing a span item at the current format: the first writable build
+    seals it, a clean rebuild verifies, and editing the span's arithmetic
+    trips the append-only lock -- the seal check reads the *expanded* text
+    at format 6 (the strip applies to legacy reconstruction only)."""
+    from refdes import seal
+
+    project = _build(tmp_path, CROSS_SPAN, APPEND_CONFIG)
+    build_mod.build(project, seal_write=True)
+    sealed = seal.load_seals(project)
+    assert sealed["DEC-002"] == project.item_by_id("DEC-002").content_hash
+
+    project2 = _rebuild(tmp_path)
+    assert not project2.errors, _errors(project2)
+    assert project2.seal_violations == []
+
+    _edit(tmp_path, "down.md", "V_in = 12 V", "V_in = 12 V + 0")
+    project3 = _rebuild(tmp_path)
+    assert "DEC-002" in project3.seal_violations
+    assert any("modified since it was sealed" in m for m in _errors(project3))
+
+
+# --------------------- 6. the round-2 review's two rewrite-scan fixes
+
+
+def test_span_name_matching_the_target_prefix_is_not_eaten(tmp_path):
+    """Round-2 review collision: with a one-letter type prefix, a span
+    whose *name* starts with the reference's target (`v21 := v2.V_in`
+    under prefix `v`) -- a `content.replace(target, new, 1)` rewrite hits
+    the name first and corrupts the span into a composite-named calc. The
+    rewriter splices the target at its recorded range, so name and target
+    each stay their own text, and the expansion re-builds clean."""
+    import re
+
+    config = "site: { title: T, out: _site }\n" \
+        "types:\n  volt: { prefix: v, fields: {} }\n"
+    files = {
+        "a.md": "---\nid: v2\ntype: volt\n---\n\n```calc\nV_in = 12 V\n```\n",
+        "b.md": "---\nid: v21\ntype: volt\n---\n\n`v21 := v2.V_in = 12 V`\n",
+    }
+    _build(tmp_path, files, config)
+    text = (tmp_path / "items" / "b.md").read_text(encoding="utf-8")
+    assert re.search(r"`v21 := v2@[A-Za-z0-9_-]+\.V_in = 12 V`", text), text
+    project = _rebuild(tmp_path)
+    assert not project.errors, _errors(project)
+
+
+def test_yaml_list_file_span_targets_stay_bare_on_disk(tmp_path):
+    """Round-2 review exclusion: the rewriter's geometry is markdown
+    (front-matter delimiters, calc fences, line offsets), so for an item
+    loaded from a YAML list file -- `Item.body_line is None`, and a line
+    rewrite of `body:` corrupts the YAML text -- the plan skips its
+    span-only targets: the span stays bare on disk, a fenced reference
+    (whose geometry *is* the item's own lines) still expands, and the
+    dependency edge exists in the in-memory graph, so the build resolves
+    clean and a `--no-write` report matches what a writable build leaves."""
+    write_project_config(tmp_path, "site: { title: T, out: _site }\n")
+    (tmp_path / "refdes-schema.yaml").write_text(
+        "types:\n  decision: { prefix: DEC, fields: {} }\n", encoding="utf-8"
+    )
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "a.md").write_text(_item("DEC-001", "```calc\nV_in = 12 V\n```\n"), encoding="utf-8")
+    yaml_text = (
+        "items:\n"
+        "  - id: DEC-002\n"
+        "    type: decision\n"
+        "    body: |\n"
+        "      Prose with `v := DEC-001.V_in = 12 V` span.\n"
+        "\n"
+        "      ```calc\n"
+        "      w = DEC-001.V_in\n"
+        "      ```\n"
+    )
+    (items / "b.yaml").write_text(yaml_text, encoding="utf-8")
+    project = _rebuild(tmp_path)
+    assert not project.errors, _errors(project)
+    text = (items / "b.yaml").read_text(encoding="utf-8")
+    assert "v := DEC-001.V_in = 12 V" in text, text  # span bare, geometry-safe
+    import re
+
+    assert re.search(r"w = DEC-001@[A-Za-z0-9_-]+\.V_in", text), text  # fence expands
+    project2 = _rebuild(tmp_path)
+    assert not project2.errors, _errors(project2)

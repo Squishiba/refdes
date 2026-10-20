@@ -1,0 +1,12 @@
+site:
+  title: "New Project — Design Reference"
+  out: _site
+
+standard:
+  base: hardware
+  version: 3
+  presets: []
+
+id:
+  width: 3
+  ledger: .refdes/ids.yaml

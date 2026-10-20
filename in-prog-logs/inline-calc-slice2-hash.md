@@ -14,20 +14,17 @@ leaves the probe fixed; an arithmetic edit moves it); a malformed span
 contributes its raw text. Items with no spans produce the identical
 `{"calc_blocks": [...]}` payload as before, so existing baselines don't
 churn. An old baseline with no `calc_hash` for a span-only item is silent
-in `_stale_arithmetic` (existing `continue` on missing field — verified by
-test, not code change).
+in `_stale_arithmetic` (verified by test, not code change).
 
 Helpers added to `src/refdes/inline_calc.py` for later steps:
 `code_span_ranges` (positional view; `code_spans` is now the content view
-over it — one scanner, no drift), `span_cross_ref` (whole-RHS `CROSS_REF_RE`
-match, same grammar the evaluator uses), `span_source_call`
-(`SOURCE_START_RE` + `parse_source_call` on the span RHS).
+over it), `span_cross_ref` (whole-RHS `CROSS_REF_RE` match, same grammar
+the evaluator uses), `span_source_call` (`SOURCE_START_RE` +
+`parse_source_call` on the span RHS).
 
-Tests: new `tests/test_inline_calc_hash.py` (8 tests: probe presence for
-inline-only items, result-only fixed, RHS/name/unit edits move it,
-block-only hash byte-identical to the blocks-only formula, positional
-ordering, malformed-span probe, stale-signal silent/active). Full affected
-suites: 257 passed.
+Tests: new `tests/test_inline_calc_hash.py` (8 tests: probe presence,
+result-only fixed, edits move it, block-only byte-identical, positional
+ordering, malformed probe, stale-signal silent/active). 257 passed.
 
 ## Step 2 (done)
 
@@ -52,7 +49,7 @@ Full suite: 4196 passed, 2 skipped.
 design doc status updated. Full suite: 4196 passed, 2 skipped.
 
 ## Step 4 (this commit; steps 2-3 ride in it — their build.py hunks
-## interleave with the bump's, and the full suite ran green at each step)
+interleave with the bump's, and the full suite ran green at each step)
 
 `HASH_FORMAT` 5 -> 6. Evidence, all green:
 
@@ -69,19 +66,13 @@ design doc status updated. Full suite: 4196 passed, 2 skipped.
   `modified since it was sealed`, no new diagnostics, carry-forward
   migration silent (`_stale_arithmetic`/`_moved_refs` silent for the
   missing fields — tests in `tests/test_inline_calc_hash.py`).
-- (c) Editing the referenced value moves the span item's hash and the
-  stale verdict signal fires; a result-only edit moves the content hash
-  (body invalidates) but not the probe
-  (`test_editing_a_referenced_value_moves_the_span_item`,
-  `test_result_only_edit_keeps_the_span_probe`).
-- (d) `fetch` + `fetch --update` of a span's `source()` input moves the
-  item's hash (`test_span_source_edit_moves_the_item`).
-- (e) Adversarial: cycle via a span errors with the cycle path, missing
-  span target gets the standard "does not exist" error, sealed item
-  verifies clean (above), three spans on one item all enter the probe
-  and snapshot (`test_span_reference_cycle_is_reported`,
-  `test_span_missing_target_is_a_clean_error`,
-  `test_several_spans_one_item_all_enter_the_snapshot`).
+- (c) Editing the referenced value moves the span item's hash and fires
+  the stale signal; a result-only edit moves the content hash, not the
+  probe. (d) `fetch`/`fetch --update` of a span's `source()` input moves
+  the item's hash. (e) Adversarial: span cycle reports the cycle path,
+  missing target is a clean error, three spans on one item all enter the
+  probe; the snapshot's `calc_refs` set is deduped while the probe covers
+  every occurrence.
 
 Docs: `HASH_FORMAT` history comment in `build.py`, `docs/lifecycle.md`
 (format list + baseline examples), `docs/change-tracking.md`,
@@ -90,10 +81,8 @@ Docs: `HASH_FORMAT` history comment in `build.py`, `docs/lifecycle.md`
 ## Notes
 
 - `ruff check .` has ~99 pre-existing findings; only check touched files
-  with `--select E9,F` (AGENTS.md).
-- Tree shared with concurrent sessions: staged by explicit paths, no
-  stash. `origin/main` gained `c9ecc30` (docs) after branch point; rebase
-  before push.
+  with `--select E9,F` (AGENTS.md). Tree shared with concurrent sessions:
+  staged by explicit paths, no stash.
 
 ## Review round (PR #347 head c5c3b8d)
 
@@ -128,3 +117,34 @@ Scope note: a source() span with `#` before the pipe (`source(...) # note
 | V = 5 V`) is broken in the evaluator itself (the comment swallows the
 unit declaration) -- the fix restores discovery parity; the evaluator's
 unit rule for that shape is out of scope.
+
+## Round 2 + rebase onto main (#351) + AgentCoder pilot triage
+
+Round-2 review fixes (HIGH: format-5 seal of a span item broke --
+`_hash_payload` now strips `@key` from expanded span targets for formats
+<=5; links `_replace_ref_target` splices at the match range instead of
+`content.replace` (name/target collisions); span-only targets of items
+loaded from YAML list files are excluded from expansion (markdown
+geometry, `body_line is None`). Red-green: seal pair + collision + YAML
+tests fail on the unfixed head, pass after; full suite 4269 passed,
+4 skipped on the rebased head; golden (a) rebuilt (hash_format 5->6, only
+the span item's hash moves), (b) evidence: old format-5 seal verifies
+clean after expansion.
+
+Rebase onto 1d6d325 kept #351's comment-aware scanner: merged scan into
+one `_scan_body` returning positioned `(offset, start, end, content)`
+spans; `triggered_spans`/`iter_triggered_spans`/`unclosed_comment_offset`
+are thin views; one test-ordering conflict (span-pin fetch vs #351's
+fence control) resolved in favour of both.
+
+AgentCoder pilot (suite in tests/test_inline_calc_agentcoder_trial.py):
+its 3 span failures all put a cross-item ref *inside* arithmetic
+(`Vb := LOG-A.V_in * 2`), which the evaluator only resolves for a
+whole-RHS ref (calc.py `CROSS_REF_RE.match(expression.strip())`) -- a
+fence control with the same expression fails identically. Verdict: test
+assumptions, not slice-2 defects; the suite copy was adapted to
+whole-RHS form, its two `release_gate` tests carry a skip marker (that
+gate is #345, unmerged -- gate code untouched). Strengthened the
+review's weak assertions (span-pin now pins the content-hash move, not
+the literal `5 V` in `body_html`; snapshot dedup vs probe coverage split;
+malformed-span probe mutation).

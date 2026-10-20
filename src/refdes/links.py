@@ -1042,7 +1042,7 @@ def _report_missing_checks(project: Project, count: int) -> None:
 # ------------------------------------- cross-item calc references (finding 35)
 
 
-def _replace_ref_target(content: str, span, ref: "re.Match[str]", new_target: str) -> str:
+def _replace_ref_target(content: str, span, ref: re.Match[str], new_target: str) -> str:
     """A span's content with the reference's target token replaced by
     ``new_target``, spliced at the exact positions `CROSS_REF_RE` matched on
     the span's (comment-stripped) right-hand side. Splicing beats

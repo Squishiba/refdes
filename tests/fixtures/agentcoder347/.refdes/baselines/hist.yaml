@@ -1,0 +1,17 @@
+# Refdes baseline. Written once by `refdes revision <name>` or
+# `refdes release <name>` and never modified afterward -- a second stamp
+# of this name with different content is a build error. See
+# docs/lifecycle.md.
+kind: revision
+name: hist
+stamped_at: '2026-10-20T04:20:12Z'
+stamped_by: jorb
+refdes_version: 0.5.0
+standard:
+  base: hardware
+  version: 3
+items:
+  CMP-P: {hash: 0e4e7d2c684903f1, type: component, title: plain historical part, hash_format: 5,
+  key: 82sn4jx6mza, verdict: candidate}
+  LOG-F: {hash: 8ea9db04659813bf, type: log, title: fence-only historical item, hash_format: 5,
+  key: 10k4qm0sf6x, verdict: null, calc_hash: 27bb6121937a71c3}

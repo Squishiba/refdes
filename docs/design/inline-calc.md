@@ -22,6 +22,13 @@ Later directions are parked in
 
 ## Implementation status by slice
 
+*Era marker:* this section is the slice-0 (2026-10) state the proposal was
+written against, quoted as history. Slices 1 and 2 have since landed most of
+what it marks as proposed: evaluation, the trigger grammar, and stored-result
+verification came with slice 1; span discovery in the hash, the dependency
+scans, and `fetch` came with slice 2. Read every "proposed"/"not current
+behavior" below as "then proposed, now landed."
+
 - Probe: in a fresh `refdes init` project holding one `log` item whose body
   is the single-backtick span `` `Vout := 2 V * 2 = 5 V` ``, the original
   proposal recorded that `refdes check` reported 0 errors. `refdes check`

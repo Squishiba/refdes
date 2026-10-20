@@ -20,12 +20,12 @@ from markdown_it.common.utils import escapeHtml
 from . import blocked as blocked_mod
 from . import blocks as blocks_mod
 from . import boards as boards_mod
-from . import calc, dates, history as history_mod, imports, seal
+from . import calc, dates, imports, inline_calc, seal
 from . import chains as chains_mod
 from . import citations as citations_mod
 from . import docs_url as docs_url_mod
+from . import history as history_mod
 from . import ids as ids_mod
-from . import inline_calc
 from . import keys as keys_mod
 from . import nav as nav_mod
 from . import pages as pages_mod

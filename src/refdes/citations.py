@@ -60,9 +60,8 @@ import yaml
 
 from . import boards as boards_mod
 from . import calc as calc_mod
-from . import inline_calc
+from . import inline_calc, textio
 from . import sources as sources_mod
-from . import textio
 from .model import CitationSpec, CitationStatus, Item, PartUsage, Project
 from .parse import _yaml_error_report, read_store_text, yaml_safe_load
 

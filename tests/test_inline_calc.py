@@ -510,7 +510,11 @@ def test_span_only_cross_item_reference_creates_an_ordering_edge(tmp_path):
     )
     assert project.errors == []
     assert _inline_messages(project) == []
-    assert "2 V" in _item(project).body_html
+    # The span renders as literal code on the page -- the whole authored
+    # text, result included (slice 1: a stored result is never
+    # interpolated). The old `"2 V" in body_html` was a substring of the
+    # span's own text, true whatever the build did.
+    assert "<code>v := DEC-002.V_in = 2 V</code>" in _item(project).body_html
     # The fence form is the control: same reference, same clean result.
     project = _build_items(
         tmp_path,
@@ -583,15 +587,19 @@ def test_span_source_is_pinned_by_fetch(tmp_path):
     ) in [d.message for d in project.diagnostics]
 
     # Discovery reads the span: the fetch pins the key, no fence needed.
+    # The signal is the item's content hash moving -- the locked value is a
+    # hash input -- not `body_html`, which carries the span's authored text
+    # (including its literal `5 V`) pin or no pin.
     (items / "a.md").write_text(
         "---\nid: DEC-001\ntype: decision\ncitations:\n"
         "  - path: analysis/budget.csv\n---\n\n" + span_body,
         encoding="utf-8",
     )
+    unpinned = build().item_by_id("DEC-001").content_hash
     assert cli_mod.main(["-c", config, "fetch"]) == 0
     project = build()
     assert _inline_messages(project) == []
-    assert "5 V" in project.item_by_id("DEC-001").body_html
+    assert project.item_by_id("DEC-001").content_hash != unpinned
 
 
 # =================================================================== run-12
