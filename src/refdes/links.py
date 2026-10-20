@@ -1042,6 +1042,24 @@ def _report_missing_checks(project: Project, count: int) -> None:
 # ------------------------------------- cross-item calc references (finding 35)
 
 
+def _replace_ref_target(content: str, span, ref: "re.Match[str]", new_target: str) -> str:
+    """A span's content with the reference's target token replaced by
+    ``new_target``, spliced at the exact positions `CROSS_REF_RE` matched on
+    the span's (comment-stripped) right-hand side. Splicing beats
+    `content.replace(target, ...)`: a span like `v21 := v2.V_in = 1 V` in a
+    project that has an item whose display id *is* `v2` would otherwise
+    rewrite its own name half and leave the real reference bare, while the
+    caller reports it applied."""
+    from . import calc as calc_mod
+
+    code = calc_mod.split_comment(span.rhs)[0]
+    lead = len(code) - len(code.lstrip())
+    pos = content.index(span.rhs)
+    start = pos + lead + ref.start("target")
+    end = pos + lead + ref.end("target")
+    return content[:start] + new_target + content[end:]
+
+
 def _calc_ref_rewrites(
     lines: list[str],
     start: int,
@@ -1049,6 +1067,7 @@ def _calc_ref_rewrites(
     replacements: dict[str, str],
     include_inline: bool = False,
     inline_start: int = 0,
+    strip_inline_composite: bool = False,
 ) -> set[str]:
     """Rewrite bare calc-reference targets inside one item's line span, and
     refresh stale composite display halves, in place. Operates only on the
@@ -1069,12 +1088,23 @@ def _calc_ref_rewrites(
     `iter_triggered_spans` assumes fences are self-contained in a body --
     an unclosed fence in front matter would otherwise hide every body span,
     and a span in front matter (no span consumer reads front matter) must
-    not be rewritten where the in-memory pass rewrites only `item.body`."""
+    not be rewritten where the in-memory pass rewrites only `item.body`.
+
+    With ``strip_inline_composite`` (and *not* ``include_inline`` -- the
+    format <= 5 hash reconstruction), an expanded span target is reduced
+    back to its pre-expansion display half (`@key` stripped) instead of the
+    replacement token: a legacy hash never contained the span's reference,
+    so the hashed body text must be byte-identical to the pre-expansion
+    file's -- the format <= 5 hash of an untouched item whose *span* got
+    composite-expanded must not move, exactly as the token reduction makes
+    expansion invisible for fence references. Enabling ``include_inline``
+    for legacy formats is not the fix: the reduction token is the target's
+    key, which a pre-slice-2 hash never contained."""
     from . import calc as calc_mod
 
     applied: set[str] = set()
     inline_entries: dict[int, list[tuple[int, int, str, str]]] = {}
-    if include_inline:
+    if include_inline or strip_inline_composite:
         from . import inline_calc as inline_calc_mod
         for offset, span_start, span_end, content in inline_calc_mod.iter_triggered_spans(
             lines[inline_start:end]
@@ -1084,11 +1114,21 @@ def _calc_ref_rewrites(
             if ref is None:
                 continue
             target = ref.group("target")
-            new_target = replacements.get(target)
-            if new_target is None:
-                continue
+            if include_inline:
+                new_target = replacements.get(target)
+                if new_target is None:
+                    continue
+            else:
+                if "@" not in target:
+                    continue
+                new_target = target.partition("@")[0]
             inline_entries.setdefault(inline_start + offset, []).append(
-                (span_start, span_end, content.replace(target, new_target, 1), target)
+                (
+                    span_start,
+                    span_end,
+                    _replace_ref_target(content, span, ref, new_target),
+                    target,
+                )
             )
     for i in range(start, end):
         raw = lines[i]
@@ -1155,10 +1195,27 @@ def plan_calc_ref_expansion(
     by_key = {item.key: item for item in project.items.values() if item.key}
     expansion_count = 0
 
-    from .build import _calc_reference_targets
+    from .build import (
+        _calc_fence_reference_targets,
+        _calc_reference_targets,
+        _calc_span_reference_targets,
+    )
 
     for item in project.local_items:
+        # A span whose body has no file position (`body_line is None`, e.g.
+        # an item body built from a YAML/list file) can never be rewritten
+        # by the scan below, so it is not counted as an expansion the write
+        # will perform -- see `_calc_span_reference_targets`. A target that
+        # a fenced reference also uses keeps its edge: that rewrite is a
+        # file-line edit the scan does perform.
+        span_only = (
+            _calc_span_reference_targets(item) - _calc_fence_reference_targets(item)
+            if item.body_line is None
+            else set()
+        )
         for target in _calc_reference_targets(item):
+            if target in span_only:
+                continue
             new_target = _planned_target(
                 project, by_key, "calc reference", item, target
             )

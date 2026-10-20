@@ -1505,8 +1505,8 @@ def compute_coverage(project: Project, chain_graph=None) -> None:
 
 def _calc_reference_targets(item) -> list[str]:
     """The target strings of every cross-item reference in this item -- calc
-    blocks and inline calc spans -- in source order, deduped: the dependency
-    edges the scheduler walks. Parsed with the same regexes `evaluate_block`
+    blocks and inline calc spans -- fence lines first, then spans, each group
+    in source order, deduped: the dependency edges the scheduler walks. Parsed with the same regexes `evaluate_block`
     uses (pipe unit stripped first; a span's whole right-hand side must be
     the reference, same `CROSS_REF_RE` as the evaluator), so a line is a
     dependency edge here exactly when it is a reference there -- run-12
@@ -1532,6 +1532,46 @@ def _calc_reference_targets(item) -> list[str]:
         if ref and ref.group("target") not in targets:
             targets.append(ref.group("target"))
     return targets
+
+
+def _calc_fence_reference_targets(item) -> set[str]:
+    """The target strings of this item's fenced cross-item references only
+    (the `calc.extract_blocks` loop of `_calc_reference_targets`)."""
+    targets: set[str] = set()
+    for block in calc.extract_blocks(item.body):
+        for raw_line in block.splitlines():
+            line = raw_line.partition("#")[0].rstrip()
+            if not line.strip():
+                continue
+            pipe = calc.PIPE_UNIT_RE.match(line)
+            if pipe:
+                line = pipe.group("lhs").rstrip()
+            match = calc.ASSIGN_RE.match(line)
+            if not match:
+                continue
+            ref = calc.CROSS_REF_RE.match(match.group(2).strip())
+            if ref:
+                targets.add(ref.group("target"))
+    return targets
+
+
+def _calc_span_reference_targets(item) -> set[str]:
+    """The target strings of this item's inline-span cross-item references
+    only -- the subset of `_calc_reference_targets` whose rewrite is a span
+    *content* replacement. The expansion plan drops these (and only these --
+    a target a fenced reference also uses stays, its fence rewrite being a
+    file-line edit) for an item whose body has no file position
+    (`body_line is None`, e.g. an item body built from a YAML/list file):
+    the span scan needs body geometry the file lines cannot supply, so the
+    write-back can never apply them, and promising an expansion in the
+    `--no-write` report that no write applies is worse than not counting it.
+    The references still resolve, evaluate and hash -- only the composite
+    expansion skips them."""
+    return {
+        ref.group("target")
+        for span in inline_calc.triggered_spans(item.body)
+        if (ref := inline_calc.span_cross_ref(span)) is not None
+    }
 
 
 def _calc_ref_display(target_str: str, target) -> str:
@@ -2202,7 +2242,9 @@ def run_checks(project: Project) -> None:
 #      probe, which content hashing never sees). Reconstruction of formats
 #      <= 5 ignores span inputs, which is what keeps the bump from making any
 #      existing baseline entry, seal, or audit look edited (the keys.md §5(c)
-#      carry-forward rule).
+#      carry-forward rule -- and it is why the reconstruction also strips an
+#      expanded span target back to its display half, restoring the
+#      pre-expansion body text the recorded hash was computed from).
 # Recorded per baseline entry (lifecycle.py) so a partially-migrated baseline
 # stays precisely describable; consulted by the migration in
 # lifecycle.py/seal.py/keys.py, never by an ordinary build.
@@ -2218,6 +2260,7 @@ def _hash_payload(
     calc_refs=None,
     source_inputs=None,
     image_inputs=None,
+    strip_inline_composite: bool = False,
 ) -> dict[str, object]:
     """Everything compute_hashes() and hash_for_format() have in common: which
     fields/body enter the hash, and under what normalization. The two things
@@ -2281,6 +2324,21 @@ def _hash_payload(
                 # entirely for a body that references no image, so an
                 # image-free item's format-5 payload is its format-4 payload.
                 payload["images"] = images
+        if strip_inline_composite:
+            # Formats <= 5: a triggered span's cross-item reference was
+            # invisible to the hash then, so the pre-slice-2 expansion of a
+            # span target (`DISPLAY.V_in` -> `DISPLAY@key.V_in` on disk)
+            # must not move a reconstruction: reduce it back to the display
+            # half, restoring the body text the recorded hash was computed
+            # from. The keys.md §5(c) carry-forward rule, third application
+            # after links and `against:`.
+            from . import links as links_mod
+
+            span_lines = body_text.splitlines()
+            links_mod._calc_ref_rewrites(
+                span_lines, 0, len(span_lines), {}, strip_inline_composite=True
+            )
+            body_text = "\n".join(span_lines)
         normalized = re.sub(r"\s+", " ", body_text).strip()
         payload["body"] = normalized
 
@@ -2516,8 +2574,9 @@ def _calc_refs_hash_value(
     references, and its target half is reduced to the same token in the
     hashed body text.
 
-    Returns ``(body_text, resolved)``. ``resolved`` lists, in source order,
-    each reference's ``[target token, name, value signature]``: the target
+    Returns ``(body_text, resolved)``. ``resolved`` lists, fence lines first
+    then spans (each group in source order), each reference's
+    ``[target token, name, value signature]``: the target
     reduced by `_link_hash_token` (its key -- so renaming the upstream
     *display id* changes nothing) and the value the reference resolved to
     (`calc.value_signature`, full precision and unit, independent of
@@ -2525,7 +2584,11 @@ def _calc_refs_hash_value(
     item's own text is untouched. ``body_text`` is the body with each
     reference line's target replaced by the same token, so the on-disk
     bare -> `DISPLAY@key` expansion, and a later display-half refresh, are
-    invisible to the hash exactly as they are for link targets.
+    invisible to the hash exactly as they are for link targets. The legacy
+    reconstruction (``include_inline=False``, formats <= 5) does not reduce
+    span targets here at all -- the span's reference is invisible to a
+    legacy hash, and the body-level strip of the expansion lives in
+    `_hash_payload`, where the raw (no-references) body is hashed too.
 
     A reference that does not resolve (missing item, missing name, failed
     or imported target) contributes a ``None`` value; the build already
@@ -2744,6 +2807,7 @@ def hash_payload_builder(project: Project, hash_format: int):
             item, spec, project,
             link_values=lambda targets: sorted(t.split("@", 1)[0] for t in targets),
             checks_values=_checks_display_only,
+            strip_inline_composite=True,
         )
     by_key = _key_index(project)
     checks_values = (
@@ -2772,6 +2836,7 @@ def hash_payload_builder(project: Project, hash_format: int):
         calc_refs=calc_refs,
         source_inputs=source_inputs,
         image_inputs=image_inputs,
+        strip_inline_composite=hash_format < 6,
     )
 
 
