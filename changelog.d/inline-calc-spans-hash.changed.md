@@ -20,5 +20,12 @@
   only when its content is provably unchanged under its own recorded
   definition), and a span's arithmetic change that predates its item's first
   format-6 stamp is undetectable and grandfathered, because the old record
-  never stored a span probe. Decides `docs/design/inline-calc.md` §3; details
+  never stored a span probe. Rollout caveat for shared projects: the
+  lockfile is rewritten whole by `refdes fetch`, and pre-slice-2 code does
+  not discover a span's `source()` calls, so one `fetch` by a collaborator
+  on the old code drops the `values:` pins a span names (recoverable -- a
+  `fetch` on the new code re-pins them; until then the span item's hash
+  moves and `check` reports it stale). Everyone working in a project that
+  pins span sources must be on this version before relying on those pins.
+  Decides `docs/design/inline-calc.md` §3; details
   in `docs/math.md`, `docs/change-tracking.md`, and `docs/lifecycle.md`.

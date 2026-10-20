@@ -147,4 +147,8 @@ whole-RHS form, its two `release_gate` tests carry a skip marker (that
 gate is #345, unmerged -- gate code untouched). Strengthened the
 review's weak assertions (span-pin now pins the content-hash move, not
 the literal `5 V` in `body_html`; snapshot dedup vs probe coverage split;
-malformed-span probe mutation).
+malformed-span probe mutation). F1 follow-up (post-push, reproduced in
+`.scratch/f1verify/`): a fetch by pre-slice-2 code rewrites the lockfile
+whole and drops a span's `values:` pins -- decided as a rollout caveat in
+the changelog fragment (recoverable by a new-code fetch; a compat fix
+belongs to shipped code and is not ours to make here).
