@@ -596,6 +596,61 @@ grouped by path, on `references.html` (and `references-<board>.html` per
 [board](multi-board.md)). See [CLI reference](cli-reference.md#refdes-fetch)
 and [output formats](output.md).
 
+## Picking a source value in the browser editor
+
+With `refdes serve`, an item's page shows an **Insert source value** panel
+below the body textarea. It reads the files that *this* item cites (see
+[Citing a datasheet](#citing-a-datasheet)) and composes
+`name = source("path", "key") | unit` lines for a ` ```calc``` ` fence, so
+you never type a path, a key, or a number by hand — the line's semantics are
+in [math](math.md#reading-a-value-from-a-source-file).
+
+The panel lists only the files the open item cites; a citation on a
+*different* item authorizes nothing. CSV files open as key/value lists (the
+file must be `key,value` shaped, as above); PDFs open as page text and need
+the optional extra (`pip install refdes[pdf]`). A citation the panel cannot
+offer — a remote URL with no kept copy, a `.xlsx` (its reader can extract
+named keys, it cannot list a file's entries), a type with no reader, a
+missing file — is listed with the reason, and the fix, under the list.
+
+For a CSV, click a file and its keys load into a filterable list; a row
+whose value does not read as a plain decimal is shown, with its problem
+named, and is not selectable. **Review** opens the confirmation panel: the
+key, the raw cell text, the canonical decimal, the row and its other
+columns, the pinned value if the lockfile has one (flagging
+*changed since the pinned value*), and the composed calc line. For a PDF,
+click **Previous page** / **Next page** — it opens at the page the citation
+names, `page:` or a resolved `section:` — click a row, then one of the
+numbers listed for it (nothing is preselected, even a page with one
+candidate; a column-header guess is labelled as the guess it is). The
+confirm step shows the whole row with your number highlighted and the exact
+row text that will be recorded, so `refdes fetch --update` can find the
+value again in a revised datasheet.
+
+The **Unit** field starts empty and **Accept and save** stays disabled
+until you fill it: the file carries no unit and the panel will not guess
+one, not even dimensionless `1`. Suggestions (units the item already uses,
+plus `1`) are clickable; a unit refdes does not know is refused in the
+panel. The **Variable name** is proposed from the key and is editable; a
+name the item already assigns is refused. On a PDF pick the **Source key**
+is editable too, and a key that already names a different confirmed
+candidate is refused.
+
+Accept inserts the line at the caret's line boundary when the caret sits
+inside a ` ```calc``` ` fence, and otherwise at the end of the last one —
+with no fence in the body, the panel says to add one. It saves through the
+ordinary **Save**: one save writes the body *and* the key's pin into
+`.refdes/citations.yaml`, so `refdes build` resolves the new line with no
+`refdes fetch` in between. The pinned number is the one the server's reader
+read from the file — not the number the browser sent.
+
+The panel reads everywhere the editor reads: a sealed or imported item, and
+a server started with `refdes --no-write serve`, can browse every file and
+preview every proposal, but accepting is refused with the editor's usual
+reason. Accepting a key whose file has changed since its pin is refused,
+with `refdes fetch --update --path …` in the message — run it, review the
+change, and pick again.
+
 ## Not supported
 
 **Raw HTML is disabled**, deliberately. A document cannot inject markup, so a
