@@ -281,7 +281,8 @@ The right-hand side is the ordinary calc-line grammar — the same units,
 functions, tolerances, cross-item references and `source()` as
 `name = expression | unit`, with the same restrictions. The unit assertion, if
 any, sits between the expression and the result; the stored literal may use
-any compatible unit.
+any compatible unit. Spaces around the `=` that introduces the stored result
+are optional, so `x := 1 V*4|V=4 V` parses the same as `x := 1 V*4 | V = 4 V`.
 
 `check` and `build` evaluate the expression and verify the stored result
 numerically. Stored `4.4 V` accepts a computed 4.436 V — half of one place
@@ -306,6 +307,16 @@ you want the literal text. A span that *is* triggered and cannot be parsed
 is an error, never ordinary code. A missing `= result`, an expression that
 fails, and a stored literal with an incompatible or unparseable unit are
 errors at the span's line.
+
+The text before the first `:=` must be a calc name. A span like
+`src=a:=b.csv` — a filename, a range, an option list — is not a calc and is
+flagged as such (suggesting the ``double-backtick`` escape hatch), so a
+literal `:=` there never gets read as a stale calc with a missing result.
+
+Inline spans are scanned in ordinary prose only. As with fenced code, a span
+inside an HTML comment (`<!-- ... -->`) is inert; an unclosed `<!--` warns
+once at its line and treats the rest of the body as comment text, so no span
+under it is checked.
 
 Inline names live in the same item-wide scope as calc fences, evaluated in
 source order across both: a later fence can use an inline name, a later span

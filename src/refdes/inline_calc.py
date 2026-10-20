@@ -1,11 +1,11 @@
 """Inline calc spans: ``name := rhs [| unit] = result`` in item prose.
 
 docs/design/inline-calc.md section 1: a single-backtick Markdown code span
-in a local item body, outside fenced code, whose content contains an
-unquoted ``:=``, is inline calc. Once triggered, a span that fails the
-grammar is an error at its line -- it never falls back to ordinary code.
-A span without ``:=`` stays ordinary code; multi-backtick spans are the
-author's escape hatch and are never triggered.
+in a local item body, outside fenced code and outside an HTML comment,
+whose content contains an unquoted ``:=``, is inline calc. Once triggered, a
+span that fails the grammar is an error at its line -- it never falls back
+to ordinary code. A span without ``:=`` stays ordinary code; multi-backtick
+spans are the author's escape hatch and are never triggered.
 
 This module is the grammar only: extraction, the trigger, and the parse.
 Evaluation threads the parsed span through the existing calc evaluator
@@ -43,6 +43,27 @@ LITERAL_RE = re.compile(
 FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 FENCE_CLOSE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
 
+# An HTML comment runs from `<!--` to the first `-->` (CommonMark raw HTML).
+# Inline spans inside one are inert, exactly as inside a fence (run-12
+# F12-1). Comments do not nest: a `<!--` under an open comment is ordinary
+# text, and the first `-->` closes it.
+COMMENT_OPEN = "<!--"
+COMMENT_CLOSE = "-->"
+
+# Mirrors `parse.UNCLOSED_FENCE_WARNING` for the comment analogue (run-12
+# F12-1): an unclosed `<!--` does not silently swallow the rest of the body
+# for span purposes -- it is reported once, at the opener's line.
+UNCLOSED_COMMENT_WARNING = (
+    "unclosed HTML comment: the rest of the body is comment text, so inline "
+    "calc spans under this line are not checked; close the comment with '-->'"
+)
+
+# A whole calc name: letters, digits and underscores, starting with a letter
+# or underscore (the same alphabet `NAME_ASSIGN_RE` captures). Used to tell a
+# genuine `name :=` head from an ambiguous span whose `:=` is not preceded by
+# a name (run-12 F12-2).
+CALC_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
 
 @dataclass
 class InlineSpan:
@@ -77,6 +98,25 @@ def contains_trigger(text: str) -> bool:
         elif ch == ":" and text[i + 1:i + 2] == "=":
             return True
     return False
+
+
+def first_trigger_index(text: str) -> int:
+    """Index of the `:` in the first `:=` outside a quoted string, or -1.
+
+    The span's head is everything before it, so its trailing text is the
+    intended calc name (run-12 F12-2). `contains_trigger` is exactly
+    `first_trigger_index(text) >= 0`; this variant returns the position so
+    the parser can inspect what precedes the trigger."""
+    quote = ""
+    for i, ch in enumerate(text):
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "\"'":
+            quote = ch
+        elif ch == ":" and text[i + 1:i + 2] == "=":
+            return i
+    return -1
 
 
 def code_spans(line: str) -> list[str]:
@@ -122,11 +162,22 @@ def code_spans(line: str) -> list[str]:
     return spans
 
 
-def _top_level_equals(text: str) -> list[int]:
-    """Indices of every top-level ` = ` delimiter: a `=` flanked by spaces
-    or tabs, outside quotes and outside parentheses/brackets. The final
-    one is the `= result` delimiter, so an `=` inside a quoted `source()`
-    argument or a parenthesized expression is never mistaken for it."""
+def _result_equals_positions(text: str) -> list[int]:
+    """Indices of every top-level result-separator candidate: a bare ` = `
+    at any spacing, outside quotes and outside parentheses/brackets. The
+    last such candidate whose tail is a quantity literal is the `= result`
+    delimiter (run-12 F12-3 relaxed the flanking-space requirement, so
+    `x := 1 V*4|V=4 V` is accepted).
+
+    A `=` is excluded when it is part of a delimiter the grammar owns
+    elsewhere and can therefore never be the result separator: the `=` of a
+    `:=` (preceded by `:`), and every comparison operator the evaluator's
+    Python AST parses (`==`, `<=`, `>=`, `!=`) -- i.e. a `=` adjacent to one
+    of `: < > ! =` on the left, or followed by `=`. The calc language itself
+    has no valid `=` in an expression (a bare `=` is a Python ``eval``
+    syntax error, a comparison parses to ``ast.Compare`` which
+    `calc._eval_node` rejects), so the only legitimate `=` in a head is the
+    one in `:=`; every other top-level `=` is a separator candidate."""
     hits: list[int] = []
     quote = ""
     depth = 0
@@ -140,14 +191,34 @@ def _top_level_equals(text: str) -> list[int]:
             depth += 1
         elif ch in ")]}":
             depth -= 1
-        elif (
-            ch == "="
-            and depth == 0
-            and text[i - 1:i] in (" ", "\t")
-            and text[i + 1:i + 2] in (" ", "\t")
-        ):
+        elif ch == "=" and depth == 0:
+            prev = text[i - 1:i]
+            nxt = text[i + 1:i + 2]
+            if prev in (":", "<", ">", "!", "=") or nxt == "=":
+                continue
             hits.append(i)
     return hits
+
+
+def _split_readings(text: str, positions: list[int]) -> list[tuple[int, str, str, str]]:
+    """Every split of `text` at a result-separator candidate that parses as
+    ``name := rhs [| unit] = result``: a ``(cut, name, rhs_unit, result)``
+    for each candidate whose head matches `NAME_ASSIGN_RE` and whose tail is
+    a quantity literal. ``len(...) > 1`` means the span is genuinely
+    ambiguous -- more than one reading is a valid whole calc -- so the
+    parser reports it instead of picking one (run-12 F12-3). For the current
+    grammar this is structurally unreachable (a stored-result literal cannot
+    itself contain a top-level `=`), so it is a defensive guard, not a
+    reachable state; the multi-`=` spans a reader writes (``x := 1 = 2 = 3``)
+    have exactly one literal tail and are not ambiguous."""
+    readings: list[tuple[int, str, str, str]] = []
+    for cut in positions:
+        head = text[:cut].rstrip()
+        tail = text[cut + 1:].strip()
+        match = NAME_ASSIGN_RE.match(head)
+        if match is not None and tail and LITERAL_RE.match(tail):
+            readings.append((cut, match.group(1), match.group(2).strip(), tail))
+    return readings
 
 
 def parse_span(line_offset: int, content: str) -> InlineSpan:
@@ -160,26 +231,61 @@ def parse_span(line_offset: int, content: str) -> InlineSpan:
     span = InlineSpan(line_offset=line_offset, raw=content)
     text = content.strip()
 
-    hits = _top_level_equals(text)
-    if not hits:
+    trigger = first_trigger_index(text)
+    head_name = text[:trigger].rstrip() if trigger >= 0 else ""
+    if trigger < 0 or not CALC_NAME_RE.match(head_name):
+        # The span triggered on an unquoted `:=` but the text before it is
+        # not a calc name (run-12 F12-2): the confusing reading is that this
+        # is literal prose (`src=a:=b.csv`), the intended one that it is a
+        # calc whose head the author typo'd. Keep it an error, name the
+        # offending head, and tell the author both ways out.
+        span.error = (
+            f"{head_name!r} is not a calc name before `:=`; if this is "
+            "literal text, use a double-backtick span; if it is a calc, "
+            "write `name := expression = result`"
+        )
+        return span
+
+    positions = _result_equals_positions(text)
+    readings = _split_readings(text, positions)
+    if len(readings) > 1:
+        both = " and ".join(
+            f"`{name} := {rhs_unit} = {result}`" for _c, name, rhs_unit, result in readings
+        )
+        span.error = (
+            f"the result separator is ambiguous, it reads two ways: {both}; "
+            "a calc has one ` = result` and its expression has no other `=` "
+            "(there are no comparisons) -- write the expression without a "
+            "second `=`"
+        )
+        return span
+
+    if readings:
+        # Exactly one reading is a complete, well-formed calc.
+        _cut, name, rhs_unit, tail = readings[0]
+    elif not positions:
         # The only `=` in the span is the one in `:=` -- declared intent
         # with no stored result (design open question 4, decided: error).
         span.error = "stored result missing; write '= <quantity>'"
         return span
-
-    cut = hits[-1]
-    head = text[:cut].rstrip()
-    tail = text[cut + 1:].strip()
-
-    match = NAME_ASSIGN_RE.match(head)
-    if match is None:
-        span.error = (
-            f"span {content.strip()!r} is not of the form "
-            "`name := expression = result`; a calc name is letters, digits "
-            "and underscores, starting with a letter or underscore"
-        )
-        return span
-    name, rhs_unit = match.group(1), match.group(2).strip()
+    else:
+        # There is a separator `=` but no reading is a whole calc: report
+        # against the last candidate, the way the grammar reads a trailing
+        # result slot (a trailing bare `=` has no tail -> missing result;
+        # a non-literal tail -> not a quantity literal; a head without a
+        # valid `name :=` -> not of the form).
+        cut = positions[-1]
+        head = text[:cut].rstrip()
+        tail = text[cut + 1:].strip()
+        match = NAME_ASSIGN_RE.match(head)
+        if match is None:
+            span.error = (
+                f"span {content.strip()!r} is not of the form "
+                "`name := expression = result`; a calc name is letters, digits "
+                "and underscores, starting with a letter or underscore"
+            )
+            return span
+        name, rhs_unit = match.group(1), match.group(2).strip()
 
     span.name = name
     pipe = calc.PIPE_UNIT_RE.match(rhs_unit)
@@ -208,31 +314,121 @@ def parse_span(line_offset: int, content: str) -> InlineSpan:
     return span
 
 
-def triggered_spans(body: str) -> list[InlineSpan]:
-    """Every inline-calc span of one item body, in source order.
+def _scan_comment_line(line: str, in_comment: bool) -> tuple[list[str], bool, bool]:
+    """Single-backtick code spans of one line that sit outside an HTML
+    comment, given the comment state entering the line.
 
-    Lines inside fenced code and indented code blocks are skipped; only
-    single-backtick spans carrying an unquoted `:=` are parsed.
-    """
+    Returns ``(spans, in_comment_out, opened_on_this_line)``. Scanning is
+    left-to-right and interleaves the two inline constructs, so each is
+    literal text inside the other: a `<!--` inside a code span is ordinary
+    span text, a backtick inside a comment never opens a span. A code span
+    is captured with the same delimiter-run rule as `code_spans` (only runs
+    of exactly one backtick); an unclosed run is literal text and scanning
+    resumes right after it."""
+    spans: list[str] = []
+    n = len(line)
+    i = 0
+    opened = False
+    while i < n:
+        if in_comment:
+            close = line.find(COMMENT_CLOSE, i)
+            if close < 0:
+                break  # the rest of the line is comment text
+            in_comment = False
+            i = close + len(COMMENT_CLOSE)
+            continue
+        if line.startswith(COMMENT_OPEN, i):
+            in_comment = True
+            opened = True
+            i += len(COMMENT_OPEN)
+            continue
+        if line[i] == "`":
+            start = i
+            while i < n and line[i] == "`":
+                i += 1
+            run = i - start
+            close = i
+            while close < n:
+                if line[close] != "`":
+                    close += 1
+                    continue
+                run_end = close
+                while run_end < n and line[run_end] == "`":
+                    run_end += 1
+                if run_end - close == run:
+                    if run == 1:
+                        spans.append(line[i:close])
+                    i = run_end
+                    break
+                close = run_end
+            # Whether closed by a matching run (i sits past it) or unclosed
+            # (i sits right after the opening run), resume scanning there.
+            continue
+        i += 1
+    return spans, in_comment, opened
+
+
+def _scan_body(body: str) -> tuple[list[InlineSpan], int | None]:
+    """Every triggered inline-calc span of one item body (source order), and
+    the 0-indexed line of an unclosed `<!--` opener (else None).
+
+    Lines inside fenced code, indented code blocks, and HTML comments are
+    skipped -- a span in any of them is inert (run-12 F12-1). A fence opened
+    in ordinary text ignores comment markers (they are code); a comment
+    opened in ordinary text ignores fence lines (they are comment text), so
+    the two inert regions never open inside each other. A `<!--` with no
+    `-->` treats the rest of the body as comment text and reports its line
+    once, mirroring the unclosed-fence warning; it never swallows the body
+    silently."""
     spans: list[InlineSpan] = []
     fence: str | None = None
+    in_comment = False
+    comment_open_line: int | None = None
     for offset, line in enumerate(body.splitlines()):
-        if fence is None:
+        if fence is not None:
+            close = FENCE_CLOSE_RE.match(line)
+            if close and close.group(1)[0] == fence[0] and len(close.group(1)) >= len(fence):
+                fence = None
+            continue
+        if not in_comment:
             open_match = FENCE_OPEN_RE.match(line)
             if open_match:
                 fence = open_match.group(1)[0] * len(open_match.group(1))
                 continue
             if line.startswith("    ") or line.startswith("\t"):
                 continue
+        line_spans, in_comment, opened = _scan_comment_line(line, in_comment)
+        if in_comment:
+            # A `<!--` opened on this line is the comment open at the line's
+            # end -- even when an earlier comment on the same line opened and
+            # closed first -- so a comment closed mid-line and a second left
+            # unclosed is attributed to the second opener. A comment carried
+            # over from a previous line keeps the line that opened it.
+            if opened or comment_open_line is None:
+                comment_open_line = offset
         else:
-            close = FENCE_CLOSE_RE.match(line)
-            if close and close.group(1)[0] == fence[0] and len(close.group(1)) >= len(fence):
-                fence = None
-            continue
-        for content in code_spans(line):
+            comment_open_line = None
+        for content in line_spans:
             if contains_trigger(content):
                 spans.append(parse_span(offset, content))
-    return spans
+    return spans, (comment_open_line if in_comment else None)
+
+
+def triggered_spans(body: str) -> list[InlineSpan]:
+    """Every inline-calc span of one item body, in source order.
+
+    Lines inside fenced code, indented code blocks and HTML comments are
+    skipped; only single-backtick spans carrying an unquoted `:=` are parsed.
+    """
+    return _scan_body(body)[0]
+
+
+def unclosed_comment_offset(body: str) -> int | None:
+    """The 0-indexed line of an unclosed ``<!--`` in `body`, or None.
+
+    The build warns there so a comment that never closes cannot silently
+    stop the body's spans from being checked (run-12 F12-1)."""
+    return _scan_body(body)[1]
 
 
 _PLAIN_NUMBER_RE = re.compile(r"[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?")

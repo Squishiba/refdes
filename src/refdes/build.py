@@ -1763,6 +1763,20 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
             fence_msg, file=item.source_file, line=fence_line, item_id=item.id
         )
         failed = True
+    # An HTML comment suppresses the inline spans under it (run-12 F12-1),
+    # so an unclosed `<!--` must not silently stop them being checked: warn
+    # once at the opener's line, the shape of the unclosed-fence warning.
+    comment_offset = inline_calc.unclosed_comment_offset(item.body)
+    if comment_offset is not None:
+        project.warn(
+            inline_calc.UNCLOSED_COMMENT_WARNING,
+            file=item.source_file,
+            line=(
+                item.body_line + comment_offset
+                if item.body_line is not None else item.source_line
+            ),
+            item_id=item.id,
+        )
     # Block names are unique per item, not per project (§11.2 decided):
     # the same shape as the value-name rule `origins` enforces below.
     named_fences: dict[str, int] = {}
