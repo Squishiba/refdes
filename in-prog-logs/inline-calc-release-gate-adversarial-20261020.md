@@ -18,7 +18,9 @@ Report-only: no product files were edited, PR #345 untouched, nothing merged.
   re-checked at `c1c6afb` through the `m1-ctl` control run (blocked on
   CMP-001, as at `4e89eab`); the remaining rows are unaffected by a diff that
   touches nothing else in `src/`. Probes not re-run at `c1c6afb` are marked
-  stale-with-respect-to-the-id-lookup only.
+  stale-with-respect-to-the-id-lookup only. Round-2 finish check: head moved
+  again, to `bbfd40053a25a965d181f639453a16b68cd2d977` (OPEN, unmerged) —
+  see "Current disposition" under Findings.
 - Source tree under audit: `git archive 4e89eab | tar -x` into
   `.scratch/pr345src` (exact PR-head tree, no git metadata).
 - Interpreter pin: the machine venv's installed `refdes` is a *different*
@@ -75,7 +77,31 @@ gate reads "as it is" carries that granularity. See F2.
 
 ## Findings
 
-### F1 (P1) — the gate fails open on an unreadable history store: a stale, editable, non-exempt span stamps a release, and nothing names the skipped check
+### Current disposition (round-2 re-check, at finish)
+
+PR #345 is **OPEN, unmerged**, head now
+`bbfd40053a25a965d181f639453a16b68cd2d977` — one commit over `c1c6afb`,
+`bbfd400 fix(release): fail inline-calc gate on unreadable history`
+(`git log --format="%h %s" c1c6afb..bbfd400`). F1's historical
+reproductions at `4e89eab`/`c1c6afb` stand as written below, unchanged.
+Independently confirmed fixed at `bbfd400` (pinned tree
+`.scratch/pr345head3`, real CLI, `.scratch/m1` with a stale editable
+CMP-001): corrupting `b8c421ff-…yaml` → `release bbfd-corrupt` blocked,
+`FAIL inline_calc_results  history: inline calc freshness cannot be
+checked: history store unreadable (… event file does not parse …)`, exit 1
+— while the *same* corrupt state re-run at pre-fix `c1c6afb` stamped
+(`bbfd-old2`, exit 0); clean-store control blocks CMP-001 (`bbfd-ctl`,
+exit 1); restored store + fresh CMP-001 stamps (`bbfd-restored2`, exit 0).
+The fix's shape is option (a) below, scoped to "stale spans in play"
+(sealed/imported/no-stale exemptions kept, docstring rewritten). The same
+commit also took F2's docs point (changelog: "the warning's reported
+source line … falling back to the item's entry line for a list-file
+`body:` key") and added an F3-adjacent sentence ("The capture exemption
+follows the captured text, not upstream values that move later.").
+Focused regression: the commit adds four unreadable-store tests;
+`PYTHONPATH=$PWD/src pytest tests/test_lifecycle.py` → 47 passed.
+
+### F1 (P1; historical at `4e89eab`/`c1c6afb`, fixed at `bbfd400` — see Current disposition) — the gate fails open on an unreadable history store: a stale, editable, non-exempt span stamps a release, and nothing names the skipped check
 
 `lifecycle._rule_inline_calc_results` catches `(history_mod.HistoryError,
 OSError)` from `capture_index` and returns `[]` — **all** offenders, for the
@@ -146,8 +172,9 @@ Minimal expectation options (for the implementing lane, not this report):
 offender line naming the unreadable store), or (b) make the build's decline
 warning name both checks, and document the exemption in
 `docs/lifecycle.md`'s rule table. As shipped, the docs overpromise.
+Resolved at `bbfd400` by option (a) — see Current disposition.
 
-### F1b (P1 at `4e89eab`, FIXED at current head) — a stale span in a permanently id-less continuation escaped the gate entirely
+### F1b (P1 at `4e89eab`, FIXED at `c1c6afb`, remains fixed at `bbfd400`) — a stale span in a permanently id-less continuation escaped the gate entirely
 
 Reachable through shipped CLI with no corruption: a `log` continuation entry
 (`follows: LOG-001`, no `id:` — continuations are permanently id-less, so

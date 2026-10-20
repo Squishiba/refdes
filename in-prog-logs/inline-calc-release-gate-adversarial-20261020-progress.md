@@ -64,5 +64,13 @@ no touching the PR branch). Authorized by Jared during Sol cover.
   which catches the same move as an error.
 - No false refusals found in the matrix; revision half, overlay halves,
   `--no-write`, imports, and check/build floor behavior all match the docs.
+- Review round 2 (reviewer 0fbbf150): F1 read as outstanding; #345 head had
+  moved to `bbfd400` (OPEN, unmerged, `fix(release): fail inline-calc gate
+  on unreadable history`). Re-verified at the pinned `bbfd400` tree
+  (`.scratch/pr345head3`): corrupt store blocks naming the store (exit 1),
+  pre-fix control at `c1c6afb` stamps (exit 0), clean/restore controls as
+  expected; the commit adds four unreadable-store tests and
+  `tests/test_lifecycle.py` is 47 passed. Added a Current-disposition note
+  (historical evidence unchanged); report-only head pushed.
 - Report-only: nothing in `src/`, `docs/`, `tests/` touched; PR #345 branch
   untouched; scratch left under `.scratch/` per AGENTS.md; no stash used.
