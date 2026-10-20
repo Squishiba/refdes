@@ -118,6 +118,8 @@ Task finished: yes.
   unreadable-store path uses the same resolver. Imported skip is explicit.
 - Final docs polish removed a truncated lifecycle-table sentence and named
   `RETIRED_UNIT_SPELLING` in the `Diagnostic.code` comment.
+- Clarified the inline-calc design header and section statuses against `main`,
+  this PR, and open PR #347.
 
 ## Review verification
 
