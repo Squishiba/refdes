@@ -60,7 +60,14 @@ bytes unchanged.
 Red/green. The 8 key-handle tests fail on a 1d6d325 worktree with the new
 tests copied in; the 3 controls (display-id, keyless, anchored-key refusal)
 pass on base and after. Focused suites green: test_patcher, test_patcher_links,
-test_keys_restore, test_serve_edit (300 tests). Full suite: see below.
+test_keys_restore, test_serve_edit (300 tests).
+
+First full-suite run caught two broken new tests (the fix code was fine):
+the minted fixture puts `key:` before `id:` so `- id: REQ-001` never appears
+after minting, and serve_support's notes.md body carries a literal `---`
+rule the patcher's md-body rule refuses — so the Markdown HTTP test now
+drives set_field on front matter (clean-body md set_body is covered in
+test_patcher.py). Second full-suite run: 4239 passed, 2 skipped.
 
 ruff: the touched files carry exactly the base findings (16), no new ones.
 CHANGELOG: entry added under [Unreleased] -> Fixed.

@@ -533,11 +533,17 @@ def test_the_keyed_handle_from_the_row_saves_the_yaml_item(served_minted):
     text = read(path)
     assert "The rail shall supply 5 V." in text
     # the identity lines and the comments outside the span survive untouched
-    assert "- id: REQ-001" in text and f"key: {handle}" in text
+    assert "id: REQ-001" in text and f"key: {handle}" in text
     assert "This comment must survive edits." in text and "# a comment between items" in text
 
 
-def test_the_keyed_handle_saves_a_markdown_body(served_minted):
+def test_the_keyed_handle_saves_a_markdown_front_matter_field(served_minted):
+    """The front-matter shape, end to end: minting put a `key:` line inside
+    the `---` block of items/notes.md, and the row hands out that key as the
+    handle. (Body edits on this fixture's notes.md are refused by the
+    patcher's `---` rule -- the fixture body carries a horizontal rule --
+    so the front-matter field is the shape driven here; clean-body Markdown
+    body edits are covered in test_patcher.py.)"""
     _app, client, root = served_minted
     handle = handle_for(client, "REQ-010")
     notes = str(root / "items" / "notes.md")
@@ -547,10 +553,16 @@ def test_the_keyed_handle_saves_a_markdown_body(served_minted):
 
     status, payload = client.api_post(
         f"/api/item/{handle}/edit",
-        {"op": "set_body", "text": "Rewritten prose.\n", "expected_revision": item["edit"]["file_revision"]},
+        {
+            "op": "set_field",
+            "field": "text",
+            "value": "A rewritten markdown requirement.",
+            "expected_revision": item["edit"]["file_revision"],
+        },
     )
     assert status == 200, payload
-    assert "Rewritten prose." in read(notes)
+    assert "A rewritten markdown requirement." in read(notes)
+    assert f"key: {handle}" in read(notes)
 
 
 def test_the_display_id_still_saves_on_a_keyed_project(served_minted):
