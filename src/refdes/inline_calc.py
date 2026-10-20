@@ -397,9 +397,14 @@ def _scan_body(body: str) -> tuple[list[InlineSpan], int | None]:
                 continue
             if line.startswith("    ") or line.startswith("\t"):
                 continue
-        line_spans, in_comment, _opened = _scan_comment_line(line, in_comment)
+        line_spans, in_comment, opened = _scan_comment_line(line, in_comment)
         if in_comment:
-            if comment_open_line is None:
+            # A `<!--` opened on this line is the comment open at the line's
+            # end -- even when an earlier comment on the same line opened and
+            # closed first -- so a comment closed mid-line and a second left
+            # unclosed is attributed to the second opener. A comment carried
+            # over from a previous line keeps the line that opened it.
+            if opened or comment_open_line is None:
                 comment_open_line = offset
         else:
             comment_open_line = None

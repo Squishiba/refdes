@@ -16,10 +16,14 @@ work (that is PR #347).
   `parse.py`'s opener rule) and comments, and yields prose lines with the
   comment regions blanked. An unclosed `<!--` reports its opener offset via
   `unclosed_comment_offset`; `build._run_item_calcs` turns that into one
-  warning, mirroring the unclosed-fence warning.
+  warning, mirroring the unclosed-fence warning. `_scan_comment_line`
+  returns `opened_on_this_line`, and `_scan_body` uses it to attribute an
+  unclosed comment to the *last* `<!--` opened on the reporting line, so a
+  comment closed mid-line by an earlier `-->` on the same line is not
+  blamed for a second one left unclosed.
 - **F12-2 (loud ambiguity).** `parse_span` now checks the text before the
   first `:=` against `CALC_NAME_RE` and, when it is not a name, emits
-  `'<text>' is not a calc name before `:=`` naming both ways out. The
+  `` '<text>' is not a calc name before `:=` `` naming both ways out. The
   trigger still fires on the first `:=` (`first_trigger_index`), so the
   full span text is named.
 - **F12-3 (tight separator).** `_top_level_equals` (space-required) became
@@ -46,13 +50,24 @@ work (that is PR #347).
 
 ## Verification
 
-- Full suite: 4226 passed, 2 skipped.
+- Full suite: 4228 passed, 2 skipped.
 - `ruff check` on touched files (`--select E9,F`): clean.
 - Differential, repo project (`refdes check --no-write`, baseline src at
   `d620ab5` vs patched): byte-identical.
 - Differential, synthetic project of docs prose spans + F12 fixtures: the
   only diff is the three intended changes (comment span warning gone, F12-2
   message reworded, two tight spans now valid); docs spans unchanged.
+- Changelog fragments, this log, and `docs/math.md` render clean under
+  markdown-it (no code span split by a nested backtick).
+
+## Review round
+
+Chunk 1 asked to fix diagnostic examples that nested a backtick-delimited
+`:=` inside a single-backtick span (span split on render); the flagged
+changelog/log spellings now use double-backtick delimiters, and the F12-1
+fragment's comment example is a fenced block. Chunk 2 found the
+same-line multi-comment attribution bug in `_scan_body` described above, now
+fixed with a focused regression. Both scoped; no unrelated cleanup.
 
 ## Integration
 
@@ -67,6 +82,6 @@ work (that is PR #347).
 
 ## Status
 
-Complete: implementation, 40 new tests, docs (`docs/math.md`), three
+Complete: implementation, 42 new tests, docs (`docs/math.md`), three
 changelog fragments, differential proof, full suite. Not self-reviewed or
 merged.

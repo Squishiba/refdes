@@ -648,6 +648,26 @@ def test_unclosed_comment_reports_its_line_and_inertizes_the_rest():
     assert inline_calc.unclosed_comment_offset(body) == 1
 
 
+def test_unclosed_comment_after_a_closed_one_points_to_the_second_opener():
+    # A comment that closes mid-line and a second one opened on that line and
+    # left unclosed: the warning names the second (the live opener), not the
+    # first (which did close).
+    body = (
+        "text\n"
+        "<!-- first\n"
+        "--> x <!-- second never closes\n"
+        "`a := 1 V = 1 V`\n"
+    )
+    assert inline_calc.unclosed_comment_offset(body) == 2
+    assert inline_calc.triggered_spans(body) == []
+
+
+def test_unclosed_comment_on_the_same_line_as_a_closed_one():
+    body = "text <!-- first --> x <!-- second never closes\n`a := 1 V = 1 V`\n"
+    assert inline_calc.unclosed_comment_offset(body) == 0
+    assert inline_calc.triggered_spans(body) == []
+
+
 def test_nested_looking_comment_closes_at_the_first_arrow():
     # Comments do not nest: the second `<!--` is text, the first `-->` closes.
     body = "<!-- <!-- `b := 1 V = 9 V` --> `a := 1 V = 1 V`"
