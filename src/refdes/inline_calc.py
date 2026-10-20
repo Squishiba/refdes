@@ -234,36 +234,54 @@ def _split_readings(text: str, positions: list[int]) -> list[tuple[int, str, str
     return readings
 
 
+def _evaluator_rhs(span: InlineSpan) -> str:
+    """The span's right-hand side exactly as the evaluator sees it.
+
+    `parse_span` splits the `| unit` first and a trailing `#` comment
+    second; `evaluate_block` strips the comment off the whole line *before*
+    it splits the unit. The orders differ whenever the comment contains a
+    `|`: `PIPE_UNIT_RE`'s unit is `[^|]+`, so the split lands on the
+    comment's pipe and the comment's text lands in `span.rhs`. Rebuild the
+    joined text and strip in the evaluator's order -- comment, then unit --
+    so a span is a reference (or a `source()`) here exactly when it is one
+    in the evaluator. Read-only: `span.rhs`/`span.unit` keep the field text
+    the hash renders."""
+    text = f"{span.rhs} | {span.unit}" if span.unit else span.rhs
+    text = calc.split_comment(text)[0].strip()
+    pipe = calc.PIPE_UNIT_RE.match(text)
+    return pipe.group("lhs").strip() if pipe else text
+
+
 def span_cross_ref(span: InlineSpan) -> re.Match[str] | None:
     """The cross-item reference a parsed span's RHS is -- `TARGET.NAME` as
-    the whole (unit-stripped) right-hand side, matched with the evaluator's
-    own `CROSS_REF_RE`, so a span is a reference here exactly when it is one
-    in `evaluate_block`. None for a malformed span and for every other RHS.
+    the whole right-hand side, matched with the evaluator's own
+    `CROSS_REF_RE`, so a span is a reference here exactly when it is one in
+    `evaluate_block`. None for a malformed span and for every other RHS.
 
-    The RHS is matched with a trailing `#` comment stripped by the
-    evaluator's own quote-aware `split_comment`: `evaluate_block` splits the
-    comment off the line before `CROSS_REF_RE` runs, so a reference carrying
-    a comment is a reference to the evaluator and must be one here too --
-    matching the raw text made such a span invisible to the scheduler, which
-    ran it before its target."""
+    The RHS is taken through `_evaluator_rhs` (the evaluator's
+    comment-then-unit order): `evaluate_block` splits the comment off the
+    line before `CROSS_REF_RE` runs, so a reference carrying a comment --
+    one whose comment contains a `|` too -- is a reference to the evaluator
+    and must be one here, or the scheduler runs the span before its target
+    (the F12-5 leak)."""
     if span.error:
         return None
-    rhs = calc.split_comment(span.rhs)[0].strip()
-    return calc.CROSS_REF_RE.match(rhs)
+    return calc.CROSS_REF_RE.match(_evaluator_rhs(span))
 
 
 def span_source_call(span: InlineSpan) -> tuple[str, str] | None:
     """`(path, key)` for a parsed span whose RHS is a well-formed `source()`
     call, None otherwise -- the span counterpart of `calc.source_calls_in_block`
     (the pipe unit is already split off by `parse_span`, as the evaluator
-    strips it for a fence line). The RHS is matched with a trailing `#`
-    comment stripped by the evaluator's own quote-aware `split_comment`, so
-    a `source()` call carrying a comment is a call here exactly when it is
-    one to the evaluator: `fetch` must pin a commented call's key, not leave
-    the evaluator demanding a value fetch never takes (the F12-6 dead end)."""
+    strips it for a fence line). The RHS is taken through `_evaluator_rhs`
+    (the evaluator's comment-then-unit order), so a `source()` call carrying
+    a comment -- one whose comment contains a `|` too -- is a call here
+    exactly when it is one to the evaluator: `fetch` must pin a commented
+    call's key, not leave the evaluator demanding a value fetch never takes
+    (the F12-6 dead end)."""
     if span.error:
         return None
-    rhs = calc.split_comment(span.rhs)[0].strip()
+    rhs = _evaluator_rhs(span)
     if not calc.SOURCE_START_RE.match(rhs):
         return None
     parsed = calc.parse_source_call(rhs)
@@ -472,7 +490,7 @@ def _scan_body(lines: list[str]) -> tuple[list[tuple[int, int, int, str]], int |
     return found, (comment_open_line if in_comment else None)
 
 
-def iter_triggered_spans(lines: list[str]) -> list[tuple[int, int, int, str]]:
+def triggered_span_events(lines: list[str]) -> list[tuple[int, int, int, str]]:
     """The triggered inline spans of the given lines, in source order, as
     ``(line_offset, content_start, content_end, content)`` -- the positioned
     view of `_scan_body` (its second return value, the unclosed-comment

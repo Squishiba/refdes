@@ -328,6 +328,60 @@ def test_span_source_with_a_rhs_comment_is_discovered(tmp_path):
     assert not project.errors, _errors(project)
 
 
+def test_a_comment_containing_a_pipe_keeps_the_span_a_reference(tmp_path):
+    """Round-3 review (chunk 2): `parse_span` splits `| unit` BEFORE the
+    trailing `#` comment, the evaluator strips the comment FIRST -- a
+    comment containing a `|` lands the pipe split on the comment's pipe
+    (the unit class is `[^|]+`) and hides the reference from the scans,
+    reviving the F12-5 leak: with no edge the span's item runs first (the
+    a.md file order) and the resolver resolves its reference against a
+    target with no evaluated environment -- the internal
+    `'Item' object has no attribute '_env'`. The scan helpers match in the
+    evaluator's order, so the edge exists and the build is clean."""
+    files = {
+        "a.md": _item("DEC-002", "`v := DEC-001.V_in | V # a | b = 12 V`\n"),
+        "z.md": _item("DEC-001", "```calc\nV_in = 12 V\n```\n"),
+    }
+    project = _build(tmp_path, files)
+    assert not project.errors, _errors(project)
+
+
+def test_a_comment_containing_a_pipe_keeps_the_span_a_source_call(tmp_path):
+    """Round-3 review (chunk 2), the same shape for `source()`: the
+    evaluator strips the comment (quote-aware) before splitting the unit,
+    so `` source(...) | V # a | b `` is a live call to it and `fetch`
+    must pin its key -- the split-order hole made the key invisible to
+    discovery while the build demanded the pin (the F12-6 dead end, this
+    shape)."""
+    import yaml
+
+    from refdes import cli as cli_mod
+
+    config = (
+        "site: { title: T, out: _site }\n"
+        "types:\n  decision:\n    prefix: DEC\n    fields:\n"
+        "      citations: { type: citations, on_change: invalidate }\n"
+    )
+    files = {
+        "a.md": "---\nid: DEC-001\ntype: decision\ncitations:\n"
+        "  - path: analysis/budget.csv\n---\n\n"
+        '`k := source("analysis/budget.csv", "k1") | V # a | b = 5 V`\n'
+    }
+    config_path = _setup(tmp_path, files, config)
+    (tmp_path / "analysis").mkdir(exist_ok=True)
+    (tmp_path / "analysis" / "budget.csv").write_text("key,value\nk1,5.0\n", encoding="utf-8")
+
+    assert cli_mod.main(["-c", config_path, "fetch"]) == 0
+    lock = yaml.safe_load(
+        (tmp_path / ".refdes" / "citations.yaml").read_text(encoding="utf-8")
+    )
+    assert "k1" in lock["citations"]["analysis/budget.csv"]["values"], lock
+    project = load_project(config_path=config_path)
+    parse.load_items(project)
+    build_mod.build(project)
+    assert not project.errors, _errors(project)
+
+
 # ------------------------------------------------- 3. scan geometry (review)
 
 
@@ -655,3 +709,71 @@ def test_yaml_list_file_span_targets_stay_bare_on_disk(tmp_path):
     assert re.search(r"w = DEC-001@[A-Za-z0-9_-]+\.V_in", text), text  # fence expands
     project2 = _rebuild(tmp_path)
     assert not project2.errors, _errors(project2)
+
+
+def test_yaml_list_file_span_hash_is_stable_across_runs(tmp_path):
+    """Round-3 review (chunk 3): the file path excludes list-file spans
+    from expansion, but the in-memory pass shared the same replacement map
+    and had no body-position guard -- with a fence and a span naming the
+    SAME target, the first writable load rewrote the span in memory only.
+    That run's `calc_hash` (which hashes `item.body` raw) and its rendered
+    page carried the composite target; every later build of the same bytes
+    sees the bare span, so a baseline stamped by the expansion run records
+    a probe no later run reproduces, and the stale-arithmetic signal
+    (fires only on equality) is silently dead for the item. Two consecutive
+    writable loads of unchanged bytes must agree on the probe."""
+    write_project_config(tmp_path, "site: { title: T, out: _site }\n")
+    (tmp_path / "refdes-schema.yaml").write_text(
+        "types:\n  decision: { prefix: DEC, fields: {} }\n", encoding="utf-8"
+    )
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "a.md").write_text(_item("DEC-001", "```calc\nV_in = 12 V\n```\n"), encoding="utf-8")
+    (items / "b.yaml").write_text(
+        "items:\n"
+        "  - id: DEC-002\n"
+        "    type: decision\n"
+        "    body: |\n"
+        "      Prose with `v := DEC-001.V_in = 12 V` span.\n"
+        "\n"
+        "      ```calc\n"
+        "      w = DEC-001.V_in\n"
+        "      ```\n",
+        encoding="utf-8",
+    )
+    first = _rebuild(tmp_path)
+    assert not first.errors, _errors(first)
+    probe1 = lifecycle._items_map(first)["DEC-002"]["calc_hash"]
+    html1 = first.item_by_id("DEC-002").body_html
+    second = _rebuild(tmp_path)
+    assert not second.errors, _errors(second)
+    probe2 = lifecycle._items_map(second)["DEC-002"]["calc_hash"]
+    assert probe1 == probe2, (probe1, probe2)
+    assert first.item_by_id("DEC-002").body_html == html1
+
+
+def test_span_and_fence_rewrites_on_one_line_both_land(tmp_path):
+    """Round-3 review (chunk 3): a line that is fence-grammar (a pipe-unit
+    assignment) AND carries a triggered span, with both of its targets
+    expandable -- the span edits were applied to `lines[i]`, then the
+    assignment pass recomputed from the stale `raw` and wrote the line from
+    that, silently discarding the span rewrite while `applied` (and so
+    `plan.rewrites`) already counted it: a reported rewrite that never
+    happened. The assignment pass anchors on the span-edited line, so both
+    rewrites land on the first writable run."""
+    import re
+
+    files = {
+        "a.md": _item("DEC-001", "```calc\nV_in = 12 V\n```\n"),
+        "b.md": _item("DEC-002", "```calc\nV_in = 5 V\n```\n"),
+        "c.md": _item(
+            "DEC-003",
+            "```calc\nw = DEC-002.V_in\n```\n\n"
+            "gain = DEC-002.V_in | V `s := DEC-001.V_in = 12 V`\n",
+        ),
+    }
+    project = _build(tmp_path, files)
+    assert not project.errors, _errors(project)
+    text = (tmp_path / "items" / "c.md").read_text(encoding="utf-8")
+    assert re.search(r"gain = DEC-002@[A-Za-z0-9_-]+\.V_in", text), text
+    assert re.search(r"`s := DEC-001@[A-Za-z0-9_-]+\.V_in = 12 V`", text), text

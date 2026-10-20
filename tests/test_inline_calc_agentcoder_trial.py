@@ -2,7 +2,7 @@
 
 Blind-designed from docs/design/inline-calc.md (esp. section 3), docs/math.md
 ("Inline calc"), and docs/design/keys.md, plus CLI probes on the origin/main
-base. The case matrix lives at .scratch/agentcoder-347-case-matrix.md.
+base.
 
 Base-state note (probe, not assumption): the trigger/verify slice (sections
 1-2) is already merged on the base (#333/#341), so the section-1/2 tests are
@@ -31,6 +31,7 @@ Validated-copy note (adjusted at the #347 head, rebased on #351):
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import shutil
 from pathlib import Path
 
@@ -43,8 +44,13 @@ from refdes import cli as cli_mod
 # The gate pair below integrates against #345's `release_gate.inline_calc_results`
 # rule, which does not exist at this head (not merged): the rule name is a
 # configuration error here, so the pair skips -- not a #347 defect surface.
-GATE_INTEGRATION = pytest.mark.skip(
-    reason="integrates #347 spans against #345's unmerged gate rule",
+# The skip is CONDITIONAL (round-3 review, chunk 2): it tests for the module
+# itself, so the pair starts running -- against the real rule -- the moment
+# #345 lands in this checkout, instead of skipping silently forever.
+GATE_INTEGRATION = pytest.mark.skipif(
+    importlib.util.find_spec("refdes.release_gate") is None,
+    reason="integrates #347 spans against #345's release_gate.inline_calc_results"
+    " rule (github issue/PR #345); runs automatically once #345 is merged",
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "agentcoder347"

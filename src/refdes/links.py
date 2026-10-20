@@ -1081,11 +1081,11 @@ def _calc_ref_rewrites(
     gets the same treatment: a span sitting in prose outside any fence, its
     content replaced in place so the author's surrounding text, the stored
     result and the line count all survive exactly. Fence lines stay the
-    fence loop's; `iter_triggered_spans` never reports a span inside a
+    fence loop's; `triggered_span_events` never reports a span inside a
     fence. The span scan covers `lines[inline_start:end]`, not the whole
     item slice: a caller slicing from `source_line` (front matter included)
     must pass the body-bound start, because the fence tracking in
-    `iter_triggered_spans` assumes fences are self-contained in a body --
+    `triggered_span_events` assumes fences are self-contained in a body --
     an unclosed fence in front matter would otherwise hide every body span,
     and a span in front matter (no span consumer reads front matter) must
     not be rewritten where the in-memory pass rewrites only `item.body`.
@@ -1106,7 +1106,7 @@ def _calc_ref_rewrites(
     inline_entries: dict[int, list[tuple[int, int, str, str]]] = {}
     if include_inline or strip_inline_composite:
         from . import inline_calc as inline_calc_mod
-        for offset, span_start, span_end, content in inline_calc_mod.iter_triggered_spans(
+        for offset, span_start, span_end, content in inline_calc_mod.triggered_span_events(
             lines[inline_start:end]
         ):
             span = inline_calc_mod.parse_span(0, content)
@@ -1144,6 +1144,13 @@ def _calc_ref_rewrites(
             if new_raw != raw:
                 lines[i] = new_raw
                 applied.update(target for *_rest, target in edits)
+                # The assignment pass below recomputes the whole line from
+                # `raw` (its `code`/`comment` partition); anchoring it on the
+                # span-edited line is what keeps a span rewrite on a line that
+                # is ALSO fence grammar from being written back out -- counting
+                # an edit as applied and then discarding it is exactly what
+                # _replace_ref_target's contract forbids.
+                raw = new_raw
         code, hash_sign, comment = raw.partition("#")
         line = code.rstrip()
         if not line.strip():
@@ -1247,7 +1254,7 @@ def plan_calc_ref_expansion(
         # impossible for the fence loop -- it only touches lines matching
         # the strict `name = TARGET.NAME` assignment grammar -- and the
         # span scan is bounded to the item's body lines below, the shape
-        # `iter_triggered_spans` documents (see `_calc_ref_rewrites`).
+        # `triggered_span_events` documents (see `_calc_ref_rewrites`).
         file_items = sorted(
             (i for i in project.local_items if i.source_file == rel),
             key=lambda i: i.source_line,
@@ -1261,12 +1268,13 @@ def plan_calc_ref_expansion(
             )
             repl = replacements_by_item.get(id(item))
             if repl:
-                # `source_line` is the front matter's opening fence line;
-                # the span scan starts at the body (`body_line` is the
-                # body's first line, 1-based) -- None means no known
-                # position, and an unbounded scan is worse than a silent
-                # no-op for spans, which every other consumer also skips
-                # when the body has no position.
+                # `source_line` is the front matter's first content line
+                # (parse.py: the opening `---` line, 0-based, plus two); the
+                # span scan starts at the body (`body_line` is the body's
+                # first line, 1-based) -- None means no known position, and
+                # an unbounded scan is worse than a silent no-op for spans,
+                # which every other consumer also skips when the body has no
+                # position.
                 inline_start = (
                     max(item.body_line - 1, start)
                     if item.body_line is not None
@@ -1332,9 +1340,17 @@ def expand_missing_calc_refs(
             continue
         # Same rewrite over the parsed body, so the build that expanded sees
         # the text the file now holds (line counts are preserved, so every
-        # other item's positions stay valid).
+        # other item's positions stay valid). `include_inline` mirrors the
+        # file path's exclusion: a list-file item (`body_line is None`) got
+        # no span rewrites on disk, so rewriting its span here too would
+        # hand the run a body -- and a probe, and a page -- no later load
+        # of the same bytes reproduces. Bare span targets resolve on the
+        # display id (keys.md §2); only the write-back was skipped.
         body_lines = item.body.splitlines()
-        _calc_ref_rewrites(body_lines, 0, len(body_lines), replacements, include_inline=True)
+        _calc_ref_rewrites(
+            body_lines, 0, len(body_lines), replacements,
+            include_inline=item.body_line is not None,
+        )
         item.body = "\n".join(body_lines) + ("\n" if item.body.endswith("\n") else "")
 
     if plan.remaining:
