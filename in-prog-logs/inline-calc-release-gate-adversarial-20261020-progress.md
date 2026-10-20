@@ -7,9 +7,11 @@ no touching the PR branch). Authorized by Jared during Sol cover.
 
 ## What was done
 
-- Pinned the audit tree: fetched `refs/pull/345/head` twice (start/end),
-  head = `4e89eabfc8cdfd799670cac4850d98519a7709c2` both times; export via
-  `git archive` to `.scratch/pr345src` (exact head tree).
+- Pinned the audit tree: fetched `refs/pull/345/head` at start
+  (`4e89eabfc8cdfd799670cac4850d98519a7709c2`) and re-fetched after probing
+  (same SHA); export via `git archive` to `.scratch/pr345src` (exact head
+  tree). The finish-check head check (`gh pr view`) then saw the branch had
+  moved to `c1c6afb` — see Outcome.
 - Environment hazard found early: the machine venv's `refdes` console script
   imports `/home/jorb/work/refdes/src` (a different checkout). All runs use
   `env PYTHONPATH=<worktree>/.scratch/pr345src/src <venv>/bin/python3 -m

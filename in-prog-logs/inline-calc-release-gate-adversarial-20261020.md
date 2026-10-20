@@ -204,13 +204,27 @@ Row 7: capture CMP-003 fresh, then move the upstream rail (`CMP-002.V_in
 applies and a release stamps a page whose displayed span result (`3.00 V`)
 no longer computes (`2.75 V`). This follows the docs' exemption wording
 literally ("a capture whose live content still matches its snapshot is
-exempt"), and the reference value is in the item's content hash, so
-`captured_edits` (same store, same flag) catches it — but that rule defaults
-off, so by default nothing blocks it. Contrast the sealed case (row 9), where
-the seal floor *does* catch the same upstream move. Worth a one-sentence
-note in `docs/lifecycle.md`/`docs/math.md` that the capture exemption covers
-dependency-induced staleness, since the docs' motivation ("rewriting history
-to satisfy a freshness rule is not what the rule is for") is about *edited*
+exempt"), and there is **no gate backstop at any setting**: `captured_edits`
+enabled does not catch it. Verified at `c1c6afb` (`.scratch/probe2`,
+`release_gate: {captured_edits: {release: true}}`, CMP-003 captured
+unedited): upstream `12 V → 11 V` → warning `inline calc Vd2: stored result
+says 3.00 V, now computes 2.75 V` visible, and `release p2-move` stamped,
+exit 0, `captured_edits` passing. The mechanism is the two digest layers:
+the *content hash* (seals, baselines) includes resolved cross-item calc
+reference values (`build.py` hash format 4, "what an item's cross-item calc
+references contribute to its content hash"), which is why the seal floor
+*does* catch the same move (row 9) — but the history digest that
+`captured_edits` reads (`history.semantic_payload`: type/fields/links/body,
+authored text only) does not, so an authored-text-unchanged item with a
+moved reference value is not "edited after captured". The only signal left
+is the visible stale warning. A correction to this paragraph in an earlier
+revision claimed `captured_edits` catches the move when enabled (conflating
+the content-hash layer with the history digest); reviewer `e02b0027`
+live-reproduced the enabled-rule pass, and the run above confirms it. Worth
+a one-sentence note in `docs/lifecycle.md`/`docs/math.md` that the capture
+exemption covers dependency-induced staleness and that `captured_edits`
+does not cover it, since the docs' motivation ("rewriting history to
+satisfy a freshness rule is not what the rule is for") is about *edited*
 frozen prose, not about an editable upstream number moving under frozen
 text. Not a code fault against the written policy; flagged because the
 asymmetry with the seal floor looks unintended.
