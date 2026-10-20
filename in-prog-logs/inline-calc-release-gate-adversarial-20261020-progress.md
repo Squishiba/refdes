@@ -41,11 +41,21 @@ no touching the PR branch). Authorized by Jared during Sol cover.
 ## Outcome
 
 - Finished. Deliverable report: `in-prog-logs/inline-calc-release-gate-adversarial-20261020.md`.
-- One P1: the rule fails open on an unreadable/corrupt history store
+- Head moved mid-audit: `4e89eab` (all probing) → `c1c6afb` (finish check).
+  The head-to-head `src/` diff is confined to the rule's offender lookup.
+- One P1: the rule fails open on an unreadable history store
   (`HistoryError`/`OSError`), so a release stamps with a stale, editable,
   non-exempt span; the emitted warning names only edited-after-captured,
   and the user-visible docs promise the default-on rule fails a release
-  (no corruption exemption documented). Repro in the report.
+  (no corruption exemption documented). Repro in the report; re-verified at
+  `c1c6afb`.
+- One P1 fixed under this audit: at `4e89eab` a stale span in a permanently
+  id-less `follows:` continuation (empty diagnostic id) escaped the gate
+  entirely (release stamped, baseline written — verified on both heads:
+  stamps at `4e89eab`, blocks naming the key at `c1c6afb` via `1f0a7c3`).
+  Recorded honestly as found-live-at-old-head / fixed-at-current-head; this
+  lane's `4e89eab` probes missed the id-less path (a `require_ids` reading
+  that continuations disprove).
 - Two P2s: "the span's line" is the item line for YAML-sourced items; the
   capture exemption (per its written wording) also exempts staleness induced
   by an upstream editable dependency move, asymmetrically vs the seal floor

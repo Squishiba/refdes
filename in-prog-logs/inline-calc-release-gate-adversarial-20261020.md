@@ -5,10 +5,20 @@ Report-only: no product files were edited, PR #345 untouched, nothing merged.
 
 ## Pinning
 
-- PR #345 head, before and after the run: `4e89eabfc8cdfd799670cac4850d98519a7709c2`
-  (`gh pr view 345 --json headRefOid` at start and end; `refs/pull/345/head`
-  fetched twice, identical). Base merge-base `d620ab5` (this worktree's HEAD).
-  No probe is stale with respect to head movement.
+- PR #345 head at start of probing: `4e89eabfc8cdfd799670cac4850d98519a7709c2`
+  (fetched `refs/pull/345/head`; base merge-base `d620ab5` = this worktree's
+  HEAD). **The head moved during the audit**: the final check shows
+  `c1c6afb68c3432a5a05c28cda6ba0f7f7eb62fa7` (branch rebased onto newer main
+  incl. #348/#349, plus `1f0a7c3 fix(release): resolve id-less inline-calc
+  offenders by source location`). All matrix rows below were probed at
+  `4e89eab`; between the two heads the only `src/` change is
+  `lifecycle.py`'s offender-lookup refactor (`git diff 4e89eab..c1c6afb
+  --stat`), which is exactly the subject of finding **F1b** below. F1 was
+  re-verified at `c1c6afb` (stamped, exit 0); matrix rows 1/3/4 were
+  re-checked at `c1c6afb` through the `m1-ctl` control run (blocked on
+  CMP-001, as at `4e89eab`); the remaining rows are unaffected by a diff that
+  touches nothing else in `src/`. Probes not re-run at `c1c6afb` are marked
+  stale-with-respect-to-the-id-lookup only.
 - Source tree under audit: `git archive 4e89eab | tar -x` into
   `.scratch/pr345src` (exact PR-head tree, no git metadata).
 - Interpreter pin: the machine venv's installed `refdes` is a *different*
@@ -137,6 +147,44 @@ offender line naming the unreadable store), or (b) make the build's decline
 warning name both checks, and document the exemption in
 `docs/lifecycle.md`'s rule table. As shipped, the docs overpromise.
 
+### F1b (P1 at `4e89eab`, FIXED at current head) — a stale span in a permanently id-less continuation escaped the gate entirely
+
+Reachable through shipped CLI with no corruption: a `log` continuation entry
+(`follows: LOG-001`, no `id:` — continuations are permanently id-less, so
+`require_ids` does not catch them) carrying a stale span. The build warns
+with an empty display id (`WARNING items/log.yaml:7 — inline calc Vfb:
+stored result says 9.9 V, now computes 4.436 V`), and at `4e89eab` the rule's
+lookup was `project.item_by_id(diagnostic.item_id) if diagnostic.item_id
+else None` → `item is None` → `continue`, so the offender vanished.
+
+```console
+# .scratch/m3/items/log.yaml: LOG-001 (id) + continuation (no id, follows:
+# LOG-001, stale body span). Keys minted by `refdes check` (writable load).
+$ refdes release m3-rel-a          # tree at 4e89eab
+release 'm3-rel-a' stamped: 2 items, all gates passed.
+$ echo $?
+0                                   # .refdes/baselines/m3-rel-a.yaml written
+$ refdes release m3-rel-b          # same tree, code at c1c6afb (1f0a7c3)
+  FAIL     inline_calc_results  q7g3jpd0qfs: inline calc Vfb (items/log.yaml:7)
+$ echo $?
+1
+```
+
+The current head's `_inline_calc_items` resolves the empty-id diagnostic by
+exact source location (`source_line`/`body_line` equality in the warning's
+file), names the offender by surrogate key, and blocks — verified above, and
+the docs at `c1c6afb` (`docs/lifecycle.md`, `docs/math.md`,
+`docs/design/inline-calc.md`, changelog fragment) were updated in the same
+commit to promise exactly that. This lane's `4e89eab` probes had not covered
+the id-less path (a `require_ids=True` reading of the release load path,
+which the continuation exemption disproves); the mid-audit fix landed under
+this audit, so it is recorded as found-live-at-old-head / fixed-at-current-
+head, with both runs shown, rather than claimed as a fresh find at the head.
+No false refusal observed from the new lookup: in `m3` the offender set is
+exactly the continuation's key — the plural location match needs two items
+at one line, and in a list file a later entry's line is always after the
+earlier item's body ends (span lines live inside the body).
+
 ### F2 (P2) — "the span's line" is not the span's line for YAML-sourced items
 
 `docs/lifecycle.md` (PR-touched): the offender "names the item, the span, and
@@ -201,3 +249,10 @@ asymmetry with the seal floor looks unintended.
   the cited output is the clean one.
 - All corrupt-store probes restored the store afterwards (`release rel-13`
   re-confirmed the restored store blocks CMP-001 only).
+- Head moved mid-audit (`4e89eab` → `c1c6afb`, detected at the finish
+  check). F1 re-verified at `c1c6afb` (`m1-corrupt` stamped, exit 0, with
+  the same stale editable CMP-001; `m1-ctl` control blocked); F1b was
+  produced by probing both heads on the same project. Matrix rows 2, 5–18
+  were probed only at `4e89eab` — the head-to-head `src/` diff is confined
+  to the offender lookup, so those rows are marked stale-with-respect-to-
+  the-id-lookup, not re-verified.
