@@ -153,7 +153,8 @@ class Diagnostic:
     # something needs to reason about a diagnostic rather than print it.
     # Today those are `CHECK_VIOLATION`, which `refdes revise` and
     # `refdes standard upgrade` must be able to tell apart from a project
-    # that does not parse or validate, and `INLINE_CALC_STALE`, which
+    # that does not parse or validate; `RETIRED_UNIT_SPELLING`, which
+    # `refdes calc-rewrite` tolerates; and `INLINE_CALC_STALE`, which
     # `release_gate.inline_calc_results` reads. Everything else leaves it
     # None rather than growing a taxonomy nothing reads.
     code: str | None = None

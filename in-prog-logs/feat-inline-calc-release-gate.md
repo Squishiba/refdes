@@ -116,6 +116,8 @@ Task finished: yes.
   and list-file body emissions.
 - P3 dead local/external branches: lookup returns local-only items, and the
   unreadable-store path uses the same resolver. Imported skip is explicit.
+- Final docs polish removed a truncated lifecycle-table sentence and named
+  `RETIRED_UNIT_SPELLING` in the `Diagnostic.code` comment.
 
 ## Review verification
 
