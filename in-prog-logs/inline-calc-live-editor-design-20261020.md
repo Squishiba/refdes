@@ -12,29 +12,33 @@ the owner decisions it inherits are D1/D2/D3 of
 calculators/pins/library, the form panel, `inline-calc fill`, transaction
 journaling, any non-editor optimization.
 
-Sequencing premise: this design is written against **main @ d620ab5 plus the
-open slice-2 (PR #347, `feat-inline-calc-slice2-hash`, HASH_FORMAT 6) and
-release-gate (PR #345) branches merged**, and it assumes the in-flight
-grammar branch `fix/inline-calc-f12-grammar-20261020` (branch cut at
-d620ab5, no commits yet) lands its grammar decisions first. Where a fact
+Sequencing premise: this design is written against **main @ 1d6d325 (which
+merged the R12-F1..F3 grammar work as PR #351: inert HTML comments,
+ambiguous-span flagging, the tight result separator) plus the still-open
+slice-2 (PR #347, `feat-inline-calc-slice2-hash`, HASH_FORMAT 6) and
+release-gate (PR #345) branches merged — #347/#345 are open at writing
+time and nothing below assumes they have landed**. Where a fact
 below depends on #347, it says so. The live layer reads the grammar's
 *outputs* (parse results, diagnostics text), never re-implements the
-grammar, so the grammar work propagates to it without editing this design.
+grammar, so future grammar work propagates to it without editing this
+design.
 
 ## 1. Baseline: what current code already supports (all verified)
 
-Every line cited was read at main @ d620ab5; branch-only items are marked;
-the probe in §9 re-verifies the behavioral claims.
+Every line cited was read at main @ 1d6d325 (citations re-checked against
+it; the §7 probes were run on the pre-#351 tree d620ab5 and the grammar
+fixes do not change the shapes they verified); branch-only items are
+marked.
 
 **Grammar + evaluation (main, slice 1 `e2d497b`/PR #333, messages
-`50c0faf`/PR #341):**
+`50c0faf`/PR #341, span-recognition fixes `1d6d325`/PR #351):**
 
 - `src/refdes/inline_calc.py` — the whole trigger grammar is a pure,
-  importable module: `contains_trigger` (:68), `code_spans(line)` (:82,
-  content-only view of a line's single-backtick spans), `parse_span` (:153,
+  importable module: `contains_trigger` (:89), `code_spans(line)` (:122,
+  content-only view of a line's single-backtick spans), `parse_span` (:224,
   fills `InlineSpan` with `name/rhs/unit/result` or a `error` string),
-  `triggered_spans(body)` (:211, fence-aware walk returning `line_offset`
-  per span), and `compare_stored(value, span, computed_text)` (:282) —
+  `triggered_spans(body)` (:417, fence-aware walk returning `line_offset`
+  per span), and `compare_stored(value, span, computed_text)` (:478) —
   returns `None` when the stored literal is inside its precision window,
   the stale message (`"stored result says 5 V, now computes 4 V"`)
   otherwise, raises `calc.CalcError` for malformed/incompatible literals.
@@ -49,16 +53,16 @@ the probe in §9 re-verifies the behavioral claims.
   serve snapshot.**
 - `src/refdes/build.py:_run_item_calcs` (:1719) — the source-ordered pass:
   fences and spans as one event list sorted by body-line offset
-  (:1796-1804); `env` seeds two   resolvers (:1739-1744):
+  (:1810-1818); `env` seeds two   resolvers (:1739-1744):
   `_make_calc_resolver` (cross-item `ITEM.NAME` reads, :1538) and
   `_make_source_resolver` (lockfile-pinned `source()`, :1603).
-  `run_calcs` (:1899) builds `by_key = _key_index(project)` (:1915) and
+  `run_calcs` (:1913) builds `by_key = _key_index(project)` (:1929) and
   caches each item's `env` on `item._env`.
 - `src/refdes/calc.py` — the restricted evaluator (owner D3): AST-whitelist
   walk (`_eval_node` :604ff), no `eval`/`exec` anywhere (grep-verified);
   `parse_quantity` (:589), `evaluate_assignment` (:693), `format_value`
   (:981), `evaluate_block` (:1301). Evaluation of a span RHS is
-  microsecond-scale (§9 probe 3: ~130 µs/span warm).
+  microsecond-scale (§7 probe 2: ~130 µs/span warm).
 
 **Serve stack (main):**
 
@@ -87,7 +91,8 @@ the probe in §9 re-verifies the behavioral claims.
   (`src/refdes/serve/preview.py:77-92`; iframe in
   `src/refdes/serve/static/item.js:205-218`); `docs/design/browser-editor.md:429-431`
   describes a debounced *unsaved* preview request — **it is not
-  implemented** (no route in `api.handle` accepts body text). The live
+  implemented**: the `/edit` route takes body text only to save it, and
+  no route in `api.handle` evaluates unsaved text for preview. The live
   calc route proposed here is the calc-shaped first instance of that
   pattern.
 
@@ -129,7 +134,7 @@ the probe in §9 re-verifies the behavioral claims.
   needs", branch step 1), plus `span_cross_ref` / `span_source_call`. The
   live route's replacement ranges are built on it. It also adds the
   cross-item span dependency edges that retire main's
-  `build.py:1580-1586` "has not been evaluated yet" error (run-12 F12-5),
+  `build.py:1581-1587` "has not been evaluated yet" error (run-12 F12-5),
   and makes `refdes fetch` pin span `source()` keys (retires F12-6), so
   after #347 the live route resolves cross-item refs and `source()` from
   the snapshot exactly as a build will.
@@ -142,7 +147,7 @@ Inheriting §"Live editor updates" of inline-calc-later.md:
 
 1. Evaluation happens **only in Python** (owner D3) — the browser sends
    body text and receives computed ranges/text; it never learns the
-   grammar, never parses `:=` (locator work is §4.3's single
+   grammar, never parses `:=` (locator work is §3.1's single
    `indexOf`-level exception, validity-checked server-side).
 2. The result-writing into the draft is **a text edit, not a save** — it
    rides the existing draft → one-Save → revision-check/conflict pipeline
@@ -180,7 +185,7 @@ Inheriting §"Live editor updates" of inline-calc-later.md:
 - Draft *fields* are not inputs: calc scope is body text + cross-item
   target envs + the lockfile; field values (status, enums…) feed nothing
   in inline calc (verified: `_run_item_calcs` reads `item.body` only,
-  `build.py:1757/1769/1796-1803`).
+  `build.py:1757/1783/1810-1818`).
 - Cross-item references and `source()` resolve against the **current
   serve snapshot** — the same `item._env` caches and lockfile records a
   build would use post-#347. Limits to document in docs:
@@ -247,7 +252,7 @@ Response 200:
 - `"revision"` lets the browser discard responses computed against an old
   model (§3.6).
 - Guard: server evaluates at most the first 200 triggered spans of the
-  body and appends `{"truncated": true}`; per-span cost is ~0.13 ms (§9),
+  body and appends `{"truncated": true}`; per-span cost is ~0.13 ms (§7),
   so a request is bounded tens of ms regardless.
 
 ### 3.4 Backend: the narrow preview pass (new, small)
@@ -264,16 +269,17 @@ def preview_inline_spans(project, item, body_text) -> list[dict]:
   snapshot's memoized `project._source_lock` (read-only:
   `citations.locked_source_value`, same as a build); events =
   `calc.extract_blocks_with_lines(body_text)` + `inline_calc.triggered_spans(body_text)`
-  sorted by offset (same as `build.py:1796-1804`).
+  sorted by offset (same as `build.py:1810-1818`).
 - Per span: parse → eval → `format_value(value, project.sigfigs)` →
   `compare_stored`; status/message per §3.3. Positions:
   `code_span_ranges` (#347) for `start/end`; **new, small**:
   `parse_span`/a helper exposing the result-slot column range (the cut
-  position is already computed at `inline_calc.py:170`, just not returned).
+  position is already computed inside `parse_span` (the `readings[0]`
+  cut, `inline_calc.py:265`), just not returned).
 - **What it must not touch**: `project.diagnostics`, `item.calc_values`,
   `item._source_uses`, lockfiles, disk. Locals for `origins`/`env`/
   `resolved`/`uses`; a test proves the snapshot is unchanged after
-  requests (§10 slice A).
+  requests (§5 slice A).
 - The resolver reads target `item._env` — present for every local item
   after any build (`run_calcs` caches it, `build.py:1721-1723` docstring);
   for a target that failed calc, the existing "target's own calc failed"
@@ -284,9 +290,9 @@ Why not `load_readonly(overlay=...)` per request: mechanism exists
 reference — it is 0.23 s @ 20 items and 2.0 s @ 400
 (`docs/performance.md:44-51`), so it cannot run on a 400 ms debounce
 beyond toy projects. The narrow pass costs one item's calcs (~0.1–5 ms,
-§9). The e2e test uses the overlay as the **oracle**: the panel's computed
+§7). The e2e test uses the overlay as the **oracle**: the panel's computed
 text must equal what the overlay-build reports as the diagnostic's
-computed value (§10 slice A) — narrow pass fidelity pinned by test.
+computed value (§5 slice A) — narrow pass fidelity pinned by test.
 
 ### 3.5 Browser: where results show and how they insert
 
@@ -346,8 +352,8 @@ is bandwidth/latency hygiene.
 ### 3.7 Error and unsafe-expression UX
 
 - Half-typed `Vbad := 2 V * ` → span row: ⚠ "stored result missing;
-  write '= <quantity>'", no text change (probe §9.2: that's exactly the
-  parse-stage message; §9.2 also shows the unclosed-span case
+  write '= <quantity>'", no text change (probe §7, probe 2: that's exactly
+  the parse-stage message; probe 2 also shows the unclosed-span case
   `` `Vnew := 1 F * 2 `` yields no span at all — silence, which is right:
   the trigger is declared intent only once the span closes).
 - Eval errors (unknown name, `| V` unit mismatch, cycle, `source()`
