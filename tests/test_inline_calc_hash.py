@@ -777,3 +777,43 @@ def test_span_and_fence_rewrites_on_one_line_both_land(tmp_path):
     text = (tmp_path / "items" / "c.md").read_text(encoding="utf-8")
     assert re.search(r"gain = DEC-002@[A-Za-z0-9_-]+\.V_in", text), text
     assert re.search(r"`s := DEC-001@[A-Za-z0-9_-]+\.V_in = 12 V`", text), text
+
+
+def test_crossed_composite_span_target_in_a_list_file_still_warns(tmp_path):
+    """Round-4 review (chunk 3): the list-file skip of span-only targets
+    ran BEFORE `_planned_target`, which is where the crossed-reference
+    refusal-and-warn (docs/design/keys.md §3 case 2) is emitted. A stale
+    composite span target in a YAML-list-file item (`DEC-001@<key-of-
+    DEC-002>`, DEC-001 a different live item) lost the warning entirely
+    while the identical reference in a fence line of the same file warned:
+    the build resolves by key, so the page shows DEC-002 while the source
+    says DEC-001, and the warning is the only signal of the bad merge. The
+    WRITE exclusion stays; the lint runs."""
+    project = _build(
+        tmp_path,
+        {
+            "a.md": _item("DEC-001", "```calc\nV_in = 12 V\n```\n"),
+            "b.md": _item("DEC-002", "```calc\nV_in = 5 V\n```\n"),
+        },
+    )
+    assert not project.errors, _errors(project)
+    key2 = project.item_by_id("DEC-002").key
+    assert key2
+    text = (
+        "items:\n"
+        "  - id: DEC-003\n"
+        "    type: decision\n"
+        "    body: |\n"
+        f"      Prose `v := DEC-001@{key2}.V_in = 12 V` span.\n"
+    )
+    (tmp_path / "items" / "c.yaml").write_text(text, encoding="utf-8")
+    after = _rebuild(tmp_path)
+    warns = [
+        d.message
+        for d in after.warnings
+        if "different live item" in d.message
+    ]
+    assert len(warns) == 1, [d.message for d in after.warnings + after.errors]
+    assert f"'DEC-001@{key2}'" in warns[0]
+    after_text = (tmp_path / "items" / "c.yaml").read_text(encoding="utf-8")
+    assert f"`v := DEC-001@{key2}.V_in = 12 V`" in after_text

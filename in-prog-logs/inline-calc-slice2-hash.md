@@ -84,9 +84,7 @@ with a red-on-this-head test first:
 
 Verified: the 4 new tests fail on `c5c3b8d`, pass after; full suite 4207
 passed, 2 skipped; ruff `--select E9,F` clean on touched files; golden (a)
-byte-identical. Scope note: a source() span with `#` before the pipe is
-broken in the evaluator itself (the comment swallows the unit declaration)
--- out of scope; the fix restores discovery parity.
+byte-identical.
 
 ## Round 2 + rebase onto main (#351) + AgentCoder pilot triage
 
@@ -95,54 +93,56 @@ Round-2 review fixes (HIGH: format-5 seal of a span item broke --
 links `_replace_ref_target` splices at the match range instead of
 `content.replace`; span-only targets of YAML-list-file items are excluded
 from expansion, `body_line is None`). Red-green verified; full suite 4269
-passed, 4 skipped; golden (a) rebuilt (only the span item's hash moves),
-(b) old format-5 seal verifies clean after expansion.
-
+passed, 4 skipped; golden (a) rebuilt, (b) old format-5 seal clean.
 Rebase onto 1d6d325 kept #351's comment-aware scanner: merged scan into
-one `_scan_body` returning positioned `(offset, start, end, content)`
-spans, with `triggered_spans`/`triggered_span_events`/
-`unclosed_comment_offset` as thin views; one test-ordering conflict
-(span-pin fetch vs #351's fence control) resolved in favour of both.
+one `_scan_body` returning positioned spans, with
+`triggered_spans`/`triggered_span_events`/`unclosed_comment_offset` as
+thin views.
 
 AgentCoder pilot (suite installed as
 tests/test_inline_calc_agentcoder_trial.py): its 3 span failures all put
 a cross-item ref *inside* arithmetic (`Vb := LOG-A.V_in * 2`), which the
 evaluator only resolves for a whole-RHS ref (calc.py
-`CROSS_REF_RE.match(expression.strip())`) -- a fence control with the
-same expression fails identically. Verdict: test assumptions, not
-slice-2 defects; the copy was adapted to whole-RHS form, its two
-`release_gate` tests skipped (that gate is #345, unmerged). Strengthened
-the review's weak assertions (span-pin pins the content-hash move;
-snapshot dedup split from probe coverage; malformed-span probe mutation).
-F1 (reproduced in `.scratch/f1verify/`): a pre-slice-2-code fetch
-rewrites the lockfile whole and drops a span's `values:` pins --
-recorded as a rollout caveat in the changelog fragment (recoverable by
-a new-code fetch; a compat fix belongs to shipped code).
+`CROSS_REF_RE.match(expression.strip())`) -- a fence control fails
+identically. Verdict: test assumptions, not slice-2 defects; adapted to
+whole-RHS form, gate tests deferred to #345. Strengthened the review's
+weak assertions (span-pin pins the content-hash move; snapshot dedup split
+from probe coverage; malformed-span probe mutation). F1 (reproduced in
+`.scratch/f1verify/`): a pre-slice-2-code fetch rewrites the lockfile
+whole and drops a span's `values:` pins -- recorded as a rollout caveat in
+the changelog fragment (recoverable by a new-code fetch).
 
-## Round 3 (head 7f533f6)
+## Round 3 (head 7f533f6, reviewed at 938f044: chunks 1-2 APPROVE)
 
 - Chunk 2 MEDIUM: `parse_span` splits `| unit` BEFORE stripping the
   trailing `#` comment, the evaluator does the reverse; a comment
   containing `|` (the unit class excludes `|`) lands the split on the
   comment's pipe and hides the ref/`source()` from the scans -- reviving
-  the F12-5 leak (span ordered before its target, bare resolver reads
-  `_env`). New `_evaluator_rhs` rebuilds the evaluator's order for
-  `span_cross_ref`/`span_source_call`; parse_span's hash field text is
-  untouched. Red tests: a leaked span must precede its target in file
-  order (span-first a.md).
+  the F12-5 leak. `_evaluator_rhs` rebuilds the evaluator's order for the
+  two scan helpers; parse_span's hash field text untouched. The red test
+  needs span-before-target in FILE order (probe project pinned it).
 - Chunk 3 MEDIUM: the in-memory pass of `expand_missing_calc_refs`
-  expanded list-file spans that the file path excludes -- first-run
-  calc_hash/rendering not reproducible from the same bytes (silent
-  stale-arithmetic). Gate: `include_inline=item.body_line is not None`;
-  red on two-run hash stability. LOW: the fence pass recomputed from the
-  stale `raw` after span edits and clobbered them while `applied` counted
-  them -- re-anchors `raw` after the span write; red on a line that is
-  both pipe-fence grammar and a triggered span.
-- LOW/nits: gate skips now `skipif` on `refdes.release_gate` existence
-  (auto-run when #345 lands); agentcoder docstring dropped its
-  gitignored `.scratch` pointer; `iter_triggered_spans` renamed
-  `triggered_span_events`; front-matter line-number comment corrected.
+  expanded list-file spans the file path excludes -- first-run
+  calc_hash/rendering not reproducible from the same bytes. Gate:
+  `include_inline=body_line is not None`; red on two-run hash stability.
+  LOW: the fence pass recomputed from the stale `raw` after span edits
+  and clobbered them while `applied` counted them -- re-anchor `raw`.
+- LOW/nits: gate skips `skipif` on `refdes.release_gate` (auto-run when
+  #345 lands); agentcoder docstring dropped its gitignored `.scratch`
+  pointer; `iter_triggered_spans` -> `triggered_span_events`; front-
+  matter line-number comment.
 
-Full suite 4273 passed, 4 skipped; red-green re-verified by swapping
-HEAD copies of the fixed modules in place (conftest hard-prepends src,
-so a PYTHONPATH overlay is ignored under pytest).
+## Round 4 (head 938f044, chunk 3 CHANGES REQUESTED)
+
+The round-2 list-file span skip ran BEFORE `_planned_target` in
+`plan_calc_ref_expansion`, and that call is where the crossed-reference
+refusal-and-warn (keys.md §3 case 2) is emitted -- a stale composite
+span target in a YAML-list-file item (`DEC-001@<key-of-DEC-002>`,
+DEC-001 a different live item) lost the warning the fence-line twin
+keeps (build resolves by key: page shows DEC-002, source says DEC-001,
+only the warning flags the bad merge). Moved the call above the skip
+(skip now only suppresses the WRITE); red on current head (span bytes
+stay unwritten, warning asserted), green after. Suite 4274 passed,
+4 skipped. Red-green method: swap HEAD copies of the module in place --
+`tests/conftest.py` hard-prepends `src`, so a PYTHONPATH overlay is
+ignored under pytest.

@@ -1221,11 +1221,20 @@ def plan_calc_ref_expansion(
             else set()
         )
         for target in _calc_reference_targets(item):
-            if target in span_only:
-                continue
+            # `_planned_target` runs BEFORE the span-only skip: it is not
+            # only the rewrite decision, it is where the crossed-reference
+            # refusal-and-warn (docs/design/keys.md §3 case 2) is emitted.
+            # The skip legitimately suppresses only the WRITE -- a list-file
+            # span cannot be rewritten on disk -- so a composite span target
+            # whose key names a different live item must still warn: the
+            # build resolves by key, the page shows that other item, and
+            # only the warning makes the mismatch visible (identical to the
+            # fence-line behaviour).
             new_target = _planned_target(
                 project, by_key, "calc reference", item, target
             )
+            if target in span_only:
+                continue
             if new_target is None:
                 continue
             if "@" not in target:
