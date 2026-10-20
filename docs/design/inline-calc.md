@@ -197,10 +197,13 @@ Its resolved cross-item inputs change the **item** hash definition for
 affected items, which is why `src/refdes/build.py:HASH_FORMAT` is 6. Old
 hashes reconstruct through `src/refdes/build.py:hash_payload_builder` and
 `src/refdes/lifecycle.py` when comparing existing baselines and seals --
-including the as-written reading of an author-written composite span target
-(`keys.hashes_in_format`). Existing no-inline items retain their old item
-hash. The `calc_hash` extension is separate: old baselines without that
-probe stay silent in the verdict-change signal
+accepting the as-written reading of a composite span target (formats <= 5
+hashed it verbatim) and the stripped reading only while the composite is
+faithful: its key half belongs to the item its display half names, so a
+key-half-only edit of an expansion-written target is reported, never
+carried (`keys.hashes_in_format`). Existing no-inline items retain their
+old item hash. The `calc_hash` extension is separate: old baselines without
+that probe stay silent in the verdict-change signal
 (`src/refdes/lifecycle.py:_stale_arithmetic`).
 
 ## Open questions for this slice (decided by the owner, 2026-10-17)

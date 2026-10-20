@@ -2338,11 +2338,12 @@ def _hash_payload(
             # must not move a reconstruction: reduce it back to the display
             # half, restoring the body text the recorded hash was computed
             # from. The keys.md §5(c) carry-forward rule, third application
-            # after links and `against:`. The strip assumes a composite span
-            # target was written by that expansion; a target an author
-            # authored as a composite was hashed as written by the format's
-            # own code, and hash_for_format_variants() keeps that reading
-            # available to the comparison side.
+            # after links and `against:`. The strip is the inverse of the
+            # slice-2 expansion: it is a faithful legacy reading only of a
+            # composite whose key half belongs to the item its display half
+            # names -- hash_for_format_variants() gates on exactly that,
+            # and a key-half-only edit keeps only the as-written reading
+            # (the text the format's own code hashed).
             from . import links as links_mod
 
             span_lines = body_text.splitlines()
@@ -2882,15 +2883,48 @@ def hash_for_format(item: Item, project: Project, hash_format: int) -> str:
     Used only by the hash-format migration (lifecycle.migrate_hash_format,
     seal._matches_sealed_hash's carry-forward comparison, and
     keys.plan_surrogate_storage/`refdes keys adopt`, all through
-    keys.hash_in_format, the one shared caller) to decide whether a stored
+    keys.hashes_in_format, which is this value plus the as-written span
+    reading hash_for_format_variants() computes) to decide whether a stored
     old-format hash still matches current content. Never called during an
-    ordinary build. Comparison sites decide "does the stored hash still
-    describe current content" through keys.hashes_in_format, which adds the
-    as-written span reading hash_for_format_variants() computes.
+    ordinary build.
     """
     spec = project.types[item.type]
     payload = hash_payload_builder(project, hash_format)(item, spec)
     return _hash_blob(payload)
+
+
+def _span_composites_are_faithful(item: Item, project: Project) -> bool:
+    """True when every composite cross-item target in this item's triggered
+    inline spans is exactly what slice-2's expansion writes for it: the
+    display half names the item that owns the key half.
+
+    The format <= 5 strip (see _hash_payload) is the inverse of that
+    expansion, so it is a faithful legacy reading of a composite *only*
+    under this identity. A key-half-only edit (`DEC-001@K2`, the display
+    half untouched -- now pointing at K2's item) strips back to the bare
+    text a pre-edit baseline/seal recorded, and the stripped hash would
+    certify an edited item as "content demonstrably unchanged" (round-7
+    review). Failing this check fails closed: the stripped reading is
+    withdrawn, the as-written reading stays -- which the format's own code
+    hashed verbatim -- so the edit is reported, exactly as it was before
+    the variant set existed. A bare target has no key half to fail on.
+    """
+    from . import inline_calc as inline_calc_mod
+
+    by_display = {i.id: i for i in project.local_items}
+    for _offset, _start, _end, content in inline_calc_mod.triggered_span_events(
+        item.body.splitlines()
+    ):
+        ref = inline_calc_mod.span_cross_ref(inline_calc_mod.parse_span(0, content))
+        if ref is None:
+            continue
+        display, sep, key = ref.group("target").partition("@")
+        if not sep:
+            continue
+        target_item = by_display.get(display)
+        if target_item is None or target_item.key != key:
+            return False
+    return True
 
 
 def hash_for_format_variants(item: Item, project: Project, hash_format: int) -> set[str] | None:
@@ -2909,17 +2943,21 @@ def hash_for_format_variants(item: Item, project: Project, hash_format: int) -> 
     resolved. For such a body there are two legitimate readings of "what
     this format hashes right now": the stripped body (target expanded by
     slice 2) and the as-written body (target authored as a composite).
-    Accepting both is the narrowest rule that keeps the keys.md §5(c)
-    carry-forward promise for an item nobody edited, while the safety
-    properties survive:
+    The stripped reading is offered only under a narrow identity gate --
+    every composite target must be faithful, `DISPLAY@key` naming the
+    item that owns ``key`` (see _span_composites_are_faithful) -- because
+    a key-half-only edit strips back to the pre-edit bare text and the
+    stripped reading would certify the edit as unchanged. The rules this
+    leaves standing:
 
     - it is a *comparison-side* rule only. The current format is untouched
       (a set of one: ``item.content_hash``), and no hash is ever *recorded*
       from a variant -- baselines and seals keep stamping the single
       hash_for_format()/compute_hashes() value.
-    - a genuine edit is still an edit: any change to the body moves *both*
-      readings, so a stored hash from before the edit matches neither and
-      the entry is reported changed/uncomparable, as before.
+    - an edit to the body text moves the as-written reading, and a
+      faithful composite that stops being faithful (a key-half edit)
+      loses the stripped reading outright -- so every edit is reported
+      changed/uncomparable, as before the variant set existed.
     - the as-written reading exists only for legacy formats (1 <= f <
       HASH_FORMAT); it is the identical payload with the span-strip pass
       disabled and every other format rule (link halves, `against:`,
@@ -2935,10 +2973,12 @@ def hash_for_format_variants(item: Item, project: Project, hash_format: int) -> 
         return {item.content_hash}
     if not 1 <= hash_format < HASH_FORMAT:
         return None
-    stripped = _hash_blob(hash_payload_builder(project, hash_format)(item, spec))
     live = _hash_blob(
         hash_payload_builder(project, hash_format, strip_inline_composite=False)(item, spec)
     )
+    if not _span_composites_are_faithful(item, project):
+        return {live}
+    stripped = _hash_blob(hash_payload_builder(project, hash_format)(item, spec))
     return {stripped, live}
 
 

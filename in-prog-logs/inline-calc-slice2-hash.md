@@ -98,4 +98,28 @@ and `docs/change-tracking.md` corrected (a resolvable span's `source()` fed
 the source-inputs hash since format 4 -- format 6 adds span cross-item
 hash inputs and `fetch` pinning, not a new source hash input);
 `SourceUse` docstring widened. Targeted suites: 550 passed; full suite 4314
-passed, 2 skipped. Task finished.
+passed, 2 skipped.
+
+## Round 7 (at the round-6 head; chunks 1-3 APPROVE, chunk 4 CHANGES REQUESTED)
+
+Chunk 4 MEDIUM: round 6 accepted the stripped format-5 reading
+unconditionally, so a KEY-HALF-only edit of an expansion-written composite
+(`DEC-001@w4fq.V_in` -> `DEC-001@K2.V_in`) strips right back to the bare
+text a pre-expansion baseline/seal recorded -- the edit was silently
+carried as "content demonstrably unchanged", and my "genuine edit moves
+both readings" comment was false. Fix: the stripped reading is offered only
+for composites *faithful* to what the expansion writes -- key half == the
+key of the item the display half names (`build._span_composites_are_-
+faithful`, gating `hash_for_format_variants`); a composite failing it keeps
+only the as-written reading (what the format's own code hashed), so the
+edit reports as changed/uncomparable -- fail-closed, no safety overclaim.
+Red-on-head test drives: bare fmt5 baseline/seal -> legitimate expansion
+compares clean -> key-half edit flags (seal violation + uncomparable).
+Chunk 4 LOW: set membership raised TypeError on an unhashable stored hash
+(a YAML list in a corrupted record) where the old equality said
+"non-match"; new `keys.stored_hash_matches` string-guards all comparison
+sites (lifecycle, keys plan x3, seal; key_restore already guarded), red
+test pins migration-uncomparable + seal-violation. Also: stale
+`hash_in_format`-as-comparison docstrings corrected (keys.py, build.py,
+key_restore.py, keys.md x2), lifecycle migrate docstring reflowed.
+Targeted suites green. Task finished.

@@ -995,3 +995,106 @@ def test_composite_span_variants_are_narrow(tmp_path):
     assert build_mod.hash_for_format_variants(
         plain.item_by_id("DEC-001"), plain, 5
     ) == {AUTHORED_SEALED_UNDER_FORMAT5["DEC-001"]}
+
+
+def _bare_fixture(fixture: dict) -> dict:
+    bare = dict(fixture)
+    bare["e.md"] = fixture["e.md"].replace("@w4fq61wx8v7", "")
+    return bare
+
+
+def test_key_half_edit_of_expanded_span_target_is_never_carried(tmp_path):
+    """MEDIUM (round-7 review): the stripped format-5 reading is the
+    pre-expansion bare text -- so a KEY-HALF-only edit of an
+    expansion-written composite (`DEC-001@w4fq61wx8v7` ->
+    `DEC-001@<DEC-002's key>`, the display half untouched) strips right
+    back to the bare body a format-5 baseline/seal recorded, and the edit
+    was silently carried forward as "content demonstrably unchanged".
+    The stripped reading must only be accepted for composites faithful to
+    what the expansion writes -- key half == the key of the item the
+    display half names. The legitimate expansion itself keeps comparing
+    clean."""
+    from refdes import seal
+
+    bare_files = _bare_fixture(AUTHORED_FIXTURE)
+    bare_files["c.md"] = (
+        "---\nid: DEC-002\ntype: decision\n---\n\n```calc\nV_in = 7 V\n```\n"
+    )
+    project = _build(tmp_path, bare_files, APPEND_CONFIG)
+    assert not project.errors, _errors(project)
+    other_key = project.item_by_id("DEC-002").key
+    assert other_key and other_key != "w4fq61wx8v7"
+    # the build expanded the span target to the faithful composite
+    assert "DEC-001@w4fq61wx8v7.V_in" in (tmp_path / "items" / "e.md").read_text(
+        encoding="utf-8"
+    )
+    # a format-5 baseline/seal recorded by the pre-expansion bare bytes
+    # (the bare twin's format-5 hash is the stripped constant).
+    _write_baseline(
+        tmp_path,
+        {
+            "DEC-005": {
+                "hash": STRIPPED_UNDER_FORMAT5,
+                "type": "decision",
+                "title": "span",
+                "hash_format": 5,
+                "key": "rff8vmeh0av",
+            },
+        },
+    )
+    (tmp_path / ".refdes" / "log-seal.yaml").write_text(
+        f"sealed:\n  DEC-005: {STRIPPED_UNDER_FORMAT5}\n", encoding="utf-8"
+    )
+    # legitimate expansion: an untouched item compares clean under both.
+    project = _rebuild(tmp_path)
+    assert project.seal_violations == []
+    baseline = lifecycle.load_baseline(project, "rev-a")
+    report = lifecycle.migrate_hash_format(project, baseline, write=False)
+    assert report.carried == ["DEC-005"]
+    assert report.uncomparable == []
+    # key-half-only edit: the span now points at DEC-002's key.
+    _edit(tmp_path, "e.md", "DEC-001@w4fq61wx8v7.V_in", f"DEC-001@{other_key}.V_in")
+    project = _rebuild(tmp_path)
+    assert "DEC-005" in project.seal_violations
+    baseline = lifecycle.load_baseline(project, "rev-a")
+    report = lifecycle.migrate_hash_format(project, baseline, write=False)
+    assert report.carried == []
+    assert report.uncomparable == ["DEC-005"]
+    assert seal.load_seals(project)["DEC-005"] == STRIPPED_UNDER_FORMAT5
+
+
+def test_malformed_stored_hashes_never_raise(tmp_path):
+    """LOW (round-7 review): the variant comparison replaced `stored ==
+    hash` with set membership, which raises TypeError on an unhashable
+    stored hash (a YAML list in a corrupted record). The comparison must
+    keep the pre-variant posture: a non-string stored hash is a plain
+    non-match -- migration reports it uncomparable, the seal check
+    reports the ordinary violation, neither crashes."""
+    from refdes import seal
+
+    project = _build(tmp_path, _bare_fixture(AUTHORED_FIXTURE), APPEND_CONFIG)
+    assert not project.errors, _errors(project)
+    _write_baseline(
+        tmp_path,
+        {
+            "DEC-005": {
+                "hash": ["not", "a", "string"],
+                "type": "decision",
+                "title": "span",
+                "hash_format": 5,
+                "key": "rff8vmeh0av",
+            },
+        },
+    )
+    (tmp_path / ".refdes" / "log-seal.yaml").write_text(
+        "sealed:\n  DEC-005: [not, a, string]\n", encoding="utf-8"
+    )
+    project = _rebuild(tmp_path)
+    assert "DEC-005" in project.seal_violations
+    baseline = lifecycle.load_baseline(project, "rev-a")
+    report = lifecycle.migrate_hash_format(project, baseline, write=False)
+    assert report.carried == []
+    assert report.uncomparable == ["DEC-005"]
+    assert seal.load_seals(project)["DEC-005"] == "['not', 'a', 'string']"
+    plan = keys.plan_surrogate_storage(project, baseline.items, {})
+    assert plan.baseline_uncomparable == ["DEC-005"]

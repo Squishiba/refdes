@@ -915,10 +915,11 @@ baseline is precisely described. Same rule for seals.
 
 **Format 3 (2026-09-14) generalizes this to "the previous format," not just
 format 1.** A format-2 entry carries forward to 3 by the identical rule:
-compare the stored hash against `keys.hash_in_format(item, project, 2)`
-(the exact format-2 reconstruction, not an approximation); match, carry;
+compare the stored hash against the item's format-2 hashes (the exact
+format-2 reconstruction, not an approximation); match, carry;
 mismatch, leave alone and report uncomparable. One shared helper --
-`keys.hash_in_format` -- answers "what would this item's hash be under
+`keys.hashes_in_format` (membership; `keys.hash_in_format` is its single
+canonical value) -- answers "what would this item's hash be under
 format N" for every caller that needs it (`lifecycle.migrate_hash_format`,
 `seal._matches_sealed_hash`, `keys.plan_surrogate_storage`, and `refdes
 keys adopt` through it), so the comparison can't drift between them. A
@@ -1059,7 +1060,8 @@ references re-attaches to the new item with `0 errors`, exit 0 -- the only
 trace being `audit`'s `changed 1` line, which the next release erases. Both
 signals are compared because they fail independently: the title is what a
 human reads, the hash is what proves. The hash is compared through
-`keys.hash_in_format`, so the record is read in the format it was stamped in
+`keys.hashes_in_format` (with `keys.hash_in_format` as the value shown in
+the refusal), so the record is read in the format it was stamped in
 and a genuine restore of the *same* item matches -- an item's own key and
 display id are not part of its content hash (§5), so restoring a key onto the
 item it belonged to moves no hash. `--force` overrides this one refusal,

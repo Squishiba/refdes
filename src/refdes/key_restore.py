@@ -92,8 +92,8 @@ def _baseline_content_conflict(project: Project, item: Item, key: str) -> str | 
 
     Both recorded signals are compared, and either one disagreeing refuses:
     the title is what a human reads, the hash is what proves. The hash is
-    compared with `keys.hash_in_format`, the single shared reconstruction of
-    "what this item's hash was under the recorded format", so a genuine
+    compared against `keys.hashes_in_format`, the shared reconstruction of
+    "what hashes this item has under the recorded format", so a genuine
     restore of the same item matches whatever format stamped the record
     (an item's own key and display id are not in its content hash -- see
     `build.compute_hashes`). A record that carries neither signal, or a hash
@@ -214,10 +214,12 @@ def apply(
         # sees the target keyless (the `!nokey:`/`!unresolved:` sentinel) and
         # a genuine same-item restore looks like moved content. The candidate
         # is the state the user is being asked to approve; judging its hashes
-        # against the record is the honest comparison. `keys.hash_in_format`
-        # compares a stored baseline hash against `item.content_hash` for the
-        # current format, and `load_readonly` does not compute hashes;
-        # `keys adopt` does the same before it compares stored hashes.
+        # against the record is the honest comparison. The comparison is
+        # membership in `keys.hashes_in_format` (the format's legitimate
+        # readings of the candidate); `hash_in_format` below is the single
+        # canonical value shown in the refusal message. `load_readonly` does
+        # not compute hashes; `keys adopt` does the same before it compares
+        # stored hashes.
         if not force:
             build_mod.compute_hashes(candidate)
             for item, key in selected:

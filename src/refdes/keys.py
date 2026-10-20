@@ -304,15 +304,13 @@ def hash_in_format(item: Item, project: Project, hash_format: int) -> str | None
     compute it right now, or ``None`` if ``hash_format`` isn't one this
     build understands.
 
-    The canonical reconstruction every hash-format migration site uses --
-    lifecycle.migrate_hash_format, seal._matches_sealed_hash, and
-    plan_surrogate_storage below (which `refdes keys adopt` calls through)
-    -- so "does this stored hash still describe this item's current
-    content" is answered identically everywhere (docs/design/keys.md §5(c)).
-    A single shared helper, not four copies that could drift. Comparison
-    sites test membership in hashes_in_format(), which is this hash plus
-    the as-written-span reading legacy formats also assigned to an
-    author-written composite span target.
+    The canonical *single* reconstruction (docs/design/keys.md §5(c)).
+    The "does this stored hash still describe this item's current
+    content" comparisons do NOT use this alone -- they test membership
+    in hashes_in_format() below, which is this hash plus the as-written
+    span reading legacy formats also assigned to an author-written
+    composite span target. This function remains the value side: the
+    message text key_restore shows, and the payload tests pin.
     """
     from . import build as build_mod
 
@@ -323,6 +321,21 @@ def hash_in_format(item: Item, project: Project, hash_format: int) -> str | None
     return None
 
 
+def stored_hash_matches(stored: object, accepted: set[str] | None) -> bool:
+    """The membership test every hash-format comparison site uses: does
+    the *stored* (record-file, corruption-prone) hash equal one of the
+    hashes ``hashes_in_format`` accepts for this item right now?
+
+    The string guard is not decoration. Records come from YAML, and a
+    malformed entry can carry a list where the hash belongs; the
+    equality test these sites ran before the variant set simply returned
+    False for it (entry reported uncomparable, seal reported modified),
+    while ``list in set`` raises TypeError. The guard keeps that stable
+    CLI posture: a non-string stored hash is a plain non-match.
+    """
+    return accepted is not None and isinstance(stored, str) and stored in accepted
+
+
 def hashes_in_format(item: Item, project: Project, hash_format: int) -> set[str] | None:
     """Every content hash ``hash_format`` legitimately assigns to this item
     right now -- the set every "does this stored hash still describe this
@@ -331,14 +344,16 @@ def hashes_in_format(item: Item, project: Project, hash_format: int) -> set[str]
 
     One shared set, for the same reason hash_in_format is one shared
     function: the four migration sites must not drift. The set is a single
-    hash except for an inline calc span whose cross-item target is an
-    author-written composite: formats <= 5 hashed that text verbatim,
-    slice-2 expansion writes composites into span targets that were
-    authored bare, and only the comparison side can tell "not edited" from
-    "expanded" by accepting both readings (the full safety analysis lives
-    on build.hash_for_format_variants, which computes them). A genuine
-    edit moves both readings, so an edited entry is still reported as
-    edited.
+    hash except for an inline calc span whose cross-item target is a
+    composite: formats <= 5 hashed that text as written, slice-2 expansion
+    writes composites into span targets that were authored bare, and only
+    the comparison side can tell "not edited" from "expanded" -- so it
+    accepts the stripped reading only for composites faithful to the
+    expansion (key half belongs to the item the display half names), plus
+    the as-written reading always (the full analysis lives on
+    build.hash_for_format_variants, which computes them). A key-half-only
+    edit fails the faithfulness gate and a body edit moves the as-written
+    reading, so an edited entry is still reported as edited.
     """
     from . import build as build_mod
 
@@ -375,7 +390,7 @@ def plan_surrogate_storage(
         except (TypeError, ValueError):
             hash_format = -1
         expected = hashes_in_format(item, project, hash_format) if item is not None else None
-        if item is not None and item.key and entry.get("hash") in (expected or set()):
+        if item is not None and item.key and stored_hash_matches(entry.get("hash"), expected):
             converted = dict(entry)
             converted.pop("key", None)
             converted["id"] = display_id
@@ -414,7 +429,7 @@ def plan_surrogate_storage(
             # a format has to be inferred rather than read off the entry.
             for candidate in (build_mod.HASH_FORMAT, 2, 1):
                 accepted = hashes_in_format(item, project, candidate)
-                if accepted is not None and recorded_hash in accepted:
+                if stored_hash_matches(recorded_hash, accepted):
                     matched_format = candidate
                     break
         expected = (
@@ -422,7 +437,7 @@ def plan_surrogate_storage(
             if item is not None and matched_format in (1, 2, build_mod.HASH_FORMAT)
             else None
         )
-        if item is not None and item.key and recorded_hash in (expected or set()):
+        if item is not None and item.key and stored_hash_matches(recorded_hash, expected):
             converted = dict(entry)
             converted["id"] = record_id
             converted["hash"] = item.content_hash

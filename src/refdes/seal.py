@@ -372,7 +372,7 @@ def _matches_sealed_hash(
     formats = (hash_format,) if hash_format is not None else tuple(range(build_mod.HASH_FORMAT, 0, -1))
     for fmt in formats:
         accepted = keys_mod.hashes_in_format(item, project, fmt)
-        if accepted is not None and recorded in accepted:
+        if keys_mod.stored_hash_matches(recorded, accepted):
             return True, item.content_hash
     return False, recorded
 

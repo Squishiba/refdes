@@ -413,20 +413,20 @@ def migrate_hash_format(project: Project, baseline: Baseline, write: bool = True
 
     The rule, for each entry not already at the current format (recorded id
     `item_id`, stored hash `old_hash`, recorded format `old_format`): find
-    the live item still using that id, and recompute what its hash would be
-    *right now* under `old_format`'s definition (keys.hashes_in_format, the
-    shared comparison set). If
-    that recomputed old-format hash matches what was actually stored, the
-    item's content has demonstrably not changed since the baseline was
-    stamped -- so the item's *current* hash (already sitting on
-    item.content_hash from this build) is the correct current-format hash of
-    the baseline's own content, and the entry is safely rewritten in place
-    (`carried`). If it does not match, the item genuinely changed since the
-    stamp, for a reason that has nothing to do with hash formats -- that
-    entry is left exactly as it was and reported as `uncomparable` rather
-    than guessed at. An id with no live item at all (deleted, or renamed
-    with no `former_ids:` recorded) is left alone too: that is the ordinary
-    "removed" case diff_against() already reports, not a migration failure.
+    the live item still using that id, and recompute the hashes its current
+    content has *right now* under `old_format`'s definition
+    (`keys.hashes_in_format`, the shared comparison set). If the stored hash
+    is one of them, the item's content has demonstrably not changed since
+    the baseline was stamped -- so the item's *current* hash (already
+    sitting on item.content_hash from this build) is the correct
+    current-format hash of the baseline's own content, and the entry is
+    safely rewritten in place (`carried`). If it is not, the item genuinely
+    changed since the stamp, for a reason that has nothing to do with hash
+    formats -- that entry is left exactly as it was and reported as
+    `uncomparable` rather than guessed at. An id with no live item at all
+    (deleted, or renamed with no `former_ids:` recorded) is left alone too:
+    that is the ordinary "removed" case diff_against() already reports, not
+    a migration failure.
 
     `write=False` computes the same report without touching the file --
     the `--no-write` posture (docs/design/keys.md §2), threaded through by
@@ -446,7 +446,7 @@ def migrate_hash_format(project: Project, baseline: Baseline, write: bool = True
         if item is None:
             continue  # no live item to recompute against -- an ordinary removal
         expected = keys_mod.hashes_in_format(item, project, recorded_format)
-        if expected is None or entry.get("hash") not in expected:
+        if not keys_mod.stored_hash_matches(entry.get("hash"), expected):
             report.uncomparable.append(display_id)
             continue
         entry["hash"] = item.content_hash
