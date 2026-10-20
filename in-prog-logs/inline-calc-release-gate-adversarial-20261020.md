@@ -1,6 +1,7 @@
 # Adversarial audit — PR #345 `release_gate.inline_calc_results` (release-gate freshness rule)
 
-Independent verification lane (Claude), authorized by Jared during Sol cover.
+Independent verification lane (Claude-lane work performed by Qwen — the
+model named in the commit trailer), authorized by Jared during Sol cover.
 Report-only: no product files were edited, PR #345 untouched, nothing merged.
 
 ## Pinning
@@ -19,8 +20,9 @@ Report-only: no product files were edited, PR #345 untouched, nothing merged.
   CMP-001, as at `4e89eab`); the remaining rows are unaffected by a diff that
   touches nothing else in `src/`. Probes not re-run at `c1c6afb` are marked
   stale-with-respect-to-the-id-lookup only. Round-2 finish check: head moved
-  again, to `bbfd40053a25a965d181f639453a16b68cd2d977` (OPEN, unmerged) —
-  see "Current disposition" under Findings.
+  to `bbfd40053a25a965d181f639453a16b68cd2d977`; round-3 check: head moved
+  again to `742b757effa314aa2fc1cccb33139ba82ea8cafb` (OPEN, unmerged both
+  times) — see "Current disposition" under Findings.
 - Source tree under audit: `git archive 4e89eab | tar -x` into
   `.scratch/pr345src` (exact PR-head tree, no git metadata).
 - Interpreter pin: the machine venv's installed `refdes` is a *different*
@@ -77,29 +79,53 @@ gate reads "as it is" carries that granularity. See F2.
 
 ## Findings
 
-### Current disposition (round-2 re-check, at finish)
+### Current disposition (round-3 re-check, at finish)
 
 PR #345 is **OPEN, unmerged**, head now
-`bbfd40053a25a965d181f639453a16b68cd2d977` — one commit over `c1c6afb`,
-`bbfd400 fix(release): fail inline-calc gate on unreadable history`
-(`git log --format="%h %s" c1c6afb..bbfd400`). F1's historical
-reproductions at `4e89eab`/`c1c6afb` stand as written below, unchanged.
-Independently confirmed fixed at `bbfd400` (pinned tree
-`.scratch/pr345head3`, real CLI, `.scratch/m1` with a stale editable
-CMP-001): corrupting `b8c421ff-…yaml` → `release bbfd-corrupt` blocked,
-`FAIL inline_calc_results  history: inline calc freshness cannot be
-checked: history store unreadable (… event file does not parse …)`, exit 1
-— while the *same* corrupt state re-run at pre-fix `c1c6afb` stamped
-(`bbfd-old2`, exit 0); clean-store control blocks CMP-001 (`bbfd-ctl`,
-exit 1); restored store + fresh CMP-001 stamps (`bbfd-restored2`, exit 0).
-The fix's shape is option (a) below, scoped to "stale spans in play"
-(sealed/imported/no-stale exemptions kept, docstring rewritten). The same
-commit also took F2's docs point (changelog: "the warning's reported
-source line … falling back to the item's entry line for a list-file
-`body:` key") and added an F3-adjacent sentence ("The capture exemption
-follows the captured text, not upstream values that move later.").
-Focused regression: the commit adds four unreadable-store tests;
-`PYTHONPATH=$PWD/src pytest tests/test_lifecycle.py` → 47 passed.
+`742b757effa314aa2fc1cccb33139ba82ea8cafb`: `bbfd400 fix(release): fail
+inline-calc gate on unreadable history` over `c1c6afb`, then
+`742b757 fix(release): match Markdown inline-calc span lines`
+(`git log --format="%h %s" c1c6afb..742b757`). The head had moved again
+before this round's push; the round-2 text below pins what was verified at
+each head. F1's and F1b's historical reproductions at `4e89eab`/`c1c6afb`
+stand as written, unchanged.
+
+- F1 (unreadable-store fail-open): confirmed fixed at `bbfd400` (pinned
+  tree `.scratch/pr345head3`, real CLI, `.scratch/m1`, stale editable
+  CMP-001): corrupting `b8c421ff-…yaml` → `release bbfd-corrupt` blocked,
+  `FAIL inline_calc_results  history: inline calc freshness cannot be
+  checked: history store unreadable (… event file does not parse …)`, exit
+  1; the same corrupt state at pre-fix `c1c6afb` stamped (`bbfd-old2`, exit
+  0); clean-store control blocks CMP-001 (`bbfd-ctl`); restored store +
+  fresh CMP-001 stamps (`bbfd-restored2`). Fix shape = option (a) below,
+  scoped to "stale spans in play" (sealed/imported/no-stale exemptions
+  kept, docstring rewritten). Re-verified fixed at `742b757` (`f1-head4`
+  blocked, exit 1), where the offender is additionally collapsed to one
+  gate row (`_unreadable_history_offender`).
+- F1b (id-less continuation): confirmed **not fully fixed until `742b757`**
+  (reviewer 80e93711; my round-2 "fixed at `c1c6afb`/`bbfd400`" claim held
+  only for the list-file reproduction). Verified: a **Markdown**
+  continuation with the stale span on a later body line (`.scratch/m4`:
+  `items/notes.md`, id-less `follows:` continuation, span line 10)
+  **stamped** at both `c1c6afb` (`m4-c1c6`, exit 0) and `bbfd400`
+  (`m4-bbfd2`, exit 0) — exact `source_line`/`body_line` equality misses a
+  span on a non-first body line — and **blocked** at `742b757`: `FAIL
+  inline_calc_results  qzymeef7f99: inline calc Vfb (items/notes.md:10)`,
+  exit 1. The **list-file** reproduction (`.scratch/m3`,
+  `q7g3jpd0qfs: … (items/log.yaml:7)`) is blocked at `c1c6afb` *and*
+  `742b757` (`m3-c1c6`, `m3-head4`, exit 1) — that half was genuinely
+  fixed by `1f0a7c3`.
+- Tests at pinned trees: `tests/test_lifecycle.py` native → 48 passed at
+  `742b757`, 47 at `bbfd400`; running `742b757`'s test file against the
+  older trees (per-tree conftest, so each tree's own `src` — a plain
+  `PYTHONPATH` override from a foreign rootdir is ignored by conftest's
+  `sys.path.insert(0, …/src)`) → 2 failures at `bbfd400` (the Markdown
+  continuation test — expected — and the one-row-offender assert) and 3 at
+  `c1c6afb` (+ the two store tests, expected pre-fix). The same commit took
+  F2's docs point (changelog: "the warning's reported source line … falling
+  back to the item's entry line for a list-file `body:` key") and an
+  F3-adjacent sentence ("The capture exemption follows the captured text,
+  not upstream values that move later.").
 
 ### F1 (P1; historical at `4e89eab`/`c1c6afb`, fixed at `bbfd400` — see Current disposition) — the gate fails open on an unreadable history store: a stale, editable, non-exempt span stamps a release, and nothing names the skipped check
 
@@ -174,7 +200,7 @@ warning name both checks, and document the exemption in
 `docs/lifecycle.md`'s rule table. As shipped, the docs overpromise.
 Resolved at `bbfd400` by option (a) — see Current disposition.
 
-### F1b (P1 at `4e89eab`, FIXED at `c1c6afb`, remains fixed at `bbfd400`) — a stale span in a permanently id-less continuation escaped the gate entirely
+### F1b (P1 at `4e89eab`; list-file variant fixed at `c1c6afb`, Markdown variant live through `bbfd400`; FIXED at `742b757`) — a stale span in a permanently id-less continuation escaped the gate entirely
 
 Reachable through shipped CLI with no corruption: a `log` continuation entry
 (`follows: LOG-001`, no `id:` — continuations are permanently id-less, so
@@ -211,6 +237,19 @@ No false refusal observed from the new lookup: in `m3` the offender set is
 exactly the continuation's key — the plural location match needs two items
 at one line, and in a list file a later entry's line is always after the
 earlier item's body ends (span lines live inside the body).
+
+Round-3 correction (reviewer 80e93711): the "`c1c6afb` blocks" claim above
+is true of the **list-file** reproduction — a YAML list entry whose
+`body:` key makes the warning's line the item's source line. A **Markdown**
+continuation is different: the warning carries the span's absolute line, so
+when the span is not the first body line, exact `source_line`/`body_line`
+equality misses the item and the bypass is live. Verified: `.scratch/m4`
+(`items/notes.md`, id-less `follows:` continuation, stale span on body line
+10) stamps at `c1c6afb` (`m4-c1c6`, exit 0) and at `bbfd400` (`m4-bbfd2`,
+exit 0), and blocks at `742b757` (`m4-head4b`, exit 1, naming
+`qzymeef7f99`), whose `_inline_calc_items` matches the whole body range.
+The historical `4e89eab` finding and the `m3` list-file reproduction above
+stand unchanged; see Current disposition.
 
 ### F2 (P2) — "the span's line" is not the span's line for YAML-sourced items
 
@@ -275,8 +314,10 @@ asymmetry with the seal floor looks unintended.
   (`message.split(": ", 1)[0]`); span labels are identifiers, so no
   observed mangling; not probed with exotic labels.
 - `ruff check .` baseline is ~99 pre-existing findings per AGENTS.md; not a
-  gate for this audit. Full test suite not run (report-only; PR's own
-  `tests/test_lifecycle.py` additions were read, not executed).
+  gate for this audit. The full repo suite was not run (report-only);
+  `tests/test_lifecycle.py` was executed at pinned trees: 47 passed at
+  `bbfd400`, 48 at `742b757`, plus the cross-tree runs in Current
+  disposition.
 
 ## Probe hygiene
 
@@ -297,3 +338,10 @@ asymmetry with the seal floor looks unintended.
   were probed only at `4e89eab` — the head-to-head `src/` diff is confined
   to the offender lookup, so those rows are marked stale-with-respect-to-
   the-id-lookup, not re-verified.
+- Round-3: F1b was re-probed as a Markdown continuation (`.scratch/m4`)
+  after reviewer 80e93711 showed the Markdown variant survived `1f0a7c3`;
+  the `m3` list-file probe is retained as the historical reproduction.
+  Cross-tree test runs from a foreign rootdir first appeared to pass
+  everywhere — conftest's `sys.path.insert(0, <rootdir>/../src)` wins over
+  `PYTHONPATH`, so those runs tested the wrong tree and were discarded;
+  the cited cross-tree results re-run each tree's own conftest+tests.

@@ -72,5 +72,17 @@ no touching the PR branch). Authorized by Jared during Sol cover.
   expected; the commit adds four unreadable-store tests and
   `tests/test_lifecycle.py` is 47 passed. Added a Current-disposition note
   (historical evidence unchanged); report-only head pushed.
+- Review round 3 (reviewer 80e93711): F1b "fixed at c1c6afb/bbfd400" was
+  over-broad. Re-verified at pinned trees: Markdown continuation with the
+  stale span on a later body line (`.scratch/m4`) stamps at `c1c6afb` and
+  `bbfd400` (exit 0), blocks at `742b757` naming the key; the list-file
+  probe (`m3`) is blocked at `c1c6afb` and `742b757` (historical claim
+  kept). #345 OPEN at `742b757` (`fix(release): match Markdown
+  inline-calc span lines`); lifecycle tests 48 passed native at `742b757`,
+  47 at `bbfd400`; `742b757`'s test file vs `bbfd400` src = 2 failures, vs
+  `c1c6afb` src = 3. Fixed the stale "additions were read, not executed"
+  line (tests were executed at pinned trees) and the "lane (Claude)"
+  wording (Claude-lane work performed by Qwen). Current disposition
+  rewritten to `742b757`. Report-only head pushed.
 - Report-only: nothing in `src/`, `docs/`, `tests/` touched; PR #345 branch
   untouched; scratch left under `.scratch/` per AGENTS.md; no stash used.
