@@ -127,7 +127,7 @@ value equals the stored literal; carry tests at the half-place boundary.
 | Condition | Proposed severity and message shape |
 |---|---|
 | Missing `= result`, malformed triggered span, evaluation failure, incompatible unit | **Error**, file:line plus name and specific fix; ordinary `check`/`build` fail. Example: `inline calc Vout: stored result missing; write '= <quantity>'`. |
-| Parsed result outside its precision window | **Warning**, file:line plus stored and recomputed quantities; `check`/`build` continue. Example: `inline calc Vout: stored result says 4.436 V, now computes 4.52 V`. |
+| Parsed result outside its precision window | **Warning** at `check`/`build`; by default `release_gate.inline_calc_results` also fails a release for an editable item. Example: `inline calc Vout: stored result says 4.436 V, now computes 4.52 V`. |
 | Result within its precision window | No diagnostic. |
 
 A stale value is reported on every verification run, including an old
@@ -147,7 +147,7 @@ editable, so the exemption does not apply to the edited entry. Landed:
 warning (tagged `model.INLINE_CALC_STALE`), resolves it by display id and,
 for permanently id-less continuations whose diagnostic has an empty id, by
 the body range containing the span (with a list-file entry-line fallback),
-and exempts entries
+fails closed if a coded stale warning resolves to no local item, and exempts entries
 `seal.is_sealed` and `history.capture_index` report. With a stale span in
 play, the rule deliberately fails closed on an unreadable history store and
 names that

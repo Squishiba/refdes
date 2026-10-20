@@ -109,9 +109,17 @@ Task finished: yes.
   Sealed and readable unedited-capture exemptions remain.
 - P2 assessments documented: list-file bodies report the item-entry line;
   capture exemption follows captured text, not later upstream moves.
+- P2 healthy-store resolver miss: public build emits stale warnings only
+  from local items, and id/body-location invariants return the emitting item.
+  The gate now fails closed on an unresolved coded warning while imported
+  items remain skipped. Added an all-resolve control over first/later Markdown
+  and list-file body emissions.
+- P3 dead local/external branches: lookup returns local-only items, and the
+  unreadable-store path uses the same resolver. Imported skip is explicit.
 
 ## Review verification
 
-- Location fallback: 12 inline-calc lifecycle tests.
+- Location fallback and unresolved-warning fail-closed controls: 14
+  inline-calc lifecycle tests.
 - Combined lifecycle/settings/docs: 20 tests.
 - Full suite and ruff results are recorded in the PR body.

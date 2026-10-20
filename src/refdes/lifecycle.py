@@ -752,8 +752,10 @@ def _rule_captured_edits(project: Project) -> list[str]:
     )
 
 
-def _inline_calc_items(project: Project, diagnostic) -> list[Item]:
-    """Items owning a stale inline-calc warning, including permanently
+def _inline_calc_local_items(
+    project: Project, diagnostic, local: set[int]
+) -> list[Item]:
+    """Local items owning a stale inline-calc warning, including permanently
     id-less continuations.
 
     A warning's display id is the normal lookup. An id-less item has
@@ -765,10 +767,13 @@ def _inline_calc_items(project: Project, diagnostic) -> list[Item]:
     duplicate-source handles can put two items at the same location, and each
     owns its warning.
     """
+
+    def local_only(matches: list[Item]) -> list[Item]:
+        return [item for item in matches if id(item) in local]
+
     if diagnostic.item_id:
         item = project.item_by_id(diagnostic.item_id)
-        if item is not None:
-            return [item]
+        return local_only([item]) if item is not None else []
     if not diagnostic.file or diagnostic.line is None:
         return []
     return [
@@ -786,6 +791,17 @@ def _inline_calc_items(project: Project, diagnostic) -> list[Item]:
             or (item.body_line is None and diagnostic.line == item.source_line)
         )
     ]
+
+
+def _inline_calc_span(diagnostic) -> str:
+    """The warning's own head, "inline calc Vout", is the span name."""
+    return diagnostic.message.split(": ", 1)[0]
+
+
+def _inline_calc_location(diagnostic) -> str:
+    if diagnostic.file and diagnostic.line is not None:
+        return f" ({diagnostic.file}:{diagnostic.line})"
+    return ""
 
 
 def _unreadable_history_offender(exc: Exception) -> str:
@@ -809,7 +825,9 @@ def _rule_inline_calc_results(project: Project) -> list[str]:
     (items/log.md:7)"), so the failure is clickable where the CLI is. An
     id-less continuation has no display id on its diagnostic, so lookup falls
     back to the body range containing that line (list-file bodies report the
-    item's source line) and the offender names its key.
+    item's source line) and the offender names its key. A coded stale warning
+    that resolves to no local item fails closed too, so the gate cannot turn
+    a resolver miss into a silent exemption.
 
     The exemptions are the design's, read narrowly: an item the build locks
     (a build seal, `seal.is_sealed`) and an item frozen into captured history
@@ -840,34 +858,31 @@ def _rule_inline_calc_results(project: Project) -> list[str]:
         }
     except (history_mod.HistoryError, OSError) as exc:
         for diagnostic in stale:
-            matches = _inline_calc_items(project, diagnostic)
-            local_matches = [item for item in matches if id(item) in local]
-            if local_matches:
-                if all(seal_mod.is_sealed(project, item) for item in local_matches):
+            items = _inline_calc_local_items(project, diagnostic, local)
+            if not items:
+                if diagnostic.item_id and project.item_by_id(diagnostic.item_id):
                     continue
                 return [_unreadable_history_offender(exc)]
-            if any(not item.external for item in matches):
-                return [_unreadable_history_offender(exc)]
-            if diagnostic.item_id and project.item_by_id(diagnostic.item_id):
+            if all(seal_mod.is_sealed(project, item) for item in items):
                 continue
             return [_unreadable_history_offender(exc)]
         return []
     offenders: set[str] = set()
     for diagnostic in stale:
-        for item in _inline_calc_items(project, diagnostic):
-            if id(item) not in local:
+        items = _inline_calc_local_items(project, diagnostic, local)
+        span = _inline_calc_span(diagnostic)
+        location = _inline_calc_location(diagnostic)
+        if not items:
+            if diagnostic.item_id and project.item_by_id(diagnostic.item_id):
                 continue
+            offenders.add(f"{span}: did not resolve to a local item{location}")
+            continue
+        for item in items:
             if seal_mod.is_sealed(project, item) or (
                 item.key and item.key in frozen_captures
             ):
                 continue
-            location = (
-                f" ({diagnostic.file}:{diagnostic.line})"
-                if diagnostic.file and diagnostic.line
-                else ""
-            )
             # The warning's own head, "inline calc Vout", is the span name.
-            span = diagnostic.message.split(": ", 1)[0]
             offenders.add(f"{item.id or item.key}: {span}{location}")
     return sorted(offenders)
 

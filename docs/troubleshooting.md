@@ -461,7 +461,7 @@ keeps the warning and stamps past the gate; the exemption follows the captured
 text, not upstream values that move afterward. Editing the item after capture
 makes the live text editable again, so the gate applies. A stale span in play
 with an unreadable history store fails the release gate closed and names the
-store. See [inline
+store; a coded stale warning that resolves to no local item fails closed too. See [inline
 calc](math.md#inline-calc).
 
 ## Checks

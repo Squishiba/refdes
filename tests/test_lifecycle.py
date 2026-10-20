@@ -1093,6 +1093,175 @@ def test_inline_calc_results_unreadable_history_store_without_stale_span_passes(
     assert lifecycle.stamp(project, kind="release", name="rel-a").status == "stamped"
 
 
+def test_inline_calc_results_real_local_stale_warnings_all_resolve(tmp_path):
+    """Control for the gate's resolver: every stale warning emitted from a
+    local item resolves back to at least one local item, including the first
+    Markdown body line, a later Markdown line, and a list-file body."""
+    write_project_config(
+        tmp_path,
+        "site: { title: IC, out: _site }\n"
+        "standard: { base: hardware, version: 3 }\n"
+        "types: { decision: { prefix: DEC, fields: {} } }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "dec.md").write_text(
+        "---\n"
+        "id: DEC-001\n"
+        "type: decision\n"
+        "title: Divider\n"
+        "---\n\n" + IC_STALE_BODY,
+        encoding="utf-8",
+    )
+    (items / "log.yaml").write_text(
+        "items:\n"
+        "  - id: LOG-001\n"
+        "    type: log\n"
+        "    date: 2026-10-18\n"
+        "    summary: First.\n"
+        "  - type: log\n"
+        "    date: 2026-10-19\n"
+        "    summary: Continuation.\n"
+        "    follows: LOG-001\n"
+        "    body: |\n"
+        "      Settled at `Vfb := 0.8 V * (1 + 10 kohm/2.2 kohm) | V = 9.9 V`.\n",
+        encoding="utf-8",
+    )
+    (items / "notes.md").write_text(
+        "---\n"
+        "id: DEC-002\n"
+        "type: decision\n"
+        "title: Later divider\n"
+        "---\n"
+        "\n"
+        "First.\n"
+        "`Vout := 0.8 V * (1 + 10 kohm/2.2 kohm) | V = 4.52 V`.\n",
+        encoding="utf-8",
+    )
+    _ic_rebuild(tmp_path)
+    project = _ic_rebuild(tmp_path)
+    stale = [d for d in project.warnings if d.code == "inline_calc_stale"]
+    assert len(stale) == 3
+    local = {id(item) for item in project.local_items}
+    for diagnostic in stale:
+        assert lifecycle._inline_calc_local_items(project, diagnostic, local)
+
+
+def test_inline_calc_results_unresolved_stale_warning_fails_closed(tmp_path):
+    """A real local stale warning must never vanish from the gate. If the
+    resolver cannot match a coded warning to a local item, and its display id
+    is not an imported item, release fails closed rather than treating the
+    missing match as an exemption."""
+    project = _ic_project(tmp_path, IC_STALE_BODY)
+    stale = next(d for d in project.warnings if d.code == "inline_calc_stale")
+    stale.item_id = "GONE-999"
+    stale.file = "items/missing.md"
+    stale.line = 7
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].status == "FAIL"
+    assert results["inline_calc_results"].offenders == [
+        "inline calc Vout: did not resolve to a local item (items/missing.md:7)"
+    ]
+    outcome = lifecycle.stamp(project, kind="release", name="rel-a")
+    assert outcome.status == "gate_failed"
+
+
+IC_IMPORT_SCHEMA = (
+    "site: { title: IC, out: _site }\n"
+    "standard: { base: hardware, version: 3 }\n"
+    "types:\n"
+    "  bound: { prefix: IFC, fields: {} }\n"
+    "  decision: { prefix: DEC, fields: {} }\n"
+)
+
+
+def _ic_imported_project(tmp_path, body):
+    import json
+
+    write_project_config(
+        tmp_path,
+        IC_IMPORT_SCHEMA + "imports:\n  - name: upstream\n    items: upstream.json\n",
+    )
+    (tmp_path / "upstream.json").write_text(
+        json.dumps(
+            {
+                "title": "Upstream",
+                "version": "1",
+                "items": [
+                    {
+                        "id": "IFC-CAN-001",
+                        "type": "bound",
+                        "title": "Current limit",
+                        "fields": {},
+                        "links": {},
+                        "content_hash": "upstreamhash01",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "dec.md").write_text(
+        f"---\nid: DEC-001\ntype: decision\n---\n\n{body}", encoding="utf-8"
+    )
+    _ic_rebuild(tmp_path)
+    return _ic_rebuild(tmp_path)
+
+
+def test_inline_calc_results_imported_stale_warning_is_skipped(tmp_path):
+    """Imported items remain outside this project's gate, even when their
+    diagnostic is coded and healthy-store lookup resolves it externally."""
+    from refdes import model
+
+    project = _ic_imported_project(tmp_path, IC_FRESH_BODY)
+    imported = project.item_by_id("IFC-CAN-001")
+    assert imported.external is True
+    project.warnings.append(
+        model.Diagnostic(
+            level=model.WARNING,
+            message="inline calc Vext: stored result says 9.9 V, now computes 4.436 V",
+            file="<import:upstream>",
+            line=1,
+            item_id=imported.id,
+            code=model.INLINE_CALC_STALE,
+        )
+    )
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].status == "pass"
+    assert lifecycle.stamp(project, kind="release", name="rel-a").status == "stamped"
+
+
+def test_inline_calc_results_unreadable_store_imported_stale_warning_is_skipped(
+    tmp_path,
+):
+    """Corrupt history cannot make the gate claim imported work belongs to
+    this project."""
+    from refdes import model
+
+    project = _ic_imported_project(tmp_path, IC_FRESH_BODY)
+    imported = project.item_by_id("IFC-CAN-001")
+    project.warnings.append(
+        model.Diagnostic(
+            level=model.WARNING,
+            message="inline calc Vext: stored result says 9.9 V, now computes 4.436 V",
+            file="<import:upstream>",
+            line=1,
+            item_id=imported.id,
+            code=model.INLINE_CALC_STALE,
+        )
+    )
+    events = tmp_path / ".refdes" / "history" / "events"
+    events.mkdir(parents=True)
+    (events / "bad.yaml").write_text("kind: [unclosed\n", encoding="utf-8")
+    with pytest.raises(history.HistoryError):
+        history.capture_index(project)
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["inline_calc_results"].status == "pass"
+    assert lifecycle.stamp(project, kind="release", name="rel-a").status == "stamped"
+
+
 def test_inline_calc_results_exempt_build_seal(tmp_path):
     """A sealed (build-locked) entry keeps its stale warning and passes the
     gate: the body is locked text, not editable prose (the exemption mirrors
