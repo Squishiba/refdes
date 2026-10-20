@@ -313,8 +313,9 @@ visible,
 and a release stamps past it. The exemption follows the captured text, not
 upstream values that move afterward. Editing an item after capture restores the
 live text to editable prose, so a stale span in the edited entry blocks.
-If a stale span is in play and the history store cannot be read, the release
-gate fails closed and names the unreadable store. A coded stale warning that
+If an editable, unsealed stale span is in play and the history store cannot be
+read, the release gate fails closed and names the unreadable store. A coded
+stale warning that
 resolves to no local item also fails closed.
 `refdes revision` is unaffected: a revision stays a
 checkpoint, not a readiness claim.

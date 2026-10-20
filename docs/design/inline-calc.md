@@ -1,8 +1,7 @@
 Status: **Partially landed.** The source form, parser, evaluator, and
-`check`/`build` diagnostics are on `main`. The §2 release gate lands in this
-PR; it is not on `main` until this PR merges.
+`check`/`build` diagnostics are implemented, as is the §2 release gate.
 The §3 hash, dependency-scan, and `source()` discovery changes remain
-proposed; PR #347 is open and not merged. The owner decided the four open
+proposed. The owner decided the four open
 questions on 2026-10-17; the decisions are recorded under each question below.
 Later directions are parked in
 [inline-calc-later.md](inline-calc-later.md).
@@ -18,7 +17,7 @@ Later directions are parked in
 - **D3:** Evaluation uses only the restricted Python calc evaluator in
   `src/refdes/calc.py`; an item cannot execute code.
 
-## Implementation status, verified against `main` and this PR
+## Implementation status by slice
 
 - Probe: in a fresh `refdes init` project holding one `log` item whose body
   is the single-backtick span `` `Vout := 2 V * 2 = 5 V` ``, the original
@@ -41,10 +40,12 @@ Later directions are parked in
   `calc_hash` only for its verdict-change signal, not for stored-result
   verification.
 - `refdes check --help`, `refdes build --help`, `refdes release --help`, and
-  `refdes revision --help` confirm the present commands. Their §1/§2 warning
-  behavior is on `main`; the §2 release gate is added by this PR, and §3 is
-  not. `refdes schema` emitted the current project's merged
-  JSON Schema; the §2 gate rule is added by this PR.
+  `refdes revision --help` confirm the present commands. §1/§2 warning behavior
+  is implemented; the §2 release gate is implemented, and §3 is proposed.
+  `refdes schema` emits the item JSON Schema and does not include project
+  settings such as `release_gate:`. `refdes check` validates `release_gate:`
+  (a misspelled subkey is rejected), and `refdes release --help` lists
+  `inline_calc_results` among the readiness rules.
 
 ## 1. Source form and trigger
 
@@ -128,7 +129,7 @@ the computed nominal to the stored literal's last written decimal place on the
 decimal text, rounding halves away from zero, and accept only when the rounded
 value equals the stored literal; carry tests at the half-place boundary.
 
-| Condition | Landed warning severity; release-gate behavior added by this PR |
+| Condition | Landed warning severity and release-gate behavior |
 |---|---|
 | Missing `= result`, malformed triggered span, evaluation failure, incompatible unit | **Error**, file:line plus name and specific fix; ordinary `check`/`build` fail. Example: `inline calc Vout: stored result missing; write '= <quantity>'`. |
 | Parsed result outside its precision window | **Warning** at `check`/`build`; by default `release_gate.inline_calc_results` also fails a release for an editable item. Example: `inline calc Vout: stored result says 4.436 V, now computes 4.52 V`. |
@@ -145,14 +146,17 @@ its warning remains visible. The capture exemption follows the entry's captured
 text, not the upstream inputs it referred to; a later upstream move can make
 the frozen prose describe a different calculation, and the gate remains silent.
 A post-capture edit leaves the live item
-editable, so the exemption does not apply to the edited entry. On this branch:
+editable, so the exemption does not apply to the edited entry. The §2
+implementation:
 `src/refdes/model.py:RELEASE_GATE_DEFAULTS` lists it,
 `src/refdes/lifecycle.py:_rule_inline_calc_results` reads the build's stale
 warning (tagged `model.INLINE_CALC_STALE`), resolves it by display id and,
 for permanently id-less continuations whose diagnostic has an empty id, by
 the body range containing the span (with a list-file entry-line fallback),
-fails closed if a coded stale warning resolves to no local item, and exempts entries
-`seal.is_sealed` and `history.capture_index` report. With a stale span in
+fails closed if a coded stale warning resolves to no local item, exempts
+entries `seal.is_sealed` reports, and exempts only captures whose
+`history.capture_index` edited flag is false (the index returns every captured
+item, not only exempt ones). With an editable, unsealed stale span in
 play, the rule deliberately fails closed on an unreadable history store and
 names that
 store: a release cannot stamp a readiness claim while the tool is unable to

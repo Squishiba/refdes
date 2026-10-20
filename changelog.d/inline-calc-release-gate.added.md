@@ -11,8 +11,8 @@
   the gate guards editable prose, never frozen text. The capture exemption
   follows the captured text, not upstream values that move later. Editing an
   item after capture restores editable text, so a stale span there is not
-  exempt. With a stale span in play, an unreadable history store fails the
-  release gate closed and names the store.
+  exempt. With an editable, unsealed stale span in play, an unreadable history
+  store fails the release gate closed and names the store.
   Missing results and calc errors
   already failed the ordinary build floor, and `refdes revision` is
   unaffected. Turn it off per project with

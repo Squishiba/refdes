@@ -122,6 +122,9 @@ Task finished: yes.
   this PR, and open PR #347.
 - Qualified id-less inline-calc release offenders as keyed only when a
   surrogate key has been minted, with file-and-line as the cold fallback.
+- Round 5 qualified unreadable-store fail-closed claims as unsealed/editable,
+  clarified schema vs release-gate validation, capture exemptions, temporal
+  status, and removed an unsupported cause generalization.
 
 ## Review verification
 

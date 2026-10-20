@@ -62,7 +62,7 @@ against the rule names.
 | `unaccepted_workspace_moves` | an item's workspace differs from `.refdes/boards.yaml`'s `workspaces:` key ([workspaces](workspaces.md)) |
 | `open_tasks` | a thread tip carries an open task (its fold lists one; a tip whose fold is ambiguous counts too, said as a conflicting list) |
 | `captured_edits` | an item's current content differs from its captured snapshot (the same fact as the "edited after captured" warning; ticking a task on a captured entry is one such edit — task rows are part of the fields the history digest covers) |
-| `inline_calc_results` | a local, editable item's inline-calc span has a stored result that no longer computes — the same fact as the build's "inline calc Vout: stored result says 4.52 V, now computes 4.436 V" warning ([math](math.md#inline-calc)), including a permanently id-less continuation, named by its surrogate key when one has been minted and by its file and line otherwise. A build seal, or an unedited capture whose live content still matches its snapshot, is exempt: its warning stays visible, the gate stays silent. Editing an item after capture makes the live text editable again, so a stale span there blocks. A coded stale warning that resolves to no local item, and a stale span in play when the history store cannot be read, both fail closed |
+| `inline_calc_results` | a local, editable item's inline-calc span has a stored result that no longer computes — the same fact as the build's "inline calc Vout: stored result says 4.52 V, now computes 4.436 V" warning ([math](math.md#inline-calc)), including a permanently id-less continuation, named by its surrogate key when one has been minted and by its file and line otherwise. A build seal, or an unedited capture whose live content still matches its snapshot, is exempt: its warning stays visible, the gate stays silent. Editing an item after capture makes the live text editable again, so a stale span there blocks. A coded stale warning that resolves to no local item fails closed, as does an unsealed, editable stale span in play when the history store cannot be read |
 
 **Why `open_tasks` and `captured_edits` default off.** Both are living-notes
 gate rules, but not the same one: `open_tasks` is worklist binding rule 5 of
@@ -88,8 +88,9 @@ satisfy a freshness rule is not what the rule is for. The exemption follows
 that entry's captured text, not the upstream values it referred to, so an
 unchanged capture can remain frozen even when a dependency moves. A
 post-capture edit is not frozen text: the live item is editable prose again,
-so a stale span in the edited entry blocks. When the history store cannot be
-read, the rule cannot prove the exemption and fails closed. A coded stale
+so a stale span in the edited entry blocks. When an editable, unsealed stale
+span is in play and the history store cannot be read, the rule cannot prove
+the exemption and fails closed. A coded stale
 warning that resolves to no local item also fails closed, so a resolver miss
 cannot become a silent exemption. Nothing defaults
 on for `revision` — the checkpoint stays unconditional.
