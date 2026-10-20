@@ -414,7 +414,8 @@ def migrate_hash_format(project: Project, baseline: Baseline, write: bool = True
     The rule, for each entry not already at the current format (recorded id
     `item_id`, stored hash `old_hash`, recorded format `old_format`): find
     the live item still using that id, and recompute what its hash would be
-    *right now* under `old_format`'s definition (keys.hash_in_format). If
+    *right now* under `old_format`'s definition (keys.hashes_in_format, the
+    shared comparison set). If
     that recomputed old-format hash matches what was actually stored, the
     item's content has demonstrably not changed since the baseline was
     stamped -- so the item's *current* hash (already sitting on
@@ -444,8 +445,8 @@ def migrate_hash_format(project: Project, baseline: Baseline, write: bool = True
         item = keys_mod.item_for_baseline_entry(project, record_id, entry)
         if item is None:
             continue  # no live item to recompute against -- an ordinary removal
-        expected = keys_mod.hash_in_format(item, project, recorded_format)
-        if expected is None or expected != entry.get("hash"):
+        expected = keys_mod.hashes_in_format(item, project, recorded_format)
+        if expected is None or entry.get("hash") not in expected:
             report.uncomparable.append(display_id)
             continue
         entry["hash"] = item.content_hash

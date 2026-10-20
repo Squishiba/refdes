@@ -351,8 +351,8 @@ def _matches_sealed_hash(
     Returns ``(matches, hash_to_store)``. Two outcomes:
 
     - ``hash_format`` known (a key-keyed entry's own recorded format): the
-      recorded hash must match ``keys.hash_in_format(item, project,
-      hash_format)`` -- the one shared reconstruction every hash-format
+      recorded hash must be one of ``keys.hashes_in_format(item, project,
+      hash_format)`` -- the one shared comparison set every hash-format
       migration site uses, not a copy of it.
     - ``hash_format`` unknown (a legacy scalar seal, with no field for a
       format marker of its own): try the newest definition first, then each
@@ -371,8 +371,8 @@ def _matches_sealed_hash(
 
     formats = (hash_format,) if hash_format is not None else tuple(range(build_mod.HASH_FORMAT, 0, -1))
     for fmt in formats:
-        expected = keys_mod.hash_in_format(item, project, fmt)
-        if expected is not None and recorded == expected:
+        accepted = keys_mod.hashes_in_format(item, project, fmt)
+        if accepted is not None and recorded in accepted:
             return True, item.content_hash
     return False, recorded
 

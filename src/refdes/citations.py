@@ -1513,7 +1513,8 @@ def authorize_source_path(project: Project, item: Item, path: str) -> tuple[str,
 
 @dataclass
 class SourceUse:
-    """One `name = source("path", "key")` line, located for fetch."""
+    """One `source("path", "key")` call -- a fence line or an inline calc
+    span -- located for fetch."""
 
     item: Item
     name: str

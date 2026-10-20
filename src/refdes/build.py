@@ -2233,19 +2233,25 @@ def run_checks(project: Project) -> None:
 #      cross-item reference (`v := DEC-001.V_in`) is a real dependency, so the
 #      scheduler orders the target first, the reference's resolved key and
 #      resolved value enter the calc-reference hash, and the body reduces the
-#      reference's target half to that key exactly as a fence line's does; a
-#      span's source() call joins the source-inputs hash. The arithmetic of
-#      every triggered span (name, rhs, unit -- never the author's stored
-#      result) joins the narrow arithmetic probe, so an inline-only item
-#      finally gets a calc_hash. An item with no triggered span has the exact
-#      same payload as format 5, so no existing item's hash moves; spans with
-#      only literal arithmetic keep their old content hash (they gain only a
-#      probe, which content hashing never sees). Reconstruction of formats
-#      <= 5 ignores span inputs, which is what keeps the bump from making any
+#      reference's target half to that key exactly as a fence line's does. (A
+#      span's resolvable source() call has fed the source-inputs hash since
+#      format 4 -- the resolver appended it under the same gate; what is new
+#      here is that `refdes fetch` *discovers and pins* it, not a hash input.)
+#      The arithmetic of every triggered span (name, rhs, unit -- never the
+#      author's stored result) joins the narrow arithmetic probe, so an
+#      inline-only item finally gets a calc_hash. An item with no triggered
+#      span has the exact same payload as format 5, so no existing item's
+#      hash moves; spans with only literal arithmetic keep their old content
+#      hash (they gain only a probe, which content hashing never sees).
+#      Reconstruction of formats <= 5 excludes the span cross-item inputs
+#      (span source() values ride `_source_uses` there exactly as they rode
+#      the old code's hash), which is what keeps the bump from making any
 #      existing baseline entry, seal, or audit look edited (the keys.md §5(c)
 #      carry-forward rule -- and it is why the reconstruction also strips an
 #      expanded span target back to its display half, restoring the
-#      pre-expansion body text the recorded hash was computed from).
+#      pre-expansion body text the recorded hash was computed from; an
+#      author-written composite was hashed as written back then, so the
+#      comparison side accepts both readings through keys.hashes_in_format).
 # Recorded per baseline entry (lifecycle.py) so a partially-migrated baseline
 # stays precisely describable; consulted by the migration in
 # lifecycle.py/seal.py/keys.py, never by an ordinary build.
@@ -2332,7 +2338,11 @@ def _hash_payload(
             # must not move a reconstruction: reduce it back to the display
             # half, restoring the body text the recorded hash was computed
             # from. The keys.md §5(c) carry-forward rule, third application
-            # after links and `against:`.
+            # after links and `against:`. The strip assumes a composite span
+            # target was written by that expansion; a target an author
+            # authored as a composite was hashed as written by the format's
+            # own code, and hash_for_format_variants() keeps that reading
+            # available to the comparison side.
             from . import links as links_mod
 
             span_lines = body_text.splitlines()
@@ -2777,7 +2787,7 @@ def compute_hashes(project: Project) -> None:
         item.content_hash = _hash_blob(payload_for(item, spec))
 
 
-def hash_payload_builder(project: Project, hash_format: int):
+def hash_payload_builder(project: Project, hash_format: int, strip_inline_composite: bool | None = None):
     """A ``(item, spec) -> payload`` closure computing _hash_payload() under
     ``hash_format``'s definition, reused by compute_hashes() (current
     format) and hash_for_format() (any earlier one) so the two can never
@@ -2802,13 +2812,21 @@ def hash_payload_builder(project: Project, hash_format: int):
     plus an inline calc span's cross-item reference counts as a calc
     reference (_calc_refs_hash_value with ``include_inline``); an item with
     no such span is identical to format 5.
+
+    ``strip_inline_composite`` overrides the default reduction of expanded
+    span targets to their display half (see _hash_payload); None derives it
+    from the format -- stripped for every reconstruction the expansion
+    post-dates, live for the current format. hash_for_format_variants()
+    uses the override to offer the as-written legacy reading.
     """
+    if strip_inline_composite is None:
+        strip_inline_composite = hash_format < 6
     if hash_format <= 1:
         return lambda item, spec: _hash_payload(
             item, spec, project,
             link_values=lambda targets: sorted(t.split("@", 1)[0] for t in targets),
             checks_values=_checks_display_only,
-            strip_inline_composite=True,
+            strip_inline_composite=strip_inline_composite,
         )
     by_key = _key_index(project)
     checks_values = (
@@ -2837,7 +2855,7 @@ def hash_payload_builder(project: Project, hash_format: int):
         calc_refs=calc_refs,
         source_inputs=source_inputs,
         image_inputs=image_inputs,
-        strip_inline_composite=hash_format < 6,
+        strip_inline_composite=strip_inline_composite,
     )
 
 
@@ -2866,11 +2884,62 @@ def hash_for_format(item: Item, project: Project, hash_format: int) -> str:
     keys.plan_surrogate_storage/`refdes keys adopt`, all through
     keys.hash_in_format, the one shared caller) to decide whether a stored
     old-format hash still matches current content. Never called during an
-    ordinary build.
+    ordinary build. Comparison sites decide "does the stored hash still
+    describe current content" through keys.hashes_in_format, which adds the
+    as-written span reading hash_for_format_variants() computes.
     """
     spec = project.types[item.type]
     payload = hash_payload_builder(project, hash_format)(item, spec)
     return _hash_blob(payload)
+
+
+def hash_for_format_variants(item: Item, project: Project, hash_format: int) -> set[str] | None:
+    """Every content hash ``hash_format`` can legitimately assign to this
+    item's current content, or ``None`` for a format this build does not
+    understand.
+
+    The one thing hash_for_format() strips that the format's own code did
+    not always strip: an inline calc span whose cross-item target is a
+    composite (`DEC-001@key.V_in`). Slice 2's expansion writes composites
+    into span targets that authors had written bare, so a format <= 5
+    reconstruction strips them back (the display-half body is what the
+    recorded hash saw). But `calc.CROSS_REF_RE` accepted an author-written
+    composite all along, and the format's own code hashed *that* text
+    verbatim -- resolving it by key exactly as a fence line's composite is
+    resolved. For such a body there are two legitimate readings of "what
+    this format hashes right now": the stripped body (target expanded by
+    slice 2) and the as-written body (target authored as a composite).
+    Accepting both is the narrowest rule that keeps the keys.md §5(c)
+    carry-forward promise for an item nobody edited, while the safety
+    properties survive:
+
+    - it is a *comparison-side* rule only. The current format is untouched
+      (a set of one: ``item.content_hash``), and no hash is ever *recorded*
+      from a variant -- baselines and seals keep stamping the single
+      hash_for_format()/compute_hashes() value.
+    - a genuine edit is still an edit: any change to the body moves *both*
+      readings, so a stored hash from before the edit matches neither and
+      the entry is reported changed/uncomparable, as before.
+    - the as-written reading exists only for legacy formats (1 <= f <
+      HASH_FORMAT); it is the identical payload with the span-strip pass
+      disabled and every other format rule (link halves, `against:`,
+      calc refs, source/image inputs) untouched, so it cannot smuggle in
+      another format's definitions.
+
+    A body with no composite span target hashes the same under both
+    readings, so the set has one element there: this is invisible to every
+    migration that predates inline spans.
+    """
+    spec = project.types[item.type]
+    if hash_format == HASH_FORMAT:
+        return {item.content_hash}
+    if not 1 <= hash_format < HASH_FORMAT:
+        return None
+    stripped = _hash_blob(hash_payload_builder(project, hash_format)(item, spec))
+    live = _hash_blob(
+        hash_payload_builder(project, hash_format, strip_inline_composite=False)(item, spec)
+    )
+    return {stripped, live}
 
 
 def legacy_hash_for(item: Item, project: Project) -> str:

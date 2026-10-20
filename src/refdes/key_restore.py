@@ -117,7 +117,8 @@ def _baseline_content_conflict(project: Project, item: Item, key: str) -> str | 
         except (TypeError, ValueError):
             recorded_format = -1
         current_hash = keys.hash_in_format(item, project, recorded_format)
-        if current_hash and current_hash != recorded_hash:
+        accepted = keys.hashes_in_format(item, project, recorded_format)
+        if accepted and recorded_hash not in accepted:
             differences.append(
                 f"content hash: baseline {recorded_hash!r}, now {current_hash!r}"
             )

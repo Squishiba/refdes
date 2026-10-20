@@ -58,92 +58,44 @@ interleave with the bump's, and the full suite ran green at each step)
   occurrence. Docs: `build.py` format-history comment, `docs/lifecycle.md`,
   `docs/change-tracking.md`, `changelog.d/inline-calc-spans-hash.changed.md`.
 
-## Review round 1 (at the first review head of PR #347)
+## Review rounds 1-5 (PR #347, three cross-model chunks each round)
 
-Three cross-model reviewers (chunks: docs+build / inline_calc / links+serve);
-chunks 2 and 3 CHANGES REQUESTED, chunk 1 none. Fixes, each with a
-red-on-this-head test first:
+Across five review rounds the findings clustered into: scan-grammar parity
+(RHS comments and a comment containing `|` hid span references from the
+scheduler and `fetch` -- scan helpers now reproduce the evaluator's own
+strip/pipe order), span-scan geometry (bounds anchored on `item.body_line`,
+front-matter fences, fence/span same-line edits), list-file items (span-only
+targets excluded from expansion; the plan's crossed-reference refusal runs
+*before* the skip so the warning survives), and historical-record safety
+(format-5 seals of span items: `_hash_payload` strips expanded span targets
+back to the display half for formats <= 5, so the bump never makes an
+unchanged item look edited). Round-5 work was mostly rebase fallout after
+#345 (gate-rule `skipif`, exemption-oracle adaptation) plus doc/test nits.
+Every fix was red-green verified; red checks swap HEAD module copies in
+place (conftest hard-prepends `src`, so a PYTHONPATH overlay is inert under
+pytest). Rebases: onto #351's comment-aware scanner (merged into one
+`_scan_body`), then onto #345 (`c3073c6`). Suite grew 4207 -> 4310 passed
+(2 skipped) with the golden byte-identity checks green at every head.
 
-- RHS-comment parity (chunk 2): `span_cross_ref`/`span_source_call` strip a
-  trailing `#` comment with the evaluator's quote-aware `split_comment`
-  before matching -- raw-text matching hid commented references from the
-  scheduler (F12-5 leak) and from `fetch` (F12-6 dead end).
-- Span-scan geometry (chunk 3): `links._calc_ref_rewrites` takes
-  `inline_start`; the plan bounds the span scan to `item.body_line` (was
-  `source_line`-1, the front-matter fence). An unclosed fence marker at
-  front-matter end hid every body span; a front-matter span was rewritten
-  on disk while the in-memory pass rewrote only `item.body`.
-- Direct coverage (chunk 3): `body_source_pairs` span branch tested in
-  `tests/test_serve_sources_accept.py`. Stale comments/labels fixed.
+## Round 6 (at the round-5 head; chunks 2/3 APPROVE, chunk 1 CHANGES REQUESTED)
 
-Verified: the 4 new tests fail on the round-1 head, pass after; full suite
-4207 passed, 2 skipped; ruff clean on touched files; golden byte-identical.
-
-## Round 2 + rebase onto main (#351) + AgentCoder pilot triage
-
-Round-2 review fixes (HIGH: format-5 seal of a span item broke --
-`_hash_payload` strips `@key` from expanded span targets for formats <=5;
-links `_replace_ref_target` splices at the match range instead of
-`content.replace`; span-only targets of YAML-list-file items are excluded
-from expansion, `body_line is None`). Red-green verified; full suite 4269
-passed, 4 skipped; golden (a) rebuilt, (b) old format-5 seal clean.
-Rebase onto 1d6d325 kept #351's comment-aware scanner: merged scan into
-one `_scan_body` returning positioned spans, with
-`triggered_spans`/`triggered_span_events`/`unclosed_comment_offset` as
-thin views.
-
-AgentCoder pilot (suite installed as
-tests/test_inline_calc_agentcoder_trial.py): its 3 span failures all put
-a cross-item ref *inside* arithmetic (`Vb := LOG-A.V_in * 2`), which the
-evaluator only resolves for a whole-RHS ref (calc.py
-`CROSS_REF_RE.match(expression.strip())`) -- a fence control fails
-identically. Verdict: test assumptions, not slice-2 defects; adapted to
-whole-RHS form, gate tests deferred to #345. Strengthened the review's
-weak assertions. F1 (reproduced in `.scratch/f1verify/`): a pre-slice-2
-fetch rewrites the lockfile whole, dropping a span's `values:` pins --
-changelog rollout caveat.
-
-## Round 3 (at the round-2 head; chunks 1-2 APPROVE at the next head)
-
-- Chunk 2 MEDIUM: a comment containing `|` hid the ref/`source()` from
-  the scans (parse_span splits the pipe before the comment is stripped,
-  the evaluator's reverse), reviving the F12-5 leak; `_evaluator_rhs`
-  rebuilds the evaluator's order for the scan helpers. Red needs
-  span-before-target in FILE order (probe project pinned it).
-- Chunk 3 MEDIUM: the in-memory pass of `expand_missing_calc_refs`
-  expanded list-file spans the file path excludes -- first-run probe
-  not reproducible from the same bytes; gated on `body_line`. LOW: the
-  fence pass clobbered span edits on a line that is both shapes;
-  re-anchor on the span-edited line.
-- LOW/nits: gate skips `skipif` rule presence (see round 5); agentcoder
-  docstring dropped its gitignored `.scratch` pointer;
-  `iter_triggered_spans` -> `triggered_span_events`; front-matter
-  line-number comment.
-
-## Round 4 (at the round-3 head; chunk 3 CHANGES REQUESTED)
-
-The round-2 list-file span skip ran BEFORE `_planned_target` in
-`plan_calc_ref_expansion`, and that call is where the crossed-reference
-refusal-and-warn (keys.md §3 case 2) is emitted -- a stale composite span
-target in a YAML-list-file item lost the warning its fence-line twin
-keeps (build resolves by key: page shows the key's item, source says
-another; only the warning flags the bad merge). Call now runs first, skip
-only suppresses the WRITE. Red on the round-3 head, green after. Red-green
-method all rounds: swap HEAD module copies in place (conftest hard-prepends
-`src`, so a PYTHONPATH overlay is inert under pytest).
-
-## Round 5 (round-4-head findings; #345 merged, rebased)
-
-#345 merged to main (c3073c6); rebased, resolving the design-doc status
-block. The round-3 `find_spec` gate skip keyed on a module #345 never
-adds -- it skipped forever; now `skipif` on
-`"inline_calc_results" in RELEASE_GATE_DEFAULTS`, and the pair RUNS
-green against the merged rule (18 passed). Blind exemption oracle
-adapted to #345's implemented narrow exemption (capture taken IN the
-stale state, no edit after). Control fence made valid calc so exit 1 can
-only be the citation rule, which the test now names. Ordering test
-observes the resolved value via the stale-result warning.
-`named-calc-blocks.md` node-id/HASH_FORMAT citations re-pinned at 6;
-`body_source_pairs` docstring covers the span walk;
-`_replace_ref_target` span arg typed; long docstring line rewrapped;
-branch-self SHAs stripped from this log (AGENTS policy).
+Chunk 1 MEDIUM: a span target *authored* as a composite (`DEC-001@key.V_in`)
+was hashed as-written by format-5 code, but my reconstruction strips every
+composite target unconditionally -- so an unchanged authored-composite item
+looked edited. Reproduced against real old code (`.scratch/r7composite.py`
+drives a fixture built by archived `origin/main`): migration reported
+`uncomparable` and `check` falsely reported "modified since it was sealed".
+Fix is comparison-side only: `build.hash_for_format_variants` adds the
+as-written reading to the legacy-format comparison (exposed as
+`keys.hashes_in_format`), consumed by `migrate_hash_format`,
+`seal._matches_sealed_hash`, `plan_surrogate_storage` and `key_restore`;
+nothing records a variant hash, and an edited body still fails both
+readings (safety test). Three of the four new tests in
+`tests/test_inline_calc_hash.py` section 7 are red at the round-5 head.
+Also landed: `docs/design/inline-calc.md` section 3 restated as landed facts
+at `HASH_FORMAT` 6; the format-6 history in `build.py`, `docs/lifecycle.md`
+and `docs/change-tracking.md` corrected (a resolvable span's `source()` fed
+the source-inputs hash since format 4 -- format 6 adds span cross-item
+hash inputs and `fetch` pinning, not a new source hash input);
+`SourceUse` docstring widened. Targeted suites: 550 passed; full suite 4314
+passed, 2 skipped. Task finished.

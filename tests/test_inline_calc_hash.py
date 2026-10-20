@@ -817,3 +817,181 @@ def test_crossed_composite_span_target_in_a_list_file_still_warns(tmp_path):
     assert f"'DEC-001@{key2}'" in warns[0]
     after_text = (tmp_path / "items" / "c.yaml").read_text(encoding="utf-8")
     assert f"`v := DEC-001@{key2}.V_in = 12 V`" in after_text
+
+
+# ------------------------- 7. an author-written composite span target under
+# format 5 (round-6 review): format-5 code accepted and hashed
+# `DISPLAY@key.V_in` in a span verbatim, so the reconstruction that strips
+# every composite target must not be the ONLY legacy reading a comparison
+# accepts -- an item nobody edited would look edited. The fixture's key
+# front matter makes the recorded hashes below stable.
+
+AUTHORED_FIXTURE = {
+    "a.md": (
+        "---\nkey: w4fq61wx8v7\nid: DEC-001\ntype: decision\n---\n\n"
+        "```calc\nV_in = 12 V\n```\n"
+    ),
+    "e.md": (
+        "---\nkey: rff8vmeh0av\nid: DEC-005\ntype: decision\n---\n\n"
+        "The divider tracks DEC-001: `Vout := DEC-001@w4fq61wx8v7.V_in = 12 V`.\n"
+    ),
+}
+# Recorded by running main (c3073c6, HASH_FORMAT 5) over these exact bytes
+# (revision + release, 2026-10-20). The test cannot regenerate them, and
+# the stripped format-5 reconstruction does not reproduce DEC-005's --
+# carrying this item forward means honoring the hash the code of the day
+# recorded for text it accepted.
+AUTHORED_SEALED_UNDER_FORMAT5 = {
+    "DEC-001": "e44d58abd0c521ca",
+    "DEC-005": "a4cfb87eab2994b6",
+}
+# The stripped reading of the same body: the format-5 hash the span target
+# would have if it had been authored bare (pinned against the bare twin in
+# test_composite_span_variants_are_narrow).
+STRIPPED_UNDER_FORMAT5 = "833d7cb975540ba9"
+
+
+def _write_baseline(tmp_path, entries: dict):
+    import yaml
+
+    baselines = tmp_path / ".refdes" / "baselines"
+    baselines.mkdir(parents=True, exist_ok=True)
+    data = {
+        "kind": "revision",
+        "name": "rev-a",
+        "stamped_at": "2026-10-20T10:36:20Z",
+        "stamped_by": "test",
+        "refdes_version": "0.5.0",
+        "items": entries,
+    }
+    (baselines / "rev-a.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def test_authored_composite_span_target_keeps_verifying_an_old_format5_seal(tmp_path):
+    """MEDIUM (round-6 review, reproduced against archived main): an item
+    with an author-written composite span target, sealed by main's own
+    code at format 5, is UNCHANGED -- but head reconstructed its format-5
+    body with the composite stripped and reported the first build after
+    the seal as `DEC-005 is append-only and has been modified since it
+    was sealed`. The comparison side now accepts both legitimate format-5
+    readings; the seal file below is byte-for-byte what main wrote."""
+    _setup(tmp_path, AUTHORED_FIXTURE, APPEND_CONFIG)
+    (tmp_path / ".refdes").mkdir(exist_ok=True)
+    (tmp_path / ".refdes" / "log-seal.yaml").write_text(
+        "sealed:\n"
+        f"  DEC-001: {AUTHORED_SEALED_UNDER_FORMAT5['DEC-001']}\n"
+        f"  DEC-005: {AUTHORED_SEALED_UNDER_FORMAT5['DEC-005']}\n",
+        encoding="utf-8",
+    )
+    project = _rebuild(tmp_path)
+    assert not project.errors, _errors(project)
+    assert project.seal_violations == []
+    spanned = project.item_by_id("DEC-005")
+    # the recorded hash is the as-written reading, not the stripped one:
+    assert build_mod.hash_for_format(spanned, project, 5) == STRIPPED_UNDER_FORMAT5
+    assert AUTHORED_SEALED_UNDER_FORMAT5["DEC-005"] in build_mod.hash_for_format_variants(
+        spanned, project, 5
+    )
+
+
+def test_authored_composite_span_baseline_entry_carries_forward(tmp_path):
+    """The same item under the baseline migration: a format-5 entry holding
+    main's recorded hash must be `carried`, not `uncomparable` -- the
+    keys.md §5(c) promise for an item whose content never moved."""
+    _setup(tmp_path, AUTHORED_FIXTURE, APPEND_CONFIG)
+    _write_baseline(
+        tmp_path,
+        {
+            "DEC-001": {
+                "hash": AUTHORED_SEALED_UNDER_FORMAT5["DEC-001"],
+                "type": "decision",
+                "title": "upstream",
+                "hash_format": 5,
+                "key": "w4fq61wx8v7",
+            },
+            "DEC-005": {
+                "hash": AUTHORED_SEALED_UNDER_FORMAT5["DEC-005"],
+                "type": "decision",
+                "title": "span",
+                "hash_format": 5,
+                "key": "rff8vmeh0av",
+            },
+        },
+    )
+    project = _rebuild(tmp_path)
+    baseline = lifecycle.load_baseline(project, "rev-a")
+    report = lifecycle.migrate_hash_format(project, baseline, write=False)
+    assert report.uncomparable == []
+    assert sorted(report.carried) == ["DEC-001", "DEC-005"]
+
+
+def test_edited_authored_composite_span_is_still_detected(tmp_path):
+    """The safety property of the widened comparison: a real edit to the
+    span moves BOTH format-5 readings, so a pre-edit seal still fails and
+    a pre-edit baseline entry is still `uncomparable`. The fix accepts two
+    readings of one text, not two texts."""
+    from refdes import seal
+
+    _setup(tmp_path, AUTHORED_FIXTURE, APPEND_CONFIG)
+    _write_baseline(
+        tmp_path,
+        {
+            "DEC-005": {
+                "hash": AUTHORED_SEALED_UNDER_FORMAT5["DEC-005"],
+                "type": "decision",
+                "title": "span",
+                "hash_format": 5,
+                "key": "rff8vmeh0av",
+            },
+        },
+    )
+    (tmp_path / ".refdes" / "log-seal.yaml").write_text(
+        f"sealed:\n  DEC-005: {AUTHORED_SEALED_UNDER_FORMAT5['DEC-005']}\n",
+        encoding="utf-8",
+    )
+    _edit(tmp_path, "e.md", "= 12 V`", "= 13 V`")
+    project = _rebuild(tmp_path)
+    assert "DEC-005" in project.seal_violations
+    assert any("modified since it was sealed" in m for m in _errors(project))
+    baseline = lifecycle.load_baseline(project, "rev-a")
+    report = lifecycle.migrate_hash_format(project, baseline, write=False)
+    assert report.carried == []
+    assert report.uncomparable == ["DEC-005"]
+    assert seal.load_seals(project)["DEC-005"] == AUTHORED_SEALED_UNDER_FORMAT5["DEC-005"]
+
+
+def test_composite_span_variants_are_narrow(tmp_path):
+    """The variant set is exactly the two format-5 readings for a composite
+    span target (as-written + stripped), a single hash for a bare one, the
+    single current hash at the current format, and None outside the
+    formats this build understands. Nothing else moves."""
+    project = _build(tmp_path, AUTHORED_FIXTURE, APPEND_CONFIG)
+    spanned = project.item_by_id("DEC-005")
+    assert build_mod.hash_for_format_variants(spanned, project, 5) == {
+        STRIPPED_UNDER_FORMAT5,
+        AUTHORED_SEALED_UNDER_FORMAT5["DEC-005"],
+    }
+    assert build_mod.hash_for_format_variants(
+        spanned, project, build_mod.HASH_FORMAT
+    ) == {spanned.content_hash}
+    assert build_mod.hash_for_format_variants(spanned, project, 0) is None
+    assert build_mod.hash_for_format_variants(spanned, project, 99) is None
+    bare_files = dict(AUTHORED_FIXTURE)
+    bare_files["e.md"] = AUTHORED_FIXTURE["e.md"].replace("@w4fq61wx8v7", "")
+    bare = _build(tmp_path, bare_files, APPEND_CONFIG)
+    bare_spanned = bare.item_by_id("DEC-005")
+    # a bare-authored item lands on the same two readings once the plan
+    # expands it in memory -- its stripped reconstruction is the control
+    # the seal/migration tests above pin against.
+    assert build_mod.hash_for_format(bare_spanned, bare, 5) == STRIPPED_UNDER_FORMAT5
+    assert build_mod.hash_for_format_variants(bare_spanned, bare, 5) == {
+        STRIPPED_UNDER_FORMAT5,
+        AUTHORED_SEALED_UNDER_FORMAT5["DEC-005"],
+    }
+    # a span with no cross-item target: stripping is a no-op, one reading.
+    plain = _build(
+        tmp_path, {"a.md": AUTHORED_FIXTURE["a.md"]}, APPEND_CONFIG
+    )
+    assert build_mod.hash_for_format_variants(
+        plain.item_by_id("DEC-001"), plain, 5
+    ) == {AUTHORED_SEALED_UNDER_FORMAT5["DEC-001"]}

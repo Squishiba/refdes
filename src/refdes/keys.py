@@ -304,12 +304,15 @@ def hash_in_format(item: Item, project: Project, hash_format: int) -> str | None
     compute it right now, or ``None`` if ``hash_format`` isn't one this
     build understands.
 
-    The one shared reconstruction every hash-format migration site uses --
+    The canonical reconstruction every hash-format migration site uses --
     lifecycle.migrate_hash_format, seal._matches_sealed_hash, and
     plan_surrogate_storage below (which `refdes keys adopt` calls through)
     -- so "does this stored hash still describe this item's current
     content" is answered identically everywhere (docs/design/keys.md §5(c)).
-    A single shared helper, not four copies that could drift.
+    A single shared helper, not four copies that could drift. Comparison
+    sites test membership in hashes_in_format(), which is this hash plus
+    the as-written-span reading legacy formats also assigned to an
+    author-written composite span target.
     """
     from . import build as build_mod
 
@@ -318,6 +321,28 @@ def hash_in_format(item: Item, project: Project, hash_format: int) -> str | None
     if 1 <= hash_format < build_mod.HASH_FORMAT:
         return build_mod.hash_for_format(item, project, hash_format)
     return None
+
+
+def hashes_in_format(item: Item, project: Project, hash_format: int) -> set[str] | None:
+    """Every content hash ``hash_format`` legitimately assigns to this item
+    right now -- the set every "does this stored hash still describe this
+    item's current content" comparison tests membership in, and ``None``
+    for a format this build cannot reconstruct.
+
+    One shared set, for the same reason hash_in_format is one shared
+    function: the four migration sites must not drift. The set is a single
+    hash except for an inline calc span whose cross-item target is an
+    author-written composite: formats <= 5 hashed that text verbatim,
+    slice-2 expansion writes composites into span targets that were
+    authored bare, and only the comparison side can tell "not edited" from
+    "expanded" by accepting both readings (the full safety analysis lives
+    on build.hash_for_format_variants, which computes them). A genuine
+    edit moves both readings, so an edited entry is still reported as
+    edited.
+    """
+    from . import build as build_mod
+
+    return build_mod.hash_for_format_variants(item, project, hash_format)
 
 
 def plan_surrogate_storage(
@@ -349,8 +374,8 @@ def plan_surrogate_storage(
             hash_format = int(entry.get("hash_format", 1))
         except (TypeError, ValueError):
             hash_format = -1
-        expected = hash_in_format(item, project, hash_format) if item is not None else None
-        if item is not None and item.key and expected == entry.get("hash"):
+        expected = hashes_in_format(item, project, hash_format) if item is not None else None
+        if item is not None and item.key and entry.get("hash") in (expected or set()):
             converted = dict(entry)
             converted.pop("key", None)
             converted["id"] = display_id
@@ -388,15 +413,16 @@ def plan_surrogate_storage(
             # keys.md §5(c)), same "newest wins" posture as everywhere else
             # a format has to be inferred rather than read off the entry.
             for candidate in (build_mod.HASH_FORMAT, 2, 1):
-                if recorded_hash == hash_in_format(item, project, candidate):
+                accepted = hashes_in_format(item, project, candidate)
+                if accepted is not None and recorded_hash in accepted:
                     matched_format = candidate
                     break
         expected = (
-            hash_in_format(item, project, matched_format)
+            hashes_in_format(item, project, matched_format)
             if item is not None and matched_format in (1, 2, build_mod.HASH_FORMAT)
             else None
         )
-        if item is not None and item.key and expected == recorded_hash:
+        if item is not None and item.key and recorded_hash in (expected or set()):
             converted = dict(entry)
             converted["id"] = record_id
             converted["hash"] = item.content_hash

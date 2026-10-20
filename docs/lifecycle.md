@@ -293,9 +293,10 @@ locked text) it resolved. Format 5 added images: every local image an item's
 body references hashes its resolved project-relative path and content digest.
 Format 6 added inline calc spans: a span whose whole right-hand side is a
 cross-item reference (`v := DEC-001.V_in`) is hashed like a fence line's
-reference, and a span's `source()` call hashes like a fence's, so the item's
-dependencies and its arithmetic probe cover inline spans, not just fenced
-ones.
+reference, so the item's dependencies and its arithmetic probe cover inline
+spans, not just fenced ones. A span's `source()` call is not a new hash input
+at this format -- a resolvable one has joined the `source()` values since
+format 4 -- but `refdes fetch` now discovers and pins it like a fence's.
 
 An item with no cross-item calc reference and no `source()` line hashes
 exactly as it did under format 3, an item with no image hashes exactly as
