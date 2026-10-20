@@ -1,0 +1,59 @@
+Task: Qwen manager trial plan (Claude-lane planning deliverable), 2026-10-20
+Worker: Qwen e9643b77, worktree claude-lane-qwen-manager-trial-plan-20261020,
+branch docs/qwen-manager-trial-plan-20261020. Sol covering Claude lane.
+
+Deliverable: in-prog-logs/qwen-manager-trial-plan-20261020.md (report, no
+length cap per AGENTS.md). This file is the progress log.
+
+What was done
+- Checked git status at start: clean, branched at d620ab5 (main). No stash
+  used, none needed.
+- The referenced inputs live in the MAIN checkout (gitignored), not in this
+  worktree: in-prog-logs/orchestrator-todo-2026-10-18.md, .scratch/
+  PROGRESS.md, .scratch/gate-merge.sh, .scratch/merge-holds.txt, watcher
+  scripts. Read them read-only from /home/jorb/work/refdes; per instruction,
+  kept external-directory reads to the named files and did not read every
+  script in main .scratch. Ran none of them, changed none of them.
+- Verified gate-merge.sh line by line (24 lines): holds grep, Sol-lane file
+  check via lane-files.txt, reviewer idle + 7-char head-sha mention +
+  APPROVE in logs tail, gh pr checks exit 0, mergeable==MERGEABLE with
+  6x10s UNKNOWN retries, squash merge with --match-head-commit, ff-main
+  tail. That became the §7 three-tier gate contract; the manager runs the
+  script unchanged.
+- Verified merge-holds.txt: holds on #344 (Sol) and #269 (security). Kept
+  #269 fully out of trial scope: manager never touches the hook, never
+  approves permissions, install stays Jared's; qwen-approver.sh read only
+  to document that a scope-whitelisted auto-approver exists and is NOT part
+  of the plan.
+- Verified PROGRESS.md rules used: baton/notify.json +
+  msg-to-sol-baton.txt protocol, merge-holds edit rule (own lane only),
+  slot split (workers <=6, reviews >=2 of 8 Qwen slots), lane
+  authorization for Claude-lane rows, this task's row 144. Noted the l.8
+  vs l.13 slot-rule conflict as an owner decision instead of picking
+  silently.
+- Verified provenance of the whole idea in orchestrator-todo l.91-93
+  (Jared 2026-10-19 idea; Claude's reply = rule-based classifier #269 +
+  cheap Qwen manager from runbook + queue, escalating; "Waiting for his
+  go") and the #269 merge-vs-install distinction l.19-20.
+
+Difficulties
+- First read of orchestrator-todo from the worktree failed (file is
+  untracked in main only) -- resolved by reading from /home/jorb/work/refdes.
+- An early batched cat of ~16 scripts truncated output; narrowed to the
+  named watchers. Mid-task, access was narrowed to read-only for the named
+  files, which is compatible with everything already read; no claim in the
+  plan cites a file not actually read.
+- No gh/pr pre-existing for this branch; verified remote
+  (Squishiba/refdes) and gh auth before planning the push.
+
+Scope discipline
+- Planning only: no manager activation, no script run/edited, no parents.json,
+  no plugin reload, no merge, no PROGRESS.md edit (shared main file left
+  untouched; the row-144 claim row stays Sol's to update).
+- Plan marks every section verified vs proposed; §13 lists the open owner
+  decisions (go timing vs release week, heartbeat carrier/model, slot-rule
+  conflict, dry-gate script authorship, PROGRESS.md edit rule; #269
+  explicitly out of scope).
+
+Status: finished. Plan written, committed on the branch, pushed, PR opened
+for human review. Not merged, not self-reviewed, per task rules.
