@@ -1325,7 +1325,12 @@ way to find out:
 
 - **Re-measure the rebuild.** The 1.06-second figure predates this revision and
   describes a project of two dozen items. Re-measure on the largest real project
-  before assuming a full rebuild stays acceptable.
+  before assuming a full rebuild stays acceptable. **Measured 2026-10-19** —
+  see [docs/performance.md](../performance.md): this repository's own project
+  (20 items) rebuilds on save in 0.23 s, a synthetic 100-item project in
+  0.42 s, 400 items in 2.0 s, 1500 items in 19.1 s. The policy holds at these
+  sizes and breaks at ~1500, where the cost is the whole-project preview
+  payload re-rendered into every page.
 - **Do diagnostics carry enough attribution?** The delta gate needs a diagnostic
   to name the field, body, or link it is about. If today's diagnostics cannot,
   enriching them is a prerequisite for the gate, not part of it.
