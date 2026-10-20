@@ -4,7 +4,7 @@ Branch `feat-inline-calc-slice2-hash`, base `main` @ `c9ecc30`, rebased onto
 `1d6d325`. Owner decision 2026-10-19: change the hash format despite
 baseline/seal risk. Plan: `docs/design/inline-calc.md` §3, four green steps.
 
-## Step 1 (done, this commit)
+## Step 1 (done)
 
 `calc_hash_for` (`src/refdes/build.py`) now hashes inline calc spans
 alongside fence blocks: events at source offsets, spans rendered
@@ -34,7 +34,7 @@ rewrites span target halves so expansion covers spans. Full suite: 4196.
 shows them; the "move to the fence form" advice is retired (F12-6
 rewritten). Docs updated.
 
-## Step 4 (this commit; steps 2-3 ride in it — their build.py hunks
+## Step 4 (steps 2-3 ride in it — their build.py hunks
 interleave with the bump's, and the full suite ran green at each step)
 
 `HASH_FORMAT` 5 -> 6. Evidence, all green:
@@ -109,8 +109,8 @@ text a pre-expansion baseline/seal recorded -- the edit was silently
 carried as "content demonstrably unchanged", and my "genuine edit moves
 both readings" comment was false. Fix: the stripped reading is offered only
 for composites *faithful* to what the expansion writes -- key half == the
-key of the item the display half names (`build._span_composites_are_-
-faithful`, gating `hash_for_format_variants`); a composite failing it keeps
+key of the item the display half names (`build._span_composites_are_faithful`,
+gating `hash_for_format_variants`); a composite failing it keeps
 only the as-written reading (what the format's own code hashed), so the
 edit reports as changed/uncomparable -- fail-closed, no safety overclaim.
 Red-on-head test drives: bare fmt5 baseline/seal -> legitimate expansion

@@ -923,9 +923,16 @@ canonical value) -- answers "what would this item's hash be under
 format N" for every caller that needs it (`lifecycle.migrate_hash_format`,
 `seal._matches_sealed_hash`, `keys.plan_surrogate_storage`, and `refdes
 keys adopt` through it), so the comparison can't drift between them. A
-legacy scalar seal with no format marker of its own still tries the newest
-definition first, then each older one in turn (3, then 2, then 1) — same
-posture as before, just one format longer.
+legacy scalar seal with no format marker of its own tries the complete
+range — `HASH_FORMAT` down to 1, newest first, the same range
+`seal._matches_sealed_hash` tries — and a format it matches in migrates
+with the entry. That widening is a behavior change, not a lengthening:
+the pre-adoption inference tried only `(HASH_FORMAT, 2, 1)`, so once the
+format bumped past 5 a format-5 scalar seal of an item whose format-4/5
+payload (fence cross-item references, image bytes) differs from its
+format-2/1 one matched nothing and adoption pinned the record to format 1
+— a record the seal check itself still read clean. The inference may not
+be narrower than the check.
 
 ## 6. Corruption and detection
 

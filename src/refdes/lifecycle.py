@@ -1158,10 +1158,11 @@ def _stale_arithmetic(
     or both fields at stamp time); the live item is gone, or its type no
     longer declares a verdict-bearing `status` field; the verdict itself
     didn't move (the hash changed for some other reason); or the item has no
-    calc block *now* (its calc block was removed, which is itself a change,
-    not staleness -- calc_hash_for returning None is a real "no" here, not
-    a missing-data case, since a present `old["calc_hash"]` already proved
-    the item had a block at baseline time).
+    calc block and no inline span *now* (its arithmetic was removed, which
+    is itself a change, not staleness -- calc_hash_for returning None is a
+    real "no" here, not a missing-data case, since a present
+    ``old["calc_hash"]`` already proved the item had a probe -- fence block
+    and/or inline span -- at baseline time).
     """
     out = []
     for item_id in changed:

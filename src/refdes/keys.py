@@ -324,9 +324,12 @@ def hash_in_format(item: Item, project: Project, hash_format: int) -> str | None
 
 
 def stored_hash_matches(stored: object, accepted: set[str] | None) -> bool:
-    """The membership test every hash-format comparison site uses: does
-    the *stored* (record-file, corruption-prone) hash equal one of the
-    hashes ``hashes_in_format`` accepts for this item right now?
+    """The membership test the hash-format migration sites use: does the
+    *stored* (record-file, corruption-prone) hash equal one of the hashes
+    ``hashes_in_format`` accepts for this item right now? Every site the
+    migration sweep touches calls this -- key_restore's restore check is
+    the one inline equivalent (same string guard + membership), kept
+    inline beside its own recorded-format parsing.
 
     The string guard is not decoration. Records come from YAML, and a
     malformed entry can carry a list where the hash belongs; the
@@ -372,9 +375,12 @@ def plan_surrogate_storage(
     Already key-keyed entries are copied through, making the operation
     idempotent. A display-id-keyed entry moves only when its live item is
     identified and its stored hash still describes that item's current
-    content under the entry's recorded format. Format-1 hashes are then
-    carried to the current format. Anything else remains display-id keyed,
-    is explicitly marked format 1, and is reported as uncomparable.
+    content under the entry's recorded format -- for a legacy scalar seal
+    (no format marker) under any format the item can currently
+    reconstruct, newest first, the range matching seal verification. A
+    matching entry's hash is then carried forward to the current format.
+    Anything else remains display-id keyed, is explicitly marked format 1,
+    and is reported as uncomparable.
     """
     from . import build as build_mod
 
