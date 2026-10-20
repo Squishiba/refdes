@@ -1098,3 +1098,108 @@ def test_malformed_stored_hashes_never_raise(tmp_path):
     assert seal.load_seals(project)["DEC-005"] == "['not', 'a', 'string']"
     plan = keys.plan_surrogate_storage(project, baseline.items, {})
     assert plan.baseline_uncomparable == ["DEC-005"]
+
+
+SPAN_AND_FENCE_FIXTURE = {
+    "a.md": (
+        "---\nkey: w4fq61wx8v7\nid: DEC-001\ntype: decision\n---\n\n"
+        "```calc\nV_in = 12 V\n```\n"
+    ),
+    "e.md": (
+        "---\nkey: rff8vmeh0av\nid: DEC-005\ntype: decision\n---\n\n"
+        "```calc\nVfb = DEC-001.V_in\n```\n\n"
+        "Tracks it: `Vout := DEC-001@w4fq61wx8v7.V_in = 12 V`.\n"
+    ),
+}
+# The seal main's own code (c3073c6, HASH_FORMAT 5) stamped over SPAN_AND_
+# FENCE_FIXTURE (build + revision + release, 2026-10-20). The fence line was
+# expanded to composite form by that same build before hashing -- the seal
+# covers these bytes as they sit on disk.
+SPAN_AND_FENCE_SEALED_UNDER_FORMAT5 = {
+    "DEC-001": "e44d58abd0c521ca",
+    "DEC-005": "e0aeecf16f5dbbcf",
+}
+
+
+def test_keys_adopt_migrates_real_format5_scalar_seals(tmp_path, capsys):
+    """MEDIUM (round-8 review): `refdes keys adopt` inferred a legacy
+    scalar seal's format from only (HASH_FORMAT, 2, 1), so after the bump
+    to 6 a genuine format-5 seal of an item whose format-4/5 payload (a
+    fence cross-item reference) differs from its format-2/1 one is
+    matched by nothing: adopt reports it uncomparable, REWITES the entry
+    to format 1, and the adopted project's own build then fails with
+    "modified since it was sealed" -- adoption rolls back, and a run that
+    skips the post-check leaves a record pinned to format 1. Seal
+    verification itself (which tries every format, newest first) reads
+    the same seal clean, proving the record is intact. The scalar
+    inference now tries the complete range, matching seal.py, and a
+    matched format migrates."""
+    from refdes import cli as cli_mod
+    from refdes import seal
+
+    _setup(tmp_path, SPAN_AND_FENCE_FIXTURE, APPEND_CONFIG)
+    (tmp_path / ".refdes").mkdir(exist_ok=True)
+    (tmp_path / ".refdes" / "log-seal.yaml").write_text(
+        "sealed:\n"
+        f"  DEC-001: {SPAN_AND_FENCE_SEALED_UNDER_FORMAT5['DEC-001']}\n"
+        f"  DEC-005: {SPAN_AND_FENCE_SEALED_UNDER_FORMAT5['DEC-005']}\n",
+        encoding="utf-8",
+    )
+    project = _rebuild(tmp_path)
+    assert not project.errors, _errors(project)
+    assert project.seal_violations == []  # the seal check itself is fine
+    rc = cli_mod.main(
+        ["-c", str(tmp_path / "refdes-project.yaml"), "keys", "adopt"]
+    )
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "uncomparable" not in output
+    assert "log-seal.yaml (2/2 entries carried)" in output
+    project = _rebuild(tmp_path)
+    assert project.seal_violations == []
+    stored = seal.load_seals(project)
+    assert set(stored) == {"w4fq61wx8v7", "rff8vmeh0av"}
+    for item_id, key in (("DEC-001", "w4fq61wx8v7"), ("DEC-005", "rff8vmeh0av")):
+        entry = stored[key]
+        assert entry["id"] == item_id
+        assert entry["hash_format"] == build_mod.HASH_FORMAT
+        assert entry["hash"] == project.item_by_id(item_id).content_hash
+
+
+def test_keys_adopt_control_edited_composite_span_stays_uncomparable(tmp_path):
+    """The control: the widened inference must not certify a real edit. A
+    key-half edit of the composite span target fails the faithfulness gate
+    (round 7), so NO format 1..6 reconstruction reproduces the recorded
+    format-5 seal hash: the plan reports the seal uncomparable and leaves
+    the entry display-id-keyed at format 1."""
+    from refdes import seal
+
+    files = dict(AUTHORED_FIXTURE)
+    files["c.md"] = (
+        "---\nid: DEC-002\ntype: decision\n---\n\n```calc\nV_in = 7 V\n```\n"
+    )
+    project = _build(tmp_path, files, APPEND_CONFIG)
+    other_key = project.item_by_id("DEC-002").key
+    assert other_key and other_key != "w4fq61wx8v7"
+    (tmp_path / ".refdes").mkdir(exist_ok=True)
+    (tmp_path / ".refdes" / "log-seal.yaml").write_text(
+        "sealed:\n"
+        f"  DEC-001: {AUTHORED_SEALED_UNDER_FORMAT5['DEC-001']}\n"
+        f"  DEC-005: {AUTHORED_SEALED_UNDER_FORMAT5['DEC-005']}\n",
+        encoding="utf-8",
+    )
+    _edit(tmp_path, "e.md", "@w4fq61wx8v7.V_in", f"@{other_key}.V_in")
+    project = _rebuild(tmp_path)
+    seals = {
+        "DEC-001": AUTHORED_SEALED_UNDER_FORMAT5["DEC-001"],
+        "DEC-005": AUTHORED_SEALED_UNDER_FORMAT5["DEC-005"],
+    }
+    plan = keys.plan_surrogate_storage(project, {}, seals)
+    assert plan.seal_uncomparable == ["DEC-005"]
+    assert plan.seals["w4fq61wx8v7"]["id"] == "DEC-001"
+    left = plan.seals["DEC-005"]
+    assert left["hash"] == AUTHORED_SEALED_UNDER_FORMAT5["DEC-005"]
+    assert left["hash_format"] == 1
+    assert "id" not in left
+    assert "DEC-005" in project.seal_violations  # build-time audit signal
+    assert seal.load_seals(project)["DEC-005"] == AUTHORED_SEALED_UNDER_FORMAT5["DEC-005"]

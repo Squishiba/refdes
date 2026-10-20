@@ -123,3 +123,33 @@ test pins migration-uncomparable + seal-violation. Also: stale
 `hash_in_format`-as-comparison docstrings corrected (keys.py, build.py,
 key_restore.py, keys.md x2), lifecycle migrate docstring reflowed.
 Targeted suites green. Task finished.
+
+## Round 8 (at the round-7 head; chunks 1-3 APPROVE, chunk 4 CHANGES REQUESTED)
+
+Chunk 4 MEDIUM: `keys.plan_surrogate_storage` inferred a legacy scalar
+seal's format from only (HASH_FORMAT, 2, 1) and gated the migration on a
+(1, 2, HASH_FORMAT) allowlist, so after the bump to 6 a genuine format-5
+seal of an item whose format-4/5 payload (fence cross-item reference,
+image bytes) differs from its format-2/1 one matched nothing: `refdes
+keys adopt` reported it uncomparable, rewrote the entry to format 1, and
+the adopted project's own build then failed "modified since it was
+sealed" -- adoption rolled back (rc 1), and the post-check-free path
+leaves the record pinned to format 1. seal verification itself
+(`seal._matches_sealed_hash`, full range newest-first) reads the same
+seal clean. Fix: the scalar inference now tries the complete range
+1..HASH_FORMAT newest-first -- same range as seal.py, so adoption can
+never rewrite a record the seal check can still read -- and a matched
+format migrates (the allowlist is gone; out-of-range formats reconstruct
+to None, so they stay uncomparable; Mapping entries stamped
+`hash_format: 5` now migrate too). Red repro: main's own code (c3073c6,
+HASH_FORMAT 5) stamped real seal hashes over a span+fence fixture (fence
+expanded to composite by that build); at head CLI `keys adopt` refuses
+with "rolled back: adopted project has build errors"; green: 2/2 carried,
+seals re-keyed at format 6, audit clean. Control: a real fence-value edit
+refuses adoption (build floor), plan reports the seal uncomparable,
+widening certifies nothing. Chunk 4 LOW: lifecycle baseline docstring
+"HASH_FORMAT -- currently 5" -> 6; `keys.hash_in_format` opening claim
+"exactly as hash-format would compute" is false for an author-composite
+span target (the reconstruction strips it) -- rewritten as the canonical
+single reconstruction vs the hashes_in_format comparison set. Full suite
+4318 passed, 2 skipped. Task finished.

@@ -300,17 +300,19 @@ def item_for_baseline_entry(project: Project, record_id: str, entry: dict) -> It
 
 
 def hash_in_format(item: Item, project: Project, hash_format: int) -> str | None:
-    """item's content hash exactly as hash-format ``hash_format`` would
-    compute it right now, or ``None`` if ``hash_format`` isn't one this
-    build understands.
+    """The canonical *single* reconstruction of item's content hash under
+    ``hash_format`` (docs/design/keys.md §5(c)), or ``None`` if
+    ``hash_format`` isn't one this build understands.
 
-    The canonical *single* reconstruction (docs/design/keys.md §5(c)).
-    The "does this stored hash still describe this item's current
-    content" comparisons do NOT use this alone -- they test membership
-    in hashes_in_format() below, which is this hash plus the as-written
-    span reading legacy formats also assigned to an author-written
-    composite span target. This function remains the value side: the
-    message text key_restore shows, and the payload tests pin.
+    Not literally "what hash-format would compute": for an author-written
+    composite inline-calc span target, the reconstruction strips the
+    composite (that reading), while the old code hashed the span text as
+    written too -- which is why the "does this stored hash still describe
+    this item's current content" comparisons do NOT use this alone. They
+    test membership in hashes_in_format() below: this hash plus the
+    as-written span reading legacy formats also assigned. This function
+    remains the value side: the message text key_restore shows, and the
+    payload tests pin.
     """
     from . import build as build_mod
 
@@ -424,17 +426,21 @@ def plan_surrogate_storage(
         matched_format = hash_format
         if item is not None and hash_format == 0:
             # Legacy scalar seal, no format marker of its own -- try the
-            # newest definition first, then each older one (docs/design/
-            # keys.md §5(c)), same "newest wins" posture as everywhere else
-            # a format has to be inferred rather than read off the entry.
-            for candidate in (build_mod.HASH_FORMAT, 2, 1):
+            # newest definition first, then every older one (docs/design/
+            # keys.md §5(c)), the complete range 1..HASH_FORMAT that
+            # seal._matches_sealed_hash tries. The inference must not be
+            # narrower than the check: a format the seal check can read
+            # (e.g. format 5 after the bump to 6) must not be rewritten
+            # to format 1 here, or adoption fails the project it just
+            # adopted. "newest wins" stays newest-first.
+            for candidate in range(build_mod.HASH_FORMAT, 0, -1):
                 accepted = hashes_in_format(item, project, candidate)
                 if stored_hash_matches(recorded_hash, accepted):
                     matched_format = candidate
                     break
         expected = (
             hashes_in_format(item, project, matched_format)
-            if item is not None and matched_format in (1, 2, build_mod.HASH_FORMAT)
+            if item is not None
             else None
         )
         if item is not None and item.key and stored_hash_matches(recorded_hash, expected):
