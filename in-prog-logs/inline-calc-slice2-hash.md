@@ -1,9 +1,8 @@
 # inline-calc slice 2: spans enter calc_hash, dependency scans, content hash
 
-Branch `feat-inline-calc-slice2-hash`, base `main` @ `c9ecc30`. Owner
-decision 2026-10-19: change the hash format despite baseline/seal risk.
-Plan is the design doc's section 3 (`docs/design/inline-calc.md`), executed
-in four steps, each its own commit + green full-suite check.
+Branch `feat-inline-calc-slice2-hash`, base `main` @ `c9ecc30`, rebased onto
+`1d6d325`. Owner decision 2026-10-19: change the hash format despite
+baseline/seal risk. Plan: `docs/design/inline-calc.md` §3, four green steps.
 
 ## Step 1 (done, this commit)
 
@@ -46,7 +45,7 @@ Full suite: 4196 passed, 2 skipped.
 `serve/sources.py:body_source_pairs` shows them; the obsolete
 "move to the fence form" advice in `_make_source_resolver` is retired
 (F12-6 rewritten as a fetch-pins-the-span test); `docs/math.md` and the
-design doc status updated. Full suite: 4196 passed, 2 skipped.
+design doc status updated.
 
 ## Step 4 (this commit; steps 2-3 ride in it — their build.py hunks
 interleave with the bump's, and the full suite ran green at each step)
@@ -80,15 +79,11 @@ Docs: `HASH_FORMAT` history comment in `build.py`, `docs/lifecycle.md`
 
 ## Notes
 
-- `ruff check .` has ~99 pre-existing findings; only check touched files
-  with `--select E9,F` (AGENTS.md). Tree shared with concurrent sessions:
-  staged by explicit paths, no stash.
-
 ## Review round (PR #347 head c5c3b8d)
 
-Three cross-model reviewers (chunks: docs+build / inline_calc / links+serve).
-Chunk 2 and chunk 3 returned CHANGES REQUESTED; chunk 1 ended without a
-verdict (no findings). Fixes, each with a red-on-this-head test first:
+Three cross-model reviewers (chunks: docs+build / inline_calc / links+serve);
+chunks 2 and 3 returned CHANGES REQUESTED, chunk 1 no findings. Fixes, each
+with a red-on-this-head test first:
 
 - RHS-comment parity (chunk 2): `span_cross_ref`/`span_source_call` now
   strip a trailing `#` comment with the evaluator's own quote-aware
@@ -125,30 +120,28 @@ Round-2 review fixes (HIGH: format-5 seal of a span item broke --
 <=5; links `_replace_ref_target` splices at the match range instead of
 `content.replace` (name/target collisions); span-only targets of items
 loaded from YAML list files are excluded from expansion (markdown
-geometry, `body_line is None`). Red-green: seal pair + collision + YAML
+geometry, `body_line is None`). Red-green: the new seal/collision/YAML
 tests fail on the unfixed head, pass after; full suite 4269 passed,
-4 skipped on the rebased head; golden (a) rebuilt (hash_format 5->6, only
-the span item's hash moves), (b) evidence: old format-5 seal verifies
-clean after expansion.
+4 skipped; golden (a) rebuilt (only the span item's hash moves), (b) old
+format-5 seal verifies clean after expansion.
 
 Rebase onto 1d6d325 kept #351's comment-aware scanner: merged scan into
 one `_scan_body` returning positioned `(offset, start, end, content)`
-spans; `triggered_spans`/`iter_triggered_spans`/`unclosed_comment_offset`
-are thin views; one test-ordering conflict (span-pin fetch vs #351's
-fence control) resolved in favour of both.
+spans, with `triggered_spans`/`iter_triggered_spans`/
+`unclosed_comment_offset` as thin views; one test-ordering conflict
+(span-pin fetch vs #351's fence control) resolved in favour of both.
 
-AgentCoder pilot (suite in tests/test_inline_calc_agentcoder_trial.py):
-its 3 span failures all put a cross-item ref *inside* arithmetic
-(`Vb := LOG-A.V_in * 2`), which the evaluator only resolves for a
-whole-RHS ref (calc.py `CROSS_REF_RE.match(expression.strip())`) -- a
-fence control with the same expression fails identically. Verdict: test
-assumptions, not slice-2 defects; the suite copy was adapted to
-whole-RHS form, its two `release_gate` tests carry a skip marker (that
-gate is #345, unmerged -- gate code untouched). Strengthened the
-review's weak assertions (span-pin now pins the content-hash move, not
-the literal `5 V` in `body_html`; snapshot dedup vs probe coverage split;
-malformed-span probe mutation). F1 follow-up (post-push, reproduced in
-`.scratch/f1verify/`): a fetch by pre-slice-2 code rewrites the lockfile
-whole and drops a span's `values:` pins -- decided as a rollout caveat in
-the changelog fragment (recoverable by a new-code fetch; a compat fix
-belongs to shipped code and is not ours to make here).
+AgentCoder pilot (suite installed as
+tests/test_inline_calc_agentcoder_trial.py): its 3 span failures all put
+a cross-item ref *inside* arithmetic (`Vb := LOG-A.V_in * 2`), which the
+evaluator only resolves for a whole-RHS ref (calc.py
+`CROSS_REF_RE.match(expression.strip())`) -- a fence control with the
+same expression fails identically. Verdict: test assumptions, not
+slice-2 defects; the copy was adapted to whole-RHS form, its two
+`release_gate` tests skipped (that gate is #345, unmerged; gate code
+untouched). Strengthened the review's weak assertions (span-pin pins the
+content-hash move; snapshot dedup split from probe coverage;
+malformed-span probe mutation). F1 (reproduced in `.scratch/f1verify/`):
+a pre-slice-2-code fetch rewrites the lockfile whole and drops a span's
+`values:` pins -- recorded as a rollout caveat in the changelog fragment
+(recoverable by a new-code fetch; a compat fix belongs to shipped code).
