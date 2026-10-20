@@ -572,3 +572,338 @@ def test_span_source_advice_points_at_the_fence_form(tmp_path):
         "-- run 'refdes fetch --path analysis/budget.csv' to extract and "
         "pin it"
     ) in [d.message for d in project.diagnostics]
+
+
+# =================================================================== run-12
+# F12-1..F12-3: the three span-recognition changes the owner decided. Each
+# is pinned at the grammar level (inline_calc) and the build level (a real
+# item body), with the run-12 repro as the anchor fixture.
+
+
+def _comment_warnings(project):
+    return [d for d in project.warnings if "unclosed HTML comment" in d.message]
+
+
+def _build_list_file(tmp_path, text):
+    write_project_config(tmp_path, BASIC_CONFIG)
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "logs.yaml").write_text(text, encoding="utf-8")
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    return project
+
+
+# --------------------------------------------------------- F12-1: HTML comments
+
+
+def test_span_inside_html_comment_is_inert():
+    body = "Text <!-- `Vout := 1 V * 2 = 99 V` --> tail"
+    assert inline_calc.triggered_spans(body) == []
+
+
+def test_spans_around_a_same_line_comment_fire_the_comment_body_is_inert():
+    body = "`a := 1 V = 1 V` x <!-- `b := 1 V = 9 V` --> `c := 2 V = 2 V`"
+    assert [s.name for s in inline_calc.triggered_spans(body)] == ["a", "c"]
+
+
+def test_multi_line_comment_skips_the_span_it_wraps():
+    body = "line0\n<!--\n`b := 1 V = 9 V`\n-->\nline4 `a := 1 V = 1 V`"
+    assert [(s.line_offset, s.name) for s in inline_calc.triggered_spans(body)] == [
+        (4, "a")
+    ]
+    assert inline_calc.unclosed_comment_offset(body) is None
+
+
+def test_several_comments_in_one_body():
+    body = (
+        "`a := 1 V = 1 V`\n"
+        "<!-- x `c := 1 V = 9 V` y -->\n"
+        "`d := 1 V = 1 V`\n"
+        "<!-- z `e := 1 V = 9 V` w -->\n"
+    )
+    assert [s.name for s in inline_calc.triggered_spans(body)] == ["a", "d"]
+
+
+def test_comment_inside_a_fence_is_inert_the_fence_wins():
+    # `<!--` inside fenced code is code text: it never opens a comment, so
+    # the span after the fence fires and there is no unclosed-comment line.
+    body = "```\n<!-- `b := 1 V = 9 V`\n```\nafter `a := 1 V = 1 V`"
+    assert [s.name for s in inline_calc.triggered_spans(body)] == ["a"]
+    assert inline_calc.unclosed_comment_offset(body) is None
+
+
+def test_fence_inside_a_comment_is_inert_the_comment_wins():
+    # A fence line under an open comment is comment text: it opens no fence,
+    # so the calc fence content is inert and the span after the comment fires.
+    body = "<!--\n```calc\nx = 1\n```\n-->\nafter `a := 1 V = 1 V`"
+    assert [s.name for s in inline_calc.triggered_spans(body)] == ["a"]
+    assert inline_calc.unclosed_comment_offset(body) is None
+
+
+def test_unclosed_comment_reports_its_line_and_inertizes_the_rest():
+    body = "`a := 1 V = 1 V`\n<!-- never closes\n`b := 1 V = 9 V`"
+    assert [s.name for s in inline_calc.triggered_spans(body)] == ["a"]
+    assert inline_calc.unclosed_comment_offset(body) == 1
+
+
+def test_nested_looking_comment_closes_at_the_first_arrow():
+    # Comments do not nest: the second `<!--` is text, the first `-->` closes.
+    body = "<!-- <!-- `b := 1 V = 9 V` --> `a := 1 V = 1 V`"
+    assert [s.name for s in inline_calc.triggered_spans(body)] == ["a"]
+    assert inline_calc.unclosed_comment_offset(body) is None
+
+
+def test_open_marker_inside_a_code_span_is_literal_span_text():
+    # A `<!--` inside a code span is ordinary span content, not a comment
+    # opener: the span is captured (and its eval is the author's problem).
+    body = "`a := 1 V = 1 V` and `t := <!--1 = 1`"
+    assert inline_calc.unclosed_comment_offset(body) is None
+    spans = inline_calc.triggered_spans(body)
+    assert spans[0].name == "a"
+    assert spans[1].raw == "t := <!--1 = 1"
+
+
+def test_close_marker_without_an_opener_is_literal_text():
+    body = "plain --> text `a := 1 V = 1 V`"
+    assert [s.name for s in inline_calc.triggered_spans(body)] == ["a"]
+    assert inline_calc.unclosed_comment_offset(body) is None
+
+
+def test_comment_in_a_list_and_blockquote_body_skips_the_span(tmp_path):
+    project = _build(
+        tmp_path,
+        "- list `a := 1 V = 1 V` then <!-- `b := 1 V = 9 V` -->\n"
+        "> blockquote `c := 2 V = 2 V` <!-- `d := 1 V = 9 V` -->\n",
+    )
+    assert project.errors == []
+    assert _inline_warnings(project) == []  # the two commented spans are inert
+    assert set(_item(project).calc_values) == {"a", "c"}
+
+
+def test_comment_span_in_a_list_file_body_is_inert(tmp_path):
+    project = _build_list_file(
+        tmp_path,
+        "defaults:\n  type: decision\n  prefix: DEC\n"
+        "items:\n  - id: DEC-001\n    summary: s\n"
+        "    body: |\n"
+        "      Text <!-- `x := 1 V * 2 = 99 V` --> done\n"
+        "      Live `y := 2 V = 2 V`\n",
+    )
+    assert _inline_messages(project) == []
+    assert set(_item(project).calc_values) == {"y"}
+
+
+def test_unclosed_comment_build_warns_once_at_its_line(tmp_path):
+    project = _build(
+        tmp_path,
+        "`w := 1 V = 1 V`\n<!-- unclosed here\n`v := 2 V = 99 V`\n",
+    )
+    warns = _comment_warnings(project)
+    assert len(warns) == 1
+    assert warns[0].line == 7  # the `<!--` line (4 fm lines + blank + 2 body)
+    assert "unclosed HTML comment" in warns[0].message
+    assert warns[0].item_id == "DEC-001"
+    # the span inside the comment is inert: only the live `w` is assigned
+    assert set(_item(project).calc_values) == {"w"}
+
+
+def test_closed_comment_no_warning(tmp_path):
+    project = _build(tmp_path, "`w := 1 V = 1 V` <!-- `v := 2 V = 99 V` -->\n")
+    assert _comment_warnings(project) == []
+    assert project.errors == []
+    assert set(_item(project).calc_values) == {"w"}
+
+
+# --------------------------------------------------- F12-2: bad name before :=
+
+
+def _not_a_name(span):
+    return span.error is not None and "is not a calc name before `:=`" in span.error
+
+
+def test_filename_with_colon_equal_is_flagged_not_result_missing():
+    span = inline_calc.parse_span(0, "src=a:=b.csv")
+    assert _not_a_name(span)
+    assert "src=a" in span.error
+
+
+def test_ambiguity_message_names_both_ways_out():
+    span = inline_calc.parse_span(0, "src=a:=b.csv")
+    assert "double-backtick span" in span.error
+    assert "name := expression = result" in span.error
+
+
+def test_digit_leading_name_is_flagged():
+    assert _not_a_name(inline_calc.parse_span(0, "1x := 2 V = 2 V"))
+
+
+def test_space_in_head_is_flagged():
+    assert _not_a_name(inline_calc.parse_span(0, "a b := 1 = 1"))
+
+
+def test_hyphen_in_head_is_flagged():
+    assert _not_a_name(inline_calc.parse_span(0, "a-b := 1 = 1"))
+
+
+def test_pipe_before_trigger_is_flagged():
+    assert _not_a_name(inline_calc.parse_span(0, "x | V := 2 = 2 V"))
+
+
+def test_empty_head_is_flagged():
+    span = inline_calc.parse_span(0, " := 1 = 1")
+    assert _not_a_name(span)
+    assert "'' is not a calc name" in span.error
+
+
+def test_valid_calc_names_are_not_flagged():
+    assert inline_calc.parse_span(0, "x := 1 = 1").error is None
+    assert inline_calc.parse_span(0, "v_in := 1 = 1").error is None
+    assert inline_calc.parse_span(0, "_top := 1 = 1").error is None
+
+
+def test_missing_space_before_trigger_is_not_the_name_message():
+    # `x` is a valid name; the span is malformed for a different reason (no
+    # wsp around `:=`), so it keeps the "not of the form" message, not the
+    # F12-2 name message.
+    span = inline_calc.parse_span(0, "x:= 1 V = 1 V")
+    assert span.error is not None
+    assert not _not_a_name(span)
+    assert "not of the form" in span.error
+
+
+def test_quoted_colon_equal_stays_inert():
+    # The trigger honors quoting: `:=` inside quotes is not a trigger, so the
+    # span never reaches the parser and stays ordinary code.
+    assert not inline_calc.contains_trigger('t = "q:=1"')
+
+
+def test_build_reports_the_split_name_message(tmp_path):
+    project = _build(tmp_path, "See `src=a:=b.csv` for inputs.\n")
+    errs = _inline_errors(project)
+    assert len(errs) == 1
+    assert "is not a calc name before `:=`" in errs[0].message
+    assert "double-backtick span" in errs[0].message
+    assert errs[0].line == 6
+
+
+# --------------------------------------------- F12-3: tight result separator
+
+
+def _valid(span):
+    return span.error is None and (span.name, span.rhs, span.unit, span.result)
+
+
+def test_finding_repro_tight_pipe_and_separator():
+    assert _valid(inline_calc.parse_span(0, "x := 1 V*4|V=4 V")) == (
+        "x", "1 V*4", "V", "4 V"
+    )
+
+
+def test_tight_left_of_separator():
+    assert _valid(inline_calc.parse_span(0, "y := 2V=4 V")) == ("y", "2V", "", "4 V")
+
+
+def test_tight_right_of_separator():
+    assert _valid(inline_calc.parse_span(0, "z := 3 V =4 V")) == ("z", "3 V", "", "4 V")
+    assert _valid(inline_calc.parse_span(0, "z := 3 V= 4 V")) == ("z", "3 V", "", "4 V")
+
+
+def test_tight_separator_exponent_no_unit():
+    assert _valid(inline_calc.parse_span(0, "x := 1000=1e3")) == ("x", "1000", "", "1e3")
+
+
+def test_tight_separator_compatible_unit():
+    assert _valid(inline_calc.parse_span(0, "x := 2 A=2000 mA")) == (
+        "x", "2 A", "", "2000 mA"
+    )
+
+
+def test_comparison_operators_are_never_the_separator():
+    # The separator is the last `=`; the comparison stays in the expression
+    # (where the evaluator rejects it), and its `=` is never split off.
+    for op in ("==", "<=", ">=", "!="):
+        span = inline_calc.parse_span(0, f"x := 1 {op} 2 = 4 V")
+        assert span.error is None, op
+        assert span.rhs == f"1 {op} 2", op
+        assert span.result == "4 V", op
+
+
+def test_equals_in_parentheses_is_never_the_separator():
+    span = inline_calc.parse_span(0, "x := (1 = 2) = 4 V")
+    assert span.error is None
+    assert span.rhs == "(1 = 2)"
+    assert span.result == "4 V"
+
+
+def test_equals_in_quotes_is_never_the_separator():
+    span = inline_calc.parse_span(0, 'x := source("f.csv","a=b") | W = 5 W')
+    assert span.error is None
+    assert span.rhs == 'source("f.csv","a=b")'
+    assert span.result == "5 W"
+
+
+def test_multi_equals_is_one_reading_not_ambiguous():
+    # More than one `=` is not automatically ambiguous: only the last `=`
+    # leaves a stored-result literal, so there is a single reading.
+    span = inline_calc.parse_span(0, "x := 1 = 2 = 3")
+    assert span.error is None
+    assert (span.rhs, span.result) == ("1 = 2", "3")
+
+
+def test_spaced_control_still_valid():
+    assert _valid(inline_calc.parse_span(0, "w := 2 V = 2 V")) == ("w", "2 V", "", "2 V")
+
+
+def test_comparison_rhs_is_an_eval_error_at_the_span(tmp_path):
+    # The separator split is right; the expression `1 == 2` is not a calc
+    # expression, so it is an ordinary evaluator error, not a grammar miss.
+    project = _build(tmp_path, "`x := 1 == 2 = 4 V`\n")
+    errs = _inline_errors(project)
+    assert len(errs) == 1
+    assert "not allowed in an expression" in errs[0].message
+
+
+def test_tight_span_evaluates_clean_in_build(tmp_path):
+    project = _build(tmp_path, "`x := 1 V*4|V=4 V`\n")
+    assert project.errors == []
+    assert _inline_warnings(project) == []
+    assert _item(project).calc_values["x"] == "4 V"
+
+
+def test_tight_span_stale_warns(tmp_path):
+    project = _build(tmp_path, "`x := 1 V*4|V=9 V`\n")
+    warns = _inline_warnings(project)
+    assert len(warns) == 1
+    assert "stored result says 9 V, now computes 4 V" in warns[0].message
+
+
+def test_result_separators_helper_finds_tight_and_skips_delimiters():
+    # Tight `=` is a candidate; the `:=`, a comparison and a quoted `=` are not.
+    assert inline_calc._result_equals_positions("x := 2V=4 V") == [7]
+    assert inline_calc._result_equals_positions("x := 1 == 2 = 4 V") == [12]
+    assert inline_calc._result_equals_positions("x := 1 <= 2 = 4 V") == [12]
+    assert inline_calc._result_equals_positions("x := 1 >= 2 = 4 V") == [12]
+    assert inline_calc._result_equals_positions("x := 1 != 2 = 4 V") == [12]
+    assert inline_calc._result_equals_positions("x := (1 = 2) = 4 V") == [13]
+    assert inline_calc._result_equals_positions('x := source("f","a=b") = 4 V') == [23]
+
+
+def test_ambiguous_span_is_reported_not_resolved(monkeypatch):
+    # Defensive: more than one split that is a whole calc is reported naming
+    # both readings rather than silently picking one. (Unreachable from real
+    # spans -- see _split_readings -- so the seam is exercised directly.)
+    monkeypatch.setattr(
+        inline_calc,
+        "_split_readings",
+        lambda text, positions: [
+            (5, "a", "1", "2 V"),
+            (11, "a", "1 = 2", "3 V"),
+        ],
+    )
+    span = inline_calc.parse_span(0, "a := 1 = 2 V = 3 V")
+    assert span.error is not None
+    assert "ambiguous" in span.error
+    assert "a := 1 = 2 V" in span.error and "a := 1 = 2 V = 3 V" not in span.error
+
