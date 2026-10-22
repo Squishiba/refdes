@@ -104,7 +104,7 @@ from ..model import (
 from ..parse import front_matter_defaults_block, md_front_matter_blocks, yaml_safe_load
 from ..patcher import AddLink, PatchPlan, Refusal, RemoveLink, SetBody, SetField
 from ..sources import PdfAnchor
-from . import security
+from . import resolution, security
 from . import sources as sources_mod
 
 CONFIG_NAME = "refdes-project.yaml"
@@ -170,7 +170,13 @@ class EditRequest:
 
 @dataclass(frozen=True)
 class Applied:
-    """The edit is on disk. `revision` is the target file's new content revision."""
+    """The edit is on disk. `revision` is the target file's new content revision.
+
+    `item_id` and `handle` are the item's CURRENT display id and live handle
+    (key, else display id) -- which is what the caller posted as `ref` only
+    when `ref` was already current. A write that arrived under a retired id
+    lands on the item and reports the live spelling back, so the browser can
+    correct its ref (the same contract `GET /api/item/<retired>` gives)."""
 
     who: str
     ref: str
@@ -181,6 +187,8 @@ class Applied:
     # What an accept pinned, as `{path, key, reader, value}` -- the value the
     # reader read. Empty for an ordinary save, and never a value the client sent.
     pinned: tuple = ()
+    item_id: str = ""
+    handle: str = ""
     ok: bool = True
 
     @property
@@ -397,9 +405,22 @@ def _apply_locked(config: str, request: EditRequest):
     except Exception as exc:  # noqa: BLE001 - a project that will not load is a result
         return Refused(who, ref, f"the project did not load: {type(exc).__name__}: {exc}")
 
-    item = _find_item(before, ref)
+    resolved = resolution.resolve_ref(before, ref)
+    if resolved.claimed_by:
+        owners = ", ".join(f"'{owner}'" for owner in resolved.claimed_by)
+        return Refused(
+            who,
+            ref,
+            f"former id {ref!r} is recorded in the former_ids of {owners}: a retired id "
+            "must resolve to exactly one item, and this write refuses to pick one",
+        )
+    item = resolved.item
     if item is None:
         return Refused(who, ref, f"no item {ref!r} in this project")
+    # What the patcher matches in the file is the item's CURRENT spelling --
+    # a retired id is not in the file, and the resolver's handle is always a
+    # display id or key the patcher accepts.
+    patch_ref = resolved.handle
     if item.external:
         return Refused(who, ref, f"{ref} is an imported item; imports are read-only here")
 
@@ -438,7 +459,7 @@ def _apply_locked(config: str, request: EditRequest):
         if reason is not None:
             return Refused(who, ref, reason, path=path)
 
-    plan = patcher.plan_patch(text, ref, op, path=path)
+    plan = patcher.plan_patch(text, patch_ref, op, path=path)
     if isinstance(plan, Refusal):
         return Refused(who, ref, plan.reason, path=path)
     new_text = patcher.apply_patch(text, plan)
@@ -554,6 +575,8 @@ def _apply_locked(config: str, request: EditRequest):
         plan=plan,
         diagnostics=tuple(after.diagnostics),
         pinned=() if accept is None else accept.pinned,
+        item_id=item.id,
+        handle=resolved.handle,
     )
 
 
@@ -879,15 +902,19 @@ def _accept_pins(
 
 
 def _find_item(project: Project, ref: str) -> Item | None:
-    """The same three spellings the read API accepts: the `project.items` dict
-    key (a surrogate key, or a keyless item's provisional handle), then the
-    display id, then the key via `item_by_ref`."""
-    if not ref:
-        return None
-    item = project.items.get(ref)
-    if item is not None:
-        return item
-    return project.item_by_ref(ref)
+    """The same spellings the read API accepts: the `project.items` dict key
+    (a surrogate key, or a keyless item's provisional handle), then the
+    display id, then the key via `item_by_ref`, then a retired id some item
+    still records in `former_ids:`.
+
+    This is the shared `serve.resolution.resolve_ref`, not a copy of it: the
+    read route resolves the identical spelling list, and the two routes
+    handing the browser different answers for the same ref is exactly the
+    EDIT-03 bug. An ambiguous retired id resolves to nothing here -- the
+    link-target callers refuse it as "no item ... to link to"; the write
+    route's own entry (`_apply_locked`) asks the resolver directly and names
+    the claimants in its refusal."""
+    return resolution.resolve_ref(project, ref).item
 
 
 def _item_path(project: Project, item: Item) -> str | None:
