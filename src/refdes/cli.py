@@ -327,28 +327,71 @@ def _print_late_refusals(project: Project, announced: int) -> None:
         print(late)
 
 
+def _scope_of_items_path(project: Project, rel: str) -> tuple[str, str] | None:
+    """(board, workspace) keys for a file path under `items/`, by the same
+    path rules `boards.resolve()`/`workspaces.resolve()` use to assign an
+    item's board/workspace (the layout's board segment and the workspace
+    segment, matched against each spec's `path:` alias when it has one).
+    Returns None when the path is not under `items/` at all -- there is no
+    scope to attribute in that case. A path under `items/` whose segments
+    name no registered board/workspace attributes to `""`, the same "no
+    board" an item sitting outside the registry resolves to.
+    """
+    rel = rel.replace("\\", "/")
+    if not rel.startswith("items/"):
+        return None
+    parts = rel[len("items/") :].split("/")[:-1]  # drop the filename
+    if project.item_layout == "workspace":
+        ws_seg = parts[0] if parts else ""
+        board_seg = parts[1] if len(parts) >= 2 else ""
+    else:
+        ws_seg = ""
+        board_seg = parts[0] if parts else ""
+    board = next(
+        (name for name, spec in project.boards.items() if spec.path_segment == board_seg),
+        "",
+    )
+    workspace = next(
+        (name for name, spec in project.workspaces.items() if spec.path_segment == ws_seg),
+        "",
+    )
+    return board, workspace
+
+
 def _visible(
     project: Project, verbose: bool, board: str | None, workspace: str | None = None
 ) -> list:
     """Diagnostics worth printing: info hidden unless `verbose`, and, when
     `board` and/or `workspace` is given, narrowed to that scope's own items --
-    a report filter only. A diagnostic with no `item_id`, or whose item isn't
-    found (nothing here resolves that far), is project-level rather than
-    scope-specific and is never hidden by either flag: an unattributable
-    problem could affect every board or workspace, and hiding it would defeat
-    the point of a review.
+    a report filter only. A diagnostic with no `item_id` is project-level
+    rather than scope-specific and is never hidden by either flag: an
+    unattributable problem could affect every board or workspace, and hiding
+    it would defeat the point of a review.
+
+    An item diagnostic whose `item_id` names no item is an id-less item's
+    diagnostic (parse reports those with the display id `?`), not an
+    unattributable one: its file path is the item's own source file, so the
+    scope is read off the path the same way `boards.resolve()` reads an
+    item's board off its location. Filtering those by id alone leaked every
+    board's id-less items' diagnostics into every `--board` report (the
+    display id `?` matches no item on any board).
     """
     out = []
     for d in project.diagnostics:
         if d.level == "info" and not verbose:
             continue
+        scope = None
         if d.item_id is not None:
             item = project.item_by_id(d.item_id)
             if item is not None:
-                if board is not None and item.board != board:
-                    continue
-                if workspace is not None and item.workspace != workspace:
-                    continue
+                scope = (item.board, item.workspace)
+            elif d.file:
+                scope = _scope_of_items_path(project, d.file)
+        if scope is not None:
+            if board is not None and scope[0] != board:
+                continue
+            if workspace is not None and scope[1] != workspace:
+                continue
         out.append(d)
     return out
 
