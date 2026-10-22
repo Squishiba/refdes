@@ -1,0 +1,476 @@
+"""The editor's write route must resolve retired ids (`former_ids:`) exactly
+like the read route does (EDIT-03).
+
+`GET /api/item/{ref}` resolves a retired id through `project.former_ids`
+(api._find_item, run-5 finding B5); the write route's `_find_item`
+(serve/edit.py) resolves only the live spellings, so a POST addressed by the
+id a schematic still names was a 422 "no item" while the very same URL as a
+GET returned 200. The two routes share one identity space; this module pins
+the write route's retired-id behavior against the read route's, including the
+three traps: a retired id that is also someone's live id (the live item
+wins), a retired id claimed by two items (the write refuses and the project
+loudly reports the ambiguity), and a retired id that exists nowhere (the
+ordinary refusal, unchanged).
+
+Contract the fix commits to, beyond "the write lands on the item whose
+`former_ids:` names the ref":
+- the 200 payload reports the item's CURRENT handle under `"handle"` --
+  the same field `GET /api/item/{ref}` hands back (surrogate key when the
+  project has keys, display id when it does not), so the browser can
+  correct its ref.
+
+The drive layer is `api.handle` itself -- the exact handler the socket
+layer dispatches to (server._dispatch), the exact (status, JSON payload)
+contract the browser consumes, the same real `ProjectState` with the same
+post-save refresh. What it leaves out is the transport: the socket, the
+token and the origin gate, which test_serve_edit_http and the upload gate
+tests pin. A route's identity resolution must be gradeable on a box with
+no spare threads for a live server (RLIMIT_NPROC/pids.max), and threads
+buy this module nothing: every assertion is a status code, a payload
+field, or file bytes.
+
+The fixtures are projects of their own (like the retired-id tests in
+test_serve_api.py): a `former_ids:` entry burns an id into the ledger, which
+the shared fixtures cannot absorb. Each test builds its project afresh, so
+no test reads text an earlier test's save edited.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+
+import pytest
+from conftest import write_project_config
+from serve_support import snapshot_tree
+
+from refdes import cli as cli_mod
+from refdes.serve import api as api_mod
+from refdes.serve import state as state_mod
+
+RETIRE_SCHEMA = """\
+site:
+  title: "Retired ids edit test"
+id:
+  width: 3
+boards:
+  board-a:
+    label: "Board A"
+link_types:
+  satisfies: { inverse: satisfied_by, label: Satisfies }
+types:
+  requirement:
+    prefix: REQ
+    fields:
+      text: { type: text, required: true }
+      status: { type: enum, choices: [draft, approved] }
+  decision:
+    prefix: DEC
+    fields:
+      title: { type: text, required: true }
+    links:
+      satisfies: [requirement]
+"""
+
+# REQ-001 was renamed: REQ-900 is its retired id, spelled by nobody in this
+# project any more. REQ-002 never was, and DEC-001 links nothing yet.
+REQS = """\
+# a comment that must survive every save
+defaults: { type: requirement, board: board-a }
+items:
+  - id: REQ-001
+    text: The rail shall supply 3.3 V.
+    status: approved
+    former_ids: [REQ-900]
+  - id: REQ-002
+    text: The board shall boot within 2 s.
+    status: approved
+"""
+
+DECS = """\
+defaults: { type: decision, board: board-a }
+items:
+  - id: DEC-001
+    title: Use the buck regulator.
+"""
+
+# The collision fixture: REQ-002's `former_ids:` names REQ-001, which is
+# still a live item. `ids.collect_former_ids` records that as a build error
+# and never puts the spelling into `project.former_ids` -- so on BOTH routes
+# the live item wins, and the write must land on REQ-001's own item.
+COLLIDE_REQS = """\
+defaults: { type: requirement, board: board-a }
+items:
+  - id: REQ-001
+    text: The rail shall supply 3.3 V.
+    status: approved
+"""
+
+COLLIDE_CLAIM = """\
+defaults: { type: requirement, board: board-a }
+items:
+  - id: REQ-002
+    text: The board shall boot within 2 s.
+    status: approved
+    former_ids: [REQ-001]
+"""
+
+# The ambiguity fixture: REQ-002 and REQ-003 each claim retired REQ-900.
+# A build error on the later-loaded claimant -- files load alphabetically,
+# so claim2.yaml (REQ-003) records `REQ-900 -> REQ-003` in
+# `project.former_ids` first, and REQ-002 (reqs.yaml) carries the "declared
+# by both" error. The write must refuse, never pick one, and the project
+# must say why, in the open.
+CLAIM_REQS = """\
+defaults: { type: requirement, board: board-a }
+items:
+  - id: REQ-001
+    text: The rail shall supply 3.3 V.
+    status: approved
+  - id: REQ-002
+    text: The board shall boot within 2 s.
+    status: approved
+    former_ids: [REQ-900]
+"""
+
+CLAIM_CLAIM2 = """\
+defaults: { type: requirement, board: board-a }
+items:
+  - id: REQ-003
+    text: Nothing addresses this yet.
+    status: approved
+    former_ids: [REQ-900]
+"""
+
+
+class Api:
+    """A thread-free drive of the API routes: the real `ProjectState`, the
+    real `api.handle`, the same (status, payload) the socket layer returns.
+
+    The gate the transport owns -- token, origin, --no-write -- is exercised
+    through the real socket in test_serve_edit_http; `read_only` here only
+    needs to reach the route's own check, which reads the same attribute the
+    server sets."""
+
+    def __init__(self, root, read_only: bool = False):
+        self.state = state_mod.ProjectState(str(root / "refdes-project.yaml"))
+        self.state.load()
+        self.read_only = read_only
+
+    def get(self, path: str):
+        return api_mod.handle(self, "GET", path, {}, None)
+
+    def post(self, path: str, payload):
+        return api_mod.handle(self, "POST", path, {}, payload)
+
+
+def make_root(tmp_path, files) -> "os.PathLike":
+    write_project_config(tmp_path, RETIRE_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    for name, text in files.items():
+        (items / name).write_text(text, encoding="utf-8", newline="\n")
+    return tmp_path
+
+
+def retired_root(tmp_path):
+    return make_root(tmp_path, {"reqs.yaml": REQS, "decs.yaml": DECS})
+
+
+def serve(root) -> Api:
+    return Api(root)
+
+
+def serve_minted(tmp_path) -> tuple[Api, "os.PathLike"]:
+    """The same project after an ordinary writable check minted every key:
+    the handle the row hands the browser is then the surrogate key, and that
+    is the handle a retired-id save must report back."""
+    root = retired_root(tmp_path)
+    cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"])
+    return Api(root), root
+
+
+def sha256(path) -> str:
+    with open(path, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
+def read(path) -> str:
+    with open(path, "rb") as fh:
+        return fh.read().decode("utf-8")
+
+
+def reqs_file(root) -> str:
+    return str(root / "items" / "reqs.yaml")
+
+
+def decs_file(root) -> str:
+    return str(root / "items" / "decs.yaml")
+
+
+def edit(client, ref, path, **fields):
+    payload = {"op": "set_field", "field": "status", "value": "draft"}
+    payload.update(fields)
+    payload["expected_revision"] = sha256(path)
+    return client.post(f"/api/item/{ref}/edit", payload)
+
+
+def is_find_refusal(status, payload) -> bool:
+    """The write route's *resolution* refusal, in its exact words: "no item
+    X in this project". The patcher's own refusal says "in this file", which
+    is the resolution succeeding and the patch declining -- a different fact,
+    pinned by test_serve_edit_http."""
+    return (
+        status == 422
+        and isinstance(payload, dict)
+        and payload.get("kind") == "refused"
+        and "in this project" in payload.get("reason", "")
+    )
+
+
+# ------------------------------------------------------- the read route's bar
+#
+# The write route has to match the read route; pin what that route does
+# today, so a change to it cannot silently move the goal posts.
+
+
+def test_the_read_route_answers_a_retired_id(tmp_path):
+    client = serve(retired_root(tmp_path))
+    status, item = client.get("/api/item/REQ-900")
+    assert status == 200, item
+    assert item["id"] == "REQ-001"
+    assert item["former_ids"] == ["REQ-900"]
+    # the handle it hands back is the live identity, never the retired spelling
+    assert item["handle"] == "REQ-001"
+
+
+# ------------------------------------------------------------------ happy path
+
+
+def test_an_edit_addressed_by_a_retired_id_lands_on_the_live_item(tmp_path):
+    """The bug verbatim: GET /api/item/REQ-900 is 200, POST /api/item/REQ-900/edit
+    was 422 "no item 'REQ-900'". The save resolves exactly like the read,
+    lands inside REQ-001's own span (the file spells REQ-001, not REQ-900),
+    and leaves REQ-002's status approved standing."""
+    client, root = serve(retired_root(tmp_path)), tmp_path
+    path = reqs_file(root)
+    status, payload = edit(client, "REQ-900", path)
+    assert status == 200, payload
+    assert payload["kind"] == "applied" and payload["ok"] is True
+    text = read(path)
+    assert "status: draft" in text
+    assert text.count("status: draft") == 1, "the edit landed on exactly one item"
+    assert "status: approved" in text, "REQ-002 keeps its status"
+    assert "# a comment that must survive every save" in text
+    # the model the next GET answers from is the refreshed one
+    _status, item = client.get("/api/item/REQ-001")
+    assert item["fields"]["status"] == "draft"
+
+
+def test_the_write_reports_the_current_handle(tmp_path):
+    """The browser holding the retired spelling must be able to correct its
+    ref: the 200 payload carries the item's current handle -- the same field
+    the read view hands back -- and not the retired spelling as an identity."""
+    client, root = serve(retired_root(tmp_path)), tmp_path
+    status, payload = edit(client, "REQ-900", reqs_file(root))
+    assert status == 200, payload
+    assert payload["handle"] == "REQ-001"
+    _status, view = client.get("/api/item/REQ-900")
+    assert payload["handle"] == view["handle"], "one handle, one spelling, both routes"
+
+
+def test_the_write_reports_the_surrogate_key_handle_on_a_keyed_project(tmp_path):
+    """On a project with keys the row's handle is the surrogate key, and a
+    retired-id save reports THAT as the handle: it is the spelling the row
+    gives every reader. The file keeps both of its identity lines."""
+    client, root = serve_minted(tmp_path)
+    _status, item = client.get("/api/item/REQ-001")
+    key = item["handle"]
+    assert key not in ("REQ-001", "REQ-900") and "-" not in key
+
+    status, payload = client.post(
+        "/api/item/REQ-900/edit",
+        {
+            "op": "set_field",
+            "field": "text",
+            "value": "The rail shall supply 5 V.",
+            "expected_revision": item["edit"]["file_revision"],
+        },
+    )
+    assert status == 200, payload
+    assert payload["kind"] == "applied"
+    assert payload["handle"] == key
+    text = read(reqs_file(root))
+    assert "The rail shall supply 5 V." in text
+    assert "id: REQ-001" in text and f"key: {key}" in text
+
+
+# -------------------------------------------------------------------- the traps
+
+
+def test_a_retired_id_that_is_a_live_id_writes_the_live_item(tmp_path):
+    """REQ-002's `former_ids:` names REQ-001, which is live. The live item
+    wins on both routes -- the collision is a build error and never enters
+    `project.former_ids`, and the live lookups run first regardless. The
+    save addressed by REQ-001 lands on REQ-001; the claimant's file is
+    byte-identical."""
+    root = make_root(tmp_path, {"reqs.yaml": COLLIDE_REQS, "claim.yaml": COLLIDE_CLAIM})
+    client = serve(root)
+    _status, item = client.get("/api/item/REQ-001")
+    assert _status == 200 and item["id"] == "REQ-001"
+    before_tree = snapshot_tree(root)
+
+    status, payload = edit(client, "REQ-001", reqs_file(root))
+    assert status == 200, payload
+    text = read(reqs_file(root))
+    assert "REQ-001" in text and "status: draft" in text
+    assert read(str(root / "items" / "claim.yaml")) == COLLIDE_CLAIM
+    moved = {k for k, v in snapshot_tree(root).items() if before_tree.get(k) != v}
+    assert moved == {"items/reqs.yaml"}
+
+
+def test_a_retired_id_claimed_by_two_items_writes_neither(tmp_path):
+    """REQ-002 and REQ-003 each record retired REQ-900. The read route
+    answers this spelling with the FIRST claimant on record (files load
+    alphabetically, so project.former_ids holds REQ-900 -> REQ-003 and the
+    second claim is a build error on REQ-002) -- a shared resolver with no
+    ambiguity check would silently write REQ-003's span. A WRITE must refuse
+    an ambiguous id: it has to name one item's span to patch, and picking
+    one of the two is exactly what it must never do. So: the write is
+    refused, the tree is byte-identical -- neither claimant is touched --
+    and the loudness lives where the reader can see it: the project reports
+    the double claim as its own build diagnostic."""
+    root = make_root(tmp_path, {"reqs.yaml": CLAIM_REQS, "claim2.yaml": CLAIM_CLAIM2})
+    client = serve(root)
+    before_tree = snapshot_tree(root)
+
+    status, payload = edit(client, "REQ-900", reqs_file(root), field="text", value="x")
+    assert status == 422, payload
+    assert payload["kind"] != "applied"
+    assert "REQ-900" in payload.get("reason", ""), payload
+    assert snapshot_tree(root) == before_tree, "the first claimant must not absorb the write"
+
+    # the project says out loud why: the claimant the linker reported
+    # on (the later-loaded file's item) carries the build error naming
+    # both owners -- check both, the loudness is the project's, not one
+    # item's.
+    for claimant in ("REQ-002", "REQ-003"):
+        _status, item = client.get(f"/api/item/{claimant}")
+        assert _status == 200
+        if any("declared by both" in d["message"] for d in item["diagnostics"]):
+            break
+    else:
+        pytest.fail("the project must report the double claim as a build error")
+
+
+def test_an_unknown_ref_is_the_same_refusal_as_always(tmp_path):
+    """A ref that resolves nowhere keeps the existing refusal, verbatim; the
+    retired-id step must not turn 404-energy into anything softer."""
+    client, root = serve(retired_root(tmp_path)), tmp_path
+    before_tree = snapshot_tree(root)
+    status, payload = edit(client, "REQ-999", reqs_file(root), field="text", value="x")
+    assert status == 422
+    assert payload["kind"] == "refused"
+    assert "no item" in payload["reason"] and "REQ-999" in payload["reason"]
+    assert client.get("/api/item/REQ-999")[0] == 404
+    assert snapshot_tree(root) == before_tree
+
+
+# ---------------------------------------------------------------------- parity
+#
+# `_find_item`'s docstring promises "the same ... spellings the read API
+# accepts". Pin that as a per-spelling equivalence: every spelling the read
+# route answers with 200 must be RESOLVED by the write route -- a
+# resolution-stage refusal ("no item X in this project") on a spelling the
+# read route accepted is the drift this task forbids. (A spelling the write
+# resolves and then the patcher declines -- the keyless project's `~`
+# provisional handle, pinned by test_serve_edit_http -- passes: that is the
+# patch refusing, not the find.)
+
+
+def test_both_routes_accept_the_same_spellings_keyless(tmp_path):
+    client, root = serve(retired_root(tmp_path)), tmp_path
+    path = reqs_file(root)
+    status, listing = client.get("/api/items")
+    assert status == 200
+    provisional = next(
+        row["handle"] for row in listing["items"] if row["id"] == "REQ-001"
+    )
+    assert provisional.startswith("~"), "the keyless row's handle is the provisional one"
+
+    for ref in ("REQ-001", "REQ-900", provisional):
+        read_status, item = client.get(f"/api/item/{ref}")
+        assert read_status == 200, f"the read route must keep answering {ref}"
+        assert item["id"] == "REQ-001"
+        write_status, payload = edit(client, ref, path)
+        assert not is_find_refusal(write_status, payload), (
+            f"the read route answers {ref} with 200, so the write route's "
+            f"_find_item must resolve it too, not refuse it: {payload}"
+        )
+        assert write_status in (200, 409, 422), (ref, payload)
+
+
+def test_both_routes_accept_the_same_spellings_keyed(tmp_path):
+    client, root = serve_minted(tmp_path)
+    path = reqs_file(root)
+    status, listing = client.get("/api/items")
+    assert status == 200
+    key = next(row["handle"] for row in listing["items"] if row["id"] == "REQ-001")
+    assert key != "REQ-001" and "-" not in key  # minted: the surrogate key
+
+    for ref in ("REQ-001", "REQ-900", key):
+        read_status, item = client.get(f"/api/item/{ref}")
+        assert read_status == 200, f"the read route must keep answering {ref}"
+        assert item["id"] == "REQ-001"
+        write_status, payload = edit(client, ref, path)
+        assert not is_find_refusal(write_status, payload), (
+            f"the read route answers {ref} with 200, so the write route's "
+            f"_find_item must resolve it too, not refuse it: {payload}"
+        )
+        assert write_status in (200, 409, 422), (ref, payload)
+
+
+def test_a_link_target_spelled_by_a_retired_id_resolves(tmp_path):
+    """The same resolver resolves a link target, not just the URL's ref:
+    `add_link` with target REQ-900 resolves to REQ-001 and writes the one
+    composite the editor writes, DISPLAY-ID@key. On the base this is a 422
+    "no item 'REQ-900' ... to link to" from the very function under fix."""
+    client, root = serve_minted(tmp_path)
+    _status, dec = client.get("/api/item/DEC-001")
+    assert _status == 200
+    _status, req = client.get("/api/item/REQ-001")
+    key = req["handle"]
+
+    status, payload = client.post(
+        "/api/item/DEC-001/edit",
+        {
+            "op": "add_link",
+            "verb": "satisfies",
+            "target": "REQ-900",
+            "expected_revision": sha256(decs_file(root)),
+        },
+    )
+    assert status == 200, payload
+    assert payload["kind"] == "applied"
+    text = read(decs_file(root))
+    assert f"REQ-001@{key}" in text, text
+    assert "REQ-900" not in text, "the retired spelling is never written into a link"
+
+
+def test_no_refusing_path_writes_anything(tmp_path):
+    """The no-write posture for this task's refusals: the unknown ref and the
+    double-claim... only the unknown ref lives in this fixture, so drive it
+    every way, and the tree is byte-identical after."""
+    client, root = serve(retired_root(tmp_path)), tmp_path
+    path = reqs_file(root)
+    before_tree = snapshot_tree(root)
+    for payload in (
+        {"op": "set_field", "field": "text", "value": "x", "expected_revision": sha256(path)},
+        {"op": "set_body", "text": "nope", "expected_revision": sha256(path)},
+        {"op": "add_link", "verb": "satisfies", "target": "REQ-900",
+         "expected_revision": sha256(path)},
+    ):
+        status, _body = client.post("/api/item/REQ-999/edit", payload)
+        assert status == 422
+    assert snapshot_tree(root) == before_tree
+    assert sorted(os.listdir(root / "items")) == ["decs.yaml", "reqs.yaml"]
