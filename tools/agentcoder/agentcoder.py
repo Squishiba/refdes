@@ -114,8 +114,8 @@ def validate_spec(spec):
         problems.append(f"task_id must match [A-Za-z0-9._-]+, got {tid!r}")
     else:
         for role in ("coder", "designer", "review-r0"):
-            rc, _, _ = run_cmd(["git", "check-ref-format", "--branch",
-                                f"ac/{tid}/{role}"])
+            rc, _, _ = run_guarded(["git", "check-ref-format", "--branch",
+                                    f"ac/{tid}/{role}"])
             if rc != 0:
                 problems.append(f"task_id {tid!r} cannot form git branch "
                                 f"ac/{tid}/{role}")
@@ -127,8 +127,8 @@ def validate_spec(spec):
     if not repo_root:
         problems.append(f"repo is not a git repository: {repo!r}")
     else:
-        rc, out, _ = run_cmd(["git", "-C", repo_root, "rev-parse",
-                              "--is-inside-work-tree"])
+        rc, out, _ = run_guarded(["git", "-C", repo_root, "rev-parse",
+                                  "--is-inside-work-tree"])
         if rc != 0 or out.strip() != "true":
             problems.append(f"repo is not a git repository: {repo!r}")
 
@@ -311,6 +311,7 @@ def record_turn(job, role, rc, out, err):
         raise Pause(f"{role} agent turn reported no agentId: {tail_text(out, 3)}")
     job[f"{role}_agent"] = agent_id
     job[f"{role}_cwd"] = agent_cwd(job, agent_id)
+    save_job(job)  # ids survive a hard crash mid-loop, so resume adopts them
 
 
 def send_to(job, agent_key, message):
@@ -331,8 +332,11 @@ def spawn_agent(job, role, model, base, prompt):
     argv = ["paseo", "run", "--new-workspace", "worktree", "--worktree-mode", "branch-off",
             "--new-branch", branch_name(job, role), "--base", base, "--model", model,
             "--title", f"AgentCoder {job['task_id']} {role}", "--json", prompt]
-    rc, out, err = run_guarded(argv, cwd=job["spec"]["repo"],
-                               timeout=int(job["spec"].get("agent_timeout", 1800)))
+    try:
+        rc, out, err = run_guarded(argv, cwd=job["spec"]["repo"],
+                                   timeout=int(job["spec"].get("agent_timeout", 1800)))
+    except Pause as exc:
+        raise Pause(f"{role} spawn: {exc}")
     key = "reviewer" if role.startswith("review") else role
     record_turn(job, key, rc, out, err)
     return job[f"{key}_cwd"]
@@ -413,9 +417,9 @@ def do_test_review(job):
                            f"requesting changes")
         test_sha = job.get("test_sha") or freeze_tests(job)
         job["test_sha"] = test_sha
-        key = str(rnd)
+        key = f"{rnd}@{test_sha[:8]}"  # sha-scoped: re-reviews get a fresh reviewer
         if not reviewers.get(key):
-            spawn_agent(job, f"review-r{rnd}", spec["test_reviewer_model"],
+            spawn_agent(job, f"review-r{rnd}-{test_sha[:6]}", spec["test_reviewer_model"],
                         test_sha, review_prompt(job))
             reviewers[key] = job.pop("reviewer_agent")
             job.pop("reviewer_cwd", None)
@@ -430,6 +434,7 @@ def do_test_review(job):
         if verdicts[-1] == "APPROVE":
             job["test_review"] = "APPROVE"
             job["review_round"] = rnd
+            job["reviewed_test_sha"] = test_sha
             return
         job["test_review"] = f"CHANGES REQUESTED (round {rnd})"
         send_to(job, "designer_agent",
@@ -521,9 +526,9 @@ def do_execute(job):
     rnd = int(job.get("execute_round", 0))
     while True:
         head = freeze_tests(job)
-        if job.get("test_sha") != head:
-            job["test_sha"] = head
-        test_sha = job["test_sha"]
+        test_sha = job["test_sha"] = head
+        if spec.get("test_reviewer_model") and head != job.get("reviewed_test_sha"):
+            return "test_review"  # designer committed new tests: re-gate via review
         test_paths = scope_check(job, test_sha, spec["allowed_test_paths"], "test designer")
         test_paths = [p for p in test_paths
                       if any(path_matches(p, g) for g in spec["allowed_test_paths"])
@@ -609,12 +614,8 @@ def co_trailer(job):
 def do_land(job):
     wt = job["coder_cwd"]
     head = git(wt, "rev-parse", "HEAD")
-    own_test_commit = (git(wt, "show", "-s", "--format=%an|%s", head)
-                       == f"agentcoder|test: acceptance tests for {job['task_id']} "
-                          f"(agentcoder)")
-    if head != job["coder_sha"] and not own_test_commit:
-        raise Escalate(f"coder branch moved past the gated sha {job['coder_sha'][:9]}; "
-                       f"refusing to land code that never passed the candidate gate")
+    if head != job["coder_sha"] and head != job.get("test_landed_sha"):
+        return "candidate"  # coder moved: re-gate the new head, land gates only
     dirty = git(wt, "status", "--porcelain", "--untracked-files=no")
     if dirty:
         raise Escalate("coder worktree has uncommitted/staged changes; refusing to "
@@ -625,7 +626,13 @@ def do_land(job):
             "commit", "--author", "agentcoder <noreply@refdes.local>",
             "-m", f"test: acceptance tests for {job['task_id']} (agentcoder)",
             "-m", co_trailer(job))
+        # driver-recorded sha (job.json is not agent-writable): identifies the
+        # driver's own test commit as landable on resume, without string matching
+        job["test_landed_sha"] = git(wt, "rev-parse", "HEAD")
+        save_job(job)
     git(wt, "push", "-u", "origin", branch_name(job, "coder"), timeout=300)
+    job["pushed_sha"] = git(wt, "rev-parse", "HEAD")
+    save_job(job)
     if job.get("pr_number") is None:
         rc, out, _ = run_guarded(["gh", "pr", "list", "--head",
                                   branch_name(job, "coder"), "--json",
@@ -635,13 +642,11 @@ def do_land(job):
                         "(a duplicate PR could result)")
         existing = json_of(out, "gh pr list output")
         hit = next((p for p in existing if p.get("state") == "OPEN"
-                    or (p.get("state") == "MERGED"
-                        and p.get("headRefOid") == job.get("coder_sha"))), None)
+                    or (p.get("state") == "MERGED" and p.get("headRefOid") == job.get("pushed_sha"))), None)
         if hit is None and existing:
-            raise Escalate(f"closed unmerged PR(s) "
-                           f"{[p.get('number') for p in existing]} exist for "
-                           f"{branch_name(job, 'coder')}; resolve them manually "
-                           f"before landing")
+            raise Escalate(f"PR(s) {[(p.get('number'), p.get('state')) for p in existing]}"
+                           f" exist for {branch_name(job, 'coder')} and none is "
+                           f"adoptable; resolve them manually before landing")
         if hit:
             job["pr_number"] = int(hit["number"])
             save_job(job)
@@ -717,8 +722,8 @@ HANDLERS = {"spawn": do_spawn, "test_review": do_test_review, "execute": do_exec
 def run_loop(job):
     while job["phase"] != "done":
         try:
-            HANDLERS[job["phase"]](job)
-            job["phase"] = PHASES[PHASES.index(job["phase"]) + 1]
+            job["phase"] = HANDLERS[job["phase"]](job) \
+                or PHASES[PHASES.index(job["phase"]) + 1]
             save_job(job)
         except Escalate as exc:
             job["status"], job["reason"] = "escalated", exc.reason
@@ -765,7 +770,7 @@ def main(argv):
             spec.setdefault("cases_file", f"tests/{spec['task_id']}.cases.json")
             jobdir = Path(argv[2] if len(argv) > 2
                           else Path(spec["repo"]) / ".scratch" / "agentcoder"
-                          / spec["task_id"])
+                          / spec["task_id"]).resolve()
             jobdir.mkdir(parents=True, exist_ok=True)
             if (jobdir / "job.json").exists():
                 exit_json("error", f"a job already lives in {jobdir}; use resume")
@@ -778,7 +783,7 @@ def main(argv):
                 return rc
         elif cmd in ("resume", "status"):
             job = load_job(arg)
-            job["jobdir"] = str(Path(arg))
+            job["jobdir"] = str(Path(arg).resolve())
             if cmd == "status":
                 keep = ("task_id", "phase", "status", "reason", "base_sha", "test_sha",
                         "coder_sha", "pr_number", "test_review", "execute_round",

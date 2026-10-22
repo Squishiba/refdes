@@ -7,10 +7,10 @@ off main tip.
 
 ## Design (as shipped)
 
-- Current size: driver 697 non-blank non-comment lines (under the 700 goal
-  -- nearly full, future changes here should expect to delete code to add
-  any); 37 tests, all passing on Linux, module skipped on Windows; full
-  suite 4299 passed / 2 skipped / 0 failed; ruff (E9,F on the two files)
+- Current size: driver 700 non-blank non-comment lines (at the 700 goal
+  -- future changes here must delete code to add any); 43 tests, all
+  passing on Linux, module skipped on Windows; full suite 4305 passed /
+  2 skipped / 0 failed; ruff (E9,F on the two files)
   clean. All measured with pytest's default basetemp: an earlier "15
   failures" claim was an artifact of running with `--basetemp` inside the
   repo tree (scaffold/sealing tests are sensitive to a temp dir inside a
@@ -32,9 +32,10 @@ off main tip.
   failure.
 - Land: commit author `agentcoder <noreply@refdes.local>`, trailer
   `Co-authored-by: <last path segment of coder_model>
-  <noreply@refdes.local>`; existing OPEN PR for the branch (or MERGED at
-  the gated coder sha) adopted before `gh pr create`; CLOSED unmerged
-  escalates; failing `gh pr list` pauses.
+  <noreply@refdes.local>`; a moved coder head bounces back to re-gate at
+  candidate; existing OPEN PR for the branch (or MERGED at the
+  driver-recorded pushed sha) adopted before `gh pr create`; CLOSED
+  unmerged escalates; failing `gh pr list` pauses.
 - Exit codes: 0 ready-for-human-gate, 2 escalated, 1 paused/error.
 
 ## Difficulties hit
@@ -52,7 +53,7 @@ off main tip.
   worktree at the *test* commit, making every candidate run red. Fixed to
   use the same `path_matches` (directory-prefix) rule as `scope_check`,
   plus an explicit escalation when the designer adds no test files.
-- Reviewed over 4 rounds (headless reviewers, driver + tests + README
+- Reviewed over 5 rounds (headless reviewers, driver + tests + README
   legs). Main changes: round 1 added Windows skip, spec validation
   (`title`, `git check-ref-format`), idempotent-land PR adoption, linked
   -worktree repos, sibling-kill + timeouts on every blocking call,
@@ -61,15 +62,30 @@ off main tip.
   PASSED, SKIPPED/XFAIL/XPASS/exit-5 red, worktree reset on reuse,
   preflight ordering, prlimit gate); round 3 made preflight un-skippable
   via a `preflight_ok` flag re-checked by every resume, turned swallowed
-  test/git timeouts into honest pauses, added land guards (moved HEAD /
-  dirty tree escalate) and PR-state rules (adopt OPEN, MERGED-at-gated-sha
-  only; CLOSED escalates), and corrected the README; round 4 (docs) pinned
+  test/git timeouts into honest pauses, added land guards and PR-state
+  rules, and corrected the README; round 4 (docs) pinned
   `base_sha` at first resolution, documented idempotency precisely, said
   plainly that designer blindness is by instruction not enforcement,
   documented the exact timeout/exit-code behavior, and added the suite
-  basetemp caveat.
-
+  basetemp caveat; round 5 made land's moved-head guard forge-proof (HEAD
+  must equal the gated sha, the driver-recorded test-commit/pushed sha, or
+  bounce to re-gate -- no commit-message string matching), made the
+  test-review gate sha-scoped (designer commits after an APPROVE re-enter
+  review, fresh reviewer per sha), made the MERGED-PR adoption compare the
+  driver's recorded pushed sha, absolutized jobdir, gave
+  `validate_spec`'s git calls the guarded timeout, persisted agent ids on
+  every completed turn, and made the driver tests independent of the
+  machine's git identity (a module fixture sets the identity and points
+  git config at /dev/null; local `~/.gitconfig` had masked a CI-only
+  failure in round 4).
 ## Status
 
-Finished. PR #356: "feat(tools): agentcoder -- a small driver for coder /
-blind test designer / executor loops" (not merged, human gate).
+Finished. PR #356:
+"feat(tools): agentcoder -- a small driver for coder /
+blind test designer / executor loops" (not merged, human gate). CI state is
+per-head, not global: the round-3 head was green on all three legs
+(ubuntu, ubuntu 3.13, windows-latest); the round-4 head went red on both
+ubuntu legs (a new test needed a git identity, which the runners lack and
+the author's `~/.gitconfig` masked locally); the round-5 commit carries
+the identity-independence fixture that fixes that. Green is re-measured on
+each push, never assumed.

@@ -96,8 +96,10 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
 phase transition, and `resume` continues from the recorded phase with
 recorded agent ids (`paseo wait`). Phases are **not all idempotent**: a
 crash after a side effect but before the next save replays it. Safe to
-replay: **spawn** (worktree/agent creation is adopted via the ids recorded
-on each turn) and **land** (an existing PR for the branch is adopted, never
+replay: **spawn** (each completed turn records its agent id, and only the
+role with no saved id is re-spawned; a real re-spawn collides with the
+already-checked-out branch and pauses for a human, it never forks) and
+**land** (an existing PR for the branch is adopted, never
 forked). What can repeat: a **feedback send** to a designer/coder whose
 turn ended during the crash window — agents are re-prompted with the same
 text, which a human reviewing the PR can see. The driver never claims to
@@ -119,10 +121,13 @@ spawn ──► test_review ──► execute ──► candidate ──► land
    implement the contract, touch only `allowed_code_paths`, do **not** write
    the acceptance tests.
  2. **test_review** (optional) — one reviewer agent per round on an
-    `ac/<task>/review-r<n>` branch created at the frozen test SHA,
-    with a checklist; the driver parses its final
-   `VERDICT: APPROVE|CHANGES REQUESTED` line. Findings are `paseo send`-ed to
-   the designer (blocking); at most `max_rounds`, then escalate.
+     `ac/<task>/review-r<n>-<sha6>` branch created at the frozen test SHA,
+     with a checklist; the driver parses its final
+    `VERDICT: APPROVE|CHANGES REQUESTED` line. Findings are `paseo send`-ed to
+    the designer (blocking); at most `max_rounds`, then escalate. The gate is
+    SHA-scoped: if the designer commits new tests after an APPROVE, execute
+    returns to this phase and the new SHA gets a fresh reviewer before any
+    coder runs on it.
 3. **execute** — freeze the test commit SHA; its changed paths must fit
    `allowed_test_paths` (violations escalate). In a temp detached worktree of
    the **base** with the frozen tests checked out, run `test_command` under
@@ -142,17 +147,23 @@ spawn ──► test_review ──► execute ──► candidate ──► land
    (blocking `paseo send`), at most `max_rounds`; the coder's head is re-read
    (`rev-parse`) each round, never trusted from memory. Tests are never
    loosened.
- 5. **land** — refuses (escalates) if the coder worktree's tracked tree is
-    dirty or its HEAD is not the gated candidate SHA (land's own test commit
-    on a resumed land is accepted). The frozen test files are then committed
-    into the coder's branch (authored `agentcoder <noreply@refdes.local>`,
-    trailer `Co-authored-by: <name> <noreply@refdes.local>` where `<name>`
-    is the last path segment of `coder_model`) and the branch is pushed.
-    `gh pr list --state all` runs first: an **OPEN** PR for the branch — or
-    a MERGED one whose head SHA equals the gated coder SHA (crash between
-    `gh pr create` and the state save) — is adopted, so a second PR can
-    never fork; a CLOSED, unmerged PR **escalates** for a human; a failing
-    `gh pr list` **pauses** (the driver won't run `gh pr create` blind).
+ 5. **land** — escalates if the coder worktree's tracked tree is
+     dirty. Its HEAD must be the gated candidate SHA (or land's own
+     driver-recorded test-commit/pushed SHA on a resumed land); if the coder
+     moved the branch after gating, land **bounces back to the candidate
+     phase** — the new head is re-gated, and only a green re-gate lands.
+     The frozen test files are then committed
+     into the coder's branch (authored `agentcoder <noreply@refdes.local>`,
+     trailer `Co-authored-by: <name> <noreply@refdes.local>` where `<name>`
+     is the last path segment of `coder_model`) and the branch is pushed;
+     the pushed SHA is recorded.
+     `gh pr list --state all` runs first: an **OPEN** PR for the branch (the
+     crash window between `gh pr create` and the state save leaves exactly
+     this) — or a MERGED one whose head is the SHA the driver recorded as
+     pushed (a human merged it; the work is on main) — is adopted, so a
+     second PR can
+     never fork; a CLOSED, unmerged PR **escalates** for a human; a failing
+     `gh pr list` **pauses** (the driver won't run `gh pr create` blind).
     Otherwise `gh pr create` opens the PR with `report.md` as the body —
     the last 20 lines of the contract, the base/test/coder SHA lines, the
     per-round candidate results table, and the status line (it reads
@@ -193,12 +204,18 @@ resolution.
 - No merges, no approvals, no auto-resume across reboots — `resume` is
   manual and explicit.
 - No parallel candidate rounds; rounds are sequential by design.
-- `allowed_test_paths` patterns are matched with `fnmatch` for the scope
-  checks (so `tests/**` matches `tests/pkg/t.py` there), then handed to
-  `test_command`/pytest **raw** as `{tests}`: a pattern pytest cannot
-  resolve itself (shell brace globbing like `tests/{a,b}.py`) passes the
-  scope check while collecting nothing — keep the patterns in the dialect
-  pytest accepts.
+- The kill-at-every-save-point test sweep covers the default path (no
+  reviewers, no feedback round-trips); save points inside those loops are
+  reasoned about, not swept.
+- `allowed_test_paths`/`allowed_code_paths` are matched with `fnmatch` for
+  the scope checks (so `tests/**` matches `tests/pkg/t.py` there), then
+  handed to `test_command`/pytest **raw** as `{tests}`. The two dialects
+  diverge in both directions: fnmatch treats `{`, `,`, `}` literally, so a
+  brace pattern like `tests/{a,b}.py` does NOT match a designer commit of
+  `tests/a.py` — the scope check **escalates** loudly; and fnmatch's `*`
+  crosses `/`, so a pattern like `tests/**` passes the scope check for
+  nested files pytest (given the raw pattern) never collects — silently.
+  Keep the patterns in the dialect pytest accepts.
 - If a job is paused mid-`send`, resuming re-sends the feedback (agents are
   idempotently re-prompted, not deduplicated).
 - Running this repo's test suite with `--basetemp` pointed **inside the
