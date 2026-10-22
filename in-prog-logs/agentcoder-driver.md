@@ -80,7 +80,7 @@ off main tip.
   machine's git identity (a module fixture sets the identity and points
   git config at /dev/null; local `~/.gitconfig` had masked a CI-only
   failure in round 4).
-## Rounds 7-9 (review passes)
+## Rounds 7-10 (review passes)
 
 Round 7 (numbered 5->7: round 6 was review-only, no code changes): outcomes
 stopped trusting agent stdout (driver-owned `--junitxml`, `--rootdir` pinned;
@@ -101,6 +101,16 @@ verdicts must be the final log line (thought-block text never counts),
 `allow_no_prlimit` must be a real bool, deleted/renamed-away test files no
 longer stall land, a failed land commit un-stages the driver's own staged
 files, dead reviewers respawn, docs fixes; tests 54->63, driver at 700 lines.
+
+Round 10: land's two crash windows close -- staged test-path dirt on resume
+is recognized as the driver's own interrupted checkout (reset+checkout,
+escalate only on dirt outside test_paths), and a committed-but-unsaved test
+head (HEAD~1 == coder_sha, test-only diff) is adopted as `test_landed_sha`
+instead of re-gating; the run helper catches `OSError` (missing paseo/gh/git
+binary) as a Pause, not a crash with job.json left running; cases.json
+entries must now be objects with a valid `expected_on_base` (null/string/
+number entries escalate cleanly; the string shorthand is gone); tests
+63->67, driver back to exactly 700 lines (met by ~16 formatting trims).
 
 ## Status
 

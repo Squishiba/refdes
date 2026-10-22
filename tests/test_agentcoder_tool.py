@@ -665,10 +665,10 @@ def test_class_based_ids_pass_gate(tmp_path, monkeypatch):
         "designer_files": {"tests/test_cls.py": cls_tests,
                            "tests/sub/test_s.py": _HEADER.replace("test_control", "test_s"),
                            "tests/t1.cases.json": json.dumps({
-                               "tests/test_cls.py::test_control": "pass",
-                               "tests/test_cls.py::TestA::test_sub[a b]": "fail",
-                               "tests/test_cls.py::TestA::TestB::test_n": "fail",
-                               "tests/sub/test_s.py::test_s": "pass"})},
+                               "tests/test_cls.py::test_control": {"expected_on_base": "pass"},
+                               "tests/test_cls.py::TestA::test_sub[a b]": {"expected_on_base": "fail"},
+                               "tests/test_cls.py::TestA::TestB::test_n": {"expected_on_base": "fail"},
+                               "tests/sub/test_s.py::test_s": {"expected_on_base": "pass"}})},
         "coder_files": {"app.py": FIX_APP}})
     assert env.run() == 0  # class, nested class, param space, subdir: strict gate green
 
@@ -700,8 +700,8 @@ def test_xpass_counts_as_passed(tmp_path, monkeypatch):
     env = build_env(tmp_path, monkeypatch, scenario_overrides={
         "designer_files": {"tests/test_add.py": tests,
                            "tests/t1.cases.json": json.dumps({
-                               "tests/test_add.py::test_control": "pass",
-                               "tests/test_add.py::test_sub": "pass"})},
+                               "tests/test_add.py::test_control": {"expected_on_base": "pass"},
+                               "tests/test_add.py::test_sub": {"expected_on_base": "pass"}})},
         "coder_files": {"app.py": FIX_APP}})
     assert env.run() == 0
 
@@ -794,14 +794,14 @@ def test_renamed_away_test_file_does_not_stall(tmp_path, monkeypatch):
     env = build_env(tmp_path, monkeypatch, scenario_overrides={
         "designer_files": {"tests/test_add.py": broken,
                            "tests/t1.cases.json": json.dumps({
-                               "tests/test_add.py::test_control": "pass",
-                               "tests/test_add.py::test_x": "pass"})},
+                               "tests/test_add.py::test_control": {"expected_on_base": "pass"},
+                               "tests/test_add.py::test_x": {"expected_on_base": "pass"}})},
         "coder_files": {"app.py": FIX_APP},
         "on_send": {"designer": [{"delete": ["tests/test_add.py"],
                                   "files": {"tests/test_add_v2.py": TEST_FILE,
                                             "tests/t1.cases.json": json.dumps({
-                                                "tests/test_add_v2.py::test_control": "pass",
-                                                "tests/test_add_v2.py::test_sub": "fail"})}}]}})
+                                                "tests/test_add_v2.py::test_control": {"expected_on_base": "pass"},
+                                                "tests/test_add_v2.py::test_sub": {"expected_on_base": "fail"}})}}]}})
     assert env.run() == 0
 
 
@@ -852,6 +852,58 @@ def test_resume_keeps_recorded_live_agents(tmp_path, monkeypatch):
     assert env.job()["coder_agent"] == "a1"  # live recorded id adopted, never respawned
 
 
+def test_missing_paseo_binary_pauses_cleanly(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="nopaseo")
+    monkeypatch.setenv("AGENTCODER_PASEO", str(tmp_path / "no-such-paseo"))
+    assert env.run() == 1  # the OSError from a missing tool becomes Pause, not a crash
+    assert env.job()["status"] == "paused" and "cannot launch" in env.job()["reason"]
+
+
+def test_land_crash_after_staging_resumes_clean(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="cl1")
+    real = agentcoder.run_cmd
+
+    def crash(argv, *a, **k):
+        if "commit" in argv:
+            raise KeyboardInterrupt  # hard stop between checkout-staging and the commit
+        return real(argv, *a, **k)
+
+    monkeypatch.setattr(agentcoder, "run_cmd", crash)
+    with pytest.raises(KeyboardInterrupt):
+        env.run()
+    assert env.job()["status"] == "running"  # died mid-land: tree staged, job.json behind
+    monkeypatch.setattr(agentcoder, "run_cmd", real)
+    assert env.resume() == 0  # dirty confined to test_paths = driver's own, not coder dirt
+    assert env.job()["pr_number"] == 4242
+
+
+def test_land_adopts_committed_test_head_on_resume(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="cl2")
+    real = agentcoder.save_job
+
+    def crash(job):
+        if job.get("test_landed_sha"):  # died right after land's commit, before the save
+            raise KeyboardInterrupt
+        return real(job)
+
+    monkeypatch.setattr(agentcoder, "save_job", crash)
+    with pytest.raises(KeyboardInterrupt):
+        env.run()
+    monkeypatch.setattr(agentcoder, "save_job", real)
+    assert env.resume() == 0  # HEAD~1 == coder_sha + test-only diff: adopted, not re-gated
+    assert env.job()["test_landed_sha"]
+
+
+def test_cases_entry_must_be_object(tmp_path, monkeypatch):
+    bad = json.dumps({"tests/test_add.py::test_control": None,
+                      "tests/test_add.py::test_sub": "pass"})
+    env = build_env(tmp_path, monkeypatch, name="casesobj", scenario_overrides={
+        "designer_files": {"tests/test_add.py": TEST_FILE,
+                           "tests/t1.cases.json": bad}})
+    assert env.run() == 2  # null/string entries escalate with a clear message, not crash
+    assert "must be an object" in env.job()["reason"]
+
+
 def test_forged_stdout_cannot_satisfy_gate(tmp_path, monkeypatch):
     # conftest prints a PASSED line for a test id that was never collected;
     # the gate reads only the junit XML, so forged stdout is mere decoration
@@ -860,9 +912,9 @@ def test_forged_stdout_cannot_satisfy_gate(tmp_path, monkeypatch):
                            "tests/conftest.py":
                                "print('PASSED tests/test_add.py::test_ghost')\n",
                            "tests/t1.cases.json": json.dumps({
-                               "tests/test_add.py::test_control": "pass",
-                               "tests/test_add.py::test_sub": "fail",
-                               "tests/test_add.py::test_ghost": "pass"})},
+                               "tests/test_add.py::test_control": {"expected_on_base": "pass"},
+                               "tests/test_add.py::test_sub": {"expected_on_base": "fail"},
+                               "tests/test_add.py::test_ghost": {"expected_on_base": "pass"}})},
         "coder_files": {"app.py": FIX_APP}})
     assert env.run() == 2  # test_ghost was never collected: caught on the base run
     reason = env.job()["reason"]
@@ -877,8 +929,8 @@ def test_parametrized_space_id_passes_gate(tmp_path, monkeypatch):
     env = build_env(tmp_path, monkeypatch, scenario_overrides={
         "designer_files": {"tests/test_add.py": tests,
                            "tests/t1.cases.json": json.dumps({
-                               "tests/test_add.py::test_control": "pass",
-                               "tests/test_add.py::test_sub[a b]": "fail"})},
+                               "tests/test_add.py::test_control": {"expected_on_base": "pass"},
+                               "tests/test_add.py::test_sub[a b]": {"expected_on_base": "fail"}})},
         "coder_files": {"app.py": FIX_APP}})
     assert env.run() == 0  # junit ids keep the space; the stdout regex used to die on it
 
@@ -1100,7 +1152,7 @@ def test_reused_worktree_is_reset(tmp_path, monkeypatch):
 
 
 def test_outcome_gate_helpers():
-    cases = {"t::a": "pass", "t::b": "fail"}
+    cases = {"t::a": {"expected_on_base": "pass"}, "t::b": {"expected_on_base": "fail"}}
     ok = {"t::a": "PASSED", "t::b": "FAILED"}
     assert agentcoder.compare_cases(cases, ok) == []
     # the junit parser only ever emits these four statuses (xpass arrives as a

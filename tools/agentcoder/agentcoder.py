@@ -51,8 +51,11 @@ def resolve(argv):
 
 def run_cmd(argv, cwd=None, env=None, timeout=None):
     # the one subprocess helper; fake it via AGENTCODER_PASEO / AGENTCODER_GH
-    proc = subprocess.run([tool_path(argv[0])] + list(argv[1:]), cwd=cwd, env=env,
-                          timeout=timeout, capture_output=True, text=True)
+    try:
+        proc = subprocess.run([tool_path(argv[0])] + list(argv[1:]), cwd=cwd, env=env,
+                              timeout=timeout, capture_output=True, text=True)
+    except OSError as exc:  # missing/not-executable paseo/gh/git/prlimit: Pause, not crash
+        raise Pause(f"cannot launch {argv[0]}: {exc}")
     return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -137,8 +140,7 @@ def validate_spec(spec):
 
     def rel_path(value, what, must_exist):
         if not isinstance(value, str) or not value:
-            problems.append(f"{what} must be a non-empty path")
-            return
+            problems.append(f"{what} must be a non-empty path"); return  # noqa: E702
         target = os.path.realpath(os.path.join(repo_root, value))
         if not (target == repo_root or target.startswith(repo_root + os.sep)):
             problems.append(f"{what} must stay inside repo: {value!r}")
@@ -155,8 +157,7 @@ def validate_spec(spec):
             problems.append(f"{key} must be a non-empty list of globs")
             return
         for g in globs:
-            if not isinstance(g, str) or not g or os.path.isabs(g) \
-                    or g.split("/")[0] in ("", "..", "."):
+            if not isinstance(g, str) or not g or os.path.isabs(g) or g.split("/")[0] in ("", "..", "."):
                 problems.append(f"{key} entry must be a relative glob: {g!r}")
 
     if "allow_no_prlimit" in spec and not isinstance(spec["allow_no_prlimit"], bool):
@@ -167,8 +168,7 @@ def validate_spec(spec):
     if not isinstance(cases_file, str) or os.path.isabs(cases_file) \
             or any(ch in cases_file for ch in "*?[") or not any(
             path_matches(cases_file, g) for g in spec.get("allowed_test_paths") or []):
-        problems.append(f"cases_file must be a plain path inside "
-                        f"allowed_test_paths: {cases_file!r}")
+        problems.append(f"cases_file must be a plain path inside allowed_test_paths: {cases_file!r}")
     tc = spec.get("test_command", DEFAULT_TC)
     if not isinstance(tc, list) or not all(isinstance(x, str) and x for x in tc) \
             or "{tests}" not in tc:
@@ -197,8 +197,7 @@ def preflight(job):
                     "limits; install prlimit, or set \"allow_no_prlimit\": true to accept")
     # real `paseo ls -g --json` keys (verified): id/shortId/name/provider/status/cwd
     running = [a for a in paseo_ls() if a.get("status") == "running" and "qwen" in str(a.get("provider", "")).lower()]
-    room = int(spec["qwen_cap"]) - int(spec["reserve"])
-    if len(running) >= room:
+    if len(running) >= (room := int(spec["qwen_cap"]) - int(spec["reserve"])):
         raise Pause(f"refusing to start: {len(running)} Qwen agents running, "
                     f"cap({spec['qwen_cap']}) - reserve({spec['reserve']}) = {room}")
     job["preflight_ok"] = True
@@ -242,8 +241,7 @@ def designer_prompt(job):
         f"- Commit your work on the current branch.\n- Write {cf} mapping each pytest "
         f'node id to {{"expected_on_base": "pass"|"fail", "requirement": "one line"}}. '
         f'"pass" = a control that must already pass on the OLD code; "fail" = new '
-        f'behavior the change must bring.'
-    )
+        f'behavior the change must bring.')
 
 
 def coder_prompt(job):
@@ -298,8 +296,7 @@ def record_turn(job, role, rc, out, err):
     if rc != 0:
         raise Pause(f"{role} agent turn failed (rc={rc}, quota/usage?): {tail_text(err, 5)}")
     data = json_of(out, f"{role} run result")
-    status = data.get("status")
-    if status != "completed":
+    if (status := data.get("status")) != "completed":
         raise Pause(f"{role} agent turn ended with status {status!r}: {tail_text(out, 5)}")
     agent_id = data.get("agentId")
     if not agent_id:
@@ -316,8 +313,7 @@ def send_to(job, agent_key, message):
     rc, out, err = run_guarded(["paseo", "send", agent_id, "--json", message], timeout=int(job["spec"].get("agent_timeout", 1800)))  # noqa: E501
     if rc != 0:
         raise Pause(f"send to {agent_key} failed (rc={rc}): {tail_text(err, 5)}")
-    status = json_of(out, "send result").get("status")
-    if status != "completed":
+    if (status := json_of(out, "send result").get("status")) != "completed":
         raise Pause(f"send to {agent_key} ended with status {status!r}")
     check_permits(job)
 
@@ -349,8 +345,8 @@ def live_ids():
 def stop_job_agents(job):
     # killing the `paseo run` client does NOT stop the agent; stop the job's
     # agents by title, EXCEPT roles whose id is already recorded (= healthy)
-    known = ({str(job.get(f"{r}_agent")) for r in ("coder", "designer")}
-             | {str(v) for v in (job.get("reviewers") or {}).values()})
+    known = {str(x) for x in (job.get("coder_agent"), job.get("designer_agent"),
+                              *(job.get("reviewers") or {}).values())}
     prefix = f"AgentCoder {job['task_id']} "[:60]  # ls `name` = title, truncated ~60
     for e in paseo_ls():
         name, aid = str(e.get("name", "")), str(e.get("id"))
@@ -375,8 +371,11 @@ def do_spawn(job):
                             "branch-off", "--new-branch", branch_name(job, role),
                             "--base", job["base_sha"], "--model", model, "--title",
                             f"AgentCoder {job['task_id']} {role}", "--json", prompts[role]])
-            procs[role] = subprocess.Popen(argv, cwd=spec["repo"], stdout=subprocess.PIPE,
-                                           stderr=subprocess.PIPE, text=True)
+            try:
+                procs[role] = subprocess.Popen(argv, cwd=spec["repo"], stdout=subprocess.PIPE,
+                                               stderr=subprocess.PIPE, text=True)
+            except OSError as exc:
+                raise Pause(f"cannot launch paseo ({role} spawn): {exc}")
         for role, proc in procs.items():
             try:
                 out, err = proc.communicate(timeout=int(spec.get("agent_timeout", 1800)))
@@ -391,8 +390,7 @@ def do_spawn(job):
                 stop_job_agents(job)
                 raise
     else:
-        for role in ("coder", "designer"):
-            run_guarded(["paseo", "wait", job[f"{role}_agent"], "--timeout", "60"])
+        for role in ("coder", "designer"): run_guarded(["paseo", "wait", job[f"{role}_agent"], "--timeout", "60"])  # noqa: E501,E701
     check_permits(job)
 
 
@@ -459,8 +457,7 @@ def do_test_review(job):
 
 
 def expand_tests(globs, wt):
-    found = sorted({p for g in globs for p in glob.glob(g, root_dir=wt, recursive=True)
-                    if Path(wt, p).is_dir() or p.endswith(".py")})  # pytest can't take data files
+    found = sorted({p for g in globs for p in glob.glob(g, root_dir=wt, recursive=True) if Path(wt, p).is_dir() or p.endswith(".py")})  # noqa: E501
     if not found:
         raise Pause(f"allowed_test_paths {globs} matched nothing in the worktree; "
                     "refusing to hand pytest an empty file list")
@@ -500,8 +497,7 @@ def run_tests(job, wt):
     if is_pytest:
         argv += ["--junitxml", str(xml), "--rootdir", str(wt)]
     xml.unlink(missing_ok=True)
-    cmd = (["prlimit"] + LIM[1:]) if shutil.which("prlimit") else []
-    cmd += argv
+    cmd = (["prlimit"] + LIM[1:] if shutil.which("prlimit") else []) + argv
     tmo = int(job["spec"].get("test_timeout", 120))
     try:
         rc, out, err = run_cmd(cmd, cwd=wt, env=base_env(job), timeout=tmo)
@@ -517,24 +513,22 @@ def run_tests(job, wt):
 
 def load_cases(job, test_sha):
     cf = job["spec"].get("cases_file", f"tests/{job['task_id']}.cases.json")
-    raw = git(job["spec"]["repo"], "show", f"{test_sha}:{cf}", check=False)
-    cases = json_of(raw, "cases.json") if raw else None
+    cases = json_of(raw, "cases.json") if (raw := git(job["spec"]["repo"], "show",
+                              f"{test_sha}:{cf}", check=False)) else None
     if not isinstance(cases, dict) or not cases:
         raise Escalate(f"no usable {cf} in frozen test commit {test_sha}; "
                        f"designer must declare every test id")
     for test_id, decl in cases.items():
-        want = decl if isinstance(decl, str) else decl.get("expected_on_base")
-        if want not in ("pass", "fail"):
-            raise Escalate(f"cases.json entry {test_id!r} has expected_on_base={want!r}, "
-                           f"must be 'pass' or 'fail'")
+        if not isinstance(decl, dict) or decl.get("expected_on_base") not in ("pass", "fail"):
+            raise Escalate(f"cases.json entry {test_id!r} must be an object with "
+                           f'expected_on_base "pass"/"fail", got {decl!r}')
     return cases
 
 
 def compare_cases(cases, outcomes):
     problems = []
     for test_id, decl in sorted(cases.items()):
-        want = decl if isinstance(decl, str) else decl.get("expected_on_base")
-        got = outcomes.get(test_id, "NOT-COLLECTED")
+        want, got = decl["expected_on_base"], outcomes.get(test_id, "NOT-COLLECTED")
         if want == "pass" and got != "PASSED":
             problems.append(f"{test_id}: control declared 'pass' but on base it is {got}")
         if want == "fail" and got != "FAILED":
@@ -552,8 +546,7 @@ def gate_failures(cases, outcomes):
 def ensure_worktree(job, name, sha):
     wt = str(Path(job["jobdir"]) / name)
     if Path(wt).exists():
-        git(wt, "checkout", "--force", "--detach", sha)
-        git(wt, "clean", "-fdq")
+        git(wt, "checkout", "--force", "--detach", sha); git(wt, "clean", "-fdq")  # noqa: E702
     else:
         git(job["spec"]["repo"], "worktree", "add", "--detach", wt, sha)
     return wt
@@ -587,7 +580,7 @@ def do_execute(job):
                                "tail": tail_text(out, 30)}
         if not problems:
             job["test_paths"] = test_paths
-            job["controls"] = sum(1 for d in cases.values() if (d if isinstance(d, str) else d.get("expected_on_base")) == "pass")
+            job["controls"] = sum(1 for d in cases.values() if d["expected_on_base"] == "pass")
             job["intended_reds"] = len(cases) - job["controls"]
             job["execute_round"] = rnd
             return
@@ -648,19 +641,29 @@ def do_candidate(job):
 
 
 def co_trailer(job):
-    model = str(job["spec"].get("coder_model") or DEFAULT_MODEL)
-    return f"Co-authored-by: {model.rsplit('/', 1)[-1]} <noreply@refdes.local>"
+    return f"Co-authored-by: {str(job['spec'].get('coder_model') or DEFAULT_MODEL).rsplit('/', 1)[-1]} <noreply@refdes.local>"  # noqa: E501
 
 
 def do_land(job):
     wt = job["coder_cwd"]
     head = git(wt, "rev-parse", "HEAD")
+    if (head != job["coder_sha"] and head != job.get("test_landed_sha")
+            and git(wt, "rev-parse", "HEAD~1", check=False) == job["coder_sha"]
+            and all(path_matches(p, g) for p in git(wt, "diff", "--name-only", "HEAD~1",
+                "HEAD").splitlines() if p for g in job["spec"]["allowed_test_paths"])):
+        job["test_landed_sha"] = head  # land committed, then died before saving: adopt it
+        save_job(job)
     if head != job["coder_sha"] and head != job.get("test_landed_sha"):
         return "candidate"  # coder moved: re-gate the new head, land gates only
     dirty = git(wt, "status", "--porcelain", "--untracked-files=no")
     if dirty:
-        raise Escalate("coder worktree has uncommitted/staged changes; refusing to "
-                       f"sweep them into the test commit:\n{tail_text(dirty, 15)}")
+        paths = [ln[3:] for ln in dirty.splitlines() if ln.strip()]
+        if [p for p in paths if not any(path_matches(p, g) for g in job["spec"]["allowed_test_paths"])]:
+            raise Escalate("coder worktree has uncommitted/staged changes outside its test "
+                           f"paths; refusing to sweep them:\n{tail_text(dirty, 15)}")
+        # changes inside test_paths: land's own interrupted checkout; redo it idempotently
+        git(wt, "reset", "-q", "--", *job["test_paths"], check=False)
+        git(wt, "checkout", "--", *job["test_paths"], check=False)
     git(wt, "checkout", job["test_sha"], "--", *job["test_paths"])
     if git(wt, "diff", "--cached", "--name-only", check=False):
         try:
@@ -714,8 +717,7 @@ def do_land(job):
 
 
 def write_report(job, landing=False):
-    rows = "\n".join(f"| {r['round']} | {r['rc']} | {', '.join(r['failed']) or '-'} |"
-                     for r in job.get("candidate_results", []))
+    rows = "\n".join(f"| {r['round']} | {r['rc']} | {', '.join(r['failed']) or '-'} |" for r in job.get("candidate_results", []))  # noqa: E501
     lines = [
         f"# agentcoder report — {job['task_id']}", "",
         f"- status: **{job.get('status', 'running')}**" + (f" — {job['reason']}" if job.get("reason") else ""),  # noqa: E501
@@ -751,8 +753,7 @@ HANDLERS = {"spawn": do_spawn, "test_review": do_test_review, "execute": do_exec
 def run_loop(job):
     while job["phase"] != "done":
         try:
-            job["phase"] = HANDLERS[job["phase"]](job) \
-                or PHASES[PHASES.index(job["phase"]) + 1]
+            job["phase"] = HANDLERS[job["phase"]](job) or PHASES[PHASES.index(job["phase"]) + 1]
             save_job(job)
         except Escalate as exc:
             job["status"], job["reason"] = "escalated", exc.reason
