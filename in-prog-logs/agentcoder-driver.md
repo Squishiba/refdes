@@ -8,9 +8,9 @@ off main tip.
 ## Design (as shipped)
 
 - Current size: driver 700 non-blank non-comment lines (at the 700 goal
-  -- future changes here must delete code to add any); 54 tests, all
+  -- future changes here must delete code to add any); 63 tests, all
   passing on Linux, module skipped on non-Linux (prlimit is Linux-only);
-  full suite 4316 passed / 2 skipped / 0 failed; ruff (E9,F on the two
+  full suite 4325 passed / 2 skipped / 0 failed; ruff (E9,F on the two
   files) clean. All measured with pytest's default basetemp: an earlier "15
   failures" claim was an artifact of running with `--basetemp` inside the
   repo tree (scaffold/sealing tests are sensitive to a temp dir inside a
@@ -80,35 +80,28 @@ off main tip.
   machine's git identity (a module fixture sets the identity and points
   git config at /dev/null; local `~/.gitconfig` had masked a CI-only
   failure in round 4).
-## Round 7 (review items 1-5; numbered 5->7 -- round 6 was a review-only
-pass with no code changes, so this log skips the number)
+## Rounds 7-9 (review passes)
 
-Outcomes stopped trusting agent stdout: pytest runs with a driver-owned
-`--junitxml` (job dir) and `--rootdir` pinned to the worktree (a repo-tree
-basetemp mangles junit paths -- found the hard way), forged `PASSED` stdout
-can no longer satisfy the gate, `{tests}` expands driver-side via
-`glob(recursive=True)` (zero matches = Pause), the kill-sweep also `paseo
-stop`s this job's agents by title and records `stopped_agents` (the re-spawn
-branch-collision gap is documented, not closed), `spec["repo"]` is normalized,
-candidate results are one-per-round. Tests 43 -> 47; driver at exactly 700
-lines (cut ~35: shared JobExit base, compacted prompts/report, inlined
-freeze_tests, `paseo_ls` helper).
+Round 7 (numbered 5->7: round 6 was review-only, no code changes): outcomes
+stopped trusting agent stdout (driver-owned `--junitxml`, `--rootdir` pinned;
+forged `PASSED` lines can no longer satisfy the gate), `{tests}` expands
+driver-side with a zero-match Pause, the kill-sweep stops job agents by title
+and records `stopped_agents`; tests 43->47.
 
-## Round 8 (review items 1-8, one pass)
+Round 8: junit node ids resolve class-based classnames to real files,
+`expand_tests` keeps dirs + `.py`, the sweep spares recorded agents and
+resume respawns recorded-dead ones, XPASS documented as PASSED, linux-only
+skip; tests 47->54.
 
-Junit node ids now resolve `classname` to the longest dotted prefix that
-exists as a `.py` in the worktree (class/nested-class tests, `tests/sub/`,
-parametrized ids with spaces; the old classname-slash guess is only the
-fallback when no file matches), `expand_tests` keeps only dirs + `.py` (data
-files under `tests/**` gave pytest rc=4), the kill-sweep no longer stops
-agents whose ids are recorded in `job.json` (only unrecorded job-titled
-agents, reviewer titles included -- the old sweep killed a healthy recorded
-coder), resume re-checks recorded ids against `paseo ls` and respawns dead
-ones, `paseo logs` failures include stderr, the driver is chmod +x, the test
-module skips on non-Linux (the driver's prlimit gate is Linux-only), XPASS is
-documented as counting as PASSED (junit has no XPASS node), and the
-json-summary test covers the usage/JSON split. Tests 47 -> 54; driver still
-exactly 700 lines.
+Round 9: every `paseo ls` consumer moved to the real, live-verified ls keys
+(`id`/`name`/`provider`/`cwd` -- the fake had invented `agentId`/`title`/
+`model`, silently disabling the Qwen cap and the sweep and making every
+resume respawn recorded agents), the fake now emits the verified schema,
+verdicts must be the final log line (thought-block text never counts),
+`allow_no_prlimit` must be a real bool, deleted/renamed-away test files no
+longer stall land, a failed land commit un-stages the driver's own staged
+files, dead reviewers respawn, docs fixes; tests 54->63, driver at 700 lines.
+
 ## Status
 
 Finished. PR #356:

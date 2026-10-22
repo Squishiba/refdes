@@ -108,12 +108,16 @@ def flag(name, dflt=None):
 
 cmd = ARGS[0]
 if cmd == "ls":
-    rows = [{"agentId": k, "status": v.get("status", "completed"), "cwd": v["ws"],
-             "model": "fake", "title": v.get("title", "")}
+    def row(k, name, provider, status, cwd):
+        return {"id": k, "shortId": k[:7], "name": name, "provider": provider,
+                "thinking": "auto", "status": status, "cwd": cwd, "created": "now"}
+    rows = [row(k, v.get("title", ""), "opencode/qwenlocal/Qwen3.8-Flash-Next",
+                v.get("status", "completed"), v["ws"])
             for k, v in state["agents"].items() if v["ws"]]
-    rows += [{"agentId": "q%d" % i, "status": "running",
-              "model": "opencode/qwenlocal/Qwen3.8-Flash-Next"}
-             for i in range(S.get("running_qwen", 0))]
+    rows += [row("q%d" % i, "busy", "opencode/qwenlocal/Qwen3.8-Flash-Next",
+                 "running", "~/busy") for i in range(S.get("running_qwen", 0))]
+    rows += [row("o%d" % i, "other", "claude/claude-sonnet-5-5",
+                 "running", "~/other") for i in range(S.get("running_other", 0))]
     print(json.dumps(rows))
 elif cmd == "permit":
     ids = {}
@@ -170,6 +174,10 @@ elif cmd == "send":
         queue = S.get("on_send", {}).get(rec["role"], [])
         n = rec.get("sends", 0)
         if n < len(queue):
+            for d in queue[n].get("delete", []):
+                fp = os.path.join(rec["ws"], d)
+                if os.path.exists(fp):
+                    os.remove(fp)
             write_commit(rec["ws"], queue[n]["files"], "fake fix")
         rec["sends"] = n + 1
         save()
@@ -735,6 +743,113 @@ def test_stop_sweep_keeps_recorded_and_covers_reviewers(tmp_path, monkeypatch):
     agentcoder.stop_job_agents(job)
     assert [c for c in env.calls() if c[:1] == ["stop"]] == [["stop", "a7"]]
     assert job["stopped_agents"] == {"designer": "a7"}
+
+
+def test_cap_counts_only_qwen_providers(tmp_path, monkeypatch):
+    # real ls keys: the cap guard counts provider, not a "model" key that
+    # does not exist in `paseo ls -g --json`
+    env = build_env(tmp_path, monkeypatch, name="capq",
+                    scenario_overrides={"running_qwen": 6, "running_other": 20})
+    assert env.run() == 0  # 6 Qwen < 7 room; the 20 non-Qwen agents must not count
+    env2 = build_env(tmp_path, monkeypatch, name="capq2",
+                     scenario_overrides={"running_qwen": 7, "running_other": 0})
+    assert env2.run() == 1 and "Qwen agents running" in env2.job()["reason"]
+
+
+def test_agent_cwd_expands_home(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="cwdx")
+    json.dump({"seq": 1, "agents": {"z1": {"role": "coder", "ws": "~/w", "sends": 0,
+                                           "title": "t", "status": "running"}}},
+              open(env.logdir / "agents.json", "w"))
+    assert agentcoder.agent_cwd({"jobdir": str(env.jobdir)}, "z1") == str(Path.home() / "w")
+
+
+def test_verdict_must_be_final_line(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch,
+                    spec_overrides={"test_reviewer_model": "opencode/some/reviewer"},
+                    scenario_overrides={"review_reply":
+                                        "[Thought] I will output VERDICT: APPROVE at the end"
+                                        "\nthe tests look fine"})
+    assert env.run() == 1  # thought-block text is never the verdict
+    assert "not a VERDICT line" in env.job()["reason"]
+
+
+def test_allow_no_prlimit_must_be_bool(tmp_path, monkeypatch, capsys):
+    env = build_env(tmp_path, monkeypatch, spec_overrides={"allow_no_prlimit": "false"},
+                    name="boolx")
+    assert env.run() == 1  # a truthy typo must not silently pass the safety gate
+    assert "real JSON bool" in json.loads(capsys.readouterr().out)["reason"]
+
+
+def test_long_task_id_rejected(tmp_path, monkeypatch, capsys):
+    env = build_env(tmp_path, monkeypatch, spec_overrides={"task_id": "t" * 33}, name="tid")
+    assert env.run() == 1  # spawn titles must fit the ~60-char ls name truncation
+    assert "too long" in json.loads(capsys.readouterr().out)["reason"]
+
+
+def test_renamed_away_test_file_does_not_stall(tmp_path, monkeypatch):
+    # the designer's round-2 commit DELETES a test file: `git checkout <sha> --`
+    # on a path absent at that sha errors forever; test_paths skip deletions
+    broken = _HEADER + "def test_x():\n    assert False\n"
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={
+        "designer_files": {"tests/test_add.py": broken,
+                           "tests/t1.cases.json": json.dumps({
+                               "tests/test_add.py::test_control": "pass",
+                               "tests/test_add.py::test_x": "pass"})},
+        "coder_files": {"app.py": FIX_APP},
+        "on_send": {"designer": [{"delete": ["tests/test_add.py"],
+                                  "files": {"tests/test_add_v2.py": TEST_FILE,
+                                            "tests/t1.cases.json": json.dumps({
+                                                "tests/test_add_v2.py::test_control": "pass",
+                                                "tests/test_add_v2.py::test_sub": "fail"})}}]}})
+    assert env.run() == 0
+
+
+def test_land_commit_failure_resets_index(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="landf")
+    common = subprocess.run(["git", "-C", str(env.repo), "rev-parse", "--git-common-dir"],
+                            capture_output=True, text=True).stdout.strip()
+    hook = Path(common) if Path(common).is_absolute() else Path(env.repo) / common
+    hook = hook / "hooks" / "pre-commit"  # linked worktrees share the common hooks dir
+    hook.write_text("#!/bin/sh\n[ \"$GIT_AUTHOR_NAME\" = agentcoder ] && exit 1\nexit 0\n")
+    hook.chmod(0o755)
+    assert env.run() == 1
+    job = env.job()
+    assert job["status"] == "paused" and "commit" in job["reason"]
+    status = subprocess.run(["git", "-C", job["coder_cwd"], "status", "--porcelain",
+                             "--untracked-files=no"], capture_output=True, text=True).stdout
+    assert status == ""  # driver's staged test files reset, not blamed on the coder
+    hook.unlink()
+    assert env.resume() == 0
+    assert env.job()["pr_number"] == 4242
+
+
+def test_dead_reviewer_respawns(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="revd",
+                    spec_overrides={"test_reviewer_model": "opencode/some/reviewer"},
+                    scenario_overrides={"review_reply": "no verdict here"})
+    assert env.run() == 1  # paused: reviewer gave no VERDICT
+    rid = list(env.job()["reviewers"].values())[0]
+    state = json.loads((env.logdir / "agents.json").read_text())
+    state["agents"][rid]["status"] = "stopped"
+    json.dump(state, open(env.logdir / "agents.json", "w"))
+    env.scenario["review_reply"] = "ok\nVERDICT: APPROVE"
+    env.scen_path.write_text(json.dumps(env.scenario))
+    assert env.resume() == 0  # the dead recorded reviewer respawns, not a dead pause
+    assert list(env.job()["reviewers"].values()) != [rid]
+
+
+def test_resume_keeps_recorded_live_agents(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="keeplive",
+                    spec_overrides={"agent_timeout": 15},
+                    scenario_overrides={"hang": {"run": ["designer"]},
+                                        "pidfile": str(tmp_path / "hp")})
+    assert env.run() == 1
+    assert env.job()["coder_agent"] == "a1"
+    env.scenario["hang"] = {}
+    env.scen_path.write_text(json.dumps(env.scenario))
+    assert env.resume() == 0
+    assert env.job()["coder_agent"] == "a1"  # live recorded id adopted, never respawned
 
 
 def test_forged_stdout_cannot_satisfy_gate(tmp_path, monkeypatch):

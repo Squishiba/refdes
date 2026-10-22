@@ -119,6 +119,8 @@ def validate_spec(spec):
                 problems.append(f"task_id {tid!r} cannot form git branch "
                                 f"ac/{tid}/{role}")
                 break
+        if len(tid) > 32:  # spawn titles stay within the ~60-char ls name truncation
+            problems.append(f"task_id {tid!r} too long: AgentCoder titles would be cut")
     if not isinstance(spec.get("title"), str) or not spec["title"].strip():
         problems.append("title must be a non-empty string")
     repo = str(spec.get("repo", ""))
@@ -157,6 +159,8 @@ def validate_spec(spec):
                     or g.split("/")[0] in ("", "..", "."):
                 problems.append(f"{key} entry must be a relative glob: {g!r}")
 
+    if "allow_no_prlimit" in spec and not isinstance(spec["allow_no_prlimit"], bool):
+        problems.append(f"allow_no_prlimit must be a real JSON bool, not {spec['allow_no_prlimit']!r}")
     check_globs("allowed_code_paths")
     check_globs("allowed_test_paths")
     cases_file = spec.get("cases_file", f"tests/{tid}.cases.json")
@@ -191,7 +195,8 @@ def preflight(job):
     if not shutil.which("prlimit") and not spec.get("allow_no_prlimit"):
         raise Pause("prlimit is not on PATH: tests would run WITHOUT CPU/address-space "
                     "limits; install prlimit, or set \"allow_no_prlimit\": true to accept")
-    running = [a for a in paseo_ls() if a.get("status") == "running" and "qwen" in str(a.get("model", "")).lower()]
+    # real `paseo ls -g --json` keys (verified): id/shortId/name/provider/status/cwd
+    running = [a for a in paseo_ls() if a.get("status") == "running" and "qwen" in str(a.get("provider", "")).lower()]
     room = int(spec["qwen_cap"]) - int(spec["reserve"])
     if len(running) >= room:
         raise Pause(f"refusing to start: {len(running)} Qwen agents running, "
@@ -200,8 +205,8 @@ def preflight(job):
 
 
 def ensure_preflight(job):
-    """Re-runs the safety gates on every resume until preflight_ok is set;
-    returns an exit code, or None to continue."""
+    # re-runs the safety gates on every resume until preflight_ok is set;
+    # returns an exit code, or None to continue
     if job.get("preflight_ok"):
         return None
     try:
@@ -247,8 +252,7 @@ def coder_prompt(job):
         f"Contract:\n{contract_text(job)}\nRules:\n- Touch ONLY files matching: "
         f"{', '.join(job['spec']['allowed_code_paths'])}.\n- Do NOT write the acceptance "
         f"tests; a separate designer owns them.\n- Run your own quick checks, then commit "
-        f"on the current branch."
-    )
+        f"on the current branch.")
 
 
 def review_prompt(job):
@@ -257,9 +261,8 @@ def review_prompt(job):
         f"designer).\nContract:\n{contract_text(job)}\nChecklist: assertions match the "
         f"CONTRACT and real CLI behavior; every declared control really passes on the "
         f"base commit; every intended red fails for the right reason; the tests do not "
-        f'accidentally target another change.\nEnd your reply with exactly one line: '
-        f'"VERDICT: APPROVE" or "VERDICT: CHANGES REQUESTED", findings below it.'
-    )
+        f"accidentally target another change.\nWrite your findings first, then END your "
+        f'reply with exactly one line: "VERDICT: APPROVE" or "VERDICT: CHANGES REQUESTED".')
 
 
 def base_env(job):
@@ -268,8 +271,8 @@ def base_env(job):
 
 def agent_cwd(job, agent_id):
     for a in paseo_ls():
-        if a.get("agentId") == agent_id and a.get("cwd"):
-            return a["cwd"]
+        if a.get("id") == agent_id and a.get("cwd"):
+            return os.path.expanduser(a["cwd"])  # real cwd can start with ~
     raise Pause(f"agent {agent_id} reports no worktree path (cwd) in paseo ls output")
 
 
@@ -280,11 +283,15 @@ def check_permits(job):
                     f"{tail_text(err, 3)}")
     data = json_of(out, "paseo permit ls output")
     entries = data.get("permits", []) if isinstance(data, dict) else data
-    ids = {job.get("coder_agent"), job.get("designer_agent"), *(job.get("reviewers") or {}).values()}
-    hit = [e for e in entries if e.get("agentId") in ids]
+    ids = {str(i) for i in (job.get("coder_agent"), job.get("designer_agent"),
+                            *(job.get("reviewers") or {}).values()) if i}
+
+    def relates(e):  # permit entry keys UNVERIFIED upstream: id-ish fields, prefix-tolerant
+        vals = {str(e[k]) for k in ("id", "agentId", "agent", "shortId") if e.get(k)}
+        return any(v == i or v.startswith(i) or i.startswith(v) for v in vals for i in ids)
+    hit = sorted(str(e.get("id") or e.get("agentId") or e.get("agent") or e) for e in entries if relates(e))  # noqa: E501
     if hit:
-        raise Pause(f"permission prompt pending for job agents: "
-                    f"{sorted(e.get('agentId') for e in hit)}")
+        raise Pause(f"permission prompt pending for job agents: {hit}")
 
 
 def record_turn(job, role, rc, out, err):
@@ -335,22 +342,26 @@ def _kill_all(procs):
         proc.wait()
 
 
+def live_ids():
+    return {str(a.get("id")) for a in paseo_ls() if a.get("status") not in (None, "stopped")}
+
+
 def stop_job_agents(job):
     # killing the `paseo run` client does NOT stop the agent; stop the job's
     # agents by title, EXCEPT roles whose id is already recorded (= healthy)
     known = ({str(job.get(f"{r}_agent")) for r in ("coder", "designer")}
              | {str(v) for v in (job.get("reviewers") or {}).values()})
+    prefix = f"AgentCoder {job['task_id']} "[:60]  # ls `name` = title, truncated ~60
     for e in paseo_ls():
-        title = str(e.get("title", ""))
-        aid = str(e.get("agentId"))
-        if title.startswith(f"AgentCoder {job['task_id']} ") and aid not in known:
+        name, aid = str(e.get("name", "")), str(e.get("id"))
+        if name.startswith(prefix) and aid not in known:
             run_guarded(["paseo", "stop", aid])
-            job.setdefault("stopped_agents", {})[title.rsplit(" ", 1)[-1]] = aid
+            job.setdefault("stopped_agents", {})[name.rsplit(" ", 1)[-1]] = aid
 
 
 def do_spawn(job):
     spec = job["spec"]
-    live = {str(a.get("agentId")) for a in paseo_ls() if a.get("status") not in (None, "stopped")}
+    live = live_ids()
     for role in ("coder", "designer"):  # resume: a recorded id that died must respawn
         if job.get(f"{role}_agent") and str(job[f"{role}_agent"]) not in live:
             job.pop(f"{role}_agent", None), job.pop(f"{role}_cwd", None)
@@ -360,15 +371,12 @@ def do_spawn(job):
         procs = {}
         for role in need:
             model = spec.get(f"{role}_model") or DEFAULT_MODEL
-            argv = resolve(["paseo", "run", "--new-workspace", "worktree",
-                            "--worktree-mode", "branch-off",
-                            "--new-branch", branch_name(job, role),
-                            "--base", job["base_sha"], "--model", model,
-                            "--title", f"AgentCoder {job['task_id']} {role}",
-                            "--json", prompts[role]])
-            procs[role] = subprocess.Popen(argv, cwd=spec["repo"],
-                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                           text=True)
+            argv = resolve(["paseo", "run", "--new-workspace", "worktree", "--worktree-mode",
+                            "branch-off", "--new-branch", branch_name(job, role),
+                            "--base", job["base_sha"], "--model", model, "--title",
+                            f"AgentCoder {job['task_id']} {role}", "--json", prompts[role]])
+            procs[role] = subprocess.Popen(argv, cwd=spec["repo"], stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE, text=True)
         for role, proc in procs.items():
             try:
                 out, err = proc.communicate(timeout=int(spec.get("agent_timeout", 1800)))
@@ -394,8 +402,8 @@ def path_matches(p, g):
 
 
 def scope_check(job, sha, globs, who):
-    changed = [p for p in git(job["spec"]["repo"], "diff", "--name-only",
-                              job["base_sha"], sha).splitlines() if p]
+    changed = [p for p in git(job["spec"]["repo"], "diff", "--name-only", "--diff-filter=ACMR",
+                              job["base_sha"], sha).splitlines() if p]  # skip D/R-away paths
     bad = sorted(p for p in changed if not any(path_matches(p, g) for g in globs))
     if bad:
         raise Escalate(f"{who} touched paths outside its allowed globs: {bad}")
@@ -416,6 +424,8 @@ def do_test_review(job):
         test_sha = job.get("test_sha") or git(job["designer_cwd"], "rev-parse", "HEAD")
         job["test_sha"] = test_sha
         key = f"{rnd}@{test_sha[:8]}"  # sha-scoped: re-reviews get a fresh reviewer
+        if reviewers.get(key) and str(reviewers[key]) not in live_ids():
+            reviewers.pop(key)  # recorded reviewer died: respawn, not a permanent pause
         if not reviewers.get(key):
             spawn_agent(job, f"review-r{rnd}-{test_sha[:6]}", spec["test_reviewer_model"],
                         test_sha, review_prompt(job))
@@ -426,19 +436,22 @@ def do_test_review(job):
         if rc != 0:
             raise Pause(f"paseo logs for reviewer {reviewers[key]} failed (rc={rc}): "
                         f"{tail_text(err, 3)}")
-        verdicts = re.findall(r"VERDICT:\s*(APPROVE|CHANGES REQUESTED)", out)
-        if not verdicts:
-            raise Pause(f"reviewer round {rnd} produced no VERDICT line; refusing to guess")
+        # logs include [Thought] blocks: only the FINAL non-empty line can be the verdict
+        last = next((ln.strip() for ln in reversed(out.splitlines()) if ln.strip()), "")
+        m = re.fullmatch(r"VERDICT:\s*(APPROVE|CHANGES REQUESTED)", last)
+        if not m:
+            raise Pause(f"reviewer round {rnd} ends on {last[:80]!r}, not a VERDICT line; "
+                        "refusing to guess (thought-block text never counts)")
         check_permits(job)
-        if verdicts[-1] == "APPROVE":
+        if m.group(1) == "APPROVE":
             job["test_review"] = "APPROVE"
             job["review_round"] = rnd
             job["reviewed_test_sha"] = test_sha
             return
         job["test_review"] = f"CHANGES REQUESTED (round {rnd})"
         send_to(job, "designer_agent",
-                f"Test review round {rnd} requested changes; the reviewer said:\n"
-                f"{tail_text(out)}\nFix the tests on your branch, keep them blind, commit.")
+                f"Test review round {rnd} requested changes; the reviewer said:\n{tail_text(out)}\n"
+                "Fix the tests on your branch, keep them blind, commit.")
         rnd += 1
         job["review_round"] = rnd
         job["test_sha"] = None
@@ -531,7 +544,7 @@ def compare_cases(cases, outcomes):
 
 
 def gate_failures(cases, outcomes):
-    """Every declared id must have been collected and PASSED; anything else is red."""
+    # every declared id must have been collected and PASSED; anything else is red
     return [f"{t} ({outcomes.get(t, 'NOT-COLLECTED')})"
             for t in sorted(cases) if outcomes.get(t, "NOT-COLLECTED") != "PASSED"]
 
@@ -583,11 +596,9 @@ def do_execute(job):
                            f"{'; '.join(problems[:6])}")
         send_to(job, "designer_agent",
                 "Executor ran the frozen tests against the BASE commit and the outcomes "
-                "contradict " + spec["cases_file"] + ":\n"
-                + "\n".join(f"- {p}" for p in problems)
-                + "\nOutput tail:\n" + tail_text(out)
-                + "\nFix the tests (a control that fails on base, a 'fail' case that "
-                  "passes on base = TEST bug). Never edit the implementation.")
+                "contradict " + spec["cases_file"] + ":\n" + "\n".join(f"- {p}" for p in problems)
+                + "\nOutput tail:\n" + tail_text(out) + "\nFix the tests (a control that "
+                "fails on base, a 'fail' case that passes on base = TEST bug). Never edit it.")
         rnd += 1
         job["execute_round"] = rnd
         job["test_sha"] = None
@@ -652,10 +663,14 @@ def do_land(job):
                        f"sweep them into the test commit:\n{tail_text(dirty, 15)}")
     git(wt, "checkout", job["test_sha"], "--", *job["test_paths"])
     if git(wt, "diff", "--cached", "--name-only", check=False):
-        git(wt, "-c", "user.name=agentcoder", "-c", "user.email=noreply@refdes.local",
-            "commit", "--author", "agentcoder <noreply@refdes.local>",
-            "-m", f"test: acceptance tests for {job['task_id']} (agentcoder)",
-            "-m", co_trailer(job))
+        try:
+            git(wt, "-c", "user.name=agentcoder", "-c", "user.email=noreply@refdes.local",
+                "commit", "--author", "agentcoder <noreply@refdes.local>",
+                "-m", f"test: acceptance tests for {job['task_id']} (agentcoder)",
+                "-m", co_trailer(job))
+        except Pause:  # driver's own staged files must not read as coder dirt on resume
+            git(wt, "reset", "-q", "--", *job["test_paths"], check=False)
+            raise
         # driver-recorded sha (job.json is not agent-writable): identifies the
         # driver's own test commit as landable on resume, without string matching
         job["test_landed_sha"] = git(wt, "rev-parse", "HEAD")
@@ -674,9 +689,8 @@ def do_land(job):
         hit = next((p for p in existing if p.get("state") == "OPEN"
                     or (p.get("state") == "MERGED" and p.get("headRefOid") == job.get("pushed_sha"))), None)
         if hit is None and existing:
-            raise Escalate(f"PR(s) {[(p.get('number'), p.get('state')) for p in existing]}"
-                           f" exist for {branch_name(job, 'coder')} and none is "
-                           f"adoptable; resolve them manually before landing")
+            raise Escalate(f"PR(s) {[(p.get('number'), p.get('state')) for p in existing]} exist "
+                           f"for {branch_name(job, 'coder')} and none is adoptable; resolve manually")
         if hit:
             job["pr_number"] = int(hit["number"])
             save_job(job)
@@ -684,11 +698,10 @@ def do_land(job):
         else:
             body = Path(job["jobdir"], "report.md")
             write_report(job, landing=True)
-            rc, out, err = run_guarded(
-                ["gh", "pr", "create", "--title", str(job["spec"]["title"]),
-                 "--base", str(job["spec"]["base"]),
-                 "--head", branch_name(job, "coder"),
-                 "--body-file", str(body)], cwd=wt)
+            rc, out, err = run_guarded(["gh", "pr", "create", "--title", str(job["spec"]["title"]),
+                                        "--base", str(job["spec"]["base"]),
+                                        "--head", branch_name(job, "coder"),
+                                        "--body-file", str(body)], cwd=wt)
             if rc != 0:
                 raise Pause(f"gh pr create failed (rc={rc}): {tail_text(err, 5)}")
             found = re.search(r"/pull/(\d+)", out)
@@ -705,11 +718,10 @@ def write_report(job, landing=False):
                      for r in job.get("candidate_results", []))
     lines = [
         f"# agentcoder report — {job['task_id']}", "",
-        f"- status: **{job.get('status', 'running')}**"
-        + (f" — {job['reason']}" if job.get("reason") else ""),
+        f"- status: **{job.get('status', 'running')}**" + (f" — {job['reason']}" if job.get("reason") else ""),  # noqa: E501
         f"- base SHA: `{job.get('base_sha')}`", f"- frozen test SHA: `{job.get('test_sha')}`",
         f"- coder SHA: `{job.get('coder_sha')}`", f"- PR: {job.get('pr_number') or '-'}",
-        f"- controls green: {job.get('controls')}, intended reds: {job.get('intended_reds')}",
+        f"- controls: {job.get('controls')} green, reds: {job.get('intended_reds')}",
         f"- test review: {job.get('test_review', 'not reached')}", "",
         "## Contract (summary)", "",
         tail_text(contract_text(job), 20) if job.get("spec", {}).get("contract_file") else "-",
@@ -720,13 +732,12 @@ def write_report(job, landing=False):
     Path(job["jobdir"], "report.md").write_text("\n".join(lines) + "\n")
     if landing:
         return
-    summary = {"job": job["jobdir"], "task_id": job["task_id"],
-               "status": job.get("status"), "reason": job.get("reason"),
-               "base_sha": job.get("base_sha"), "test_sha": job.get("test_sha"),
-               "code_sha": job.get("coder_sha"), "controls_green": job.get("controls"),
-               "intended_reds": job.get("intended_reds"), "test_review": job.get("test_review"),
-               "candidate_results": job.get("candidate_results", []),
-               "pr_number": job.get("pr_number")}
+    summary = {"job": job["jobdir"], "task_id": job["task_id"], "status": job.get("status"),
+               "reason": job.get("reason"), "base_sha": job.get("base_sha"),
+               "test_sha": job.get("test_sha"), "code_sha": job.get("coder_sha"),
+               "controls_green": job.get("controls"), "intended_reds": job.get("intended_reds"),
+               "test_review": job.get("test_review"), "pr_number": job.get("pr_number"),
+               "candidate_results": job.get("candidate_results", [])}
     print(json.dumps(summary, indent=1, sort_keys=True))
 
 
@@ -763,7 +774,6 @@ def exit_json(status, reason):
 
 def main(argv):
     if not argv:
-        print(__doc__.strip().splitlines()[0])
         print("usage: agentcoder.py run SPEC.json [JOBDIR] | resume JOBDIR | status JOBDIR")
         return EXIT_ERROR
     cmd, arg = argv[0], argv[1] if len(argv) > 1 else ""
@@ -779,8 +789,7 @@ def main(argv):
             if problems:
                 exit_json("invalid-spec", "; ".join(problems))
                 return EXIT_ERROR
-            for key, value in (("test_command", DEFAULT_TC),
-                               ("coder_model", DEFAULT_MODEL),
+            for key, value in (("test_command", DEFAULT_TC), ("coder_model", DEFAULT_MODEL),
                                ("designer_model", DEFAULT_MODEL), ("max_rounds", 2),
                                ("qwen_cap", 8), ("reserve", 1),
                                ("cases_file", f"tests/{spec['task_id']}.cases.json")):
@@ -800,9 +809,8 @@ def main(argv):
             job = load_job(arg)
             job["jobdir"] = str(Path(arg).resolve())
             if cmd == "status":
-                keep = ("task_id", "phase", "status", "reason", "base_sha", "test_sha",
-                        "coder_sha", "pr_number", "test_review", "execute_round", "review_round",
-                        "candidate_round")
+                keep = ("task_id", "phase", "status", "reason", "base_sha", "test_sha", "coder_sha",
+                        "pr_number", "test_review", "execute_round", "review_round", "candidate_round")
                 print(json.dumps({k: job.get(k) for k in keep}, indent=1, sort_keys=True))
                 return EXIT_OK
             job["status"], job["reason"] = "running", None

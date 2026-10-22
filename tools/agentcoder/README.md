@@ -40,7 +40,8 @@ print the JSON on stdout as their entire output; running with no arguments
 prints the usage text (not JSON) and exits 1.
 
 The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
-`paseo`); on Windows it is untested and its test suite is skipped.
+`paseo`); its test suite is skipped on **non-Linux** (the preflight gate needs
+`prlimit`, a Linux tool), and the driver is untested on Windows/macOS.
 
 `paseo` is resolved via `AGENTCODER_PASEO` and `gh` via `AGENTCODER_GH`
 (env vars), which is also how the test suite fakes them.
@@ -78,8 +79,10 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
   `tests/<task_id>.cases.json` and must sit inside `allowed_test_paths`.
 - `{tests}` in `test_command` expands to the files matching the
   `allowed_test_paths` globs, expanded by the driver with
-  `glob.glob(..., recursive=True)` relative to the job's worktree — pytest
-  does not expand patterns itself, and a pattern matching nothing is a
+  `glob.glob(..., recursive=True)` relative to the job's worktree, keeping
+  only **directories and `.py` files** (a `tests/**` glob also matches the
+  designer's data files, and pytest exits rc=4 on those). pytest does not
+  expand patterns itself, and a pattern matching nothing is a
   Pause, not an empty pytest run. For pytest commands the driver appends
   `--junitxml` (written into the job dir, outside the repo) and `--rootdir`,
   and judges per-test outcomes from that XML only: agent-written stdout
@@ -162,8 +165,8 @@ spawn ──► test_review ──► execute ──► candidate ──► land
    (`rev-parse`) each round, never trusted from memory. Tests are never
    loosened.
  5. **land** — escalates if the coder worktree's tracked tree is
-     dirty. Its HEAD must be the gated candidate SHA (or land's own
-     driver-recorded test-commit/pushed SHA on a resumed land); if the coder
+     dirty. Its HEAD must be the gated candidate SHA, or (on a resumed
+     land) the driver-recorded test-commit SHA `test_landed_sha`; if the coder
      moved the branch after gating, land **bounces back to the candidate
      phase** — the new head is re-gated, and only a green re-gate lands.
      The frozen test files are then committed
@@ -241,6 +244,16 @@ resolution.
 - If a job is paused mid-`send`, resuming re-sends the feedback (agents are
   idempotently re-prompted, not deduplicated).
 - Running this repo's test suite with `--basetemp` pointed **inside the
-  repo tree** makes ~15 scaffold/sealing tests fail spuriously (they are
-  sensitive to their temp dir living in a git repo); use pytest's default
-  basetemp, which is where the green numbers were measured.
+  repo tree** has been observed to fail scaffold/sealing tests spuriously
+  (they are sensitive to their temp dir living in a git repo; the exact
+  count was never pinned down — treat "~15" as unverified); use pytest's
+  default basetemp, which is where the green numbers were measured.
+- **JSON key names** for `paseo` were verified against live commands:
+  `paseo ls -g --json` entries carry `id`/`shortId`/`name`/`provider`/
+  `thinking`/`status`/`cwd`/`created` (there is **no** `agentId`/`title`/
+  `model` in ls output; `name` is the title truncated to ~60 chars, so
+  title matching uses the truncated prefix), and `paseo run --json` returns
+  `agentId`/`status`. **Unverified** and handled tolerantly: the entry keys
+  of `paseo permit ls --json` (matched across `id`/`agentId`/`agent`/
+  `shortId`, prefix-tolerant) and the `status` field of
+  `paseo send --json`; `gh pr list --json` uses the documented gh fields.
