@@ -76,6 +76,37 @@ main tip.
   tools/agentcoder/agentcoder.py tests/test_agentcoder_tool.py --select
   E9,F` is clean.
 
+## Round 3 (reviewers: driver + README, on the round-2 head)
+
+- Preflight was escapable: a pause inside it left `base_sha` set, and resume
+  keyed re-verification off `base_sha is None`, so the prlimit/capacity
+  gates were skipped on the next resume. Fixed with an explicit
+  `preflight_ok` flag set only after ALL checks pass, re-checked by every
+  resume via one `ensure_preflight` helper (also de-duplicated the two
+  call sites); tests prove resume re-pauses for prlimit-missing and a full
+  Qwen cap until the condition clears, then proceeds.
+- `run_tests` swallowed its own timeout (empty outcomes -> the run got
+  blamed/judged); now a timeout, and any exit outside {0,1,5} with no
+  per-test outcomes, PAUSEs with the real reason. `git()` gained a 120s
+  default timeout (300s for push) + `GIT_TERMINAL_PROMPT=0` -> Pause.
+- Land now refuses a moved coder HEAD (only land's own test commit on a
+  resume is accepted) and a dirty tracked tree (escalate, before checkout,
+  so `git add`ed garbage can't be swept into the test commit).
+- PR adoption: adopt only OPEN PRs, or MERGED with head == gated coder SHA;
+  CLOSED unmerged -> escalate; failing `gh pr list` -> pause (no blind
+  create). Designer feedback uses `cases_file` from the spec, not a
+  hardcoded path; `check_permits` rc!=0 and an unreadable contract no
+  longer report "all clear"/empty text silently.
+- README: exit-path list (no-args prints usage, not JSON; `status` exits
+  0), pause-vs-escalate classification (dropped the stale-SHA claim),
+  reviewer branch placement, PR-body contents, candidate green = exit 0
+  AND all ids PASSED, `agent_timeout`/`test_timeout` documented, fnmatch
+  scope-matching + raw `{tests}` noted in Limits.
+- 36 driver tests (7 new); full suite 4298 passed, 2 skipped, 0 failed;
+  ruff (E9,F on the two files) clean; driver at 696 non-blank/non-comment
+  lines (cap 700 -- it is nearly full; future work on this file should
+  expect to delete code to add any).
+
 ## Status
 
 Finished. PR #356: "feat(tools): agentcoder -- a small driver for coder /

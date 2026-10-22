@@ -27,11 +27,12 @@ python tools/agentcoder/agentcoder.py status JOBDIR
 `JOBDIR` defaults to `<repo>/.scratch/agentcoder/<task_id>/` — keep job
 dirs out of tracked paths (in this repo `.scratch/` is gitignored). Exit
 codes: **0** done (`ready-for-human-gate`), **2** escalated, **1**
-error/paused. Every run prints a JSON object with at least `status` and
-`reason` on stdout. Exits that already have a `JOBDIR` (preflight pause,
-escalation, completion) also write `JOBDIR/report.md`; the exits with **no**
+error/paused. `status` always exits 0 and prints the job's recorded fields as
+JSON. Exits that have a `JOBDIR` (preflight pause, mid-run pause, escalation,
+completion) print JSON **and** write `JOBDIR/report.md`; the exits with **no**
 jobdir (unknown command, unreadable/invalid spec, jobdir already in use)
-print the JSON on stdout as their entire output.
+print the JSON on stdout as their entire output; running with no arguments
+prints the usage text (not JSON) and exits 1.
 
 The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
 `paseo`); on Windows it is untested and its test suite is skipped.
@@ -69,10 +70,16 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
   the driver appends `-rA` to pytest invocations to capture per-test outcomes.
 - `test_reviewer_model` optional — when absent the test-review phase is
   skipped and the report says so.
-- Before starting: refuses to run if `paseo ls -g --json` shows
-  running Qwen agents >= `qwen_cap - reserve`, and **pauses** (no agents
-  started) if `prlimit` is not on `PATH` unless the spec sets
-  `"allow_no_prlimit": true` — the executor never silently drops the limits.
+- The start gates — `paseo ls -g --json` must show running Qwen agents
+  below `qwen_cap - reserve`, and `prlimit` must be on `PATH` unless the
+  spec sets `"allow_no_prlimit": true` (the executor never silently drops
+  the limits) — are re-checked on **every** `resume` until all of them pass
+  at once; only a fully-passed preflight is recorded as passed, so a pause
+  inside preflight can never let `resume` skip a gate.
+- `agent_timeout` (default 1800s) bounds each blocking `paseo` call;
+  `test_timeout` (default 120s) bounds each `test_command` run — a test run
+  that exceeds it **pauses** the job (the output is never judged, no agent
+  is fed it).
 
 ## State machine
 
@@ -86,7 +93,7 @@ spawn ──► test_review ──► execute ──► candidate ──► land
 
 1. **spawn** — two worktrees at the base SHA, created **in parallel** via
    `paseo run --new-workspace worktree --worktree-mode branch-off
-   --new-branch ac/<task>/{coder,designer,review-r<n>} --base <sha> ...` (each blocking
+   --new-branch ac/<task>/{coder,designer} --base <sha> ...` (each blocking
    call is that agent's whole turn). The designer is told: tests only under
    `allowed_test_paths`, never touch anything else, never inspect other
    branches (`git log --all`), commit, and write
@@ -95,8 +102,9 @@ spawn ──► test_review ──► execute ──► candidate ──► land
    `"fail"` (new behavior) plus a one-line requirement. The coder is told:
    implement the contract, touch only `allowed_code_paths`, do **not** write
    the acceptance tests.
-2. **test_review** (optional) — one reviewer agent per round in a worktree at
-   the frozen test commit, with a checklist; the driver parses its final
+ 2. **test_review** (optional) — one reviewer agent per round on an
+    `ac/<task>/review-r<n>` branch created at the frozen test SHA,
+    with a checklist; the driver parses its final
    `VERDICT: APPROVE|CHANGES REQUESTED` line. Findings are `paseo send`-ed to
    the designer (blocking); at most `max_rounds`, then escalate.
 3. **execute** — freeze the test commit SHA; its changed paths must fit
@@ -108,24 +116,32 @@ spawn ──► test_review ──► execute ──► candidate ──► land
    a `pass` control that is not PASSED on base, or a `fail` test that is not
    FAILED on base (SKIPPED/XFAIL/XPASS/missing all count), is a **TEST bug** —
    the mismatch goes to the designer, up to `max_rounds` rounds, then escalate.
-4. **candidate** — temp detached worktree of the coder's HEAD + frozen tests;
-   coder's changed paths checked against `allowed_code_paths`. A round is
-   green only when **every** id declared in `cases.json` shows outcome
-   PASSED for the coder's code; SKIPPED/XFAIL/XPASS/ERROR/missing and exit 5
-   (nothing collected) are red, with the observed outcome fed back per id.
+ 4. **candidate** — temp detached worktree of the coder's HEAD + frozen tests;
+    coder's changed paths checked against `allowed_code_paths`. A round is
+    green only when the pytest run exits 0 **and** **every** id declared in
+    `cases.json` shows outcome PASSED for the coder's code; SKIPPED/XFAIL/
+    XPASS/ERROR/missing and exit 5 (nothing collected) all count as red even
+    if the exit code is 0, with the observed outcome fed back per id.
    Failures are fed to the coder as the last 150 output lines + failing ids
    (blocking `paseo send`), at most `max_rounds`; the coder's head is re-read
    (`rev-parse`) each round, never trusted from memory. Tests are never
    loosened.
-5. **land** — the frozen test files are committed into the coder's branch
-   (authored `agentcoder <noreply@refdes.local>`, trailer
-   `Co-authored-by: <name> <noreply@refdes.local>` where `<name>` is the
-   last path segment of `coder_model`), the branch is pushed, an existing
-   PR for the branch is adopted if `gh pr list` finds one (so a crash
-   between `gh pr create` and the state save cannot fork a second PR),
-   `gh pr create` opens the PR (contract summary + the full per-round
-   executor results), and the PR number is printed.
-   **Nothing is merged, no merge holds touched, no permissions approved.**
+ 5. **land** — refuses (escalates) if the coder worktree's tracked tree is
+    dirty or its HEAD is not the gated candidate SHA (land's own test commit
+    on a resumed land is accepted). The frozen test files are then committed
+    into the coder's branch (authored `agentcoder <noreply@refdes.local>`,
+    trailer `Co-authored-by: <name> <noreply@refdes.local>` where `<name>`
+    is the last path segment of `coder_model`) and the branch is pushed.
+    `gh pr list --state all` runs first: an **OPEN** PR for the branch — or
+    a MERGED one whose head SHA equals the gated coder SHA (crash between
+    `gh pr create` and the state save) — is adopted, so a second PR can
+    never fork; a CLOSED, unmerged PR **escalates** for a human; a failing
+    `gh pr list` **pauses** (the driver won't run `gh pr create` blind).
+    Otherwise `gh pr create` opens the PR with `report.md` as the body —
+    the last 20 lines of the contract, the base/test/coder SHA lines, the
+    per-round candidate results table, and the status line (it reads
+    `running` while landing) — and the PR number is printed.
+    **Nothing is merged, no merge holds touched, no permissions approved.**
 6. **report** — `JOBDIR/report.md` + JSON summary (base/test/code SHAs,
    controls green, intended reds, candidate results per round, review
    verdict, PR number, status).
@@ -134,10 +150,15 @@ Temp worktrees under `JOBDIR` used by execute/candidate are removed
 (`git worktree remove --force`) at the end of each round, including on
 failure.
 
-Any error, quota failure, missing verdict, stale SHA, agent in an error
-state, or a pending permission prompt (detected via `paseo permit ls`
-showing the job's agents) **pauses** the job: state saved, precise reason,
-`resume` continues. The driver never guesses.
+Operational anomalies — a command/quota failure, a timeout, a missing
+verdict, an agent in an error state, a pending permission prompt (detected
+via `paseo permit ls` showing the job's agents), a failing `gh pr list` —
+**pause** the job: state saved, precise reason, `resume` continues (after
+re-running the preflight gates). Expected loop outcomes — a contract/scope
+violation, `max_rounds` exhausted, a coder branch that moved or went dirty
+before land, a CLOSED unmerged PR — **escalate** (exit 2) for a human. The
+driver never guesses and has no stale-SHA detection of its own: SHAs are
+re-read from git each round, never trusted from memory.
 
 ## Limits / what it deliberately does NOT do
 
@@ -151,5 +172,11 @@ showing the job's agents) **pauses** the job: state saved, precise reason,
 - No merges, no approvals, no auto-resume across reboots — `resume` is
   manual and explicit.
 - No parallel candidate rounds; rounds are sequential by design.
+- `allowed_test_paths` patterns are matched with `fnmatch` for the scope
+  checks (so `tests/**` matches `tests/pkg/t.py` there), then handed to
+  `test_command`/pytest **raw** as `{tests}`: a pattern pytest cannot
+  resolve itself (shell brace globbing like `tests/{a,b}.py`) passes the
+  scope check while collecting nothing — keep the patterns in the dialect
+  pytest accepts.
 - If a job is paused mid-`send`, resuming re-sends the feedback (agents are
   idempotently re-prompted, not deduplicated).

@@ -170,12 +170,16 @@ with open(LOG, "a") as fh:
     fh.write(json.dumps(sys.argv[1:]) + "\n")
 args = sys.argv[1:]
 if args[:2] == ["pr", "list"]:
+    if S.get("pr_list_fails"):
+        sys.exit(1)
     created = S.get("pr_exists")
     if not created and os.path.exists(LOG):
         for line in open(LOG):
             if json.loads(line)[:2] == ["pr", "create"]:
                 created = True
-    print(json.dumps([{"number": 4242}] if created else []))
+    row = {"number": 4242, "state": S.get("pr_state", "OPEN"),
+           "headRefOid": S.get("pr_head", "")}
+    print(json.dumps([row] if created else []))
 elif args[:2] == ["pr", "create"]:
     print("https://github.com/fake/repo/pull/4242")
 else:
@@ -624,6 +628,88 @@ def test_temp_worktrees_removed(tmp_path, monkeypatch):
     assert env.run() == 0
     assert not (env.jobdir / "base-wt").exists()
     assert not list(env.jobdir.glob("cand-wt-*"))
+
+
+def test_preflight_prlimit_gate_survives_resume(tmp_path, monkeypatch):
+    real_which = agentcoder.shutil.which
+    env = build_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(agentcoder.shutil, "which", lambda name: None)
+    assert env.run() == 1
+    assert "prlimit" in env.job()["reason"]
+    assert env.resume() == 1  # the gate must NOT be considered passed
+    assert "prlimit" in env.job()["reason"]
+    assert not env.calls()  # no agents were ever started
+    monkeypatch.setattr(agentcoder.shutil, "which", real_which)
+    assert env.resume() == 0  # gate passes now, job proceeds
+
+
+def test_cap_gate_survives_resume(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={"running_qwen": 9})
+    assert env.run() == 1
+    assert "refusing to start" in env.job()["reason"]
+    assert env.resume() == 1  # cap still full: resume must re-pause
+    assert "refusing to start" in env.job()["reason"]
+    env.scenario["running_qwen"] = 0
+    env.scen_path.write_text(json.dumps(env.scenario))
+    assert env.resume() == 0
+
+
+def test_test_timeout_pauses_not_blamed(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, spec_overrides={"test_timeout": 0})
+    assert env.run() == 1
+    job = env.job()
+    assert job["status"] == "paused"
+    assert "timed out" in job["reason"]
+    assert "mismatch" not in job["reason"]
+    assert not any(c[:1] == ["send"] for c in env.calls())  # no agent was fed it
+
+
+def test_land_refuses_dirty_coder_tree(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch)
+    real_cand = agentcoder.do_candidate
+
+    def cand(job):
+        real_cand(job)
+        (Path(job["coder_cwd"]) / "sneaky.py").write_text("import os\n")
+        gitat(job["coder_cwd"], "add", "sneaky.py")
+
+    monkeypatch.setitem(agentcoder.HANDLERS, "candidate", cand)
+    assert env.run() == 2
+    assert "sweep" in env.job()["reason"]
+    assert env.gh_calls() == []  # nothing pushed, no PR
+
+
+def test_land_refuses_moved_coder_branch(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch)
+    real_cand = agentcoder.do_candidate
+
+    def cand(job):
+        real_cand(job)
+        coder = Path(job["coder_cwd"])
+        (coder / "extra.py").write_text("x = 1\n")
+        gitat(coder, "add", "extra.py")
+        gitat(coder, "-c", "user.name=x", "-c", "user.email=x@x", "commit", "-qm", "extra")
+
+    monkeypatch.setitem(agentcoder.HANDLERS, "candidate", cand)
+    assert env.run() == 2
+    assert "moved past the gated sha" in env.job()["reason"]
+    assert env.gh_calls() == []
+
+
+def test_land_gh_list_failure_pauses(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={"pr_list_fails": True})
+    assert env.run() == 1
+    assert "gh pr list failed" in env.job()["reason"]
+    assert not [c for c in env.gh_calls() if c[:2] == ["pr", "create"]]
+
+
+def test_land_closed_pr_escalates(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch,
+                    scenario_overrides={"pr_exists": True, "pr_state": "CLOSED"})
+    assert env.run() == 2
+    assert "closed unmerged" in env.job()["reason"]
+    assert env.job().get("pr_number") is None
+    assert not [c for c in env.gh_calls() if c[:2] == ["pr", "create"]]
 
 
 def test_reused_worktree_is_reset(tmp_path, monkeypatch):

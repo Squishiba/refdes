@@ -76,8 +76,13 @@ def json_of(text, what):
         raise Pause(f"unparseable {what}: {exc}: {text[:200]!r}")
 
 
-def git(repo, *args, check=True):
-    rc, out, err = run_cmd(["git", "-C", str(repo)] + [str(a) for a in args])
+def git(repo, *args, check=True, timeout=120):
+    try:
+        rc, out, err = run_cmd(["git", "-C", str(repo)] + [str(a) for a in args],
+                               env=dict(os.environ, GIT_TERMINAL_PROMPT="0"),
+                               timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise Pause(f"git {' '.join(map(str, args))} in {repo}: timed out after {timeout}s")
     if check and rc != 0:
         raise Pause(f"git {' '.join(map(str, args))} in {repo}: rc={rc} {err.strip()[:200]}")
     return out.strip()
@@ -189,12 +194,32 @@ def preflight(job):
     if len(running) >= room:
         raise Pause(f"refusing to start: {len(running)} Qwen agents running, "
                     f"cap({spec['qwen_cap']}) - reserve({spec['reserve']}) = {room}")
-    job["base_sha"] = git(spec["repo"], "rev-parse", "--verify",
-                          str(spec["base"]) + "^{commit}")
+    job["preflight_ok"] = True
+
+
+def ensure_preflight(job):
+    """Re-runs the safety gates on every resume until they have fully passed
+    (preflight_ok is only set once ALL checks pass, so a pause mid-preflight
+    cannot leave base_sha set and let resume skip the prlimit/capacity gates).
+    Returns an exit code to use, or None to continue."""
+    if job.get("preflight_ok"):
+        return None
+    try:
+        preflight(job)
+    except Pause as exc:
+        job["status"], job["reason"] = "paused", exc.reason
+        save_job(job)
+        write_report(job)
+        return EXIT_ERROR
+    save_job(job)
+    return None
 
 
 def contract_text(job):
-    return Path(job["spec"]["repo"], job["spec"]["contract_file"]).read_text()
+    try:
+        return Path(job["spec"]["repo"], job["spec"]["contract_file"]).read_text()
+    except OSError as exc:  # report.md must never crash the exit path
+        return f"(contract unreadable: {exc})"
 
 
 def branch_name(job, role):
@@ -261,7 +286,8 @@ def agent_cwd(job, agent_id):
 def check_permits(job):
     rc, out, err = run_guarded(["paseo", "permit", "ls", "--json"])
     if rc != 0:
-        return
+        raise Pause(f"cannot list pending permits (paseo permit ls rc={rc}): "
+                    f"{tail_text(err, 3)}")
     data = json_of(out, "paseo permit ls output")
     entries = data.get("permits", []) if isinstance(data, dict) else data
     ids = {job.get("coder_agent"), job.get("designer_agent"),
@@ -426,13 +452,17 @@ def run_tests(job, wt):
         argv.append("-rA")
     cmd = (["prlimit"] + LIM[1:]) if shutil.which("prlimit") else []
     cmd += argv
+    tmo = int(job["spec"].get("test_timeout", 120))
     try:
-        rc, out, err = run_cmd(cmd, cwd=wt, env=base_env(job),
-                               timeout=int(job["spec"].get("test_timeout", 120)))
+        rc, out, err = run_cmd(cmd, cwd=wt, env=base_env(job), timeout=tmo)
     except subprocess.TimeoutExpired:
-        return None, "test command timed out", {}
+        raise Pause(f"test command timed out after {tmo}s; nothing was judged "
+                    f"and no agent was fed this output")
     outcomes = {node.rstrip(":"): status
                 for status, node in OUTCOME_RE.findall(out + err)}
+    if rc not in (0, 1, 5) and not outcomes:
+        raise Pause(f"test command exited {rc} with no per-test outcomes: "
+                    f"{tail_text(out + err, 8)}")
     return rc, out + err, outcomes
 
 
@@ -522,7 +552,7 @@ def do_execute(job):
                            f"{'; '.join(problems[:6])}")
         send_to(job, "designer_agent",
                 "Executor ran the frozen tests against the BASE commit and the outcomes "
-                "contradict tests/" + job["task_id"] + ".cases.json:\n"
+                "contradict " + spec["cases_file"] + ":\n"
                 + "\n".join(f"- {p}" for p in problems)
                 + "\nOutput tail:\n" + tail_text(out)
                 + "\nFix the tests (a control that fails on base, a 'fail' case that "
@@ -577,20 +607,42 @@ def co_trailer(job):
 
 def do_land(job):
     wt = job["coder_cwd"]
+    head = git(wt, "rev-parse", "HEAD")
+    own_test_commit = (git(wt, "show", "-s", "--format=%an|%s", head)
+                       == f"agentcoder|test: acceptance tests for {job['task_id']} "
+                          f"(agentcoder)")
+    if head != job["coder_sha"] and not own_test_commit:
+        raise Escalate(f"coder branch moved past the gated sha {job['coder_sha'][:9]}; "
+                       f"refusing to land code that never passed the candidate gate")
+    dirty = git(wt, "status", "--porcelain", "--untracked-files=no")
+    if dirty:
+        raise Escalate("coder worktree has uncommitted/staged changes; refusing to "
+                       f"sweep them into the test commit:\n{tail_text(dirty, 15)}")
     git(wt, "checkout", job["test_sha"], "--", *job["test_paths"])
     if git(wt, "diff", "--cached", "--name-only", check=False):
         git(wt, "-c", "user.name=agentcoder", "-c", "user.email=noreply@refdes.local",
             "commit", "--author", "agentcoder <noreply@refdes.local>",
             "-m", f"test: acceptance tests for {job['task_id']} (agentcoder)",
             "-m", co_trailer(job))
-    git(wt, "push", "-u", "origin", branch_name(job, "coder"))
+    git(wt, "push", "-u", "origin", branch_name(job, "coder"), timeout=300)
     if job.get("pr_number") is None:
         rc, out, _ = run_guarded(["gh", "pr", "list", "--head",
-                                  branch_name(job, "coder"), "--json", "number",
-                                  "--state", "all"], cwd=wt)
-        existing = json_of(out, "gh pr list output") if rc == 0 else []
-        if existing:
-            job["pr_number"] = int(existing[0]["number"])
+                                  branch_name(job, "coder"), "--json",
+                                  "number,state,headRefOid", "--state", "all"], cwd=wt)
+        if rc != 0:
+            raise Pause("gh pr list failed; refusing to run gh pr create blind "
+                        "(a duplicate PR could result)")
+        existing = json_of(out, "gh pr list output")
+        hit = next((p for p in existing if p.get("state") == "OPEN"
+                    or (p.get("state") == "MERGED"
+                        and p.get("headRefOid") == job.get("coder_sha"))), None)
+        if hit is None and existing:
+            raise Escalate(f"closed unmerged PR(s) "
+                           f"{[p.get('number') for p in existing]} exist for "
+                           f"{branch_name(job, 'coder')}; resolve them manually "
+                           f"before landing")
+        if hit:
+            job["pr_number"] = int(hit["number"])
             save_job(job)
             print(f"PR: {job['pr_number']} (adopted existing)")
         else:
@@ -720,14 +772,9 @@ def main(argv):
             job = {"jobdir": str(jobdir), "task_id": spec["task_id"], "spec": spec,
                    "phase": "spawn", "status": "running", "reason": None}
             save_job(job)
-            try:
-                preflight(job)
-            except Pause as exc:
-                job["status"], job["reason"] = "paused", exc.reason
-                save_job(job)
-                write_report(job)
-                return EXIT_ERROR
-            save_job(job)
+            rc = ensure_preflight(job)
+            if rc is not None:
+                return rc
         elif cmd in ("resume", "status"):
             job = load_job(arg)
             job["jobdir"] = str(Path(arg))
@@ -738,15 +785,9 @@ def main(argv):
                 print(json.dumps({k: job.get(k) for k in keep}, indent=1, sort_keys=True))
                 return EXIT_OK
             job["status"], job["reason"] = "running", None
-            if job.get("base_sha") is None:  # killed before preflight finished
-                try:
-                    preflight(job)
-                except Pause as exc:
-                    job["status"], job["reason"] = "paused", exc.reason
-                    save_job(job)
-                    write_report(job)
-                    return EXIT_ERROR
-                save_job(job)
+            rc = ensure_preflight(job)
+            if rc is not None:
+                return rc
         else:
             exit_json("error", f"unknown command: {cmd}")
             return EXIT_ERROR
