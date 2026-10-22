@@ -108,7 +108,8 @@ def flag(name, dflt=None):
 
 cmd = ARGS[0]
 if cmd == "ls":
-    rows = [{"agentId": k, "status": "completed", "cwd": v["ws"], "model": "fake"}
+    rows = [{"agentId": k, "status": "completed", "cwd": v["ws"],
+             "model": "fake", "title": v.get("title", "")}
             for k, v in state["agents"].items() if v["ws"]]
     rows += [{"agentId": "q%d" % i, "status": "running",
               "model": "opencode/qwenlocal/Qwen3.8-Flash-Next"}
@@ -157,7 +158,8 @@ elif cmd == "run":
             write_commit(ws, files, "fake %s work" % role)
     state["seq"] += 1
     aid = "a%d" % state["seq"]
-    state["agents"][aid] = {"role": role, "ws": ws, "sends": 0}
+    state["agents"][aid] = {"role": role, "ws": ws, "sends": 0,
+                            "title": flag("--title", "")}
     save()
     print(json.dumps({"agentId": aid, "status": "completed"}))
 elif cmd == "send":
@@ -172,6 +174,12 @@ elif cmd == "send":
         rec["sends"] = n + 1
         save()
     print(json.dumps({"status": "completed"}))
+elif cmd == "stop":
+    rec = state["agents"].get(ARGS[1])
+    if rec is not None:
+        rec["status"] = "stopped"
+        save()
+    print(json.dumps({"status": "stopped"}))
 else:
     sys.exit("fake paseo: unknown " + cmd)
 '''
@@ -627,6 +635,59 @@ def test_spawn_hang_kills_siblings(tmp_path, monkeypatch):
     # sibling; a pid-reuse race within the test window is not a real risk
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+    # killing the `paseo run` clients does NOT stop the agents: the driver must
+    # also find them by title, stop them, and record the ids for the human
+    assert [c for c in env.calls() if c[:1] == ["stop"]]
+    assert env.job()["stopped_agents"] == {"coder": "a1"}
+
+
+def test_forged_stdout_cannot_satisfy_gate(tmp_path, monkeypatch):
+    # conftest prints a PASSED line for a test id that was never collected;
+    # the gate reads only the junit XML, so forged stdout is mere decoration
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={
+        "designer_files": {"tests/test_add.py": TEST_FILE,
+                           "tests/conftest.py":
+                               "print('PASSED tests/test_add.py::test_ghost')\n",
+                           "tests/t1.cases.json": json.dumps({
+                               "tests/test_add.py::test_control": "pass",
+                               "tests/test_add.py::test_sub": "fail",
+                               "tests/test_add.py::test_ghost": "pass"})},
+        "coder_files": {"app.py": FIX_APP}})
+    assert env.run() == 2  # test_ghost was never collected: caught on the base run
+    reason = env.job()["reason"]
+    assert "test_ghost" in reason and "NOT-COLLECTED" in reason
+    assert not [c for c in env.gh_calls() if c[:2] == ["pr", "create"]]
+
+
+def test_parametrized_space_id_passes_gate(tmp_path, monkeypatch):
+    tests = _HEADER + (
+        '@pytest.mark.parametrize("x", ["a b"])\n'
+        "def test_sub(x):\n    assert app.sub(1, 2) == -1\n")
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={
+        "designer_files": {"tests/test_add.py": tests,
+                           "tests/t1.cases.json": json.dumps({
+                               "tests/test_add.py::test_control": "pass",
+                               "tests/test_add.py::test_sub[a b]": "fail"})},
+        "coder_files": {"app.py": FIX_APP}})
+    assert env.run() == 0  # junit ids keep the space; the stdout regex used to die on it
+
+
+def test_glob_test_paths_are_expanded(tmp_path, monkeypatch):
+    # the README's own example: pytest never expands `tests/**` (rc=4, nothing
+    # ran); the driver expands it inside the worktree before calling pytest
+    env = build_env(tmp_path, monkeypatch,
+                    spec_overrides={"allowed_test_paths": ["tests/**"]})
+    assert env.run() == 0
+    assert env.job()["status"] == "ready-for-human-gate"
+
+
+def test_glob_zero_match_pauses(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch,
+                    spec_overrides={"allowed_test_paths": ["tests/ghost-*.py"]})
+    job = {"jobdir": str(env.jobdir), "spec": env.spec}
+    with pytest.raises(agentcoder.Pause) as excinfo:
+        agentcoder.run_tests(job, str(env.repo))
+    assert "matched nothing" in str(excinfo.value)
 
 
 def test_send_timeout_pauses(tmp_path, monkeypatch):
@@ -737,7 +798,9 @@ def test_land_regates_moved_coder_branch(tmp_path, monkeypatch):
     assert env.run() == 0  # land bounces to candidate: the moved head is RE-GATED
     job = env.job()
     assert job["status"] == "ready-for-human-gate"
-    assert len(job["candidate_results"]) == 2  # gated twice, landed only when green
+    assert len(job["candidate_results"]) == 1  # re-gate replaces the round-0 entry:
+    # one idempotent record per round, and landing only happened once it was green
+    assert job["candidate_results"][0] == {"round": 0, "rc": 0, "failed": []}
     assert len([c for c in env.gh_calls() if c[:2] == ["pr", "create"]]) == 1
 
 
@@ -841,9 +904,9 @@ def test_outcome_gate_helpers():
 
 
 @pytest.mark.parametrize("tests,expect", [
-    (TESTS_SKIP, "NOT-COLLECTED"),   # skip summary lines carry file:line, not the id
+    (TESTS_SKIP, "SKIPPED"),       # junit XML reports skips/xfails with their real ids
     (TESTS_MISSING, "NOT-COLLECTED"),
-    (TESTS_XFAIL, "XFAIL"),
+    (TESTS_XFAIL, "SKIPPED"),
 ], ids=["skip", "missing", "xfail"])
 def test_unrun_never_ready(tmp_path, monkeypatch, tests, expect):
     env = build_env(tmp_path, monkeypatch, scenario_overrides={
@@ -896,16 +959,16 @@ TESTS_MODULE_SKIP = (
 )
 
 
-@pytest.mark.parametrize("tests_src", [TESTS_SKIP_ON_FIX, TESTS_MODULE_SKIP])
-def test_candidate_skipped_suite_not_ready(tmp_path, monkeypatch, tests_src):
+@pytest.mark.parametrize("tests_src,expect", [
+    (TESTS_SKIP_ON_FIX, "SKIPPED"),       # per-test skip: junit names the skipped id
+    (TESTS_MODULE_SKIP, "NOT-COLLECTED"),  # module-level skip: no testcase rows at all
+])
+def test_candidate_skipped_suite_not_ready(tmp_path, monkeypatch, tests_src, expect):
     env = build_env(
         tmp_path, monkeypatch,
         scenario_overrides={
             "designer_files": {"tests/test_add.py": tests_src,
                                "tests/t1.cases.json": CASES_OK}})
     assert env.run() == 2  # a green run that ran nothing is not a green run
-    # both skip styles leave no PASSED id: SKIPPED lines carry no test id,
-    # so the gate's honest label for every declared id is NOT-COLLECTED
-    assert "NOT-COLLECTED" in env.job()["reason"]
-    assert not [c for c in env.gh_calls() if c[:2] == ["pr", "create"]]
+    assert expect in env.job()["reason"]
     assert not [c for c in env.gh_calls() if c[:2] == ["pr", "create"]]

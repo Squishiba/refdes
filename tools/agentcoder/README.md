@@ -67,14 +67,25 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
 }
 ```
 
+- `repo` is validated as a git repository and normalized (expansions and
+  symlinks resolved) at validation time; everything after that uses the
+  normalized absolute path.
 - `base` is resolved to a SHA at its **first resolution** (in preflight) and
   pinned in `job.json`; later resumes never re-resolve the ref, so a base
   branch that moves while the job is paused cannot drift the job.
 - `cases_file` is where the designer writes its per-test expectations
   (`expected_on_base: "pass"|"fail"`); it defaults to
   `tests/<task_id>.cases.json` and must sit inside `allowed_test_paths`.
-- `{tests}` in `test_command` expands to the `allowed_test_paths` globs;
-  the driver appends `-rA` to pytest invocations to capture per-test outcomes.
+- `{tests}` in `test_command` expands to the files matching the
+  `allowed_test_paths` globs, expanded by the driver with
+  `glob.glob(..., recursive=True)` relative to the job's worktree — pytest
+  does not expand patterns itself, and a pattern matching nothing is a
+  Pause, not an empty pytest run. For pytest commands the driver appends
+  `--junitxml` (written into the job dir, outside the repo) and `--rootdir`,
+  and judges per-test outcomes from that XML only: agent-written stdout
+  (e.g. a conftest printing `PASSED` lines) is not gate input. The guard
+  protects against mistakes, not hostile coders — a coder who can edit
+  `conftest.py` or pytest plugins can forge the XML too.
 - `test_reviewer_model` optional — when absent the test-review phase is
   skipped and the report says so.
 - The start gates — `paseo ls -g --json` must show running Qwen agents
@@ -207,15 +218,23 @@ resolution.
 - The kill-at-every-save-point test sweep covers the default path (no
   reviewers, no feedback round-trips); save points inside those loops are
   reasoned about, not swept.
+- On a spawn-turn timeout the driver kills the `paseo run` clients, then
+  finds this job's agents by title (`paseo ls -g`), stops them (`paseo
+  stop`), and records the ids in `stopped_agents` in job.json. Remaining
+  gap: a resume re-spawns any role with no recorded agent id, and its
+  branch collides with the stopped agent's — that Pause is loud; delete
+  the branch or start a fresh jobdir.
+- Candidate rounds are recorded one-per-round: a resume re-runs the round
+  and replaces its entry in `candidate_results` instead of appending a
+  duplicate.
 - `allowed_test_paths`/`allowed_code_paths` are matched with `fnmatch` for
-  the scope checks (so `tests/**` matches `tests/pkg/t.py` there), then
-  handed to `test_command`/pytest **raw** as `{tests}`. The two dialects
-  diverge in both directions: fnmatch treats `{`, `,`, `}` literally, so a
-  brace pattern like `tests/{a,b}.py` does NOT match a designer commit of
-  `tests/a.py` — the scope check **escalates** loudly; and fnmatch's `*`
-  crosses `/`, so a pattern like `tests/**` passes the scope check for
-  nested files pytest (given the raw pattern) never collects — silently.
-  Keep the patterns in the dialect pytest accepts.
+  the scope checks (so `tests/**` matches `tests/pkg/t.py` there), and
+  expanded with `glob.glob(..., recursive=True)` for `{tests}`. The two
+  dialects diverge: fnmatch treats `{`, `,`, `}` literally, so a brace
+  pattern like `tests/{a,b}.py` does NOT match a designer commit of
+  `tests/a.py` — the scope check **escalates** loudly. A test pattern that
+  matches no file in the worktree **pauses** the job. Both are loud; keep
+  patterns in a dialect both sides read the same way.
 - If a job is paused mid-`send`, resuming re-sends the feedback (agents are
   idempotently re-prompted, not deduplicated).
 - Running this repo's test suite with `--basetemp` pointed **inside the

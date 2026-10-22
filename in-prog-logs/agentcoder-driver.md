@@ -78,6 +78,26 @@ off main tip.
   machine's git identity (a module fixture sets the identity and points
   git config at /dev/null; local `~/.gitconfig` had masked a CI-only
   failure in round 4).
+## Round 7 (review items 1-5, one pass)
+
+The outcomes parser stopped trusting agent stdout: pytest runs with a
+driver-owned `--junitxml` (in the job dir, outside the repo) and `--rootdir`
+pinned to the worktree (a basetemp inside a repo tree makes pytest resolve
+rootdir to the repo root and mangles junit file paths -- found the hard way),
+and a declared test id that is not PASSED in that XML is NOT-COLLECTED, so a
+conftest printing forged `PASSED` lines can no longer satisfy the gate. The
+README says plainly that this guards against mistakes, not hostile coders.
+`{tests}` is now expanded driver-side with `glob.glob(recursive=True)`
+(zero matches = Pause), the spawn kill-sweep also stops this job's agents by
+title via `paseo ls -g`/`paseo stop` and records `stopped_agents` (the
+re-spawn branch-collision gap is documented, not closed), `spec["repo"]` is
+normalized at validation, and candidate results are recorded one-per-round
+so a resume replaces the round's entry. Net of the new code the driver is
+exactly 700 non-blank/non-comment lines (cut ~35: shared JobExit base,
+compacted prompts/report, inlined freeze_tests, `paseo_ls` helper).
+Driver tests 43 -> 47 (forged stdout, space-in-param-id, `tests/**`
+expansion, zero-match pause, stop assertions in the hang test); full suite
+4309 passed, 2 skipped.
 ## Status
 
 Finished. PR #356:
