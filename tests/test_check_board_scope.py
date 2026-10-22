@@ -20,6 +20,8 @@ import pytest
 from conftest import write_project_config
 
 from refdes import cli as cli_mod
+from refdes import model
+from refdes.schema import load_project
 
 CONFIG = """\
 site:
@@ -155,3 +157,143 @@ def test_check_without_board_shows_all_diagnostics(noid_board_project, capsys):
     assert NO_ID_ERROR in err
     assert "2 items, 1 errors, 2 warnings" in out
     assert status == 1
+
+
+# ------------------------------------------------- non-`?` unresolved item ids
+#
+# The path fallback exists for the literal display id `?` that parse.py
+# gives id-less items. Other emitters (blocked.py's cycle refs, build.py's
+# where_id, seal.py's display_id, former_ids.py's c.new_id) pass item ids
+# that may name no item; those diagnostics must keep the every-scope
+# visibility they had before the fix.
+
+
+def test_unresolved_nonquestion_item_id_stays_visible_for_every_board(
+    noid_board_project,
+):
+    project = load_project(
+        config_path=str(noid_board_project / "refdes-project.yaml")
+    )
+    stray = model.Diagnostic(
+        level="warning",
+        message="blocked_by cycle: LOG-A-999 is not an item",
+        file=NOID_FILE,
+        item_id="LOG-A-999",
+    )
+    project.diagnostics.append(stray)
+    for board in (None, "board-a", "board-b"):
+        visible = cli_mod._visible(project, verbose=False, board=board)
+        assert stray in visible, board
+
+
+# ------------------------------------------------------- unregistered path segment
+#
+# A `?`-id diagnostic whose file sits under an items/ segment that names no
+# registered board is unattributable: docs/cli-reference.md says an
+# unattributable diagnostic is never hidden by --board. Its file (board-a's
+# noid.md) is registered, so this fixture adds an id-less item under a stray
+# segment carrying the same warning.
+
+
+def test_id_less_item_under_unregistered_path_stays_visible(noid_board_project, capsys):
+    stray_dir = noid_board_project / "items" / "stray"
+    stray_dir.mkdir(parents=True)
+    (stray_dir / "noid.md").write_text(
+        f"---\ntype: log\nsummary: entry in an unregistered directory\n{STRAY_FIELD}\n---\n",
+        encoding="utf-8",
+    )
+    for extra in ((), ("--board", "board-a"), ("--board", "board-b")):
+        _status, out, _err = _check(noid_board_project, capsys, *extra)
+        lines = [
+            line
+            for line in _warning_lines(out, NOID_WARNING_TEXT)
+            if "items/stray/noid.md" in line
+        ]
+        assert len(lines) == 1, extra
+
+
+# ------------------------------------------------------------- workspace layout
+#
+# item_layout: workspace moves boards one level down (items/<ws>/<board>/),
+# and the path fallback has its own branch for that layout; the --workspace
+# filter rides on the same fallback for `?`-id diagnostics.
+
+
+WS_CONFIG = """\
+site:
+  title: "Workspace attribution"
+  out: _site
+id:
+  width: 3
+item_layout: workspace
+workspaces:
+  ws-a:
+    label: "Workspace A"
+  ws-b:
+    label: "Workspace B"
+boards:
+  board-a:
+    label: "Board A"
+  board-b:
+    label: "Board B"
+types:
+  log:
+    prefix: LOG
+    label: "Log Entry"
+    fields:
+      summary: { type: text, required: true }
+"""
+
+
+@pytest.fixture
+def noid_workspace_project(tmp_path):
+    write_project_config(tmp_path, WS_CONFIG)
+    a = tmp_path / "items" / "ws-a" / "board-a"
+    a.mkdir(parents=True)
+    (a / "noid.md").write_text(
+        f"---\ntype: log\nsummary: entry with no id\n{STRAY_FIELD}\n---\n",
+        encoding="utf-8",
+    )
+    b = tmp_path / "items" / "ws-b" / "board-b"
+    b.mkdir(parents=True)
+    (b / "log2.md").write_text(
+        "---\nid: LOG-B-001\ntype: log\nsummary: clean entry\n---\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_workspace_layout_board_axis(noid_workspace_project, capsys):
+    """The `?`-id warning follows its board: shown for --board board-a,
+    hidden for --board board-b, under item_layout: workspace."""
+    _status, out_a, _err = _check(noid_workspace_project, capsys, "--board", "board-a")
+    assert _warning_lines(out_a, NOID_WARNING_TEXT) != []
+    _status, out_b, _err = _check(noid_workspace_project, capsys, "--board", "board-b")
+    assert _warning_lines(out_b, NOID_WARNING_TEXT) == []
+
+
+def test_workspace_layout_workspace_axis(noid_workspace_project, capsys):
+    """The same diagnostic follows its workspace: shown for --workspace
+    ws-a, hidden for --workspace ws-b."""
+    _status, out_a, _err = _check(
+        noid_workspace_project, capsys, "--workspace", "ws-a"
+    )
+    assert _warning_lines(out_a, NOID_WARNING_TEXT) != []
+    _status, out_b, _err = _check(
+        noid_workspace_project, capsys, "--workspace", "ws-b"
+    )
+    assert _warning_lines(out_b, NOID_WARNING_TEXT) == []
+
+
+def test_workspace_layout_no_id_error_visible_everywhere(noid_workspace_project, capsys):
+    """The project-level no-id error keeps its every-scope visibility under
+    the workspace layout too."""
+    for extra in (
+        (),
+        ("--board", "board-a"),
+        ("--board", "board-b"),
+        ("--workspace", "ws-a"),
+        ("--workspace", "ws-b"),
+    ):
+        _status, _out, err = _check(noid_workspace_project, capsys, *extra)
+        assert NO_ID_ERROR in err, extra
