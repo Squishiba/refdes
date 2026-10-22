@@ -6,8 +6,8 @@ script. Done: `tools/agentcoder/agentcoder.py`, `tools/agentcoder/README.md`,
 
 ## Design (as shipped)
 
-- Current size: driver 782 non-blank non-comment lines (~1000 soft sanity
-  ceiling, plain readable lines); 77 driver tests, all passing on Linux,
+- Current size: driver 810 non-blank non-comment lines (~1000 soft sanity
+  ceiling, plain readable lines); 88 driver tests, all passing on Linux,
   module skipped on non-Linux (prlimit is Linux-only); full suite
   4339 passed / 2 skipped / 0 failed; ruff (E9,F on the two files) clean.
   All measured with pytest's default basetemp: an earlier "15 failures"
@@ -20,7 +20,9 @@ script. Done: `tools/agentcoder/agentcoder.py`, `tools/agentcoder/README.md`,
   stderr.
 - Phases: spawn -> test_review -> execute -> candidate -> land -> report ->
   done. `job.json` rewritten atomically (temp + `os.replace`) at every
-  transition, so resume is crash-safe. The kill/resume test computes the
+  transition, so a resume continues from the last save; a crash between a
+  side effect and its save can replay that side effect on resume (README
+  "State machine"). The kill/resume test computes the
   dry-run save count and parametrizes over every save point.
 - Default jobdir `<repo>/.scratch/agentcoder/<task_id>` (`.scratch/` is
   gitignored here); keep job dirs out of tracked paths elsewhere.
@@ -109,6 +111,19 @@ dead = closed/error (no "stopped" in the real vocabulary), land's adopt
 matches globs per path (disjoint globs adopted), non-pytest
 `test_command` rejected up front, porcelain `R old -> new` rows parsed;
 tests 67->77.
+
+Round 12 (close-out of the HIGH/MEDIUMs): the scope guards read the
+UNFILTERED diff (`--no-renames`), so deletions and rename-away halves can
+no longer ride the PR (ACMR kept only for the checkout list, which also
+excludes the spec's exact `cases_file`); `paseo wait --json`'s status
+field gates the spawn phase (rc=0 on "error"/not-found is worthless, live
+verified), with the subprocess timeout sitting above the CLI's own; all
+subprocess/text reads decode `errors="replace"` (binary test output and
+binary contracts can't strand job.json in "running"; NULs stripped from
+the pinned contract, argv cannot carry them); land adopts only the
+driver's exact frozen blobs; reviewer ids survive their crash window;
+timeout/model types validated; the contract is pinned into job.json at
+preflight; tests 77->88.
 
 ## Status
 

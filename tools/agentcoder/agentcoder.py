@@ -59,7 +59,8 @@ def run_cmd(argv, cwd=None, env=None, timeout=None):
     # the one subprocess helper; fake it via AGENTCODER_PASEO / AGENTCODER_GH
     try:
         proc = subprocess.run([tool_path(argv[0])] + list(argv[1:]), cwd=cwd, env=env,
-                              timeout=timeout, capture_output=True, text=True)
+                              timeout=timeout, capture_output=True, text=True,
+                              errors="replace")  # agents/tests can emit undecodable bytes
     except OSError as exc:  # missing/not-executable paseo/gh/git/prlimit: Pause, not crash
         raise Pause(f"cannot launch {argv[0]}: {exc}")
     return proc.returncode, proc.stdout, proc.stderr
@@ -117,7 +118,7 @@ def git(repo, *args, check=True, timeout=120):
 def save_job(job):
     path = Path(job["jobdir"]) / "job.json"
     tmp = Path(job["jobdir"]) / "job.json.tmp"
-    with open(tmp, "w") as fh:
+    with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(job, fh, indent=1, sort_keys=True)
         fh.flush()
         os.fsync(fh.fileno())
@@ -128,7 +129,7 @@ def load_job(jobdir):
     path = Path(jobdir) / "job.json"
     if not path.is_file():
         raise Pause(f"no job.json in {jobdir}")
-    return json_of(path.read_text(), "job.json")
+    return json_of(path.read_text(encoding="utf-8", errors="replace"), "job.json")
 
 
 def validate_spec(spec):
@@ -203,10 +204,16 @@ def validate_spec(spec):
     elif not any("pytest" in x for x in tc):
         problems.append(f"test_command must invoke pytest: outcomes are judged from pytest's "
                         f"--junitxml only, so {tc!r} can never reach the gate")
-    for key, lo in (("max_rounds", 1), ("qwen_cap", 1), ("reserve", 0)):
-        value = spec.get(key, {"max_rounds": 2, "qwen_cap": 8, "reserve": 1}[key])
+    for key, lo in (("max_rounds", 1), ("qwen_cap", 1), ("reserve", 0),
+                    ("agent_timeout", 1), ("test_timeout", 1)):
+        value = spec.get(key, {"max_rounds": 2, "qwen_cap": 8, "reserve": 1,
+                               "agent_timeout": 1800, "test_timeout": 120}[key])
         if not isinstance(value, int) or isinstance(value, bool) or value < lo:
             problems.append(f"{key} must be an int >= {lo}, got {value!r}")
+    for key in ("coder_model", "designer_model", "test_reviewer_model"):
+        if key in spec and spec[key] is not None \
+                and (not isinstance(spec[key], str) or not spec[key].strip()):
+            problems.append(f"{key} must be a non-empty string, got {spec[key]!r}")
     return problems
 
 
@@ -223,6 +230,13 @@ def preflight(job):
     if job.get("base_sha") is None:  # pinned at first resolution; never re-moved
         job["base_sha"] = git(spec["repo"], "rev-parse", "--verify",
                               str(spec["base"]) + "^{commit}")
+    if job.get("contract") is None:  # pinned once; later reads never touch the checkout
+        try:
+            # NULs cannot ride argv: the pinned text goes into every spawn prompt
+            job["contract"] = Path(spec["repo"], spec["contract_file"]).read_text(
+                encoding="utf-8", errors="replace").replace("\x00", "")
+        except OSError as exc:
+            job["contract"] = f"(contract unreadable: {exc})"
     if not shutil.which("prlimit") and not spec.get("allow_no_prlimit"):
         raise Pause("prlimit is not on PATH: tests would run WITHOUT CPU/address-space "
                     "limits; install prlimit, or set \"allow_no_prlimit\": true to accept")
@@ -252,10 +266,9 @@ def ensure_preflight(job):
 
 
 def contract_text(job):
-    try:
-        return Path(job["spec"]["repo"], job["spec"]["contract_file"]).read_text()
-    except OSError as exc:  # report.md must never crash the exit path
-        return f"(contract unreadable: {exc})"
+    # pinned into job.json at preflight: the contract file is usually untracked
+    # scratch, so it is read from the checkout ONCE, never from the base commit
+    return str(job.get("contract", "(contract not pinned)"))
 
 
 def branch_name(job, role):
@@ -385,6 +398,19 @@ def _kill_all(procs):
         proc.wait()
 
 
+def wait_for_agent(job, role):
+    # rc=0 proves NOTHING: real `paseo wait` exits 0 printing status "error"
+    # ("Agent not found") as readily as "idle" -- the JSON status is the signal
+    tmo = int(job["spec"].get("agent_timeout", 1800))
+    rc, out, err = run_guarded(["paseo", "wait", job[f"{role}_agent"], "--json",
+                                "--timeout", str(tmo)], timeout=tmo + 30)  # outlive the CLI
+    data = last_json_of(out, f"{role} wait result")
+    if data.get("status") != "idle":
+        aid = job[f"{role}_agent"]
+        raise Pause(f"{role} agent {aid} is not idle: paseo wait reports "
+                    f"{data.get('status')!r} {tail_text(str(data.get('message', '')), 3)}")
+
+
 def live_ids():
     # real ls statuses (verified): running / idle / closed / error -- closed+error are dead
     return {str(a.get("id")) for a in paseo_ls()
@@ -394,7 +420,7 @@ def live_ids():
 def stop_job_agents(job):
     # killing the `paseo run` client does NOT stop the agent; stop the job's
     # agents by title, EXCEPT roles whose id is already recorded (= healthy)
-    known = ({str(job.get(f"{r}_agent")) for r in ("coder", "designer")}
+    known = ({str(job.get(f"{r}_agent")) for r in ("coder", "designer", "reviewer")}
              | {str(v) for v in (job.get("reviewers") or {}).values()})
     prefix = f"AgentCoder {job['task_id']} "[:60]  # ls `name` = title, truncated ~60
     for e in paseo_ls():
@@ -422,7 +448,8 @@ def do_spawn(job):
                             f"AgentCoder {job['task_id']} {role}", "--json", prompts[role]])
             try:
                 procs[role] = subprocess.Popen(argv, cwd=spec["repo"], stdout=subprocess.PIPE,
-                                               stderr=subprocess.PIPE, text=True)
+                                               stderr=subprocess.PIPE, text=True,
+                                               errors="replace")
             except OSError as exc:
                 raise Pause(f"cannot launch paseo ({role} spawn): {exc}")
         for role, proc in procs.items():
@@ -438,9 +465,9 @@ def do_spawn(job):
                 _kill_all(procs)
                 stop_job_agents(job)
                 raise
-    else:
-        for role in ("coder", "designer"):
-            run_guarded(["paseo", "wait", job[f"{role}_agent"], "--timeout", "60"])
+    for role in ("coder", "designer"):  # every recorded live role must be idle to proceed
+        if job.get(f"{role}_agent"):
+            wait_for_agent(job, role)
     check_permits(job)
 
 
@@ -454,13 +481,23 @@ LOGS_PREFIX = "in-prog-logs/"  # AGENTS.md progress logs: always allowed, both a
 
 
 def scope_check(job, sha, globs, who):
-    changed = [p for p in git(job["spec"]["repo"], "diff", "--name-only", "--diff-filter=ACMR",
-                              job["base_sha"], sha).splitlines() if p]  # skip D/R-away paths
+    # UNFILTERED, --no-renames: a DELETED file is scope dirt too, and git splits a
+    # rename into delete-old + add-new, so BOTH paths of a rename must clear the globs
+    changed = [p for p in git(job["spec"]["repo"], "diff", "--name-only", "--no-renames",
+                              job["base_sha"], sha).splitlines() if p]
     bad = sorted(p for p in changed if not p.startswith(LOGS_PREFIX)
                  and not any(path_matches(p, g) for g in globs))
     if bad:
         raise OutOfScope(who, bad)
     return changed
+
+
+def checkout_paths(job, sha):
+    # files that EXIST at sha (ACMR): `git checkout <sha> -- <path>` on a
+    # deleted/renamed-away path errors forever; the scope check above uses the
+    # unfiltered list on purpose -- deletions must not hide from it
+    return [p for p in git(job["spec"]["repo"], "diff", "--name-only", "--diff-filter=ACMR",
+                           job["base_sha"], sha).splitlines() if p]
 
 
 def scope_feedback(job, exc, agent_key, round_key, rnd, sha):
@@ -495,8 +532,11 @@ def do_test_review(job):
         if reviewers.get(key) and str(reviewers[key]) not in live_ids():
             reviewers.pop(key)  # recorded reviewer died: respawn, not a permanent pause
         if not reviewers.get(key):
-            spawn_agent(job, f"review-r{rnd}-{test_sha[:6]}", spec["test_reviewer_model"],
-                        test_sha, review_prompt(job))
+            # a recorded reviewer id that died is respawned; one saved mid-crash (by
+            # record_turn, before the move into `reviewers`) is adopted, not respawned
+            if not job.get("reviewer_agent") or str(job["reviewer_agent"]) not in live_ids():
+                spawn_agent(job, f"review-r{rnd}-{test_sha[:6]}", spec["test_reviewer_model"],
+                            test_sha, review_prompt(job))
             reviewers[key] = job.pop("reviewer_agent")
             job.pop("reviewer_cwd", None)
             save_job(job)
@@ -638,13 +678,14 @@ def do_execute(job):
         if spec.get("test_reviewer_model") and test_sha != job.get("reviewed_test_sha"):
             return "test_review"  # designer committed new tests: re-gate via review
         try:
-            changed = scope_check(job, test_sha, spec["allowed_test_paths"], "test designer")
+            scope_check(job, test_sha, spec["allowed_test_paths"], "test designer")
         except OutOfScope as exc:
             scope_feedback(job, exc, "designer_agent", "execute_round", rnd, test_sha)
             rnd += 1
             job["test_sha"] = None
             continue
-        test_paths = [p for p in changed if not p.endswith(".cases.json")]
+        test_paths = [p for p in checkout_paths(job, test_sha)
+                      if not p.endswith(".cases.json") and p != spec["cases_file"]]
         if not test_paths:
             raise Escalate(f"test designer commit {test_sha[:9]} adds no files "
                            f"under {spec['allowed_test_paths']}")
@@ -734,10 +775,13 @@ def do_land(job):
     wt = job["coder_cwd"]
     head = git(wt, "rev-parse", "HEAD")
     moved = [p for p in git(wt, "diff", "--name-only", "HEAD~1", "HEAD").splitlines() if p]
+    frozen = job.get("test_paths") or []
     if (head != job["coder_sha"] and head != job.get("test_landed_sha")
             and git(wt, "rev-parse", "HEAD~1", check=False) == job["coder_sha"]
-            and moved and all(any(path_matches(p, g) for g in job["spec"]["allowed_test_paths"])
-                              for p in moved)):
+            and moved and all(p in frozen for p in moved)
+            and all(git(wt, "rev-parse", f"HEAD:{p}", check=False)
+                    == git(wt, "rev-parse", f"{job['test_sha']}:{p}", check=False)
+                    for p in moved)):
         job["test_landed_sha"] = head  # land committed, then died before saving: adopt it
         save_job(job)
     if head != job["coder_sha"] and head != job.get("test_landed_sha"):
@@ -821,7 +865,7 @@ def write_report(job, landing=False):
         "| round | exit | failing tests |", "| --- | --- | --- |",
         rows or "| - | - | not reached |",
     ]
-    Path(job["jobdir"], "report.md").write_text("\n".join(lines) + "\n")
+    Path(job["jobdir"], "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     if landing:
         return
     summary = {"job": job["jobdir"], "task_id": job["task_id"], "status": job.get("status"),
@@ -873,7 +917,7 @@ def main(argv):
     try:
         if cmd == "run":
             try:
-                raw = Path(arg).read_text()
+                raw = Path(arg).read_text(encoding="utf-8", errors="replace")
             except OSError as exc:
                 exit_json("error", f"spec unreadable: {exc}")
                 return EXIT_ERROR

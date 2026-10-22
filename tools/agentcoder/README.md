@@ -1,8 +1,9 @@
 # agentcoder — a small driver for coder / blind test designer / executor loops
 
 `tools/agentcoder/agentcoder.py` is a **plain driver script** (stdlib only,
-one file, with ~1000 non-blank/non-comment lines as a soft sanity
-ceiling — not enforced by a check) that runs the AgentCoder paper loop against Paseo agents:
+one file; currently 810 non-blank/non-comment lines — ~1000 is a soft
+sanity ceiling, not enforced by a check) that runs the AgentCoder paper
+loop against Paseo agents:
 
 - a **CODER** agent implements a contract,
 - an **INDEPENDENT, BLIND test designer** writes acceptance tests from the
@@ -33,11 +34,14 @@ dirs out of tracked paths (in this repo `.scratch/` is gitignored). Exit
 codes: **0** done (`ready-for-human-gate`), **2** escalated, **1**
 error/paused. `status` on an existing job prints the job's recorded fields
 as JSON and exits 0; `status` on a missing/invalid jobdir prints a paused
-JSON (`"no job.json in ..."`) and exits 1. Exits that have a `JOBDIR` (preflight pause, mid-run pause, escalation,
-completion) print JSON **and** write `JOBDIR/report.md`; the exits with **no**
-jobdir (unknown command, unreadable/invalid spec, jobdir already in use)
-print the JSON on stdout as their entire output; running with no arguments
-prints the usage text (not JSON) and exits 1.
+JSON (`"no job.json in ..."`) and exits 1, writing no report.
+Exits that run the loop with a `JOBDIR` (preflight pause, mid-run pause,
+escalation, completion) print JSON **and** write `JOBDIR/report.md`; the
+jobdir-in-use exit has a jobdir (the existing one) and writes **no**
+report. The exits with **no** jobdir (unknown command, unreadable spec
+file, invalid spec) print the JSON on stdout as their entire output; an
+**unparseable** spec file exits `status: "paused"` with rc 1. Running
+with no arguments prints the usage text (not JSON) and exits 1.
 
 The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
 `paseo`); its test suite is skipped on **non-Linux** (the preflight gate needs
@@ -74,6 +78,10 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
 - `base` is resolved to a SHA at its **first resolution** (in preflight) and
   pinned in `job.json`; later resumes never re-resolve the ref, so a base
   branch that moves while the job is paused cannot drift the job.
+- `contract_file` is read **once** in preflight and its text is pinned in
+  `job.json` (undecodable bytes replaced, NULs stripped — the text rides
+  argv in every spawn prompt); prompts and `report.md` use the pinned
+  text afterwards, never a re-read of the live checkout.
 - `cases_file` is where the designer writes its per-test expectations
   (`expected_on_base: "pass"|"fail"`); it defaults to
   `tests/<task_id>.cases.json` and must sit inside `allowed_test_paths`.
@@ -92,35 +100,44 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
   (e.g. a conftest printing `PASSED` lines) is not gate input. The guard
   protects against mistakes, not hostile coders — a coder who can edit
   `conftest.py` or pytest plugins can forge the XML too.
-- `test_reviewer_model` optional — when absent the test-review phase is
-  skipped and the report says so.
+- `test_reviewer_model` optional — when absent (or `null`) the test-review
+  phase is skipped and the report says so. `coder_model`/`designer_model`/
+  `test_reviewer_model` must be non-empty strings when present.
 - The start gates — `paseo ls -g --json` must show running Qwen agents
   below `qwen_cap - reserve`, and `prlimit` must be on `PATH` unless the
   spec sets `"allow_no_prlimit": true` (the executor never silently drops
   the limits) — are re-checked on **every** `resume` until all of them pass
   at once; only a fully-passed preflight is recorded as passed, so a pause
   inside preflight can never let `resume` skip a gate.
-- `agent_timeout` (default 1800s) bounds only the agent `paseo run`/`paseo
-  send` calls (an agent's whole turn). Every other blocking call has a
-  fixed timeout: other `paseo`/`gh` calls 60s, `git` 120s, `git push` 300s.
+- `agent_timeout` (default 1800s) bounds the agent `paseo run`/`paseo
+  send` calls (an agent's whole turn) and the `paseo wait` confirmation of
+  recorded agents (whose subprocess timeout sits slightly above it). Every
+  other blocking call has a fixed timeout: other `paseo`/`gh` calls 60s,
+  `git` 120s, `git push` 300s.
   `test_timeout` (default 120s) bounds each `test_command` run — a test run
   that exceeds it **pauses** the job (the output is never judged, no agent
-  is fed it).
+  is fed it). All four (`agent_timeout`, `test_timeout`, `max_rounds`,
+  `qwen_cap`/`reserve`) are validated as ints before the job starts.
 
 ## State machine
 
 `JOBDIR/job.json` is rewritten atomically (temp + `os.replace`) after **every**
-phase transition, and `resume` continues from the recorded phase with
-recorded agent ids (`paseo wait`). Phases are **not all idempotent**: a
-crash after a side effect but before the next save replays it. Safe to
-replay: **spawn** (each completed turn records its agent id, and only the
-role with no saved id is re-spawned; a real re-spawn collides with the
-already-checked-out branch and pauses for a human, it never forks) and
-**land** (an existing PR for the branch is adopted, never
-forked). What can repeat: a **feedback send** to a designer/coder whose
-turn ended during the crash window — agents are re-prompted with the same
-text, which a human reviewing the PR can see. The driver never claims to
-have deduplicated a send it did not record.
+phase transition and every recorded agent id, and `resume` continues from
+the recorded phase with the recorded ids — for coder, designer **and**
+reviewer (an id saved by a completed turn is adopted on resume, not
+respawned). A recorded live agent is confirmed by `paseo wait <id>
+--json`: a status of `error`, timeout or not-found **pauses** the job —
+`paseo wait` exits 0 for all of those, so the exit code is never the
+completion signal, only the JSON status is. Phases are **not all
+idempotent**: a crash after a side effect but before the next save
+replays it. Safe to replay: **spawn** (each completed turn records its
+agent id, and only the role with no saved id is re-spawned; a real
+re-spawn collides with the already-checked-out branch and pauses for a
+human, it never forks) and **land** (an existing PR for the branch is
+adopted, never forked). What can repeat: a **feedback send** to a
+designer/coder whose turn ended during the crash window — agents are
+re-prompted with the same text, which a human reviewing the PR can see.
+The driver never claims to have deduplicated a send it did not record.
 
 ```
 spawn ──► test_review ──► execute ──► candidate ──► land ──► report ──► done
@@ -129,7 +146,10 @@ spawn ──► test_review ──► execute ──► candidate ──► land
 1. **spawn** — two worktrees at the base SHA, created **in parallel** via
    `paseo run --new-workspace worktree --worktree-mode branch-off
    --new-branch ac/<task>/{coder,designer} --base <sha> ...` (each blocking
-   call is that agent's whole turn). The designer is told: tests only under
+   call is that agent's whole turn). At the end of the phase every recorded
+   live agent is confirmed with `paseo wait <id> --json` — a status of
+   anything but `idle` **pauses** (the rc is 0 for all of them, so only
+   the JSON status decides). The designer is told: tests only under
    `allowed_test_paths`, never touch anything else, never inspect other
    branches (`git log --all`), commit, and write
    `cases_file` (default `tests/<task>.cases.json`) declaring each test id as
@@ -145,8 +165,12 @@ spawn ──► test_review ──► execute ──► candidate ──► land
     SHA-scoped: if the designer commits new tests after an APPROVE, execute
     returns to this phase and the new SHA gets a fresh reviewer before any
     coder runs on it.
-3. **execute** — freeze the test commit SHA; its changed paths must fit
-   `allowed_test_paths` (violations escalate). In a temp detached worktree of
+3. **execute** — freeze the test commit SHA; its changed paths — the
+   **unfiltered** diff list: additions, modifications, DELETIONS, and both
+   halves of a rename — must fit `allowed_test_paths` (violations
+   escalate). The checkout list from the frozen SHA is the added/modified
+   subset (a deleted path cannot be checked out), minus the `cases_file`
+   itself (matched by exact path, not just by its `.cases.json` suffix). In a temp detached worktree of
    the **base** with the frozen tests checked out, run `test_command` under
    `prlimit` when available (CPU/address-space/file-size/process bounds;
    preflight refuses to start without it unless `allow_no_prlimit`), a
@@ -155,7 +179,9 @@ spawn ──► test_review ──► execute ──► candidate ──► land
    FAILED on base (SKIPPED/ERROR/missing all count), is a **TEST bug** —
    the mismatch goes to the designer, up to `max_rounds` rounds, then escalate.
  4. **candidate** — temp detached worktree of the coder's HEAD + frozen tests;
-    coder's changed paths checked against `allowed_code_paths`. A round is
+    coder's changed paths (same unfiltered list: a DELETION of an
+    out-of-scope file is a violation too) checked against
+    `allowed_code_paths`. A round is
     green only when the pytest run exits 0 **and** **every** id declared in
     `cases.json` shows outcome PASSED for the coder's code; SKIPPED/ERROR/
     missing and exit 5 (nothing collected) all count as red even if the exit
@@ -167,11 +193,21 @@ spawn ──► test_review ──► execute ──► candidate ──► land
    (blocking `paseo send`), at most `max_rounds`; the coder's head is re-read
    (`rev-parse`) each round, never trusted from memory. Tests are never
    loosened.
- 5. **land** — escalates if the coder worktree's tracked tree is
-     dirty. Its HEAD must be the gated candidate SHA, or (on a resumed
-     land) the driver-recorded test-commit SHA `test_landed_sha`; if the coder
-     moved the branch after gating, land **bounces back to the candidate
-     phase** — the new head is re-gated, and only a green re-gate lands.
+  5. **land** — checks the coder worktree's HEAD **first**: it must be the
+     gated candidate SHA, or the driver's recorded test-commit SHA
+     `test_landed_sha`. A moved HEAD is adopted **only** as the driver's
+     own test commit, and only strictly: `HEAD~1` is the gated coder SHA,
+     the commit touches **only paths in the frozen `test_paths`**, and
+     every one of those paths has the **same git blob** in HEAD as at the
+     frozen test SHA (`rev-parse HEAD:<p> == rev-parse <test_sha>:<p>`).
+     A coder-authored commit that merely lands inside the test paths
+     fails this and **bounces the job back to the candidate phase** — the
+     new head is re-gated (and re-scope-checked against
+     `allowed_code_paths`), and only a green re-gate lands. Only then is
+     the tree checked for dirt: changes **outside** the frozen test paths
+     **escalate** (land refuses to sweep them); dirt **inside** them is
+     the driver's own interrupted checkout — reset and re-checked-out
+     from the frozen SHA.
      The frozen test files are then committed
      into the coder's branch (authored `agentcoder <noreply@refdes.local>`,
      trailer `Co-authored-by: <name> <noreply@refdes.local>` where `<name>`
@@ -221,6 +257,12 @@ feedback, scope-feedback rounds, candidate-red feedback), the `test_review`
 phase end to end, the crash-window recovery paths in `land`, and
 `paseo wait`/`stop` semantics under failure.
 
+All subprocess output and text reads (child stdout/stderr, spec,
+`job.json`, the contract file) decode with `errors="replace"`: an agent
+or test that emits undecodable bytes, or a binary contract file, can
+never raise a `UnicodeDecodeError` out of the driver and strand
+`job.json` in `running`.
+
 ## Limits / what it deliberately does NOT do
 
 - Tests are **model-authored code** executed as **the same user the Qwen
@@ -249,14 +291,19 @@ phase end to end, the crash-window recovery paths in `land`, and
 - Candidate rounds are recorded one-per-round: a resume re-runs the round
   and replaces its entry in `candidate_results` instead of appending a
   duplicate.
-- `allowed_test_paths`/`allowed_code_paths` are matched with `fnmatch` for
-  the scope checks (so `tests/**` matches `tests/pkg/t.py` there), and
-  expanded with `glob.glob(..., recursive=True)` for `{tests}`. The two
-  dialects diverge: fnmatch treats `{`, `,`, `}` literally, so a brace
-  pattern like `tests/{a,b}.py` does NOT match a designer commit of
-  `tests/a.py` — the scope check **escalates** loudly. A test pattern that
-  matches no file in the worktree **pauses** the job. Both are loud; keep
-  patterns in a dialect both sides read the same way.
+- `allowed_test_paths`/`allowed_code_paths` are matched for the scope
+  checks by `path_matches`: a pattern with no `*?[` is compared as a
+  plain path (the file itself, or anything under that directory), and
+  fnmatch applies only to patterns containing `*`, `?` or `[`. For
+  `{tests}` they are expanded with `glob.glob(..., recursive=True)`. The
+  two dialects diverge: fnmatch treats `{`, `,`, `}` literally, so a
+  brace pattern like `tests/{a,b}.py` **matches nothing** — a
+  designer/coder commit is then flagged and the scope check **escalates**
+  loudly. A test pattern that matches no file in the worktree **pauses**
+  the job. Both are loud; keep patterns in a dialect both sides read the
+  same way. `in-prog-logs/` is exempt from **both** scope checks, for
+  both agents (the AGENTS.md progress logs) — designer and coder logs
+  ride along into the PR.
 - If a job is paused mid-`send`, resuming re-sends the feedback (agents are
   idempotently re-prompted, not deduplicated).
 - Running this repo's test suite with `--basetemp` pointed **inside the
@@ -268,8 +315,10 @@ phase end to end, the crash-window recovery paths in `land`, and
   `paseo ls -g --json` entries carry `id`/`shortId`/`name`/`provider`/
   `thinking`/`status`/`cwd`/`created` (there is **no** `agentId`/`title`/
   `model` in ls output; `name` is the title truncated to ~60 chars, so
-  title matching uses the truncated prefix), and `paseo run --json` returns
-  `agentId`/`status`. **Unverified** and handled tolerantly: the entry keys
+   title matching uses the truncated prefix), `paseo run --json` returns
+   `agentId`/`status`, and `paseo wait --json` returns `agentId`/`status`
+   with a `message` (live-verified: a missing agent gives status
+   `"error"`, rc 0 — the status is the signal, never the rc). **Unverified** and handled tolerantly: the entry keys
   of `paseo permit ls --json` (matched across `id`/`agentId`/`agent`/
   `shortId`, prefix-tolerant) and the `status` field of
   `paseo send --json`; `gh pr list --json` uses the documented gh fields.

@@ -103,6 +103,10 @@ def git(*a):
 def write_commit(ws, files, msg):
     for p, c in files.items():
         fp = os.path.join(ws, p)
+        if c is None:  # a committed DELETION (scope guards must see it)
+            if os.path.exists(fp):
+                os.remove(fp)
+            continue
         os.makedirs(os.path.dirname(fp) or ws, exist_ok=True)
         open(fp, "w").write(c)
     subprocess.run(["git", "-C", ws, "add", "-A"], capture_output=True)
@@ -156,7 +160,7 @@ elif cmd == "permit":
         ids[v["role"]] = k
     print(json.dumps([{"agentId": ids[r]} for r in S.get("permits", []) if ids.get(r)]))
 elif cmd == "wait":
-    print(json.dumps({"status": "idle"}))
+    print(json.dumps(S.get("wait_status") or {"status": "idle"}))
 elif cmd == "logs":
     rec = state["agents"].get(ARGS[1], {})
     replies = S.get("review_replies")
@@ -1152,7 +1156,17 @@ def test_base_sha_pinned_across_pause(tmp_path, monkeypatch):
 
 
 def test_test_timeout_pauses_not_blamed(tmp_path, monkeypatch):
-    env = build_env(tmp_path, monkeypatch, spec_overrides={"test_timeout": 0})
+    env = build_env(tmp_path, monkeypatch, spec_overrides={"test_timeout": 1})
+    real = agentcoder.run_cmd
+
+    def slow(argv, *a, **k):
+        # element-exact: the temp path is /tmp/pytest-of-jorb/..., so substring
+        # matching would poison the git calls too
+        if "-m" in argv and argv[argv.index("-m") + 1] == "pytest":
+            raise subprocess.TimeoutExpired(argv, 1)
+        return real(argv, *a, **k)
+
+    monkeypatch.setattr(agentcoder, "run_cmd", slow)
     assert env.run() == 1
     job = env.job()
     assert job["status"] == "paused"
@@ -1367,3 +1381,149 @@ def test_candidate_skipped_suite_not_ready(tmp_path, monkeypatch, tests_src, exp
     assert env.run() == 2  # a green run that ran nothing is not a green run
     assert expect in env.job()["reason"]
     assert not [c for c in env.gh_calls() if c[:2] == ["pr", "create"]]
+
+
+def test_coder_deleting_out_of_scope_file_escalates(tmp_path, monkeypatch):
+    # the ACMR diff filter used to hide DELETIONS from the scope guard, so this
+    # pushed the removal of an out-of-scope file onto the PR
+    env = build_env(tmp_path, monkeypatch, name="del1", scenario_overrides={
+        "coder_files": {"app.py": FIX_APP, "contract.md": None}})
+    assert env.run() == 2
+    assert "contract.md" in env.job()["reason"]
+
+
+def test_designer_deleting_out_of_scope_file_escalates(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="del2", scenario_overrides={
+        "designer_files": {"tests/test_add.py": TEST_FILE, "tests/t1.cases.json": CASES_OK,
+                           "app.py": None}})
+    assert env.run() == 2
+    assert "app.py" in env.job()["reason"]
+
+
+def test_designer_rename_within_scope_ok(tmp_path, monkeypatch):
+    # the round-2 commit renames a test (delete + add): both halves sit inside
+    # allowed_test_paths, so the unfiltered scope check waves it through
+    ghost = json.dumps({"tests/test_old.py::test_control": {"expected_on_base": "pass"},
+                        "tests/test_old.py::test_sub": {"expected_on_base": "fail"},
+                        "tests/test_old.py::test_ghost": {"expected_on_base": "pass"}})
+    env = build_env(tmp_path, monkeypatch, name="ren1", scenario_overrides={
+        "designer_files": {"tests/test_old.py": TEST_FILE, "tests/t1.cases.json": ghost},
+        "on_send": {"designer": [{"delete": ["tests/test_old.py"],
+                                  "files": {"tests/test_add.py": TEST_FILE,
+                                            "tests/t1.cases.json": CASES_OK}}]}})
+    assert env.run() == 0  # round 1: test_ghost NOT-COLLECTED -> rename round -> green
+
+
+def test_wait_error_status_pauses(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="waitx", scenario_overrides={
+        "wait_status": {"status": "error", "message": "Agent not found: a1"}})
+    assert env.run() == 1  # rc=0 + status "error" is NOT idle: never proceed on it
+    job = env.job()
+    assert job["status"] == "paused"
+    assert "not idle" in job["reason"] and "error" in job["reason"]
+
+
+def test_resume_waits_on_recorded_live_role(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="keepw",
+                    spec_overrides={"agent_timeout": 15},
+                    scenario_overrides={"hang": {"run": ["designer"]},
+                                        "pidfile": str(tmp_path / "hw")})
+    assert env.run() == 1
+    assert env.job()["coder_agent"] == "a1"
+    env.scenario["hang"] = {}
+    env.scen_path.write_text(json.dumps(env.scenario))
+    assert env.resume() == 0
+    # the recorded live coder is `paseo wait`-confirmed even while the designer
+    # is respawned (run turns bypass run_guarded, so waits ride on the resume)
+    assert any(c[:2] == ["wait", "a1"] for c in env.calls())
+    assert spawn_count(env, "coder") == 1 and spawn_count(env, "designer") == 2
+
+
+def test_land_rejects_post_gate_test_path_commit(tmp_path, monkeypatch):
+    # the old adoption rule waved in ANY head whose diff was test-path-confined:
+    # a coder-authored tests/conftest.py added after gating would land untested.
+    # Adoption now requires frozen test_paths AND frozen blobs, so this bounces
+    # to candidate, where the conftest trips the CODE-scope guard.
+    env = build_env(tmp_path, monkeypatch, name="adopt3")
+    real = agentcoder.run_cmd
+
+    def crash(argv, *a, **k):
+        if "commit" in argv:
+            raise KeyboardInterrupt
+        return real(argv, *a, **k)
+
+    monkeypatch.setattr(agentcoder, "run_cmd", crash)
+    with pytest.raises(KeyboardInterrupt):
+        env.run()  # died between land's staging and its commit
+    monkeypatch.setattr(agentcoder, "run_cmd", real)
+    wt = Path(env.job()["coder_cwd"])
+    (wt / "tests" / "conftest.py").write_text("import os\n")
+    gitat(wt, "add", "-A")
+    gitat(wt, "commit", "-qm", "coder adds a test helper")
+    assert env.resume() == 2
+    assert "conftest.py" in env.job()["reason"]
+
+
+def test_reviewer_id_adopted_after_crash(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="revwin",
+                    spec_overrides={"test_reviewer_model": "opencode/some/reviewer"},
+                    scenario_overrides={"review_reply": "ok\nVERDICT: APPROVE"})
+    real = agentcoder.save_job
+
+    def crash(job):
+        real(job)  # job.json now carries the id: the crash window is after the save
+        if job.get("reviewer_agent"):  # died between the id save and the reviewers move
+            raise KeyboardInterrupt
+        return real(job)
+
+    monkeypatch.setattr(agentcoder, "save_job", crash)
+    with pytest.raises(KeyboardInterrupt):
+        env.run()
+    monkeypatch.setattr(agentcoder, "save_job", real)
+    assert env.resume() == 0  # the saved id is adopted; no duplicate reviewer spawns
+    assert len(env.job()["reviewers"]) == 1
+    assert sum(1 for c in env.calls() if c[:1] == ["run"]
+               and any("review-r0" in a for a in c)) == 1
+
+
+def test_timeout_and_model_types_validated(tmp_path, monkeypatch, capsys):
+    for mut, key in (({"test_timeout": "60"}, "test_timeout"),
+                     ({"agent_timeout": True}, "agent_timeout"),
+                     ({"coder_model": 5}, "coder_model"),
+                     ({"test_reviewer_model": "  "}, "test_reviewer_model")):
+        env = build_env(tmp_path, monkeypatch, spec_overrides=mut,
+                        name="types%d" % len(key))
+        assert env.run() == 1, mut
+        assert key in json.loads(capsys.readouterr().out)["reason"], mut
+
+
+def test_contract_pinned_at_preflight(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={"running_qwen": 7})
+    assert env.run() == 1  # paused at the cap gate: the contract is pinned already
+    assert "returns the sum" in env.job()["contract"]
+    (env.repo / "contract.md").write_text("# Changed contract\n")  # live file moves on
+    env.scenario["running_qwen"] = 0
+    env.scen_path.write_text(json.dumps(env.scenario))
+    assert env.resume() == 0
+    report = (env.jobdir / "report.md").read_text()
+    assert "returns the sum" in report  # the PINNED text, not the edited checkout
+    assert "Changed contract" not in report
+
+
+def test_undecodable_child_output_is_replaced(tmp_path, monkeypatch):
+    # a failing test whose captured stderr holds raw 0xFF bytes: the driver's
+    # decode must not raise UnicodeDecodeError out of run_cmd and strand the job
+    bin_tests = TEST_FILE + (
+        "\ndef test_bytes():\n"
+        "    import sys\n"
+        "    sys.stderr.buffer.write(b'\\xff\\xfe not utf-8\\n')\n"
+        "    assert app.sub(1, 2) == -1\n")
+    env = build_env(tmp_path, monkeypatch, name="binout", scenario_overrides={
+        "designer_files": {"tests/test_add.py": bin_tests, "tests/t1.cases.json": CASES_OK}})
+    assert env.run() == 0  # replaced decode: the round trips, the gate judges normally
+
+
+def test_binary_contract_file_no_traceback(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="bincon")
+    (env.repo / "contract.md").write_bytes(b"\xff\xfe\x00binary contract\xff")
+    assert env.run() == 0  # preflight pins a replaced-decoded text; the loop runs on
