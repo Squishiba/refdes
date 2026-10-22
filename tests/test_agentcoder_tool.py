@@ -16,9 +16,9 @@ from types import SimpleNamespace
 import pytest
 
 pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="agentcoder drives a Linux paseo host; fakes use shebang scripts, "
-           "fcntl and prlimit")
+    sys.platform != "linux",
+    reason="agentcoder drives a Linux paseo host: fakes use shebang scripts, fcntl "
+           "and the driver's preflight gate requires prlimit, which is Linux-only")
 
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location(
@@ -108,7 +108,7 @@ def flag(name, dflt=None):
 
 cmd = ARGS[0]
 if cmd == "ls":
-    rows = [{"agentId": k, "status": "completed", "cwd": v["ws"],
+    rows = [{"agentId": k, "status": v.get("status", "completed"), "cwd": v["ws"],
              "model": "fake", "title": v.get("title", "")}
             for k, v in state["agents"].items() if v["ws"]]
     rows += [{"agentId": "q%d" % i, "status": "running",
@@ -278,7 +278,7 @@ def build_env(tmp_path, monkeypatch, scenario_overrides=None, spec_overrides=Non
         return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
 
     return SimpleNamespace(
-        spec=spec, spec_path=spec_path, jobdir=jobdir, repo=repo,
+        spec=spec, spec_path=spec_path, jobdir=jobdir, repo=repo, logdir=logdir,
         calls=lambda: _log("paseo-calls.log"),
         gh_calls=lambda: _log("gh-calls.log"),
         scenario=scenario, scen_path=scen_path,
@@ -544,6 +544,8 @@ def test_resume_unknown_and_missing(tmp_path, monkeypatch, capsys):
 
 
 def test_json_summary_on_all_exits(tmp_path, monkeypatch, capsys):
+    assert agentcoder.main([]) == 1  # the no-args exit prints usage, not JSON
+    assert "usage" in capsys.readouterr().out
     env = build_env(tmp_path, monkeypatch, spec_overrides={"max_rounds": 0},
                     name="jsonx")
     assert env.run() == 1
@@ -635,10 +637,104 @@ def test_spawn_hang_kills_siblings(tmp_path, monkeypatch):
     # sibling; a pid-reuse race within the test window is not a real risk
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
-    # killing the `paseo run` clients does NOT stop the agents: the driver must
-    # also find them by title, stop them, and record the ids for the human
-    assert [c for c in env.calls() if c[:1] == ["stop"]]
-    assert env.job()["stopped_agents"] == {"coder": "a1"}
+    # killing the `paseo run` clients does NOT stop the agents, and the sweep
+    # must NOT stop the recorded healthy coder (item 6): the hung designer
+    # never registered an id, so there is nothing to stop and nothing recorded
+    assert not [c for c in env.calls() if c[:1] == ["stop"]]
+    assert env.job().get("stopped_agents") is None
+
+
+def test_class_based_ids_pass_gate(tmp_path, monkeypatch):
+    # junit gives classname="...test_cls.TestA.TestB" with no file attribute;
+    # the node id must resolve the module file and keep the classes in the id
+    cls_tests = _HEADER + (
+        'class TestA:\n'
+        '    @pytest.mark.parametrize("x", ["a b"])\n'
+        '    def test_sub(self, x):\n        assert app.sub(1, 2) == -1\n'
+        '    class TestB:\n'
+        '        def test_n(self):\n            assert app.sub(3, 1) == 2\n')
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={
+        "designer_files": {"tests/test_cls.py": cls_tests,
+                           "tests/sub/test_s.py": _HEADER.replace("test_control", "test_s"),
+                           "tests/t1.cases.json": json.dumps({
+                               "tests/test_cls.py::test_control": "pass",
+                               "tests/test_cls.py::TestA::test_sub[a b]": "fail",
+                               "tests/test_cls.py::TestA::TestB::test_n": "fail",
+                               "tests/sub/test_s.py::test_s": "pass"})},
+        "coder_files": {"app.py": FIX_APP}})
+    assert env.run() == 0  # class, nested class, param space, subdir: strict gate green
+
+
+def test_junit_node_falls_back_to_guess(tmp_path):
+    xml = tmp_path / "j.xml"
+    xml.write_text('<testcase classname="ghost.mod" name="test_z"/>')
+    assert agentcoder.junit_outcomes(xml, str(tmp_path)) == {"ghost/mod.py::test_z": "PASSED"}
+
+
+def test_data_files_in_test_globs_are_dropped(tmp_path, monkeypatch):
+    # README's `tests/**` also matches the designer's fixture data; pytest exits
+    # rc=4 on data files, so the expansion keeps only what pytest can collect
+    env = build_env(tmp_path, monkeypatch,
+                    spec_overrides={"allowed_test_paths": ["tests/**"]},
+                    scenario_overrides={"designer_files": {
+                        "tests/test_add.py": TEST_FILE,
+                        "tests/t1.cases.json": CASES_OK,
+                        "tests/data/input.txt": "golden data\n"}})
+    assert env.run() == 0
+
+
+def test_xpass_counts_as_passed(tmp_path, monkeypatch):
+    # decision (documented in the README): a non-strict xfail that passes is a
+    # plain PASSED testcase in junit, so the gate judges XPASS as PASSED
+    tests = _HEADER + (
+        "@pytest.mark.xfail(reason='green on base')\n"
+        "def test_sub():\n    assert callable(app.add)\n")
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={
+        "designer_files": {"tests/test_add.py": tests,
+                           "tests/t1.cases.json": json.dumps({
+                               "tests/test_add.py::test_control": "pass",
+                               "tests/test_add.py::test_sub": "pass"})},
+        "coder_files": {"app.py": FIX_APP}})
+    assert env.run() == 0
+
+
+def test_allow_no_prlimit_escape_hatch(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, spec_overrides={"allow_no_prlimit": True},
+                    name="nopr")
+    monkeypatch.setattr(agentcoder.shutil, "which", lambda name: None)
+    assert env.run() == 0  # preflight proceeds; tests run without the prlimit prefix
+
+
+def test_resume_clears_dead_recorded_agents(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch,
+                    spec_overrides={"agent_timeout": 15},
+                    scenario_overrides={"hang": {"run": ["designer"]},
+                                        "pidfile": str(tmp_path / "hangpid")})
+    assert env.run() == 1  # designer spawn hangs; coder a1 recorded, healthy
+    assert env.job()["coder_agent"] == "a1"
+    state = json.loads((env.logdir / "agents.json").read_text())
+    state["agents"]["a1"]["status"] = "stopped"  # coder dies while the job is paused
+    json.dump(state, open(env.logdir / "agents.json", "w"))
+    env.scenario["hang"] = {}
+    env.scen_path.write_text(json.dumps(env.scenario))
+    assert env.resume() == 0  # liveness check drops the dead id and respawns
+    assert env.job()["status"] == "ready-for-human-gate"
+    assert env.job()["coder_agent"] != "a1"
+
+
+def test_stop_sweep_keeps_recorded_and_covers_reviewers(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="sweep")
+    json.dump({"seq": 9, "agents": {
+        "a1": {"role": "coder", "ws": "/w1", "sends": 0, "title": "AgentCoder t1 coder"},
+        "a7": {"role": "designer", "ws": "/w7", "sends": 0, "title": "AgentCoder t1 designer"},
+        "a9": {"role": "review-r0-abcd", "ws": "/w9", "sends": 0,
+               "title": "AgentCoder t1 review-r0-abcd"}}},
+        open(env.logdir / "agents.json", "w"))
+    job = {"jobdir": str(env.jobdir), "task_id": "t1", "spec": env.spec,
+           "coder_agent": "a1", "reviewers": {"0@deadbeef": "a9"}}
+    agentcoder.stop_job_agents(job)
+    assert [c for c in env.calls() if c[:1] == ["stop"]] == [["stop", "a7"]]
+    assert job["stopped_agents"] == {"designer": "a7"}
 
 
 def test_forged_stdout_cannot_satisfy_gate(tmp_path, monkeypatch):
@@ -892,15 +988,15 @@ def test_outcome_gate_helpers():
     cases = {"t::a": "pass", "t::b": "fail"}
     ok = {"t::a": "PASSED", "t::b": "FAILED"}
     assert agentcoder.compare_cases(cases, ok) == []
-    for bad_b in ("SKIPPED", "XFAIL", "XPASS", "NOT-COLLECTED", "PASSED"):
+    # the junit parser only ever emits these four statuses (xpass arrives as a
+    # plain PASSED testcase; see test_xpass_counts_as_passed for the decision)
+    for bad_b in ("SKIPPED", "NOT-COLLECTED", "PASSED"):
         assert agentcoder.compare_cases(cases, {"t::a": "PASSED", "t::b": bad_b})
-    for bad_a in ("SKIPPED", "XFAIL", "XPASS", "NOT-COLLECTED", "FAILED"):
+    for bad_a in ("SKIPPED", "NOT-COLLECTED", "FAILED"):
         assert agentcoder.compare_cases(cases, {"t::a": bad_a, "t::b": "FAILED"})
     assert agentcoder.gate_failures(cases, {"t::a": "PASSED", "t::b": "PASSED"}) == []
     assert agentcoder.gate_failures(cases, {}) == ["t::a (NOT-COLLECTED)",
                                                    "t::b (NOT-COLLECTED)"]
-    assert agentcoder.gate_failures(cases, {"t::a": "PASSED", "t::b": "XPASS"}) \
-        == ["t::b (XPASS)"]
 
 
 @pytest.mark.parametrize("tests,expect", [

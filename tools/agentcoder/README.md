@@ -1,7 +1,7 @@
 # agentcoder — a small driver for coder / blind test designer / executor loops
 
 `tools/agentcoder/agentcoder.py` is a **plain driver script** (stdlib only,
-one file, kept under 700 non-blank/non-comment lines — a goal, not enforced
+one file, kept at ≤700 non-blank/non-comment lines — a goal, not enforced
 by a check) that runs the AgentCoder paper loop against Paseo agents:
 
 - a **CODER** agent implements a contract,
@@ -146,14 +146,17 @@ spawn ──► test_review ──► execute ──► candidate ──► land
    preflight refuses to start without it unless `allow_no_prlimit`), a
    scrubbed environment, and a timeout. Outcomes are compared with `cases.json`:
    a `pass` control that is not PASSED on base, or a `fail` test that is not
-   FAILED on base (SKIPPED/XFAIL/XPASS/missing all count), is a **TEST bug** —
+   FAILED on base (SKIPPED/ERROR/missing all count), is a **TEST bug** —
    the mismatch goes to the designer, up to `max_rounds` rounds, then escalate.
  4. **candidate** — temp detached worktree of the coder's HEAD + frozen tests;
     coder's changed paths checked against `allowed_code_paths`. A round is
     green only when the pytest run exits 0 **and** **every** id declared in
-    `cases.json` shows outcome PASSED for the coder's code; SKIPPED/XFAIL/
-    XPASS/ERROR/missing and exit 5 (nothing collected) all count as red even
-    if the exit code is 0, with the observed outcome fed back per id.
+    `cases.json` shows outcome PASSED for the coder's code; SKIPPED/ERROR/
+    missing and exit 5 (nothing collected) all count as red even if the exit
+    code is 0, with the observed outcome fed back per id. Outcomes come from
+    junit XML, which has no XFAIL/XPASS status: a non-strict xfail arrives as
+    SKIPPED (red), and an xfail that passes (XPASS) as a plain PASSED
+    testcase — XPASS therefore counts as PASSED, by decision.
    Failures are fed to the coder as the last 150 output lines + failing ids
    (blocking `paseo send`), at most `max_rounds`; the coder's head is re-read
    (`rev-parse`) each round, never trusted from memory. Tests are never

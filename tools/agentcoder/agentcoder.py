@@ -50,14 +50,14 @@ def resolve(argv):
 
 
 def run_cmd(argv, cwd=None, env=None, timeout=None):
-    """The one subprocess helper.  Fake it via AGENTCODER_PASEO / AGENTCODER_GH."""
-    proc = subprocess.run(resolve(argv), cwd=cwd, env=env, timeout=timeout,
-                          capture_output=True, text=True)
+    # the one subprocess helper; fake it via AGENTCODER_PASEO / AGENTCODER_GH
+    proc = subprocess.run([tool_path(argv[0])] + list(argv[1:]), cwd=cwd, env=env,
+                          timeout=timeout, capture_output=True, text=True)
     return proc.returncode, proc.stdout, proc.stderr
 
 
 def run_guarded(argv, cwd=None, timeout=PASEO_TIMEOUT):
-    """Every blocking tool call goes through here: a hung tool is a Pause."""
+    # every blocking tool call goes through here: a hung tool is a Pause
     try:
         return run_cmd(argv, cwd=cwd, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -187,13 +187,11 @@ def paseo_ls():
 def preflight(job):
     spec = job["spec"]
     if job.get("base_sha") is None:  # pinned at first resolution; never re-moved
-        job["base_sha"] = git(spec["repo"], "rev-parse", "--verify",
-                              str(spec["base"]) + "^{commit}")
+        job["base_sha"] = git(spec["repo"], "rev-parse", "--verify", str(spec["base"]) + "^{commit}")  # noqa: E501
     if not shutil.which("prlimit") and not spec.get("allow_no_prlimit"):
         raise Pause("prlimit is not on PATH: tests would run WITHOUT CPU/address-space "
                     "limits; install prlimit, or set \"allow_no_prlimit\": true to accept")
-    running = [a for a in paseo_ls() if a.get("status") == "running"
-               and "qwen" in str(a.get("model", "")).lower()]
+    running = [a for a in paseo_ls() if a.get("status") == "running" and "qwen" in str(a.get("model", "")).lower()]
     room = int(spec["qwen_cap"]) - int(spec["reserve"])
     if len(running) >= room:
         raise Pause(f"refusing to start: {len(running)} Qwen agents running, "
@@ -282,8 +280,7 @@ def check_permits(job):
                     f"{tail_text(err, 3)}")
     data = json_of(out, "paseo permit ls output")
     entries = data.get("permits", []) if isinstance(data, dict) else data
-    ids = {job.get("coder_agent"), job.get("designer_agent"),
-           *(job.get("reviewers") or {}).values()}
+    ids = {job.get("coder_agent"), job.get("designer_agent"), *(job.get("reviewers") or {}).values()}
     hit = [e for e in entries if e.get("agentId") in ids]
     if hit:
         raise Pause(f"permission prompt pending for job agents: "
@@ -309,8 +306,7 @@ def send_to(job, agent_key, message):
     agent_id = job.get(agent_key)
     if not agent_id:
         raise Pause(f"no recorded agent for {agent_key}; refusing to guess")
-    rc, out, err = run_guarded(["paseo", "send", agent_id, "--json", message],
-                                timeout=int(job["spec"].get("agent_timeout", 1800)))
+    rc, out, err = run_guarded(["paseo", "send", agent_id, "--json", message], timeout=int(job["spec"].get("agent_timeout", 1800)))  # noqa: E501
     if rc != 0:
         raise Pause(f"send to {agent_key} failed (rc={rc}): {tail_text(err, 5)}")
     status = json_of(out, "send result").get("status")
@@ -324,8 +320,7 @@ def spawn_agent(job, role, model, base, prompt):
             "--new-branch", branch_name(job, role), "--base", base, "--model", model,
             "--title", f"AgentCoder {job['task_id']} {role}", "--json", prompt]
     try:
-        rc, out, err = run_guarded(argv, cwd=job["spec"]["repo"],
-                                   timeout=int(job["spec"].get("agent_timeout", 1800)))
+        rc, out, err = run_guarded(argv, cwd=job["spec"]["repo"], timeout=int(job["spec"].get("agent_timeout", 1800)))  # noqa: E501
     except Pause as exc:
         raise Pause(f"{role} spawn: {exc}")
     key = "reviewer" if role.startswith("review") else role
@@ -341,17 +336,24 @@ def _kill_all(procs):
 
 
 def stop_job_agents(job):
-    # killing the `paseo run` client does NOT stop the agent: find it by title, stop it
+    # killing the `paseo run` client does NOT stop the agent; stop the job's
+    # agents by title, EXCEPT roles whose id is already recorded (= healthy)
+    known = ({str(job.get(f"{r}_agent")) for r in ("coder", "designer")}
+             | {str(v) for v in (job.get("reviewers") or {}).values()})
     for e in paseo_ls():
-        role = next((r for r in ("coder", "designer")
-                     if e.get("title") == f"AgentCoder {job['task_id']} {r}"), None)
-        if role and e.get("agentId"):
-            run_guarded(["paseo", "stop", str(e["agentId"])])
-            job.setdefault("stopped_agents", {})[role] = e["agentId"]
+        title = str(e.get("title", ""))
+        aid = str(e.get("agentId"))
+        if title.startswith(f"AgentCoder {job['task_id']} ") and aid not in known:
+            run_guarded(["paseo", "stop", aid])
+            job.setdefault("stopped_agents", {})[title.rsplit(" ", 1)[-1]] = aid
 
 
 def do_spawn(job):
     spec = job["spec"]
+    live = {str(a.get("agentId")) for a in paseo_ls() if a.get("status") not in (None, "stopped")}
+    for role in ("coder", "designer"):  # resume: a recorded id that died must respawn
+        if job.get(f"{role}_agent") and str(job[f"{role}_agent"]) not in live:
+            job.pop(f"{role}_agent", None), job.pop(f"{role}_cwd", None)
     need = [r for r in ("coder", "designer") if not job.get(f"{r}_agent")]
     if need:
         prompts = {"coder": coder_prompt(job), "designer": designer_prompt(job)}
@@ -388,9 +390,7 @@ def do_spawn(job):
 
 def path_matches(p, g):
     g = g.rstrip("/")
-    if not any(ch in g for ch in "*?[") and (p == g or p.startswith(g + "/")):
-        return True
-    return fnmatch.fnmatch(p, g)
+    return (not any(ch in g for ch in "*?[") and (p == g or p.startswith(g + "/"))) or fnmatch.fnmatch(p, g)  # noqa: E501
 
 
 def scope_check(job, sha, globs, who):
@@ -424,7 +424,8 @@ def do_test_review(job):
             save_job(job)
         rc, out, err = run_guarded(["paseo", "logs", reviewers[key], "--tail", "60"])
         if rc != 0:
-            raise Pause(f"paseo logs for reviewer {reviewers[key]} failed (rc={rc})")
+            raise Pause(f"paseo logs for reviewer {reviewers[key]} failed (rc={rc}): "
+                        f"{tail_text(err, 3)}")
         verdicts = re.findall(r"VERDICT:\s*(APPROVE|CHANGES REQUESTED)", out)
         if not verdicts:
             raise Pause(f"reviewer round {rnd} produced no VERDICT line; refusing to guess")
@@ -445,14 +446,25 @@ def do_test_review(job):
 
 
 def expand_tests(globs, wt):
-    found = sorted({p for g in globs for p in glob.glob(g, root_dir=wt, recursive=True)})
+    found = sorted({p for g in globs for p in glob.glob(g, root_dir=wt, recursive=True)
+                    if Path(wt, p).is_dir() or p.endswith(".py")})  # pytest can't take data files
     if not found:
         raise Pause(f"allowed_test_paths {globs} matched nothing in the worktree; "
                     "refusing to hand pytest an empty file list")
     return found
 
 
-def junit_outcomes(xml):
+def junit_node(tc, wt):
+    parts = [p for p in tc.get("classname", "").split(".") if p]
+    for k in range(len(parts), 0, -1):  # longest dotted prefix naming a real .py
+        mod = "/".join(parts[:k])
+        if Path(wt, mod + ".py").is_file():
+            rest = "".join(f"::{p}" for p in parts[k:])
+            return f"{mod}.py{rest}::{tc.get('name', '')}"
+    return f"{tc.get('file') or tc.get('classname', '').replace('.', '/') + '.py'}::{tc.get('name', '')}"  # noqa: E501
+
+
+def junit_outcomes(xml, wt):
     outcomes = {}
     try:
         root = ET.parse(xml).getroot()
@@ -460,9 +472,8 @@ def junit_outcomes(xml):
         return outcomes
     for tc in root.iter("testcase"):
         kids = {c.tag for c in tc}
-        node = f"{tc.get('file') or tc.get('classname', '').replace('.', '/') + '.py'}::{tc.get('name', '')}"
-        outcomes[node] = ("SKIPPED" if "skipped" in kids else "FAILED" if "failure" in kids
-                          else "ERROR" if "error" in kids else "PASSED")
+        outcomes[junit_node(tc, wt)] = ("SKIPPED" if "skipped" in kids else "FAILED" if "failure" in kids
+                                        else "ERROR" if "error" in kids else "PASSED")
     return outcomes
 
 
@@ -484,7 +495,7 @@ def run_tests(job, wt):
     except subprocess.TimeoutExpired:
         raise Pause(f"test command timed out after {tmo}s; nothing was judged "
                     f"and no agent was fed this output")
-    outcomes = junit_outcomes(xml) if is_pytest else {}
+    outcomes = junit_outcomes(xml, wt) if is_pytest else {}
     if rc not in (0, 1, 5) and not outcomes:
         raise Pause(f"test command exited {rc} with no per-test outcomes: "
                     f"{tail_text(out + err, 8)}")
@@ -546,10 +557,8 @@ def do_execute(job):
         test_sha = job["test_sha"] = git(job["designer_cwd"], "rev-parse", "HEAD")
         if spec.get("test_reviewer_model") and test_sha != job.get("reviewed_test_sha"):
             return "test_review"  # designer committed new tests: re-gate via review
-        test_paths = scope_check(job, test_sha, spec["allowed_test_paths"], "test designer")
-        test_paths = [p for p in test_paths
-                      if any(path_matches(p, g) for g in spec["allowed_test_paths"])
-                      and not p.endswith(".cases.json")]
+        changed = scope_check(job, test_sha, spec["allowed_test_paths"], "test designer")
+        test_paths = [p for p in changed if not p.endswith(".cases.json")]
         if not test_paths:
             raise Escalate(f"test designer commit {test_sha[:9]} adds no files "
                            f"under {spec['allowed_test_paths']}")
@@ -692,9 +701,8 @@ def do_land(job):
 
 
 def write_report(job, landing=False):
-    rows = "\n".join(
-        f"| {r['round']} | {r['rc']} | {', '.join(r['failed']) or '-'} |"
-        for r in job.get("candidate_results", []))
+    rows = "\n".join(f"| {r['round']} | {r['rc']} | {', '.join(r['failed']) or '-'} |"
+                     for r in job.get("candidate_results", []))
     lines = [
         f"# agentcoder report — {job['task_id']}", "",
         f"- status: **{job.get('status', 'running')}**"
@@ -723,12 +731,10 @@ def write_report(job, landing=False):
 
 
 def do_report(job):
-    job["status"] = "ready-for-human-gate"
-    job["reason"] = None
+    job.update(status="ready-for-human-gate", reason=None)
 
 
-HANDLERS = {"spawn": do_spawn, "test_review": do_test_review, "execute": do_execute,
-            "candidate": do_candidate, "land": do_land, "report": do_report}
+HANDLERS = {"spawn": do_spawn, "test_review": do_test_review, "execute": do_execute, "candidate": do_candidate, "land": do_land, "report": do_report}  # noqa: E501
 
 
 def run_loop(job):
@@ -779,8 +785,7 @@ def main(argv):
                                ("qwen_cap", 8), ("reserve", 1),
                                ("cases_file", f"tests/{spec['task_id']}.cases.json")):
                 spec.setdefault(key, value)
-            jobdir = Path(argv[2] if len(argv) > 2 else
-                          Path(spec["repo"]) / ".scratch" / "agentcoder" / spec["task_id"]).resolve()
+            jobdir = Path(argv[2] if len(argv) > 2 else Path(spec["repo"]) / ".scratch" / "agentcoder" / spec["task_id"]).resolve()  # noqa: E501
             jobdir.mkdir(parents=True, exist_ok=True)
             if (jobdir / "job.json").exists():
                 exit_json("error", f"a job already lives in {jobdir}; use resume")
