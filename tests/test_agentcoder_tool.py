@@ -274,7 +274,9 @@ def _dry_run_save_count():
     return calls[0]
 
 
-SAVE_COUNT = _dry_run_save_count()
+# Only computed off Windows: the dry run spawns the fakes, which is exactly
+# what Windows cannot do; the kill test is skipped there anyway.
+SAVE_COUNT = 1 if sys.platform == "win32" else _dry_run_save_count()
 
 
 def test_happy_path(tmp_path, monkeypatch, capsys):
