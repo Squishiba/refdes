@@ -64,4 +64,18 @@ I did not write them.
   today, since `collect_former_ids` leaves it out of the built map); only
   the write route adds the loud "names both claimants" refusal.
 
+## Review rounds
+
+PR #358 review (product code approved, test file only): tightened the parity
+loops to assert the write's reported id/handle match the read route's per
+spelling and that landed saves land inside REQ-001's own span (keyless
+provisional handle pinned as the patcher's "in this file" refusal, not the
+find's); `test_no_refusing_path_writes_anything` now drives both refusals
+(unknown ref, double claim) through set_field/set_body/add_link in separate
+project dirs with a finished docstring; dropped the trivially-true
+`"REQ-001" in text` for a REQ-001-block assertion; fixed the
+`make_root`/`serve_minted` return annotations to `Path`. 11/11 pass, plus the
+serve edit/api suites.
+
 Task finished.
+

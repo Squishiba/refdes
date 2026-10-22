@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from pathlib import Path
 
 import pytest
 from conftest import write_project_config
@@ -164,7 +165,7 @@ class Api:
         return api_mod.handle(self, "POST", path, {}, payload)
 
 
-def make_root(tmp_path, files) -> "os.PathLike":
+def make_root(tmp_path, files) -> Path:
     write_project_config(tmp_path, RETIRE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir(exist_ok=True)
@@ -181,7 +182,7 @@ def serve(root) -> Api:
     return Api(root)
 
 
-def serve_minted(tmp_path) -> tuple[Api, "os.PathLike"]:
+def serve_minted(tmp_path) -> tuple[Api, Path]:
     """The same project after an ordinary writable check minted every key:
     the handle the row hands the browser is then the surrogate key, and that
     is the handle a retired-id save must report back."""
@@ -323,7 +324,8 @@ def test_a_retired_id_that_is_a_live_id_writes_the_live_item(tmp_path):
     status, payload = edit(client, "REQ-001", reqs_file(root))
     assert status == 200, payload
     text = read(reqs_file(root))
-    assert "REQ-001" in text and "status: draft" in text
+    block = text.split("- id: REQ-001", 1)[1].split("- id:", 1)[0]
+    assert "status: draft" in block, "the edit landed inside REQ-001's own block"
     assert read(str(root / "items" / "claim.yaml")) == COLLIDE_CLAIM
     moved = {k for k, v in snapshot_tree(root).items() if before_tree.get(k) != v}
     assert moved == {"items/reqs.yaml"}
@@ -402,12 +404,28 @@ def test_both_routes_accept_the_same_spellings_keyless(tmp_path):
         read_status, item = client.get(f"/api/item/{ref}")
         assert read_status == 200, f"the read route must keep answering {ref}"
         assert item["id"] == "REQ-001"
-        write_status, payload = edit(client, ref, path)
+        write_status, payload = edit(client, ref, path, field="text", value=f"via {ref}")
         assert not is_find_refusal(write_status, payload), (
             f"the read route answers {ref} with 200, so the write route's "
             f"_find_item must resolve it too, not refuse it: {payload}"
         )
-        assert write_status in (200, 409, 422), (ref, payload)
+        if ref == provisional:
+            # The find resolves the provisional handle (it IS the items dict
+            # key); the patcher then declines it -- the file spells the item
+            # by id, not by `~`-handle. Pinned as the write route's own
+            # behavior by test_serve_edit_http; the parity here is that it is
+            # the PATCH refusing, not the find.
+            assert write_status == 422, (ref, payload)
+            assert "in this file" in payload["reason"], payload
+            continue
+        assert write_status == 200, (ref, payload)
+        assert payload["kind"] == "applied"
+        # one identity, both routes: the write reports what the read answers
+        assert payload["id"] == item["id"] and payload["handle"] == item["handle"]
+        text = read(path)
+        assert f"via {ref}" in text.split("- id: REQ-001", 1)[1].split("- id:", 1)[0], (
+            f"the save under {ref} must land inside REQ-001's own span"
+        )
 
 
 def test_both_routes_accept_the_same_spellings_keyed(tmp_path):
@@ -422,12 +440,23 @@ def test_both_routes_accept_the_same_spellings_keyed(tmp_path):
         read_status, item = client.get(f"/api/item/{ref}")
         assert read_status == 200, f"the read route must keep answering {ref}"
         assert item["id"] == "REQ-001"
-        write_status, payload = edit(client, ref, path)
+        write_status, payload = edit(client, ref, path, field="text", value=f"via {ref}")
         assert not is_find_refusal(write_status, payload), (
             f"the read route answers {ref} with 200, so the write route's "
             f"_find_item must resolve it too, not refuse it: {payload}"
         )
-        assert write_status in (200, 409, 422), (ref, payload)
+        assert write_status == 200, (ref, payload)
+        assert payload["kind"] == "applied"
+        # one identity, both routes: every live spelling reports the same
+        # current key-handle, never the retired spelling
+        assert payload["id"] == item["id"] and payload["handle"] == item["handle"]
+        assert payload["handle"] == key
+        text = read(path)
+        # minting moved `key:` in front of `id:`, so the block boundaries are
+        # the id lines themselves, not the `- id:` list markers
+        assert f"via {ref}" in text.split("id: REQ-001", 1)[1].split("id: REQ-002", 1)[0], (
+            f"the save under {ref} must land inside REQ-001's own span"
+        )
 
 
 def test_a_link_target_spelled_by_a_retired_id_resolves(tmp_path):
@@ -458,19 +487,36 @@ def test_a_link_target_spelled_by_a_retired_id_resolves(tmp_path):
 
 
 def test_no_refusing_path_writes_anything(tmp_path):
-    """The no-write posture for this task's refusals: the unknown ref and the
-    double-claim... only the unknown ref lives in this fixture, so drive it
-    every way, and the tree is byte-identical after."""
-    client, root = serve(retired_root(tmp_path)), tmp_path
-    path = reqs_file(root)
-    before_tree = snapshot_tree(root)
-    for payload in (
-        {"op": "set_field", "field": "text", "value": "x", "expected_revision": sha256(path)},
-        {"op": "set_body", "text": "nope", "expected_revision": sha256(path)},
-        {"op": "add_link", "verb": "satisfies", "target": "REQ-900",
-         "expected_revision": sha256(path)},
-    ):
-        status, _body = client.post("/api/item/REQ-999/edit", payload)
-        assert status == 422
-    assert snapshot_tree(root) == before_tree
-    assert sorted(os.listdir(root / "items")) == ["decs.yaml", "reqs.yaml"]
+    """The no-write posture for this task's two refusals, each driven every
+    way the write route can be driven: the unknown ref (`REQ-999`, resolved
+    nowhere) and the double-claim (`REQ-900`, claimed by REQ-002 and
+    REQ-003). For each: set_field, set_body and add_link are all refused,
+    the tree is byte-identical after, and no file appears in `items/`."""
+    # the two refusals need two projects: one directory per case, the
+    # fixtures write the same `items/reqs.yaml`
+    unknown_root = tmp_path / "unknown"
+    unknown_root.mkdir()
+    claim_root = tmp_path / "claim"
+    claim_root.mkdir()
+    cases = [
+        (retired_root(unknown_root), "REQ-999", ["decs.yaml", "reqs.yaml"]),
+        (
+            make_root(claim_root, {"reqs.yaml": CLAIM_REQS, "claim2.yaml": CLAIM_CLAIM2}),
+            "REQ-900",
+            ["claim2.yaml", "reqs.yaml"],
+        ),
+    ]
+    for root, ref, item_files in cases:
+        client = serve(root)
+        path = reqs_file(root)
+        before_tree = snapshot_tree(root)
+        for payload in (
+            {"op": "set_field", "field": "text", "value": "x", "expected_revision": sha256(path)},
+            {"op": "set_body", "text": "nope", "expected_revision": sha256(path)},
+            {"op": "add_link", "verb": "satisfies", "target": "REQ-001",
+             "expected_revision": sha256(path)},
+        ):
+            status, _body = client.post(f"/api/item/{ref}/edit", payload)
+            assert status == 422, (ref, payload, _body)
+        assert snapshot_tree(root) == before_tree
+        assert sorted(os.listdir(root / "items")) == item_files
