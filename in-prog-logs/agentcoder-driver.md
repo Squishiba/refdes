@@ -7,8 +7,9 @@ off main tip.
 
 ## Design (as shipped)
 
-- Current size: driver 700 non-blank non-comment lines (at the 700 goal
-  -- future changes here must delete code to add any); 63 tests, all
+- Current size: driver 723 non-blank non-comment lines (the 700 cap was
+  lifted in round 10 as the reviewer's own number; ~1000 is a soft sanity
+  ceiling); 67 tests, all
   passing on Linux, module skipped on non-Linux (prlimit is Linux-only);
   full suite 4325 passed / 2 skipped / 0 failed; ruff (E9,F on the two
   files) clean. All measured with pytest's default basetemp: an earlier "15
@@ -110,7 +111,10 @@ instead of re-gating; the run helper catches `OSError` (missing paseo/gh/git
 binary) as a Pause, not a crash with job.json left running; cases.json
 entries must now be objects with a valid `expected_on_base` (null/string/
 number entries escalate cleanly; the string shorthand is gone); tests
-63->67, driver back to exactly 700 lines (met by ~16 formatting trims).
+63->67. Mid-round the reviewer lifted the 700-line cap (their own
+arbitrary number, not the owner's) in favour of ~1000 as a soft sanity
+ceiling with plain readable lines; the fit-to-700 compressions (noqa
+joins, one-liners) were un-golfed, landing at 723 lines.
 
 ## Status
 

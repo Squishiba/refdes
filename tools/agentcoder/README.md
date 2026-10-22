@@ -1,8 +1,8 @@
 # agentcoder — a small driver for coder / blind test designer / executor loops
 
 `tools/agentcoder/agentcoder.py` is a **plain driver script** (stdlib only,
-one file, kept at ≤700 non-blank/non-comment lines — a goal, not enforced
-by a check) that runs the AgentCoder paper loop against Paseo agents:
+one file, with ~1000 non-blank/non-comment lines as a soft sanity
+ceiling — not enforced by a check) that runs the AgentCoder paper loop against Paseo agents:
 
 - a **CODER** agent implements a contract,
 - an **INDEPENDENT, BLIND test designer** writes acceptance tests from the
