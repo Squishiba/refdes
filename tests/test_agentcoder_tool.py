@@ -915,6 +915,27 @@ def test_land_crash_after_staging_resumes_clean(tmp_path, monkeypatch):
     assert env.job()["pr_number"] == 4242
 
 
+def test_land_escalates_extra_staged_file_in_tests_dir(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="landdirt")
+    real = agentcoder.do_land
+
+    def poison(job):  # coder stages an extra tests/ file just before land
+        wt = Path(job["coder_cwd"])
+        (wt / "tests").mkdir(exist_ok=True)
+        (wt / "tests" / "conftest.py").write_text("COLLECT = 1\n")
+        gitat(wt, "add", "tests/conftest.py")
+        return real(job)
+
+    monkeypatch.setitem(agentcoder.HANDLERS, "land", poison)
+    assert env.run() == 2  # under the allowed_test_paths GLOB but not in the frozen list
+    job = env.job()
+    assert job["status"] == "escalated" and "frozen test paths" in job["reason"]
+    assert job.get("pr_number") is None
+    head = subprocess.run(["git", "-C", job["coder_cwd"], "rev-parse", "HEAD"],
+                          capture_output=True, text=True).stdout.strip()
+    assert head == job["coder_sha"]  # staged file not committed/swept
+
+
 def test_land_adopts_committed_test_head_on_resume(tmp_path, monkeypatch):
     env = build_env(tmp_path, monkeypatch, name="cl2")
     real = agentcoder.save_job

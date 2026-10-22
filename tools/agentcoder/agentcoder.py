@@ -789,9 +789,9 @@ def do_land(job):
     dirty = git(wt, "status", "--porcelain", "--untracked-files=no")
     if dirty:
         paths = [ln[3:].split(" -> ")[-1] for ln in dirty.splitlines() if ln.strip()]
-        if [p for p in paths if not any(path_matches(p, g) for g in job["spec"]["allowed_test_paths"])]:
-            raise Escalate("coder worktree has uncommitted/staged changes outside its test "
-                           f"paths; refusing to sweep them:\n{tail_text(dirty, 15)}")
+        if [p for p in paths if p not in job["test_paths"]]:
+            raise Escalate("coder worktree has uncommitted/staged changes outside the frozen "
+                           f"test paths; refusing to sweep them:\n{tail_text(dirty, 15)}")
         # changes inside test_paths: land's own interrupted checkout; redo it idempotently
         git(wt, "reset", "-q", "--", *job["test_paths"], check=False)
         git(wt, "checkout", "--", *job["test_paths"], check=False)
@@ -801,7 +801,7 @@ def do_land(job):
             git(wt, "-c", "user.name=agentcoder", "-c", "user.email=noreply@refdes.local",
                 "commit", "--author", "agentcoder <noreply@refdes.local>",
                 "-m", f"test: acceptance tests for {job['task_id']} (agentcoder)",
-                "-m", co_trailer(job))
+                "-m", co_trailer(job), "--", *job["test_paths"])
         except Pause:  # driver's own staged files must not read as coder dirt on resume
             git(wt, "reset", "-q", "--", *job["test_paths"], check=False)
             raise

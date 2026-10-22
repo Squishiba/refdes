@@ -32,8 +32,10 @@ python tools/agentcoder/agentcoder.py status JOBDIR
 `JOBDIR` defaults to `<repo>/.scratch/agentcoder/<task_id>/` — keep job
 dirs out of tracked paths (in this repo `.scratch/` is gitignored). Exit
 codes: **0** done (`ready-for-human-gate`), **2** escalated, **1**
-error/paused. `status` on an existing job prints the job's recorded fields
-as JSON and exits 0; `status` on a missing/invalid jobdir prints a paused
+error/paused. `status` on an existing job prints a fixed **subset** of
+the job's recorded fields (task_id, phase, status, reason, the SHAs,
+pr_number, and the round counters) as JSON and exits 0; `status` on a
+missing/invalid jobdir prints a paused
 JSON (`"no job.json in ..."`) and exits 1, writing no report.
 Exits that run the loop with a `JOBDIR` (preflight pause, mid-run pause,
 escalation, completion) print JSON **and** write `JOBDIR/report.md`; the
@@ -95,7 +97,8 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
   designer's data files, and pytest exits rc=4 on those). pytest does not
   expand patterns itself, and a pattern matching nothing is a
   Pause, not an empty pytest run. For pytest commands the driver appends
-  `--junitxml` (written into the job dir, outside the repo) and `--rootdir`,
+  `--junitxml` (written into the job dir — by default under the repo's
+  `.scratch/`, untracked and outside the worktrees under test) and `--rootdir`,
   and judges per-test outcomes from that XML only: agent-written stdout
   (e.g. a conftest printing `PASSED` lines) is not gate input. The guard
   protects against mistakes, not hostile coders — a coder who can edit
@@ -167,10 +170,13 @@ spawn ──► test_review ──► execute ──► candidate ──► land
     coder runs on it.
 3. **execute** — freeze the test commit SHA; its changed paths — the
    **unfiltered** diff list: additions, modifications, DELETIONS, and both
-   halves of a rename — must fit `allowed_test_paths` (violations
-   escalate). The checkout list from the frozen SHA is the added/modified
-   subset (a deleted path cannot be checked out), minus the `cases_file`
-   itself (matched by exact path, not just by its `.cases.json` suffix). In a temp detached worktree of
+   halves of a rename — must fit `allowed_test_paths`; a violation buys the
+   designer ONE "revert these paths" feedback round per offending sha
+   (counts against `max_rounds`, resume-safe), and only a repeat after that
+   escalates. The checkout list from the frozen SHA is the added/modified
+   subset (a deleted path cannot be checked out), minus every
+   `*.cases.json`-suffixed file AND the exact `cases_file` (so a
+   custom-named cases file is excluded too). In a temp detached worktree of
    the **base** with the frozen tests checked out, run `test_command` under
    `prlimit` when available (CPU/address-space/file-size/process bounds;
    preflight refuses to start without it unless `allow_no_prlimit`), a
@@ -204,12 +210,16 @@ spawn ──► test_review ──► execute ──► candidate ──► land
      fails this and **bounces the job back to the candidate phase** — the
      new head is re-gated (and re-scope-checked against
      `allowed_code_paths`), and only a green re-gate lands. Only then is
-     the tree checked for dirt: changes **outside** the frozen test paths
-     **escalate** (land refuses to sweep them); dirt **inside** them is
-     the driver's own interrupted checkout — reset and re-checked-out
-     from the frozen SHA.
-     The frozen test files are then committed
-     into the coder's branch (authored `agentcoder <noreply@refdes.local>`,
+      the tree checked for dirt: only paths in the **frozen `test_paths`
+      list** are accepted (the `allowed_test_paths` GLOBS are not the
+      standard — a coder-staged `tests/conftest.py` sits inside the globs
+      and **escalates**: it is the coder's, never the driver's to land);
+      dirt in the frozen list is the driver's own interrupted checkout —
+      reset and re-checked-out from the frozen SHA.
+      The frozen test files are then committed
+      into the coder's branch **with an explicit pathspec
+      (`git commit … -- <frozen test paths>`), so nothing outside them can
+      ride the land commit** (authored `agentcoder <noreply@refdes.local>`,
      trailer `Co-authored-by: <name> <noreply@refdes.local>` where `<name>`
      is the last path segment of `coder_model`) and the branch is pushed;
      the pushed SHA is recorded.
@@ -237,8 +247,9 @@ Operational anomalies — a command/quota failure, a timeout, a missing
 verdict, an agent in an error state, a pending permission prompt (detected
 via `paseo permit ls` showing the job's agents), a failing `gh pr list` —
 **pause** the job: state saved, precise reason, `resume` continues (after
-re-running the preflight gates). Expected loop outcomes — a contract/scope
-violation, `max_rounds` exhausted, a coder branch that moved or went dirty
+re-running the preflight gates). Expected loop outcomes — a contract
+violation, a scope violation repeated after its one-shot revert round,
+`max_rounds` exhausted, a coder branch that moved or went dirty
 before land, a CLOSED unmerged PR — **escalate** (exit 2) for a human. The
 driver never guesses and has no stale-SHA detection of its own: coder heads
 are re-read from git each round, while the base SHA is pinned at its first
@@ -298,8 +309,8 @@ never raise a `UnicodeDecodeError` out of the driver and strand
   `{tests}` they are expanded with `glob.glob(..., recursive=True)`. The
   two dialects diverge: fnmatch treats `{`, `,`, `}` literally, so a
   brace pattern like `tests/{a,b}.py` **matches nothing** — a
-  designer/coder commit is then flagged and the scope check **escalates**
-  loudly. A test pattern that matches no file in the worktree **pauses**
+  designer/coder commit is then flagged, buys the one-shot revert round,
+  and the scope check **escalates** loudly on the repeat. A test pattern that matches no file in the worktree **pauses**
   the job. Both are loud; keep patterns in a dialect both sides read the
   same way. `in-prog-logs/` is exempt from **both** scope checks, for
   both agents (the AGENTS.md progress logs) — designer and coder logs

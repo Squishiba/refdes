@@ -7,9 +7,9 @@ script. Done: `tools/agentcoder/agentcoder.py`, `tools/agentcoder/README.md`,
 ## Design (as shipped)
 
 - Current size: driver 810 non-blank non-comment lines (~1000 soft sanity
-  ceiling, plain readable lines); 88 driver tests, all passing on Linux,
+  ceiling, plain readable lines); 89 driver tests, all passing on Linux,
   module skipped on non-Linux (prlimit is Linux-only); full suite
-  4339 passed / 2 skipped / 0 failed; ruff (E9,F on the two files) clean.
+  4351 passed / 2 skipped / 0 failed; ruff (E9,F on the two files) clean.
   All measured with pytest's default basetemp: an earlier "15 failures"
   claim was an artifact of running with `--basetemp` inside the repo tree
   (scaffold/sealing tests are sensitive to a temp dir inside a git repo).
@@ -50,8 +50,9 @@ script. Done: `tools/agentcoder/agentcoder.py`, `tools/agentcoder/README.md`,
 - Parallel spawns raced on the fake paseo's state file; fixed with
   `fcntl.flock` in the fake (test-side only, driver unaffected).
 - The outcome regex initially anchored `$`, which misses `-rA` summary
-  lines of the form `FAILED <id> - reason`; un-anchored with `[ \t]+`
-  separator.
+  lines of the form `FAILED <id> - reason`; it was un-anchored with a
+  `[ \t]+` separator (stdout parsing was later replaced by junit XML, see
+  round 7).
 - `dict(re.findall(...))` inverted the outcomes map (status as key) --
   every test looked NOT-RUN; now `{node: status}`.
 - The test-filter step used raw `fnmatch(p, g)`, so a bare-directory glob
@@ -76,6 +77,9 @@ script. Done: `tools/agentcoder/agentcoder.py`, `tools/agentcoder/README.md`,
   `~/.gitconfig` had masked a CI-only failure).
 
 ## Rounds 7-11 (review passes)
+
+Rounds were numbered 1-5 then 7+ (round 6 was folded into the next send,
+there was no separate round 6).
 
 Round 7: outcomes stopped trusting agent stdout (driver-owned `--junitxml`,
 pinned `--rootdir`; forged `PASSED` lines can no longer satisfy the gate),
@@ -124,6 +128,14 @@ the pinned contract, argv cannot carry them); land adopts only the
 driver's exact frozen blobs; reviewer ids survive their crash window;
 timeout/model types validated; the contract is pinned into job.json at
 preflight; tests 77->88.
+
+Round 13: land's dirt check accepts only the frozen `test_paths` LIST (the
+`allowed_test_paths` globs let a coder-staged `tests/conftest.py` ride the
+land commit untested), and the land commit itself carries an explicit
+pathspec; README corrected on the one-shot scope-revert round, the land
+gate, the cases exclusion (suffix AND exact `cases_file`), the junit XML's
+location (job dir, untracked), and `status` printing a fixed field subset;
+tests 88->89.
 
 ## Status
 
