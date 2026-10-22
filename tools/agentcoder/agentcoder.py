@@ -20,6 +20,7 @@ DEFAULT_MODEL = "opencode/qwenlocal/Qwen3.8-Flash-Next"
 DEFAULT_TC = ["python", "-m", "pytest", "-q", "{tests}"]
 PHASES = ["spawn", "test_review", "execute", "candidate", "land", "report", "done"]
 PROMPT_CAP = 150
+PASEO_TIMEOUT = 60
 LIM = ["prlimit", "--cpu=60", "--as=3221225472", "--fsize=268435456", "--nproc=256"]
 TASK_ID_RE = re.compile(r"[A-Za-z0-9._-]+\Z")
 
@@ -53,6 +54,14 @@ def run_cmd(argv, cwd=None, env=None, timeout=None):
     proc = subprocess.run(resolve(argv), cwd=cwd, env=env, timeout=timeout,
                           capture_output=True, text=True)
     return proc.returncode, proc.stdout, proc.stderr
+
+
+def run_guarded(argv, cwd=None, timeout=PASEO_TIMEOUT):
+    """Every blocking tool call goes through here: a hung tool is a Pause."""
+    try:
+        return run_cmd(argv, cwd=cwd, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise Pause(f"{' '.join(map(str, argv[:3]))} timed out after {timeout}s")
 
 
 def tail_text(text, limit=PROMPT_CAP):
@@ -98,10 +107,25 @@ def validate_spec(spec):
     tid = str(spec.get("task_id", ""))
     if not TASK_ID_RE.match(tid):
         problems.append(f"task_id must match [A-Za-z0-9._-]+, got {tid!r}")
+    else:
+        for role in ("coder", "designer", "review-r0"):
+            rc, _, _ = run_cmd(["git", "check-ref-format", "--branch",
+                                f"ac/{tid}/{role}"])
+            if rc != 0:
+                problems.append(f"task_id {tid!r} cannot form git branch "
+                                f"ac/{tid}/{role}")
+                break
+    if not isinstance(spec.get("title"), str) or not spec["title"].strip():
+        problems.append("title must be a non-empty string")
     repo = str(spec.get("repo", ""))
     repo_root = os.path.realpath(os.path.expanduser(repo)) if repo else ""
-    if not repo_root or not os.path.isdir(os.path.join(repo_root, ".git")):
+    if not repo_root:
         problems.append(f"repo is not a git repository: {repo!r}")
+    else:
+        rc, out, _ = run_cmd(["git", "-C", repo_root, "rev-parse",
+                              "--is-inside-work-tree"])
+        if rc != 0 or out.strip() != "true":
+            problems.append(f"repo is not a git repository: {repo!r}")
 
     def rel_path(value, what, must_exist):
         if not isinstance(value, str) or not value:
@@ -129,6 +153,13 @@ def validate_spec(spec):
 
     check_globs("allowed_code_paths")
     check_globs("allowed_test_paths")
+    cases_file = spec.get("cases_file", f"tests/{tid}.cases.json")
+    if not isinstance(cases_file, str) or os.path.isabs(cases_file) \
+            or any(ch in cases_file for ch in "*?[") \
+            or not any(path_matches(cases_file, g)
+                       for g in spec.get("allowed_test_paths") or []):
+        problems.append(f"cases_file must be a plain path inside "
+                        f"allowed_test_paths: {cases_file!r}")
     tc = spec.get("test_command", DEFAULT_TC)
     if not isinstance(tc, list) or not all(isinstance(x, str) and x for x in tc) \
             or "{tests}" not in tc:
@@ -142,7 +173,7 @@ def validate_spec(spec):
 
 def preflight(job):
     spec = job["spec"]
-    rc, out, err = run_cmd(["paseo", "ls", "-g", "--json"])
+    rc, out, err = run_guarded(["paseo", "ls", "-g", "--json"])
     if rc != 0:
         raise Pause(f"cannot list agents (paseo ls -g): {tail_text(err, 5) or rc}")
     data = json_of(out, "paseo ls output")
@@ -166,6 +197,7 @@ def branch_name(job, role):
 
 
 def designer_prompt(job):
+    cf = job["spec"].get("cases_file", f"tests/{job['task_id']}.cases.json")
     return (
         f"You are the BLIND test designer for task {job['task_id']}. Write no product code.\n"
         f"Contract:\n{contract_text(job)}\n"
@@ -175,7 +207,7 @@ def designer_prompt(job):
         f"- Never look at other branches, other worktrees, or their history "
         f"(no `git log --all`). You are blind to the implementation.\n"
         f"- Commit your work on the current branch.\n"
-        f"- Write tests/{job['task_id']}.cases.json mapping each pytest node id to "
+        f"- Write {cf} mapping each pytest node id to "
         f'{{"expected_on_base": "pass"|"fail", "requirement": "one line"}}. '
         f'"pass" = a control that must already pass on the OLD code; '
         f'"fail" = new behavior the change must bring.'
@@ -210,7 +242,7 @@ def base_env(job):
 
 
 def agent_cwd(job, agent_id):
-    rc, out, err = run_cmd(["paseo", "ls", "-g", "--json"])
+    rc, out, err = run_guarded(["paseo", "ls", "-g", "--json"])
     if rc != 0:
         raise Pause(f"cannot list agents (paseo ls -g): {tail_text(err, 5) or rc}")
     data = json_of(out, "paseo ls output")
@@ -222,7 +254,7 @@ def agent_cwd(job, agent_id):
 
 
 def check_permits(job):
-    rc, out, err = run_cmd(["paseo", "permit", "ls", "--json"])
+    rc, out, err = run_guarded(["paseo", "permit", "ls", "--json"])
     if rc != 0:
         return
     data = json_of(out, "paseo permit ls output")
@@ -253,7 +285,8 @@ def send_to(job, agent_key, message):
     agent_id = job.get(agent_key)
     if not agent_id:
         raise Pause(f"no recorded agent for {agent_key}; refusing to guess")
-    rc, out, err = run_cmd(["paseo", "send", agent_id, "--json", message])
+    rc, out, err = run_guarded(["paseo", "send", agent_id, "--json", message],
+                                timeout=int(job["spec"].get("agent_timeout", 1800)))
     if rc != 0:
         raise Pause(f"send to {agent_key} failed (rc={rc}): {tail_text(err, 5)}")
     status = json_of(out, "send result").get("status")
@@ -266,11 +299,18 @@ def spawn_agent(job, role, model, base, prompt):
     argv = ["paseo", "run", "--new-workspace", "worktree", "--worktree-mode", "branch-off",
             "--new-branch", branch_name(job, role), "--base", base, "--model", model,
             "--title", f"AgentCoder {job['task_id']} {role}", "--json", prompt]
-    rc, out, err = run_cmd(argv, cwd=job["spec"]["repo"],
-                           timeout=int(job["spec"].get("agent_timeout", 1800)))
+    rc, out, err = run_guarded(argv, cwd=job["spec"]["repo"],
+                               timeout=int(job["spec"].get("agent_timeout", 1800)))
     key = "reviewer" if role.startswith("review") else role
     record_turn(job, key, rc, out, err)
     return job[f"{key}_cwd"]
+
+
+def _kill_all(procs):
+    for proc in procs.values():
+        proc.kill()
+    for proc in procs.values():
+        proc.wait()
 
 
 def do_spawn(job):
@@ -294,13 +334,17 @@ def do_spawn(job):
             try:
                 out, err = proc.communicate(timeout=int(spec.get("agent_timeout", 1800)))
             except subprocess.TimeoutExpired:
-                proc.kill()
+                _kill_all(procs)
                 raise Pause(f"{role} agent turn timed out")
-            record_turn(job, role, proc.returncode, out, err)
+            try:
+                record_turn(job, role, proc.returncode, out, err)
+            except Pause:
+                _kill_all(procs)
+                raise
         check_permits(job)
     else:
         for role in ("coder", "designer"):
-            run_cmd(["paseo", "wait", job[f"{role}_agent"], "--timeout", "60"])
+            run_guarded(["paseo", "wait", job[f"{role}_agent"], "--timeout", "60"])
         check_permits(job)
 
 
@@ -338,15 +382,13 @@ def do_test_review(job):
         test_sha = job.get("test_sha") or freeze_tests(job)
         job["test_sha"] = test_sha
         key = str(rnd)
-        if key not in reviewers:
-            reviewers[key] = None
-            save_job(job)
+        if not reviewers.get(key):
             spawn_agent(job, f"review-r{rnd}", spec["test_reviewer_model"],
                         test_sha, review_prompt(job))
             reviewers[key] = job.pop("reviewer_agent")
             job.pop("reviewer_cwd", None)
             save_job(job)
-        rc, out, err = run_cmd(["paseo", "logs", reviewers[key], "--tail", "60"])
+        rc, out, err = run_guarded(["paseo", "logs", reviewers[key], "--tail", "60"])
         if rc != 0:
             raise Pause(f"paseo logs for reviewer {reviewers[key]} failed (rc={rc})")
         verdicts = re.findall(r"VERDICT:\s*(APPROVE|CHANGES REQUESTED)", out)
@@ -387,12 +429,12 @@ def run_tests(job, wt):
 
 
 def load_cases(job, test_sha):
-    raw = git(job["spec"]["repo"], "show", f"{test_sha}:tests/{job['task_id']}.cases.json",
-              check=False)
+    cf = job["spec"].get("cases_file", f"tests/{job['task_id']}.cases.json")
+    raw = git(job["spec"]["repo"], "show", f"{test_sha}:{cf}", check=False)
     cases = json_of(raw, "cases.json") if raw else None
     if not isinstance(cases, dict) or not cases:
-        raise Escalate(f"no usable tests/{job['task_id']}.cases.json in frozen test commit "
-                       f"{test_sha}; designer must declare every test id")
+        raise Escalate(f"no usable {cf} in frozen test commit {test_sha}; "
+                       f"designer must declare every test id")
     for test_id, decl in cases.items():
         want = decl if isinstance(decl, str) else decl.get("expected_on_base")
         if want not in ("pass", "fail"):
@@ -421,6 +463,10 @@ def ensure_worktree(job, name, sha):
     return wt
 
 
+def drop_worktree(job, wt):
+    git(job["spec"]["repo"], "worktree", "remove", "--force", wt, check=False)
+
+
 def do_execute(job):
     spec = job["spec"]
     rnd = int(job.get("execute_round", 0))
@@ -438,8 +484,11 @@ def do_execute(job):
                            f"under {spec['allowed_test_paths']}")
         cases = load_cases(job, test_sha)
         wt = ensure_worktree(job, "base-wt", job["base_sha"])
-        git(wt, "checkout", "-f", test_sha, "--", *test_paths)
-        rc, out, outcomes = run_tests(job, wt)
+        try:
+            git(wt, "checkout", "-f", test_sha, "--", *test_paths)
+            rc, out, outcomes = run_tests(job, wt)
+        finally:
+            drop_worktree(job, wt)
         problems = compare_cases(cases, outcomes)
         job["execute_last"] = {"round": rnd, "rc": rc, "problems": problems,
                                "tail": tail_text(out, 30)}
@@ -473,8 +522,11 @@ def do_candidate(job):
         coder_sha = git(job["coder_cwd"], "rev-parse", "HEAD")
         scope_check(job, coder_sha, spec["allowed_code_paths"], "coder")
         wt = ensure_worktree(job, f"cand-wt-{rnd}", coder_sha)
-        git(wt, "checkout", "-f", job["test_sha"], "--", *job["test_paths"])
-        rc, out, outcomes = run_tests(job, wt)
+        try:
+            git(wt, "checkout", "-f", job["test_sha"], "--", *job["test_paths"])
+            rc, out, outcomes = run_tests(job, wt)
+        finally:
+            drop_worktree(job, wt)
         failed = sorted(t for t, o in outcomes.items() if o != "PASSED")
         if rc == 0 and not failed:
             job["coder_sha"] = coder_sha
@@ -497,6 +549,11 @@ def do_candidate(job):
         save_job(job)
 
 
+def co_trailer(job):
+    model = str(job["spec"].get("coder_model") or DEFAULT_MODEL)
+    return f"Co-authored-by: {model.rsplit('/', 1)[-1]} <noreply@refdes.local>"
+
+
 def do_land(job):
     wt = job["coder_cwd"]
     git(wt, "checkout", job["test_sha"], "--", *job["test_paths"])
@@ -504,22 +561,33 @@ def do_land(job):
         git(wt, "-c", "user.name=agentcoder", "-c", "user.email=noreply@refdes.local",
             "commit", "--author", "agentcoder <noreply@refdes.local>",
             "-m", f"test: acceptance tests for {job['task_id']} (agentcoder)",
-            "-m", "Co-authored-by: Qwen3.8-Flash-Next <noreply@refdes.local>")
+            "-m", co_trailer(job))
     git(wt, "push", "-u", "origin", branch_name(job, "coder"))
     if job.get("pr_number") is None:
-        body = Path(job["jobdir"], "report.md")
-        write_report(job, landing=True)
-        rc, out, err = run_cmd(
-            ["gh", "pr", "create", "--title", str(job["spec"]["title"]),
-             "--base", str(job["spec"]["base"]), "--head", branch_name(job, "coder"),
-             "--body-file", str(body)], cwd=wt)
-        if rc != 0:
-            raise Pause(f"gh pr create failed (rc={rc}): {tail_text(err, 5)}")
-        found = re.search(r"/pull/(\d+)", out)
-        if not found:
-            raise Pause(f"gh pr create printed no PR URL: {tail_text(out, 3)}")
-        job["pr_number"] = int(found.group(1))
-        print(f"PR: {job['pr_number']}")
+        rc, out, _ = run_guarded(["gh", "pr", "list", "--head",
+                                  branch_name(job, "coder"), "--json", "number",
+                                  "--state", "all"], cwd=wt)
+        existing = json_of(out, "gh pr list output") if rc == 0 else []
+        if existing:
+            job["pr_number"] = int(existing[0]["number"])
+            save_job(job)
+            print(f"PR: {job['pr_number']} (adopted existing)")
+        else:
+            body = Path(job["jobdir"], "report.md")
+            write_report(job, landing=True)
+            rc, out, err = run_guarded(
+                ["gh", "pr", "create", "--title", str(job["spec"]["title"]),
+                 "--base", str(job["spec"]["base"]),
+                 "--head", branch_name(job, "coder"),
+                 "--body-file", str(body)], cwd=wt)
+            if rc != 0:
+                raise Pause(f"gh pr create failed (rc={rc}): {tail_text(err, 5)}")
+            found = re.search(r"/pull/(\d+)", out)
+            if not found:
+                raise Pause(f"gh pr create printed no PR URL: {tail_text(out, 3)}")
+            job["pr_number"] = int(found.group(1))
+            save_job(job)
+            print(f"PR: {job['pr_number']}")
         write_report(job)
 
 
@@ -592,6 +660,10 @@ def run_loop(job):
     return EXIT_OK
 
 
+def exit_json(status, reason):
+    print(json.dumps({"status": status, "reason": reason}, sort_keys=True))
+
+
 def main(argv):
     if not argv:
         print(__doc__.strip().splitlines()[0])
@@ -603,12 +675,12 @@ def main(argv):
             try:
                 raw = Path(arg).read_text()
             except OSError as exc:
-                print(f"spec unreadable: {exc}")
+                exit_json("error", f"spec unreadable: {exc}")
                 return EXIT_ERROR
             spec = json_of(raw, "spec file")
             problems = validate_spec(spec)
             if problems:
-                print("spec invalid: " + "; ".join(problems))
+                exit_json("invalid-spec", "; ".join(problems))
                 return EXIT_ERROR
             spec.setdefault("test_command", DEFAULT_TC)
             spec.setdefault("coder_model", DEFAULT_MODEL)
@@ -616,11 +688,13 @@ def main(argv):
             spec.setdefault("max_rounds", 2)
             spec.setdefault("qwen_cap", 8)
             spec.setdefault("reserve", 1)
+            spec.setdefault("cases_file", f"tests/{spec['task_id']}.cases.json")
             jobdir = Path(argv[2] if len(argv) > 2
-                          else Path.cwd() / ".agentcoder" / spec["task_id"])
+                          else Path(spec["repo"]) / ".scratch" / "agentcoder"
+                          / spec["task_id"])
             jobdir.mkdir(parents=True, exist_ok=True)
             if (jobdir / "job.json").exists():
-                print(f"a job already lives in {jobdir}; use resume")
+                exit_json("error", f"a job already lives in {jobdir}; use resume")
                 return EXIT_ERROR
             job = {"jobdir": str(jobdir), "task_id": spec["task_id"], "spec": spec,
                    "phase": "spawn", "status": "running", "reason": None}
@@ -637,11 +711,11 @@ def main(argv):
                 return EXIT_OK
             job["status"], job["reason"] = "running", None
         else:
-            print(f"unknown command: {cmd}")
+            exit_json("error", f"unknown command: {cmd}")
             return EXIT_ERROR
         return run_loop(job)
     except Pause as exc:
-        print(f"paused: {exc.reason}")
+        exit_json("paused", exc.reason)
         return EXIT_ERROR
 
 

@@ -7,12 +7,19 @@ raising from inside the module's own helpers.
 """
 import importlib.util
 import json
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="agentcoder drives a Linux paseo host; fakes use shebang scripts, "
+           "fcntl and prlimit")
 
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location(
@@ -45,7 +52,7 @@ CASES_BUG = json.dumps({
 })
 
 PASEO_FAKE = r'''#!/usr/bin/env python3
-import json, os, subprocess, sys
+import json, os, subprocess, sys, time
 
 S = json.load(open(os.environ["FAKESCENARIO"]))
 ARGS = sys.argv[1:]
@@ -100,6 +107,18 @@ elif cmd == "logs":
     print(text)
 elif cmd == "run":
     role = flag("--title", "").rsplit(" ", 1)[-1]
+    hang = S.get("hang", {})
+    if role in hang.get("run", []):
+        if S.get("pidfile"):
+            open(S["pidfile"], "w").write(str(os.getpid()))
+        time.sleep(120)
+    if role.startswith("review-r"):
+        n = state.get("rfails", 0)
+        if n < int(S.get("review_fails", 0)):
+            state["rfails"] = n + 1
+            save()
+            print(json.dumps({"status": "failed"}))
+            sys.exit(0)
     ws = None
     if flag("--new-workspace") == "worktree":
         branch = flag("--new-branch")
@@ -116,6 +135,8 @@ elif cmd == "run":
     save()
     print(json.dumps({"agentId": aid, "status": "completed"}))
 elif cmd == "send":
+    if S.get("hang", {}).get("send"):
+        time.sleep(120)
     rec = state["agents"].get(ARGS[1])
     if rec is not None:
         queue = S.get("on_send", {}).get(rec["role"], [])
@@ -133,9 +154,21 @@ GH_FAKE = r'''#!/usr/bin/env python3
 import json, os, sys
 
 S = json.load(open(os.environ["FAKESCENARIO"]))
-with open(os.path.join(S["logdir"], "gh-calls.log"), "a") as fh:
+LOG = os.path.join(S["logdir"], "gh-calls.log")
+with open(LOG, "a") as fh:
     fh.write(json.dumps(sys.argv[1:]) + "\n")
-print("https://github.com/fake/repo/pull/4242")
+args = sys.argv[1:]
+if args[:2] == ["pr", "list"]:
+    created = S.get("pr_exists")
+    if not created and os.path.exists(LOG):
+        for line in open(LOG):
+            if json.loads(line)[:2] == ["pr", "create"]:
+                created = True
+    print(json.dumps([{"number": 4242}] if created else []))
+elif args[:2] == ["pr", "create"]:
+    print("https://github.com/fake/repo/pull/4242")
+else:
+    print("[]")
 '''
 
 
@@ -217,6 +250,33 @@ def spawn_count(env, role):
                and f"AgentCoder t1 {role}" in c)
 
 
+class _EnvMP:
+    def setenv(self, key, value):
+        os.environ[key] = value
+
+
+def _dry_run_save_count():
+    """Number of job.json saves in one clean happy-path run; the kill/resume
+    test parametrizes over every one of them."""
+    env = build_env(Path(tempfile.mkdtemp(prefix="ac-savecount-")), _EnvMP(),
+                    name="env")
+    real, calls = agentcoder.save_job, [0]
+
+    def counting(job):
+        real(job)
+        calls[0] += 1
+
+    agentcoder.save_job = counting
+    try:
+        env.run()
+    finally:
+        agentcoder.save_job = real
+    return calls[0]
+
+
+SAVE_COUNT = _dry_run_save_count()
+
+
 def test_happy_path(tmp_path, monkeypatch, capsys):
     env = build_env(tmp_path, monkeypatch)
     assert env.run() == 0
@@ -230,7 +290,8 @@ def test_happy_path(tmp_path, monkeypatch, capsys):
     assert "PR: 4242" in out
     assert "ready-for-human-gate" in out
     assert spawn_count(env, "coder") == 1 and spawn_count(env, "designer") == 1
-    assert len(env.gh_calls()) == 1
+    assert len([c for c in env.gh_calls()
+                if c[:2] == ["pr", "create"]]) == 1
     assert (env.jobdir / "report.md").read_text().count("Candidate results") == 1
     # designer worktree: tests committed; coder branch pushed with test commit
     head = subprocess.run(["git", "-C", str(env.repo), "rev-parse", "ac/t1/coder"],
@@ -243,6 +304,8 @@ def test_happy_path(tmp_path, monkeypatch, capsys):
 def test_spec_validation_failures(tmp_path, monkeypatch, capsys):
     bad = [
         {"task_id": "bad id"},
+        {"task_id": ".."},
+        {"title": ""},
         {"allowed_test_paths": ["/abs/tests"]},
         {"contract_file": "missing.md"},
         {"test_command": [sys.executable, "-m", "pytest", "-q"]},
@@ -253,7 +316,9 @@ def test_spec_validation_failures(tmp_path, monkeypatch, capsys):
         env = build_env(tmp_path, monkeypatch, spec_overrides=mut,
                             name="e%d" % bad.index(mut))
         assert env.run() == 1, mut
-        assert "spec invalid" in capsys.readouterr().out
+        printed = json.loads(capsys.readouterr().out)
+        assert printed["status"] == "invalid-spec", mut
+        assert printed["reason"], mut
         assert not (env.jobdir / "job.json").exists()
 
 
@@ -306,7 +371,7 @@ def test_escalated_after_max_rounds(tmp_path, monkeypatch, capsys):
     assert "escalated" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("k", range(2, 8))
+@pytest.mark.parametrize("k", range(1, SAVE_COUNT + 1))
 def test_resume_after_kill(tmp_path, monkeypatch, k):
     env = build_env(tmp_path, monkeypatch)
     calls = {"n": 0}
@@ -415,5 +480,125 @@ def test_job_json_is_atomic(tmp_path, monkeypatch):
 
 def test_resume_unknown_and_missing(tmp_path, monkeypatch, capsys):
     assert agentcoder.main(["frobnicate"]) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "error"
     assert agentcoder.main(["resume", str(tmp_path / "nope")]) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "paused"
     assert agentcoder.main(["run", str(tmp_path / "no-such-spec.json")]) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "error"
+
+
+def test_json_summary_on_all_exits(tmp_path, monkeypatch, capsys):
+    env = build_env(tmp_path, monkeypatch, spec_overrides={"max_rounds": 0},
+                    name="jsonx")
+    assert env.run() == 1
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["status"] == "invalid-spec" and "max_rounds" in printed["reason"]
+    env2 = build_env(tmp_path, monkeypatch, name="jsonx2")
+    assert env2.run() == 0
+    capsys.readouterr()
+    assert env2.run() == 1
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["status"] == "error" and "resume" in printed["reason"]
+    env3 = build_env(tmp_path, monkeypatch, name="jsonp",
+                     scenario_overrides={"running_qwen": 7})
+    assert env3.run() == 1
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["status"] == "paused"
+    assert "refusing to start" in printed["reason"]
+
+
+def test_reviewer_spawn_pause_then_resume(tmp_path, monkeypatch):
+    env = build_env(
+        tmp_path, monkeypatch,
+        spec_overrides={"test_reviewer_model": "opencode/some/reviewer"},
+        scenario_overrides={"review_fails": 1})
+    assert env.run() == 1
+    job = env.job()
+    assert job["status"] == "paused" and "review" in job["reason"].lower()
+    assert job["reviewers"] == {}
+    assert env.resume() == 0
+    job = env.job()
+    assert job["phase"] == "done" and all(job["reviewers"].values())
+    assert len(job["reviewers"]) == 1  # no duplicate reviewer, resume re-spawned
+    assert spawn_count(env, "review-r0") == 2  # first attempt failed, second succeeded
+
+
+def test_land_adopts_existing_pr(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={"pr_exists": True})
+    assert env.run() == 0
+    job = env.job()
+    assert job["pr_number"] == 4242
+    assert not [c for c in env.gh_calls() if c[:2] == ["pr", "create"]]
+    assert [c for c in env.gh_calls() if c[:2] == ["pr", "list"]]
+
+
+def test_land_kill_after_create_yields_one_pr(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch)
+    real = agentcoder.save_job
+
+    class Kill(Exception):
+        pass
+
+    def killer(job):
+        if job.get("phase") == "land" and job.get("pr_number") is not None:
+            raise Kill()  # crash between gh pr create and the state save
+        real(job)
+
+    monkeypatch.setattr(agentcoder, "save_job", killer)
+    with pytest.raises(Kill):
+        env.run()
+    monkeypatch.setattr(agentcoder, "save_job", real)
+    assert env.resume() == 0
+    assert env.job()["pr_number"] == 4242
+    assert len([c for c in env.gh_calls()
+                if c[:2] == ["pr", "create"]]) == 1
+
+
+def test_linked_worktree_repo_accepted(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="linked")
+    wt = tmp_path / "linked-wt"
+    subprocess.run(["git", "-C", str(env.repo), "worktree", "add", "-q",
+                    "--detach", str(wt), "main"], check=True)
+    env.spec["repo"] = str(wt)
+    env.spec_path.write_text(json.dumps(env.spec))
+    assert env.run() == 0
+    assert env.job()["phase"] == "done"
+
+
+def test_spawn_hang_kills_siblings(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch,
+                    spec_overrides={"agent_timeout": 3},
+                    scenario_overrides={"hang": {"run": ["designer"]},
+                                        "pidfile": str(tmp_path / "hangpid")})
+    assert env.run() == 1
+    assert "timed out" in env.job()["reason"]
+    pid = int((tmp_path / "hangpid").read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
+def test_send_timeout_pauses(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch,
+                    spec_overrides={"agent_timeout": 3},
+                    scenario_overrides={"hang": {"send": True},
+                                        "coder_files": {"app.py": BASE_APP}})
+    assert env.run() == 1
+    job = env.job()
+    assert job["status"] == "paused" and "timed out" in job["reason"]
+
+
+def test_custom_cases_file(tmp_path, monkeypatch):
+    env = build_env(
+        tmp_path, monkeypatch,
+        spec_overrides={"cases_file": "tests/cases.t1.json"},
+        scenario_overrides={"designer_files": {
+            "tests/test_add.py": TEST_FILE,
+            "tests/cases.t1.json": CASES_OK}})
+    assert env.run() == 0
+
+
+def test_temp_worktrees_removed(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch)
+    assert env.run() == 0
+    assert not (env.jobdir / "base-wt").exists()
+    assert not list(env.jobdir.glob("cand-wt-*"))
