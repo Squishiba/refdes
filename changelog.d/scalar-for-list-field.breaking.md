@@ -6,7 +6,7 @@
   neither could a reader: `refdes ls --tag analog` still "found" the item,
   because tag matching is a substring test, so the wrong value looked right
   everywhere it could be looked at. A field declared `type: list` (or
-  `checks`, `citations`, `options`) that receives anything other than a YAML
+  `checks`, `citations`, `options`, `tasks`) that receives anything other than a YAML
   list is now refused by name, by type, and with the value that was found:
   `field 'tags' is a list field, but it was given a string 'power, analog' --
   write it as a list, one entry per value (tags: [first, second])`. The value

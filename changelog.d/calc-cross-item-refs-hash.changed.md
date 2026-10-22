@@ -1,4 +1,4 @@
-A cross-item calc reference's resolved value (`V_in = DEC-PWR-001.V_in`) now
+- A cross-item calc reference's resolved value (`V_in = DEC-PWR-001.V_in`) now
 enters the referring item's content hash (`hash_format` 4): when the upstream
 value or tolerance moves, the dependent shows as `changed` in the baseline diff
 even though its own text is untouched, and `refdes audit` names the moved

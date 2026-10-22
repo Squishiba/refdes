@@ -4,5 +4,6 @@
   prints one. Substring and case rules are the same as for title and tag
   matching, so a partial or lowercased id (`refdes ls req-sys-0`) works too;
   there is no exact-id-only mode. `ls --help` and the `ls` entry in
-  `docs/cli-reference.md` now say the query matches id, title and tags. The
+  `docs/cli-reference.md` now say the query matches the item's id, its title,
+  `tags:` and `former_ids:`. The
   browser editor's free-text filter is unchanged.
