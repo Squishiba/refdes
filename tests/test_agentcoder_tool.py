@@ -61,6 +61,12 @@ CASES_BUG = json.dumps({
     "tests/test_add.py::test_sub":
         {"expected_on_base": "fail", "requirement": "sub() is added by the change"},
 })
+CASES_A = json.dumps({
+    "tests/a/test_add.py::test_control":
+        {"expected_on_base": "pass", "requirement": "control passes on old code"},
+    "tests/a/test_add.py::test_sub":
+        {"expected_on_base": "fail", "requirement": "sub() is added by the change"},
+})
 _HEADER = (
     "import os, sys\nimport pytest\n"
     "sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))\n"
@@ -107,12 +113,37 @@ def flag(name, dflt=None):
     return ARGS[ARGS.index(name) + 1] if name in ARGS else dflt
 
 cmd = ARGS[0]
+FLAGS = {  # flags the REAL CLI accepts, verified from `paseo <cmd> --help`
+    "run": {"-d", "--background", "--title", "--provider", "--model", "--thinking", "--mode",
+            "--new-workspace", "--worktree-mode", "--worktree-slug", "--new-branch", "--base",
+            "--branch", "--pr-number", "--forge", "--workspace", "--image", "--cwd", "--env",
+            "--label", "--wait-timeout", "--output-schema", "--json", "--host", "--home",
+            "-o", "--format", "-q", "--no-headers", "--no-color", "-h", "--help"},
+    "send": {"--prompt", "--prompt-file", "--image", "--no-wait", "--json", "--host",
+             "--home", "-o", "--format", "-q", "--no-headers", "--no-color"},
+    "wait": {"--timeout", "--json", "--host", "--home", "-o", "--format", "-q", "--no-headers",
+             "--no-color"},
+    "stop": {"--all", "--cwd", "--json", "--host", "--home", "-o", "--format", "-q",
+             "--no-headers", "--no-color"},
+    "logs": {"-f", "--follow", "--tail", "--filter", "--since", "--host", "--home", "-o",
+             "--format", "-q", "--no-headers", "--no-color"},
+    "ls": {"-a", "--all", "-g", "--global", "--label", "--thinking", "--json", "--host",
+           "--home", "-o", "--format", "-q", "--no-headers", "--no-color"},
+}
+if cmd in FLAGS:
+    for a in ARGS[1:]:
+        if a.startswith("-"):
+            if a == "--model":
+                sys.exit("MISSING_PROVIDER: --model alone is not accepted; pass the provider "
+                         "string with --provider <provider/model>")
+            if a not in FLAGS[cmd]:
+                sys.exit("fake paseo: %s has no flag %s" % (cmd, a))
 if cmd == "ls":
     def row(k, name, provider, status, cwd):
         return {"id": k, "shortId": k[:7], "name": name, "provider": provider,
                 "thinking": "auto", "status": status, "cwd": cwd, "created": "now"}
     rows = [row(k, v.get("title", ""), "opencode/qwenlocal/Qwen3.8-Flash-Next",
-                v.get("status", "completed"), v["ws"])
+                v.get("status", "idle"), v["ws"])
             for k, v in state["agents"].items() if v["ws"]]
     rows += [row("q%d" % i, "busy", "opencode/qwenlocal/Qwen3.8-Flash-Next",
                  "running", "~/busy") for i in range(S.get("running_qwen", 0))]
@@ -165,7 +196,10 @@ elif cmd == "run":
     state["agents"][aid] = {"role": role, "ws": ws, "sends": 0,
                             "title": flag("--title", "")}
     save()
-    print(json.dumps({"agentId": aid, "status": "completed"}))
+    if S.get("run_stream"):  # real `paseo run --json` prints a running doc, then the final
+        print(json.dumps({"agentId": aid, "status": "running"}))
+    print(json.dumps({"agentId": aid,
+                      "status": S.get("run_status", {}).get(role, "completed")}))
 elif cmd == "send":
     if S.get("hang", {}).get("send"):
         time.sleep(120)
@@ -185,9 +219,9 @@ elif cmd == "send":
 elif cmd == "stop":
     rec = state["agents"].get(ARGS[1])
     if rec is not None:
-        rec["status"] = "stopped"
+        rec["status"] = "closed"
         save()
-    print(json.dumps({"status": "stopped"}))
+    print(json.dumps({"status": "closed"}))
 else:
     sys.exit("fake paseo: unknown " + cmd)
 '''
@@ -324,9 +358,9 @@ def test_happy_path(tmp_path, monkeypatch, capsys):
     assert job["controls"] == 1 and job["intended_reds"] == 1
     assert job["test_review"].startswith("skipped")
     assert job["candidate_results"][-1]["failed"] == []
-    out = capsys.readouterr().out
-    assert "PR: 4242" in out
-    assert "ready-for-human-gate" in out
+    cap = capsys.readouterr()
+    assert "PR: 4242" in cap.err  # the PR line rides stderr; stdout is pure JSON
+    assert "ready-for-human-gate" in cap.out
     assert spawn_count(env, "coder") == 1 and spawn_count(env, "designer") == 1
     assert len([c for c in env.gh_calls()
                 if c[:2] == ["pr", "create"]]) == 1
@@ -721,7 +755,7 @@ def test_resume_clears_dead_recorded_agents(tmp_path, monkeypatch):
     assert env.run() == 1  # designer spawn hangs; coder a1 recorded, healthy
     assert env.job()["coder_agent"] == "a1"
     state = json.loads((env.logdir / "agents.json").read_text())
-    state["agents"]["a1"]["status"] = "stopped"  # coder dies while the job is paused
+    state["agents"]["a1"]["status"] = "closed"  # coder dies while the job is paused
     json.dump(state, open(env.logdir / "agents.json", "w"))
     env.scenario["hang"] = {}
     env.scen_path.write_text(json.dumps(env.scenario))
@@ -831,7 +865,7 @@ def test_dead_reviewer_respawns(tmp_path, monkeypatch):
     assert env.run() == 1  # paused: reviewer gave no VERDICT
     rid = list(env.job()["reviewers"].values())[0]
     state = json.loads((env.logdir / "agents.json").read_text())
-    state["agents"][rid]["status"] = "stopped"
+    state["agents"][rid]["status"] = "closed"
     json.dump(state, open(env.logdir / "agents.json", "w"))
     env.scenario["review_reply"] = "ok\nVERDICT: APPROVE"
     env.scen_path.write_text(json.dumps(env.scenario))
@@ -902,6 +936,104 @@ def test_cases_entry_must_be_object(tmp_path, monkeypatch):
                            "tests/t1.cases.json": bad}})
     assert env.run() == 2  # null/string entries escalate with a clear message, not crash
     assert "must be an object" in env.job()["reason"]
+
+
+def test_run_uses_provider_flag(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="prov")
+    assert env.run() == 0  # the fake exits MISSING_PROVIDER on --model, so this proves it
+    runs = [c for c in env.calls() if c[:1] == ["run"]]
+    assert runs and all("--provider" in c and "--model" not in c for c in runs)
+
+
+def test_out_of_scope_gets_one_feedback_round(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="scopefb", scenario_overrides={
+        "designer_files": {"tests/test_add.py": TEST_FILE, "tests/t1.cases.json": CASES_OK,
+                           "docs/bad.md": "written outside the allowed globs"},
+        "on_send": {"designer": [{"files": {}, "delete": ["docs/bad.md"]}]}})
+    assert env.run() == 0  # one "revert these paths" send, then the clean head passes
+    assert any(c[:1] == ["send"] for c in env.calls())
+    assert env.job()["status"] == "ready-for-human-gate"
+
+
+def test_agent_paused_on_permission_prompt(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="permp",
+                    scenario_overrides={"run_status": {"coder": "permission"}})
+    assert env.run() == 1
+    reason = env.job()["reason"]
+    assert "permission prompt" in reason and "paseo permit" in reason and "resume" in reason
+
+
+def test_streamed_run_json_uses_final_doc(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="stream",
+                    scenario_overrides={"run_stream": True})
+    assert env.run() == 0  # real `paseo run --json` prints running, then final: use the final
+
+
+def test_land_adopts_test_head_with_disjoint_globs(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="dglobs", spec_overrides={
+        "allowed_test_paths": ["tests/a", "tests/b"],
+        "cases_file": "tests/a/t1.cases.json"}, scenario_overrides={
+        "designer_files": {"tests/a/test_add.py": TEST_FILE,
+                           "tests/a/t1.cases.json": CASES_A}})
+    real = agentcoder.save_job
+
+    def crash(job):
+        if job.get("test_landed_sha"):  # died right after land's commit, before the save
+            raise KeyboardInterrupt
+        return real(job)
+
+    monkeypatch.setattr(agentcoder, "save_job", crash)
+    with pytest.raises(KeyboardInterrupt):
+        env.run()
+    monkeypatch.setattr(agentcoder, "save_job", real)
+    assert env.resume() == 0  # per-path glob match: a disjoint sibling glob must not block
+    assert env.job()["test_landed_sha"]
+
+
+def test_non_pytest_test_command_rejected(tmp_path, monkeypatch, capsys):
+    env = build_env(tmp_path, monkeypatch, name="nopt",
+                    spec_overrides={"test_command": ["make", "test", "{tests}"]})
+    assert env.run() == 1
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["status"] == "invalid-spec" and "pytest" in printed["reason"]
+
+
+def test_in_prog_logs_allowed_and_carried(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="iplogs", scenario_overrides={
+        "designer_files": {"tests/test_add.py": TEST_FILE, "tests/t1.cases.json": CASES_OK,
+                           "in-prog-logs/t1-designer.md": "designer log"},
+        "coder_files": {"app.py": FIX_APP, "in-prog-logs/t1-coder.md": "coder log"}})
+    assert env.run() == 0  # AGENTS.md progress logs never trip the scope guards
+    shown = subprocess.run(["git", "-C", str(env.repo), "show",
+                            "origin/ac/t1/coder:in-prog-logs/t1-designer.md"],
+                           capture_output=True, text=True)
+    assert "designer log" in shown.stdout  # the designer's log rides along in the PR
+
+
+def test_prompts_demand_relative_paths_and_logs(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="relp")
+    job = {"task_id": "t1", "spec": env.spec, "jobdir": str(env.jobdir)}
+    for prompt, role in ((agentcoder.coder_prompt(job), "coder"),
+                         (agentcoder.designer_prompt(job), "designer")):
+        assert "RELATIVE paths only" in prompt
+        assert f"cd to an absolute path" in prompt
+        assert f"in-prog-logs/t1-{role}.md" in prompt
+
+
+def test_live_ids_dead_statuses(monkeypatch):
+    monkeypatch.setattr(agentcoder, "paseo_ls", lambda: [
+        {"id": "a", "status": "running"}, {"id": "b", "status": "idle"},
+        {"id": "c", "status": "closed"}, {"id": "d", "status": "error"},
+        {"id": "e", "status": None}])
+    assert agentcoder.live_ids() == {"a", "b"}  # real vocabulary: closed/error are dead
+
+
+def test_pr_line_goes_to_stderr(tmp_path, monkeypatch, capsys):
+    env = build_env(tmp_path, monkeypatch, name="stderrpr")
+    assert env.run() == 0
+    cap = capsys.readouterr()
+    assert "PR: 4242" in cap.err
+    assert json.loads(cap.out)["status"] == "ready-for-human-gate"  # stdout is pure JSON
 
 
 def test_forged_stdout_cannot_satisfy_gate(tmp_path, monkeypatch):

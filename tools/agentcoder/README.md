@@ -77,6 +77,9 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
 - `cases_file` is where the designer writes its per-test expectations
   (`expected_on_base: "pass"|"fail"`); it defaults to
   `tests/<task_id>.cases.json` and must sit inside `allowed_test_paths`.
+- `test_command` must invoke **pytest**: outcomes are judged from pytest's
+  `--junitxml` output only, so a non-pytest argv is rejected by
+  `validate_spec` (it could never reach the gate).
 - `{tests}` in `test_command` expands to the files matching the
   `allowed_test_paths` globs, expanded by the driver with
   `glob.glob(..., recursive=True)` relative to the job's worktree, keeping
@@ -204,6 +207,19 @@ before land, a CLOSED unmerged PR — **escalate** (exit 2) for a human. The
 driver never guesses and has no stale-SHA detection of its own: coder heads
 are re-read from git each round, while the base SHA is pinned at its first
 resolution.
+
+## Verified against the real CLI
+
+The first real pilot (task CHK-ATTR-003, which produced PR #357) exercised,
+against the live `paseo` CLI and real Qwen agents: `run`/spawn of both
+agents in parallel, designer and coder turns, `execute` (controls and
+intended reds on the base commit under `prlimit` with driver-owned junit
+XML), the candidate round, `land` + real `gh pr create`, and `resume` after
+a permission pause. **Not yet verified live** (offline-tested against the
+fake only): the feedback `send` loops (test-review changes, executor
+feedback, scope-feedback rounds, candidate-red feedback), the `test_review`
+phase end to end, the crash-window recovery paths in `land`, and
+`paseo wait`/`stop` semantics under failure.
 
 ## Limits / what it deliberately does NOT do
 

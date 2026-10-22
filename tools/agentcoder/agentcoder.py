@@ -41,6 +41,12 @@ class Escalate(JobExit):
     pass
 
 
+class OutOfScope(Escalate):
+    def __init__(self, who, paths):
+        super().__init__(f"{who} touched paths outside its allowed globs: {sorted(paths)}")
+        self.paths = sorted(paths)
+
+
 def tool_path(name):
     return os.environ.get(f"AGENTCODER_{name.upper()}", name) if name in ("paseo", "gh") else name
 
@@ -76,6 +82,24 @@ def json_of(text, what):
         return json.loads(text)
     except ValueError as exc:
         raise Pause(f"unparseable {what}: {exc}: {text[:200]!r}")
+
+
+def last_json_of(text, what):
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    dec, docs, i = json.JSONDecoder(), [], 0
+    while (j := text.find("{", i)) >= 0:
+        try:
+            doc, end = dec.raw_decode(text, j)
+            docs.append(doc)
+            i = end
+        except ValueError:
+            i = j + 1
+    if not docs:
+        raise Pause(f"unparseable {what}: {text[:200]!r}")
+    return docs[-1]
 
 
 def git(repo, *args, check=True, timeout=120):
@@ -176,6 +200,9 @@ def validate_spec(spec):
     if not isinstance(tc, list) or not all(isinstance(x, str) and x for x in tc) \
             or "{tests}" not in tc:
         problems.append(f"test_command must be a fixed argv list containing '{{tests}}': {tc!r}")
+    elif not any("pytest" in x for x in tc):
+        problems.append(f"test_command must invoke pytest: outcomes are judged from pytest's "
+                        f"--junitxml only, so {tc!r} can never reach the gate")
     for key, lo in (("max_rounds", 1), ("qwen_cap", 1), ("reserve", 0)):
         value = spec.get(key, {"max_rounds": 2, "qwen_cap": 8, "reserve": 1}[key])
         if not isinstance(value, int) or isinstance(value, bool) or value < lo:
@@ -241,9 +268,13 @@ def designer_prompt(job):
         f"You are the BLIND test designer for task {job['task_id']}. Write no product "
         f"code.\nContract:\n{contract_text(job)}\nRules:\n"
         f"- Write tests ONLY under: {', '.join(job['spec']['allowed_test_paths'])}. "
-        f"Never edit anything else.\n- Never look at other branches, other worktrees, "
-        f"or their history (no `git log --all`). You are blind to the implementation.\n"
-        f"- Commit your work on the current branch.\n- Write {cf} mapping each pytest "
+        f"Never edit anything else (one exception: your progress log, below).\n- Never "
+        f"look at other branches, other worktrees, or their history (no `git log --all`). "
+        f"You are blind to the implementation.\n- Your shell already starts in your own "
+        f"worktree. Use RELATIVE paths only. Never cd to an absolute path and never touch "
+        f"other worktrees.\n- Write your short progress log under in-prog-logs/"
+        f"{job['task_id']}-designer.md; that path is allowed for you.\n- Commit your work "
+        f"on the current branch.\n- Write {cf} mapping each pytest "
         f'node id to {{"expected_on_base": "pass"|"fail", "requirement": "one line"}}. '
         f'"pass" = a control that must already pass on the OLD code; "fail" = new '
         f'behavior the change must bring.')
@@ -254,8 +285,11 @@ def coder_prompt(job):
         f"You are the coder for task {job['task_id']}. Implement the contract below.\n"
         f"Contract:\n{contract_text(job)}\nRules:\n- Touch ONLY files matching: "
         f"{', '.join(job['spec']['allowed_code_paths'])}.\n- Do NOT write the acceptance "
-        f"tests; a separate designer owns them.\n- Run your own quick checks, then commit "
-        f"on the current branch.")
+        f"tests; a separate designer owns them.\n- Your shell already starts in your own "
+        f"worktree. Use RELATIVE paths only. Never cd to an absolute path and never touch "
+        f"other worktrees.\n- Write your short progress log under in-prog-logs/"
+        f"{job['task_id']}-coder.md; that path is allowed for you.\n- Run your own quick "
+        f"checks, then commit on the current branch.")
 
 
 def review_prompt(job):
@@ -301,8 +335,11 @@ def check_permits(job):
 def record_turn(job, role, rc, out, err):
     if rc != 0:
         raise Pause(f"{role} agent turn failed (rc={rc}, quota/usage?): {tail_text(err, 5)}")
-    data = json_of(out, f"{role} run result")
+    data = last_json_of(out, f"{role} run result")  # real run --json: running doc, then final
     status = data.get("status")
+    if status == "permission":
+        raise Pause(f"{role} agent is waiting on a permission prompt; approve/deny it with "
+                    "`paseo permit`, then `resume`")
     if status != "completed":
         raise Pause(f"{role} agent turn ended with status {status!r}: {tail_text(out, 5)}")
     agent_id = data.get("agentId")
@@ -329,7 +366,7 @@ def send_to(job, agent_key, message):
 
 def spawn_agent(job, role, model, base, prompt):
     argv = ["paseo", "run", "--new-workspace", "worktree", "--worktree-mode", "branch-off",
-            "--new-branch", branch_name(job, role), "--base", base, "--model", model,
+            "--new-branch", branch_name(job, role), "--base", base, "--provider", model,
             "--title", f"AgentCoder {job['task_id']} {role}", "--json", prompt]
     try:
         rc, out, err = run_guarded(argv, cwd=job["spec"]["repo"],
@@ -349,7 +386,9 @@ def _kill_all(procs):
 
 
 def live_ids():
-    return {str(a.get("id")) for a in paseo_ls() if a.get("status") not in (None, "stopped")}
+    # real ls statuses (verified): running / idle / closed / error -- closed+error are dead
+    return {str(a.get("id")) for a in paseo_ls()
+            if a.get("status") not in (None, "closed", "error")}
 
 
 def stop_job_agents(job):
@@ -379,7 +418,7 @@ def do_spawn(job):
             model = spec.get(f"{role}_model") or DEFAULT_MODEL
             argv = resolve(["paseo", "run", "--new-workspace", "worktree", "--worktree-mode",
                             "branch-off", "--new-branch", branch_name(job, role),
-                            "--base", job["base_sha"], "--model", model, "--title",
+                            "--base", job["base_sha"], "--provider", model, "--title",
                             f"AgentCoder {job['task_id']} {role}", "--json", prompts[role]])
             try:
                 procs[role] = subprocess.Popen(argv, cwd=spec["repo"], stdout=subprocess.PIPE,
@@ -411,13 +450,32 @@ def path_matches(p, g):
     return (p == g or p.startswith(g + "/")) if plain else fnmatch.fnmatch(p, g)
 
 
+LOGS_PREFIX = "in-prog-logs/"  # AGENTS.md progress logs: always allowed, both agents
+
+
 def scope_check(job, sha, globs, who):
     changed = [p for p in git(job["spec"]["repo"], "diff", "--name-only", "--diff-filter=ACMR",
                               job["base_sha"], sha).splitlines() if p]  # skip D/R-away paths
-    bad = sorted(p for p in changed if not any(path_matches(p, g) for g in globs))
+    bad = sorted(p for p in changed if not p.startswith(LOGS_PREFIX)
+                 and not any(path_matches(p, g) for g in globs))
     if bad:
-        raise Escalate(f"{who} touched paths outside its allowed globs: {bad}")
+        raise OutOfScope(who, bad)
     return changed
+
+
+def scope_feedback(job, exc, agent_key, round_key, rnd, sha):
+    # ONE feedback round per offending sha (persisted: a resume can't loop); it
+    # counts against max_rounds
+    key = f"scope_sent@{agent_key}@{sha[:9]}"
+    if job.get(key) or rnd >= int(job["spec"]["max_rounds"]):
+        raise Escalate(f"{exc.reason} (scope feedback round already used)")
+    job[key] = True
+    save_job(job)
+    send_to(job, agent_key,
+            f"Revert these paths; they are outside your allowed globs: {exc.paths}. "
+            "Keep only work under your allowed paths, commit on your branch.")
+    job[round_key] = rnd + 1
+    save_job(job)
 
 
 def do_test_review(job):
@@ -579,7 +637,13 @@ def do_execute(job):
         test_sha = job["test_sha"] = git(job["designer_cwd"], "rev-parse", "HEAD")
         if spec.get("test_reviewer_model") and test_sha != job.get("reviewed_test_sha"):
             return "test_review"  # designer committed new tests: re-gate via review
-        changed = scope_check(job, test_sha, spec["allowed_test_paths"], "test designer")
+        try:
+            changed = scope_check(job, test_sha, spec["allowed_test_paths"], "test designer")
+        except OutOfScope as exc:
+            scope_feedback(job, exc, "designer_agent", "execute_round", rnd, test_sha)
+            rnd += 1
+            job["test_sha"] = None
+            continue
         test_paths = [p for p in changed if not p.endswith(".cases.json")]
         if not test_paths:
             raise Escalate(f"test designer commit {test_sha[:9]} adds no files "
@@ -627,7 +691,12 @@ def do_candidate(job):
     cases = load_cases(job, job["test_sha"])
     while True:
         coder_sha = git(job["coder_cwd"], "rev-parse", "HEAD")
-        scope_check(job, coder_sha, spec["allowed_code_paths"], "coder")
+        try:
+            scope_check(job, coder_sha, spec["allowed_code_paths"], "coder")
+        except OutOfScope as exc:
+            scope_feedback(job, exc, "coder_agent", "candidate_round", rnd, coder_sha)
+            rnd += 1
+            continue
         wt = ensure_worktree(job, f"cand-wt-{rnd}", coder_sha)
         try:
             git(wt, "checkout", "-f", job["test_sha"], "--", *job["test_paths"])
@@ -664,17 +733,18 @@ def co_trailer(job):
 def do_land(job):
     wt = job["coder_cwd"]
     head = git(wt, "rev-parse", "HEAD")
+    moved = [p for p in git(wt, "diff", "--name-only", "HEAD~1", "HEAD").splitlines() if p]
     if (head != job["coder_sha"] and head != job.get("test_landed_sha")
             and git(wt, "rev-parse", "HEAD~1", check=False) == job["coder_sha"]
-            and all(path_matches(p, g) for p in git(wt, "diff", "--name-only", "HEAD~1",
-                "HEAD").splitlines() if p for g in job["spec"]["allowed_test_paths"])):
+            and moved and all(any(path_matches(p, g) for g in job["spec"]["allowed_test_paths"])
+                              for p in moved)):
         job["test_landed_sha"] = head  # land committed, then died before saving: adopt it
         save_job(job)
     if head != job["coder_sha"] and head != job.get("test_landed_sha"):
         return "candidate"  # coder moved: re-gate the new head, land gates only
     dirty = git(wt, "status", "--porcelain", "--untracked-files=no")
     if dirty:
-        paths = [ln[3:] for ln in dirty.splitlines() if ln.strip()]
+        paths = [ln[3:].split(" -> ")[-1] for ln in dirty.splitlines() if ln.strip()]
         if [p for p in paths if not any(path_matches(p, g) for g in job["spec"]["allowed_test_paths"])]:
             raise Escalate("coder worktree has uncommitted/staged changes outside its test "
                            f"paths; refusing to sweep them:\n{tail_text(dirty, 15)}")
@@ -714,7 +784,7 @@ def do_land(job):
         if hit:
             job["pr_number"] = int(hit["number"])
             save_job(job)
-            print(f"PR: {job['pr_number']} (adopted existing)")
+            print(f"PR: {job['pr_number']} (adopted existing)", file=sys.stderr)
         else:
             body = Path(job["jobdir"], "report.md")
             write_report(job, landing=True)
@@ -729,8 +799,8 @@ def do_land(job):
                 raise Pause(f"gh pr create printed no PR URL: {tail_text(out, 3)}")
             job["pr_number"] = int(found.group(1))
             save_job(job)
-            print(f"PR: {job['pr_number']}")
-        write_report(job)
+            print(f"PR: {job['pr_number']}", file=sys.stderr)  # JSON summary owns stdout
+        write_report(job, landing=True)  # refresh report.md; the final summary prints once
 
 
 def write_report(job, landing=False):
