@@ -1016,7 +1016,7 @@ def test_prompts_demand_relative_paths_and_logs(tmp_path, monkeypatch):
     for prompt, role in ((agentcoder.coder_prompt(job), "coder"),
                          (agentcoder.designer_prompt(job), "designer")):
         assert "RELATIVE paths only" in prompt
-        assert f"cd to an absolute path" in prompt
+        assert "cd to an absolute path" in prompt
         assert f"in-prog-logs/t1-{role}.md" in prompt
 
 
