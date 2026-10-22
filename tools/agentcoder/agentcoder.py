@@ -178,8 +178,9 @@ def validate_spec(spec):
 
 def preflight(job):
     spec = job["spec"]
-    job["base_sha"] = git(spec["repo"], "rev-parse", "--verify",
-                          str(spec["base"]) + "^{commit}")
+    if job.get("base_sha") is None:  # pinned at first resolution; never re-moved
+        job["base_sha"] = git(spec["repo"], "rev-parse", "--verify",
+                              str(spec["base"]) + "^{commit}")
     if not shutil.which("prlimit") and not spec.get("allow_no_prlimit"):
         raise Pause("prlimit is not on PATH: tests would run WITHOUT CPU/address-space "
                     "limits; install prlimit, or set \"allow_no_prlimit\": true to accept")

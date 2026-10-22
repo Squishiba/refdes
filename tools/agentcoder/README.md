@@ -6,7 +6,11 @@ by a check) that runs the AgentCoder paper loop against Paseo agents:
 
 - a **CODER** agent implements a contract,
 - an **INDEPENDENT, BLIND test designer** writes acceptance tests from the
-  contract alone (it never sees the implementation),
+  contract alone — blind **by instruction**: its prompt forbids touching
+  anything but its test paths and inspecting other branches, but the
+  worktrees share one git object store, so a designer that ran
+  `git log --all` *could* see the coder's commits. This is procedural
+  independence, not a security boundary (the same-user Limits note below),
 - an **EXECUTOR** (this driver, via fixed-argv `test_command` runs) freezes
   the tests, checks them against the *base* commit, then runs them against
   the coder's candidate and feeds precise failures back.
@@ -27,8 +31,9 @@ python tools/agentcoder/agentcoder.py status JOBDIR
 `JOBDIR` defaults to `<repo>/.scratch/agentcoder/<task_id>/` — keep job
 dirs out of tracked paths (in this repo `.scratch/` is gitignored). Exit
 codes: **0** done (`ready-for-human-gate`), **2** escalated, **1**
-error/paused. `status` always exits 0 and prints the job's recorded fields as
-JSON. Exits that have a `JOBDIR` (preflight pause, mid-run pause, escalation,
+error/paused. `status` on an existing job prints the job's recorded fields
+as JSON and exits 0; `status` on a missing/invalid jobdir prints a paused
+JSON (`"no job.json in ..."`) and exits 1. Exits that have a `JOBDIR` (preflight pause, mid-run pause, escalation,
 completion) print JSON **and** write `JOBDIR/report.md`; the exits with **no**
 jobdir (unknown command, unreadable/invalid spec, jobdir already in use)
 print the JSON on stdout as their entire output; running with no arguments
@@ -62,7 +67,9 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
 }
 ```
 
-- `base` is resolved to a SHA **once** and recorded in `job.json`.
+- `base` is resolved to a SHA at its **first resolution** (in preflight) and
+  pinned in `job.json`; later resumes never re-resolve the ref, so a base
+  branch that moves while the job is paused cannot drift the job.
 - `cases_file` is where the designer writes its per-test expectations
   (`expected_on_base: "pass"|"fail"`); it defaults to
   `tests/<task_id>.cases.json` and must sit inside `allowed_test_paths`.
@@ -76,7 +83,9 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
   the limits) — are re-checked on **every** `resume` until all of them pass
   at once; only a fully-passed preflight is recorded as passed, so a pause
   inside preflight can never let `resume` skip a gate.
-- `agent_timeout` (default 1800s) bounds each blocking `paseo` call;
+- `agent_timeout` (default 1800s) bounds only the agent `paseo run`/`paseo
+  send` calls (an agent's whole turn). Every other blocking call has a
+  fixed timeout: other `paseo`/`gh` calls 60s, `git` 120s, `git push` 300s.
   `test_timeout` (default 120s) bounds each `test_command` run — a test run
   that exceeds it **pauses** the job (the output is never judged, no agent
   is fed it).
@@ -84,8 +93,15 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
 ## State machine
 
 `JOBDIR/job.json` is rewritten atomically (temp + `os.replace`) after **every**
-phase transition. `resume` re-attaches to recorded agent ids (`paseo wait`)
-and continues from the recorded phase; every phase is idempotent.
+phase transition, and `resume` continues from the recorded phase with
+recorded agent ids (`paseo wait`). Phases are **not all idempotent**: a
+crash after a side effect but before the next save replays it. Safe to
+replay: **spawn** (worktree/agent creation is adopted via the ids recorded
+on each turn) and **land** (an existing PR for the branch is adopted, never
+forked). What can repeat: a **feedback send** to a designer/coder whose
+turn ended during the crash window — agents are re-prompted with the same
+text, which a human reviewing the PR can see. The driver never claims to
+have deduplicated a send it did not record.
 
 ```
 spawn ──► test_review ──► execute ──► candidate ──► land ──► report ──► done
@@ -157,8 +173,9 @@ via `paseo permit ls` showing the job's agents), a failing `gh pr list` —
 re-running the preflight gates). Expected loop outcomes — a contract/scope
 violation, `max_rounds` exhausted, a coder branch that moved or went dirty
 before land, a CLOSED unmerged PR — **escalate** (exit 2) for a human. The
-driver never guesses and has no stale-SHA detection of its own: SHAs are
-re-read from git each round, never trusted from memory.
+driver never guesses and has no stale-SHA detection of its own: coder heads
+are re-read from git each round, while the base SHA is pinned at its first
+resolution.
 
 ## Limits / what it deliberately does NOT do
 
@@ -166,7 +183,11 @@ re-read from git each round, never trusted from memory.
   workers already run as**. v1 bounds them with the fixed argv, a timeout,
   `prlimit` when available (preflight refuses to start without it unless
   `allow_no_prlimit: true`), and a scrubbed env; a `bwrap`-style wrapper is a
-  possible later flag. There is no sandbox runtime.
+  possible later flag. There is no sandbox runtime. The designer's blindness
+  is part of the same bargain: **by instruction, not enforcement** — its
+  worktree shares the repo's object store, so a designer that disobeys its
+  prompt (`git log --all`) can see the coder's commits; independence here
+  is procedural, not a security boundary.
 - No daemon, no hooks, no event journal, no receipts, no run-identity
   machinery, no caching layers, no retry framework.
 - No merges, no approvals, no auto-resume across reboots — `resume` is
@@ -180,3 +201,7 @@ re-read from git each round, never trusted from memory.
   pytest accepts.
 - If a job is paused mid-`send`, resuming re-sends the feedback (agents are
   idempotently re-prompted, not deduplicated).
+- Running this repo's test suite with `--basetemp` pointed **inside the
+  repo tree** makes ~15 scaffold/sealing tests fail spuriously (they are
+  sensitive to their temp dir living in a git repo); use pytest's default
+  basetemp, which is where the green numbers were measured.

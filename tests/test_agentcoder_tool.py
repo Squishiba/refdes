@@ -654,6 +654,20 @@ def test_cap_gate_survives_resume(tmp_path, monkeypatch):
     assert env.resume() == 0
 
 
+def test_base_sha_pinned_across_pause(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={"running_qwen": 9})
+    assert env.run() == 1  # paused at the capacity gate, base_sha already pinned
+    pinned = env.job()["base_sha"]
+    gitat(env.spec["repo"], "commit", "--allow-empty", "-qm", "base moved")
+    moved = subprocess.run(["git", "rev-parse", "main"], cwd=env.spec["repo"],
+                           capture_output=True, text=True).stdout.strip()
+    assert moved != pinned
+    env.scenario["running_qwen"] = 0
+    env.scen_path.write_text(json.dumps(env.scenario))
+    assert env.resume() == 0
+    assert env.job()["base_sha"] == pinned  # resume must NOT re-resolve a moved ref
+
+
 def test_test_timeout_pauses_not_blamed(tmp_path, monkeypatch):
     env = build_env(tmp_path, monkeypatch, spec_overrides={"test_timeout": 0})
     assert env.run() == 1
