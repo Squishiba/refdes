@@ -27,10 +27,11 @@ python tools/agentcoder/agentcoder.py status JOBDIR
 `JOBDIR` defaults to `<repo>/.scratch/agentcoder/<task_id>/` — keep job
 dirs out of tracked paths (in this repo `.scratch/` is gitignored). Exit
 codes: **0** done (`ready-for-human-gate`), **2** escalated, **1**
-error/paused. Every run — every exit path, including spec-invalid,
-jobdir-exists, unknown-command and preflight-pause — prints a JSON object
-with at least `status` and `reason` on stdout, and writes
-`JOBDIR/report.md`.
+error/paused. Every run prints a JSON object with at least `status` and
+`reason` on stdout. Exits that already have a `JOBDIR` (preflight pause,
+escalation, completion) also write `JOBDIR/report.md`; the exits with **no**
+jobdir (unknown command, unreadable/invalid spec, jobdir already in use)
+print the JSON on stdout as their entire output.
 
 The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
 `paseo`); on Windows it is untested and its test suite is skipped.
@@ -69,7 +70,9 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
 - `test_reviewer_model` optional — when absent the test-review phase is
   skipped and the report says so.
 - Before starting: refuses to run if `paseo ls -g --json` shows
-  running Qwen agents >= `qwen_cap - reserve`.
+  running Qwen agents >= `qwen_cap - reserve`, and **pauses** (no agents
+  started) if `prlimit` is not on `PATH` unless the spec sets
+  `"allow_no_prlimit": true` — the executor never silently drops the limits.
 
 ## State machine
 
@@ -83,7 +86,7 @@ spawn ──► test_review ──► execute ──► candidate ──► land
 
 1. **spawn** — two worktrees at the base SHA, created **in parallel** via
    `paseo run --new-workspace worktree --worktree-mode branch-off
-   --new-branch ac/<task>/{coder,tests} --base <sha> ...` (each blocking
+   --new-branch ac/<task>/{coder,designer,review-r<n>} --base <sha> ...` (each blocking
    call is that agent's whole turn). The designer is told: tests only under
    `allowed_test_paths`, never touch anything else, never inspect other
    branches (`git log --all`), commit, and write
@@ -99,28 +102,33 @@ spawn ──► test_review ──► execute ──► candidate ──► land
 3. **execute** — freeze the test commit SHA; its changed paths must fit
    `allowed_test_paths` (violations escalate). In a temp detached worktree of
    the **base** with the frozen tests checked out, run `test_command` under
-   `prlimit` (CPU/address-space/file-size/process bounds), a scrubbed
-   environment, and a timeout. Outcomes are compared with `cases.json`: a
-   `pass` control that fails on base, or a `fail` test that passes on base,
-   is a **TEST bug** — the exact mismatch goes to the designer, one round.
+   `prlimit` when available (CPU/address-space/file-size/process bounds;
+   preflight refuses to start without it unless `allow_no_prlimit`), a
+   scrubbed environment, and a timeout. Outcomes are compared with `cases.json`:
+   a `pass` control that is not PASSED on base, or a `fail` test that is not
+   FAILED on base (SKIPPED/XFAIL/XPASS/missing all count), is a **TEST bug** —
+   the mismatch goes to the designer, up to `max_rounds` rounds, then escalate.
 4. **candidate** — temp detached worktree of the coder's HEAD + frozen tests;
-   coder's changed paths checked against `allowed_code_paths`. Failures are
-   fed to the coder as the last 150 output lines + failing ids (blocking
-   `paseo send`), at most `max_rounds`; the coder's head is re-read
+   coder's changed paths checked against `allowed_code_paths`. A round is
+   green only when **every** id declared in `cases.json` shows outcome
+   PASSED for the coder's code; SKIPPED/XFAIL/XPASS/ERROR/missing and exit 5
+   (nothing collected) are red, with the observed outcome fed back per id.
+   Failures are fed to the coder as the last 150 output lines + failing ids
+   (blocking `paseo send`), at most `max_rounds`; the coder's head is re-read
    (`rev-parse`) each round, never trusted from memory. Tests are never
    loosened.
- 5. **land** — the frozen test files are committed into the coder's branch
-    (authored `agentcoder <noreply@refdes.local>`, trailer
-    `Co-authored-by: <name> <noreply@refdes.local>` where `<name>` is the
-    last path segment of `coder_model`), the branch is pushed, an existing
-    PR for the branch is adopted if `gh pr list` finds one (so a crash
-    between `gh pr create` and the state save cannot fork a second PR),
-    `gh pr create` opens the PR (contract summary + executor
-    results table + escalation notes), and the PR number is printed.
-    **Nothing is merged, no merge holds touched, no permissions approved.**
- 6. **report** — `JOBDIR/report.md` + JSON summary (base/test/code SHAs,
-    controls green, intended reds, candidate results per round, review
-    verdict, PR number, status).
+5. **land** — the frozen test files are committed into the coder's branch
+   (authored `agentcoder <noreply@refdes.local>`, trailer
+   `Co-authored-by: <name> <noreply@refdes.local>` where `<name>` is the
+   last path segment of `coder_model`), the branch is pushed, an existing
+   PR for the branch is adopted if `gh pr list` finds one (so a crash
+   between `gh pr create` and the state save cannot fork a second PR),
+   `gh pr create` opens the PR (contract summary + the full per-round
+   executor results), and the PR number is printed.
+   **Nothing is merged, no merge holds touched, no permissions approved.**
+6. **report** — `JOBDIR/report.md` + JSON summary (base/test/code SHAs,
+   controls green, intended reds, candidate results per round, review
+   verdict, PR number, status).
 
 Temp worktrees under `JOBDIR` used by execute/candidate are removed
 (`git worktree remove --force`) at the end of each round, including on
@@ -135,8 +143,9 @@ showing the job's agents) **pauses** the job: state saved, precise reason,
 
 - Tests are **model-authored code** executed as **the same user the Qwen
   workers already run as**. v1 bounds them with the fixed argv, a timeout,
-  `prlimit`, and a scrubbed env; a `bwrap`-style wrapper is a possible later
-  flag. There is no sandbox runtime.
+  `prlimit` when available (preflight refuses to start without it unless
+  `allow_no_prlimit: true`), and a scrubbed env; a `bwrap`-style wrapper is a
+  possible later flag. There is no sandbox runtime.
 - No daemon, no hooks, no event journal, no receipts, no run-identity
   machinery, no caching layers, no retry framework.
 - No merges, no approvals, no auto-resume across reboots — `resume` is

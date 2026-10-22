@@ -173,6 +173,11 @@ def validate_spec(spec):
 
 def preflight(job):
     spec = job["spec"]
+    job["base_sha"] = git(spec["repo"], "rev-parse", "--verify",
+                          str(spec["base"]) + "^{commit}")
+    if not shutil.which("prlimit") and not spec.get("allow_no_prlimit"):
+        raise Pause("prlimit is not on PATH: tests would run WITHOUT CPU/address-space "
+                    "limits; install prlimit, or set \"allow_no_prlimit\": true to accept")
     rc, out, err = run_guarded(["paseo", "ls", "-g", "--json"])
     if rc != 0:
         raise Pause(f"cannot list agents (paseo ls -g): {tail_text(err, 5) or rc}")
@@ -409,6 +414,10 @@ def do_test_review(job):
         save_job(job)
 
 
+OUTCOME_RE = re.compile(r"^(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)[ \t]+"
+                        r"(?:\[\d+\][ \t]+)?(\S+)", re.MULTILINE)
+
+
 def run_tests(job, wt):
     argv = []
     for part in job["spec"].get("test_command", DEFAULT_TC):
@@ -422,9 +431,8 @@ def run_tests(job, wt):
                                timeout=int(job["spec"].get("test_timeout", 120)))
     except subprocess.TimeoutExpired:
         return None, "test command timed out", {}
-    outcomes = {node: status for status, node
-                in re.findall(r"^(PASSED|FAILED|ERROR)[ \t]+(\S+)", out + err,
-                              re.MULTILINE)}
+    outcomes = {node.rstrip(":"): status
+                for status, node in OUTCOME_RE.findall(out + err)}
     return rc, out + err, outcomes
 
 
@@ -447,19 +455,29 @@ def compare_cases(cases, outcomes):
     problems = []
     for test_id, decl in sorted(cases.items()):
         want = decl if isinstance(decl, str) else decl.get("expected_on_base")
-        got = outcomes.get(test_id, "NOT-RUN")
+        got = outcomes.get(test_id, "NOT-COLLECTED")
         if want == "pass" and got != "PASSED":
             problems.append(f"{test_id}: control declared 'pass' but on base it is {got}")
-        if want == "fail" and got == "PASSED":
-            problems.append(f"{test_id}: declared 'fail' (new behavior) but it PASSES on "
-                            f"base — the test does not pin the change")
+        if want == "fail" and got != "FAILED":
+            problems.append(f"{test_id}: declared 'fail' (new behavior) but on base it is "
+                            f"{got} — it must FAIL on base to pin the change")
     return problems
+
+
+def gate_failures(cases, outcomes):
+    """Every declared id must have been collected and PASSED; SKIPPED/XFAIL/
+    XPASS/ERROR/FAILED/missing are all red, each with the observed outcome."""
+    return [f"{t} ({outcomes.get(t, 'NOT-COLLECTED')})"
+            for t in sorted(cases) if outcomes.get(t, "NOT-COLLECTED") != "PASSED"]
 
 
 def ensure_worktree(job, name, sha):
     wt = str(Path(job["jobdir"]) / name)
-    git(job["spec"]["repo"], "worktree", "add", "--detach", wt, sha,
-        check=not Path(wt).exists())
+    if Path(wt).exists():
+        git(wt, "checkout", "--force", "--detach", sha)
+        git(wt, "clean", "-fdq")
+    else:
+        git(job["spec"]["repo"], "worktree", "add", "--detach", wt, sha)
     return wt
 
 
@@ -518,6 +536,7 @@ def do_execute(job):
 def do_candidate(job):
     spec = job["spec"]
     rnd = int(job.get("candidate_round", 0))
+    cases = load_cases(job, job["test_sha"])
     while True:
         coder_sha = git(job["coder_cwd"], "rev-parse", "HEAD")
         scope_check(job, coder_sha, spec["allowed_code_paths"], "coder")
@@ -527,7 +546,9 @@ def do_candidate(job):
             rc, out, outcomes = run_tests(job, wt)
         finally:
             drop_worktree(job, wt)
-        failed = sorted(t for t, o in outcomes.items() if o != "PASSED")
+        failed = gate_failures(cases, outcomes)
+        if rc == 5:
+            failed = failed or ["no tests were collected (exit 5)"]
         if rc == 0 and not failed:
             job["coder_sha"] = coder_sha
             job.setdefault("candidate_results", []).append(
@@ -698,7 +719,14 @@ def main(argv):
                 return EXIT_ERROR
             job = {"jobdir": str(jobdir), "task_id": spec["task_id"], "spec": spec,
                    "phase": "spawn", "status": "running", "reason": None}
-            preflight(job)
+            save_job(job)
+            try:
+                preflight(job)
+            except Pause as exc:
+                job["status"], job["reason"] = "paused", exc.reason
+                save_job(job)
+                write_report(job)
+                return EXIT_ERROR
             save_job(job)
         elif cmd in ("resume", "status"):
             job = load_job(arg)
@@ -710,6 +738,15 @@ def main(argv):
                 print(json.dumps({k: job.get(k) for k in keep}, indent=1, sort_keys=True))
                 return EXIT_OK
             job["status"], job["reason"] = "running", None
+            if job.get("base_sha") is None:  # killed before preflight finished
+                try:
+                    preflight(job)
+                except Pause as exc:
+                    job["status"], job["reason"] = "paused", exc.reason
+                    save_job(job)
+                    write_report(job)
+                    return EXIT_ERROR
+                save_job(job)
         else:
             exit_json("error", f"unknown command: {cmd}")
             return EXIT_ERROR

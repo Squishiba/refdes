@@ -10,7 +10,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -50,6 +49,18 @@ CASES_BUG = json.dumps({
     "tests/test_add.py::test_sub":
         {"expected_on_base": "fail", "requirement": "sub() is added by the change"},
 })
+_HEADER = (
+    "import os, sys\nimport pytest\n"
+    "sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))\n"
+    "import app\n\n\n"
+    "def test_control():\n    assert callable(app.add)\n\n\n")
+TESTS_SKIP = _HEADER + (
+    "@pytest.mark.skip(reason=\"hide\")\n"
+    "def test_sub():\n    assert app.sub(1, 2) == -1\n")
+TESTS_MISSING = _HEADER + "def test_other():\n    assert True\n"
+TESTS_XFAIL = _HEADER + (
+    "@pytest.mark.xfail(reason=\"hide\")\n"
+    "def test_sub():\n    assert app.sub(1, 2) == -1\n")
 
 PASEO_FAKE = r'''#!/usr/bin/env python3
 import json, os, subprocess, sys, time
@@ -250,33 +261,18 @@ def spawn_count(env, role):
                and f"AgentCoder t1 {role}" in c)
 
 
-class _EnvMP:
-    def setenv(self, key, value):
-        os.environ[key] = value
-
-
-def _dry_run_save_count():
-    """Number of job.json saves in one clean happy-path run; the kill/resume
-    test parametrizes over every one of them."""
-    env = build_env(Path(tempfile.mkdtemp(prefix="ac-savecount-")), _EnvMP(),
-                    name="env")
+def count_save_points(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="dry")
     real, calls = agentcoder.save_job, [0]
 
     def counting(job):
         real(job)
         calls[0] += 1
 
-    agentcoder.save_job = counting
-    try:
-        env.run()
-    finally:
-        agentcoder.save_job = real
+    monkeypatch.setattr(agentcoder, "save_job", counting)
+    env.run()
+    monkeypatch.setattr(agentcoder, "save_job", real)
     return calls[0]
-
-
-# Only computed off Windows: the dry run spawns the fakes, which is exactly
-# what Windows cannot do; the kill test is skipped there anyway.
-SAVE_COUNT = 1 if sys.platform == "win32" else _dry_run_save_count()
 
 
 def test_happy_path(tmp_path, monkeypatch, capsys):
@@ -313,6 +309,8 @@ def test_spec_validation_failures(tmp_path, monkeypatch, capsys):
         {"test_command": [sys.executable, "-m", "pytest", "-q"]},
         {"max_rounds": 0},
         {"repo": str(tmp_path / "not-a-repo")},
+        {"cases_file": "src/evil.json"},
+        {"cases_file": "/abs/tests/t1.cases.json"},
     ]
     for mut in bad:
         env = build_env(tmp_path, monkeypatch, spec_overrides=mut,
@@ -327,9 +325,14 @@ def test_spec_validation_failures(tmp_path, monkeypatch, capsys):
 def test_cap_refusal(tmp_path, monkeypatch, capsys):
     env = build_env(tmp_path, monkeypatch, scenario_overrides={"running_qwen": 7})
     assert env.run() == 1
-    assert "refusing to start" in capsys.readouterr().out
-    assert not (env.jobdir / "job.json").exists()
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["status"] == "paused" and "refusing to start" in printed["reason"]
+    assert (env.jobdir / "job.json").exists()  # state + report are written now
+    assert (env.jobdir / "report.md").exists()
     assert not any(c[:1] == ["run"] for c in env.calls())
+    env.scenario["running_qwen"] = 0  # capacity frees up
+    env.scen_path.write_text(json.dumps(env.scenario))
+    assert env.resume() == 0  # preflight re-runs on resume; job completes
 
 
 def test_designer_test_bug_fixed_round2(tmp_path, monkeypatch):
@@ -373,29 +376,33 @@ def test_escalated_after_max_rounds(tmp_path, monkeypatch, capsys):
     assert "escalated" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("k", range(1, SAVE_COUNT + 1))
-def test_resume_after_kill(tmp_path, monkeypatch, k):
-    env = build_env(tmp_path, monkeypatch)
-    calls = {"n": 0}
-    real = agentcoder.save_job
+def test_resume_after_kill_every_save_point(tmp_path, monkeypatch):
+    # compute the number of save points at RUN time (not import) by counting
+    # saves in one clean run, then kill after each one and assert resume works
+    n = count_save_points(tmp_path / "count", monkeypatch)
+    assert n >= 2
+    for k in range(1, n + 1):
+        env = build_env(tmp_path, monkeypatch, name=f"kill{k}")
+        calls = {"n": 0}
+        real = agentcoder.save_job
 
-    class Kill(Exception):
-        pass
+        class Kill(Exception):
+            pass
 
-    def killer(job):
-        real(job)
-        calls["n"] += 1
-        if calls["n"] == k:
-            raise Kill()
+        def killer(job):
+            real(job)
+            calls["n"] += 1
+            if calls["n"] == k:
+                raise Kill()
 
-    monkeypatch.setattr(agentcoder, "save_job", killer)
-    with pytest.raises(Kill):
-        env.run()
-    monkeypatch.setattr(agentcoder, "save_job", real)
-    assert env.resume() == 0
-    assert env.job()["phase"] == "done"
-    assert spawn_count(env, "coder") == 1
-    assert spawn_count(env, "designer") == 1
+        monkeypatch.setattr(agentcoder, "save_job", killer)
+        with pytest.raises(Kill):
+            env.run()
+        monkeypatch.setattr(agentcoder, "save_job", real)
+        assert env.resume() == 0, f"resume failed after kill at save {k}/{n}"
+        assert env.job()["phase"] == "done", f"not done after kill at save {k}/{n}"
+        assert spawn_count(env, "coder") == 1
+        assert spawn_count(env, "designer") == 1
 
 
 def test_designer_scope_violation(tmp_path, monkeypatch):
@@ -472,10 +479,20 @@ def test_job_json_is_atomic(tmp_path, monkeypatch):
     assert env.run() == 0
     job = env.job()
     before = (env.jobdir / "job.json").read_text()
-    monkeypatch.setattr(agentcoder.os, "replace",
-                        lambda a, b: (_ for _ in ()).throw(OSError("crash")))
+
+    class _BoomOS:
+        def __getattr__(self, name):
+            return getattr(os, name)
+
+        def replace(self, a, b):
+            raise OSError("crash")
+
+    # rebind the agentcoder module's own `os` name so only save_job's
+    # os.replace call is poisoned, not the shared os module
+    monkeypatch.setattr(agentcoder, "os", _BoomOS())
     with pytest.raises(OSError):
         agentcoder.save_job(job)
+    monkeypatch.setattr(agentcoder, "os", os)
     assert (env.jobdir / "job.json").read_text() == before
     assert (env.jobdir / "job.json.tmp").exists()
 
@@ -575,6 +592,9 @@ def test_spawn_hang_kills_siblings(tmp_path, monkeypatch):
     assert env.run() == 1
     assert "timed out" in env.job()["reason"]
     pid = int((tmp_path / "hangpid").read_text())
+    # the pid was written by the fake itself (not a recycled pid we read
+    # blind), so ProcessLookupError here means the driver killed the hung
+    # sibling; a pid-reuse race within the test window is not a real risk
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
 
@@ -604,3 +624,75 @@ def test_temp_worktrees_removed(tmp_path, monkeypatch):
     assert env.run() == 0
     assert not (env.jobdir / "base-wt").exists()
     assert not list(env.jobdir.glob("cand-wt-*"))
+
+
+def test_reused_worktree_is_reset(tmp_path, monkeypatch):
+    # simulate a hard kill between `worktree add` and cleanup: the stale
+    # cand-wt stays on disk, the coder branch moves, and resume MUST run the
+    # tests against the NEW sha (a green result at the old tree is false
+    # green), proving ensure_worktree resets HEAD on reuse.
+    env = build_env(tmp_path, monkeypatch)
+    real_ewt = agentcoder.ensure_worktree
+    state = {"hit": False}
+
+    class Kill(Exception):
+        pass
+
+    def hook(job, name, sha):
+        wt = real_ewt(job, name, sha)
+        if name.startswith("cand-wt") and not state["hit"]:
+            state["hit"] = True
+            coder = Path(job["coder_cwd"])
+            (coder / "app.py").write_text(
+                "def add(a, b):\n    return a\n\n\ndef sub(a, b):\n    return None\n")
+            gitat(coder, "add", "-A")
+            gitat(coder, "-c", "user.name=x", "-c", "user.email=x@x",
+                  "commit", "-qm", "regress")
+            raise Kill()
+        return wt
+
+    monkeypatch.setattr(agentcoder, "ensure_worktree", hook)
+    with pytest.raises(Kill):
+        env.run()
+    assert list(env.jobdir.glob("cand-wt-*"))  # stale worktree survives
+    monkeypatch.setattr(agentcoder, "ensure_worktree", real_ewt)
+    # coder's reply to the round's red feedback restores the correct code
+    env.scenario["on_send"] = {"coder": [{"files": {"app.py": FIX_APP}}]}
+    env.scen_path.write_text(json.dumps(env.scenario))
+    assert env.resume() == 0
+    job = env.job()
+    # round 0 went RED: the only way that happens is the gate ran the MOVED
+    # branch (sub returns None), not the stale cand-wt HEAD (which was green)
+    assert job["phase"] == "done"
+    assert job["candidate_results"][0]["failed"]
+    assert not job["candidate_results"][-1]["failed"]
+
+
+def test_outcome_gate_helpers():
+    cases = {"t::a": "pass", "t::b": "fail"}
+    ok = {"t::a": "PASSED", "t::b": "FAILED"}
+    assert agentcoder.compare_cases(cases, ok) == []
+    for bad_b in ("SKIPPED", "XFAIL", "XPASS", "NOT-COLLECTED", "PASSED"):
+        assert agentcoder.compare_cases(cases, {"t::a": "PASSED", "t::b": bad_b})
+    for bad_a in ("SKIPPED", "XFAIL", "XPASS", "NOT-COLLECTED", "FAILED"):
+        assert agentcoder.compare_cases(cases, {"t::a": bad_a, "t::b": "FAILED"})
+    assert agentcoder.gate_failures(cases, {"t::a": "PASSED", "t::b": "PASSED"}) == []
+    assert agentcoder.gate_failures(cases, {}) == ["t::a (NOT-COLLECTED)",
+                                                   "t::b (NOT-COLLECTED)"]
+    assert agentcoder.gate_failures(cases, {"t::a": "PASSED", "t::b": "XPASS"}) \
+        == ["t::b (XPASS)"]
+
+
+@pytest.mark.parametrize("tests,expect", [
+    (TESTS_SKIP, "NOT-COLLECTED"),   # skip summary lines carry file:line, not the id
+    (TESTS_MISSING, "NOT-COLLECTED"),
+    (TESTS_XFAIL, "XFAIL"),
+], ids=["skip", "missing", "xfail"])
+def test_unrun_never_ready(tmp_path, monkeypatch, tests, expect):
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={
+        "designer_files": {"tests/test_add.py": tests,
+                           "tests/t1.cases.json": CASES_OK}})
+    assert env.run() == 2  # escalated, never ready-for-human-gate
+    job = env.job()
+    assert job["status"] == "escalated"
+    assert "test_sub" in job["reason"] and expect in job["reason"]

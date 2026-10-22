@@ -1,9 +1,9 @@
 # agentcoder driver
 
 Goal: replace the old Paseo-plugin AgentCoder with a small plain driver
-script. Done: `tools/agentcoder/agentcoder.py` (624 non-blank non-comment
+script. Done: `tools/agentcoder/agentcoder.py` (657 non-blank non-comment
 lines, under the 700 goal), `tools/agentcoder/README.md`,
-`tests/test_agentcoder_tool.py` (31 tests, all passing on Linux; the module
+`tests/test_agentcoder_tool.py` (29 tests, all passing on Linux; the module
 is skipped on Windows). Committed on branch `feat-agentcoder-driver` off
 main tip.
 
@@ -55,7 +55,20 @@ main tip.
   (TimeoutExpired -> Pause); spec gained `cases_file`; the Co-authored-by
   trailer is derived from `coder_model`; temp worktrees are removed after
   each round; every early-exit path prints JSON.
-- Full-suite numbers (measured in this worktree, default basetemp): 4293
+- Review round 2 fixes: false-green closed -- the outcome regex now also
+  captures SKIPPED/XFAIL/XPASS, `compare_cases` requires 'fail' ids to be
+  FAILED on base (not PASSED-only-checked before), and the candidate gate
+  (`gate_failures`) demands EVERY cases.json id show PASSED; missing ids
+  report NOT-COLLECTED (skip summary lines carry file:line, not the id),
+  exit 5 is red. `ensure_worktree` resets a reused worktree
+  (`checkout --force --detach <sha>` + `clean -fdq`) so a kill between
+  `worktree add` and cleanup can't test a stale tree. Preflight runs AFTER
+  the first save (preflight pause leaves job.json + report.md), sets
+  base_sha before its checks, re-runs on resume when unverified, and pauses
+  when `prlimit` is missing unless `allow_no_prlimit: true`. Collection is
+  side-effect free (kill-every-save test counts save points at run time).
+  README branch names / max_rounds / prlimit / PR-body claims corrected.
+- Full-suite numbers (measured in this worktree, default basetemp): 4291
   passed, 2 skipped, 0 failed. An earlier run with `--basetemp` under
   `.scratch/` showed 15 scaffold/sealing failures -- those tests are
   sensitive to their temp dir living *inside* a git repo; that run was the
