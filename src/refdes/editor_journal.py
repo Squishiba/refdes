@@ -100,6 +100,27 @@ def _live_path(project_root: str, rel: str) -> str:
     return os.path.join(project_root, *rel.split("/"))
 
 
+def _escapes_root(project_root: str, rel: str) -> bool:
+    """True when a path's containing directory resolves outside the root.
+
+    `_is_safe_relpath` is lexical, and lexical cannot see symlinks: with
+    ``project/jump -> /outside``, the manifest path ``jump/file.txt`` is
+    lexically safe, yet writing it lands a file outside the project.
+    Resolving the PARENT directory (the file itself may not exist) and
+    requiring it to stay under the resolved root closes that. A symlink
+    as the final component is fine: ``os.replace``/``os.remove`` act on
+    the link itself, never on its target.
+    """
+    parent = os.path.dirname(_live_path(project_root, rel))
+    root_real = os.path.realpath(project_root)
+    parent_real = os.path.realpath(parent)
+    try:
+        return os.path.commonpath([root_real, parent_real]) != root_real
+    except ValueError:
+        # commonpath raises for paths on different drives (Windows).
+        return True
+
+
 def _is_safe_relpath(path: str) -> bool:
     if not path:
         return False
@@ -203,11 +224,30 @@ def _read_orig(journal: str, index: int) -> bytes | None:
 
 
 def _read_manifest_raw(journal: str) -> object | None:
-    """The parsed manifest, or None if missing / unreadable / not JSON."""
+    """The parsed manifest; None when it is missing or unparseable.
+
+    Missing/unparseable is the inert state: begin() writes manifest.json
+    last, so a journal without one is a crash before any live file was
+    touched, and recover removes it. An UNREADABLE manifest is the
+    opposite -- it says nothing about whether begin() completed -- so it
+    raises JournalCorrupt naming the path: deleting the journal there
+    would discard the only rollback copy while replacement bytes are
+    live. (UnicodeDecodeError is a ValueError; JSONDecodeError too.)
+    """
+    manifest_path = os.path.join(journal, _MANIFEST_NAME)
     try:
-        with open(os.path.join(journal, _MANIFEST_NAME), "rb") as fh:
-            return json.loads(fh.read())
-    except (OSError, ValueError, UnicodeDecodeError):
+        with open(manifest_path, "rb") as fh:
+            data = fh.read()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise JournalCorrupt(
+            f"journal manifest at {manifest_path} cannot be read ({exc}); "
+            f"refusing to judge the journal without it"
+        ) from exc
+    try:
+        return json.loads(data)
+    except ValueError:
         return None
 
 
@@ -263,9 +303,10 @@ def begin(project_root: str, entries: Sequence[Entry]) -> str:
 
     Raises ``JournalPending`` if a journal already exists (nothing is
     created), ``ValueError`` for unusable entry paths (absolute, ``..``,
-    backslash, colon, empty, duplicated) -- also with nothing created.
+    backslash, colon, empty, duplicated, resolving outside the root via
+    a symlink) -- also with nothing created.
     """
-    _validate_entries(entries)
+    _validate_entries(project_root, entries)
     journal = _journal_path(project_root)
     if os.path.exists(journal):
         raise JournalPending(pending(project_root) or "unknown")
@@ -293,6 +334,11 @@ def begin(project_root: str, entries: Sequence[Entry]) -> str:
             {"transaction": transaction_id, "entries": manifest_entries},
             indent=2,
         ).encode("utf-8")
+        # The backups live in a directory of their own: fsyncing staging
+        # persists its entry for `orig/`, never the files inside it, so
+        # orig/ is synced here -- a power loss must not leave a visible
+        # manifest beside backup entries that never reached the disk.
+        _fsync_dir(orig_dir)
         # manifest.json last: a visible journal without it means "crash
         # inside begin, no live file touched", and recover relies on that.
         _atomic_write_bytes(os.path.join(staging, _MANIFEST_NAME), manifest)
@@ -320,7 +366,12 @@ def pending(project_root: str) -> str | None:
     journal = _journal_path(project_root)
     if not os.path.isdir(journal):
         return None
-    manifest = _read_manifest_raw(journal)
+    try:
+        manifest = _read_manifest_raw(journal)
+    except JournalCorrupt:
+        # Unreadable: it is still a live journal, and pending() is the
+        # refusal gate -- it must report, not raise.
+        return "unknown"
     if isinstance(manifest, dict):
         transaction_id = manifest.get("transaction")
         if isinstance(transaction_id, str) and transaction_id:
@@ -392,6 +443,10 @@ def recover(project_root: str) -> list[str]:
     for entry in entries:
         if not _is_safe_relpath(entry["path"]):
             raise JournalCorrupt(f"journal names an unsafe path: {entry['path']!r}")
+        if _escapes_root(project_root, entry["path"]):
+            raise JournalCorrupt(
+                f"journal path {entry['path']!r} resolves outside the project root"
+            )
 
     originals: dict[int, bytes] = {}
     for index, entry in enumerate(entries):
@@ -426,11 +481,15 @@ def recover(project_root: str) -> list[str]:
     return restored
 
 
-def _validate_entries(entries: Sequence[Entry]) -> None:
+def _validate_entries(project_root: str, entries: Sequence[Entry]) -> None:
     seen: set[tuple[str, ...]] = set()
     for entry in entries:
         if not _is_safe_relpath(entry.path):
             raise ValueError(f"unusable entry path: {entry.path!r}")
+        if _escapes_root(project_root, entry.path):
+            raise ValueError(
+                f"entry path {entry.path!r} resolves outside the project root"
+            )
         key = tuple(segment for segment in entry.path.split("/") if segment != ".")
         if key in seen:
             raise ValueError(f"duplicate entry path: {entry.path!r}")

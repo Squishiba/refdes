@@ -64,4 +64,23 @@ I/O errors. Designer log corrected re cases.json (not delivered).
 tests/test_editor_journal.py: 53 pass (47 frozen designer tests unchanged,
 6 added).
 
+## Review round 2 (PR #367, manual review of 98cb7ae)
+
+Three MEDIUMs, all fixed test-first (5 RED tests, 4 failing on the old
+code): unreadable manifest -> recover no longer deletes the journal
+(_read_manifest_raw raises JournalCorrupt naming the path on any OSError
+that is not FileNotFoundError; only missing/genuine parse failures mean
+the inert crashed-begin state; pending() maps JournalCorrupt to
+"unknown" so the refusal gate keeps reporting it). Symlink escape: new
+_escapes_root resolves each entry's live parent and requires
+os.path.commonpath containment under realpath(root) -- recover raises
+JournalCorrupt changing nothing, begin raises ValueError leaving no
+journal; final-component symlinks are replaced/removed as links by
+os.replace/os.remove, never followed; a guard test keeps
+project-internal symlinked dirs allowed. Durability: begin now fsyncs
+orig/ (the backups' own directory) before writing the manifest and the
+staging rename, per the recorded fsync order test. Module is 496 lines.
+Targeted 58 pass (47 frozen unchanged), full suite 4468 passed / 2
+skipped (exit 0), ruff clean.
+
 Finished.

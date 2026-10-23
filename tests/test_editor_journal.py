@@ -811,3 +811,133 @@ def test_recover_fsyncs_the_journal_parent_after_removal(tmp_path, monkeypatch):
     monkeypatch.setattr(ej, "_fsync_dir", fsyncs.append)
     ej.recover(root)
     assert fsyncs[-1] == str(tmp_path / ".refdes")
+
+
+# ------------------------------------------ review round 2: unreadable manifest, symlinks, fsync
+
+
+def _symlink(target: str, link: str) -> None:
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("cannot create symlinks on this platform")
+
+
+def test_recover_keeps_journal_when_the_manifest_is_unreadable(tmp_path, monkeypatch):
+    """An unreadable manifest (permissions, a sharing violation) says nothing
+    about whether begin() crashed: recover must NOT remove the journal --
+    that would discard the only rollback copy while the replacement bytes
+    are live. It refuses, changes nothing, keeps the journal, and pending()
+    still reports it."""
+    ej = _ej()
+    root = _project(tmp_path)
+    entries = _entries(ej)
+    ej.begin(root, entries)
+    _apply_save(tmp_path, entries)
+    manifest = str(_journal(tmp_path) / MANIFEST_NAME)
+    real_open = open
+
+    def blocked_open(file, *args, **kwargs):
+        if str(file) == manifest:
+            raise PermissionError(13, "simulated sharing violation", str(file))
+        return real_open(file, *args, **kwargs)
+
+    with monkeypatch.context() as m:
+        m.setattr("builtins.open", blocked_open)
+        assert ej.pending(root) == "unknown", "unreadable manifest is still pending"
+        with pytest.raises((ej.JournalCorrupt, OSError)):
+            ej.recover(root)
+    assert _journal(tmp_path).is_dir(), "the journal (and its rollback data) is kept"
+    assert _read(tmp_path, P1) == NEW1, "an unreadable manifest restores NOTHING"
+    assert _read(tmp_path, P2) == NEW2
+    assert _read(tmp_path, P3) == NEW3
+    assert ej.pending(root) is not None
+
+
+def test_recover_refuses_paths_through_escaping_symlinks(tmp_path):
+    """A manifest path can be lexically safe and still escape the project
+    through a symlinked directory: `jump/file.txt` with `jump -> /outside`
+    must be refused as JournalCorrupt, touching nothing, journal kept."""
+    ej = _ej()
+    root = _project(tmp_path)
+    outside = tmp_path.parent / (tmp_path.name + "-outside")
+    outside.mkdir()
+    victim = outside / "victim.txt"
+    victim.write_bytes(b"VICTIM")
+    _symlink(str(outside), str(tmp_path / "jump"))
+    _write(tmp_path, "jump/victim.txt", b"VICTIM")
+    ej.begin(root, [ej.Entry(P1, OLD1, NEW1)])
+    _write(tmp_path, P1, NEW1)
+    manifest_path = _journal(tmp_path) / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_bytes())
+    _find_entry_list(manifest)[0]["path"] = "jump/victim.txt"
+    manifest_path.write_bytes(json.dumps(manifest).encode())
+    with pytest.raises(ej.JournalCorrupt) as excinfo:
+        ej.recover(root)
+    assert "jump/victim.txt" in str(excinfo.value)
+    assert victim.read_bytes() == b"VICTIM", "nothing may be written outside the root"
+    assert _read(tmp_path, P1) == NEW1, "the refusal changes nothing"
+    assert _journal(tmp_path).is_dir()
+
+
+def test_begin_refuses_entries_through_escaping_symlinks(tmp_path):
+    """begin() must not journal a save that runs through an escaping
+    symlink: ValueError, no journal directory left behind."""
+    ej = _ej()
+    root = _project(tmp_path)
+    outside = tmp_path.parent / (tmp_path.name + "-outside")
+    outside.mkdir()
+    victim = outside / "victim.txt"
+    victim.write_bytes(b"VICTIM")
+    _symlink(str(outside), str(tmp_path / "jump"))
+    with pytest.raises(ValueError):
+        ej.begin(root, [ej.Entry("jump/victim.txt", b"VICTIM", b"ESCAPE")])
+    assert not _journal(tmp_path).exists()
+    assert victim.read_bytes() == b"VICTIM"
+
+
+def test_recover_allows_symlinked_directories_inside_the_project(tmp_path):
+    """Guard against over-refusing: containment means the resolved parent
+    stays inside the root; a symlink to a directory inside the project is
+    the project's own business and must keep working."""
+    ej = _ej()
+    root = str(tmp_path)
+    (tmp_path / "realdir").mkdir()
+    _symlink(str(tmp_path / "realdir"), str(tmp_path / "linkdir"))
+    _write(tmp_path, "linkdir/f.txt", b"F-OLD")
+    ej.begin(root, [ej.Entry("linkdir/f.txt", b"F-OLD", b"F-NEW")])
+    _write(tmp_path, "linkdir/f.txt", b"F-NEW")
+    assert ej.recover(root) == ["linkdir/f.txt"]
+    assert (tmp_path / "realdir" / "f.txt").read_bytes() == b"F-OLD"
+
+
+def test_begin_fsyncs_the_orig_directory_before_exposing_the_journal(tmp_path, monkeypatch):
+    """fsyncing the staging directory does not persist the entries written
+    into orig/: after a power loss a visible manifest must not sit beside
+    backup files whose directory entries never landed (JournalCorrupt on
+    recovery of a journal that was journaled correctly)."""
+    ej = _ej()
+    root = _project(tmp_path)
+    events: list[tuple] = []
+    monkeypatch.setattr(ej, "_fsync_dir", lambda path: events.append(("fsync", path)))
+    real_replace = os.replace
+
+    def spy_replace(src, dst):
+        events.append(("replace", src, dst))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", spy_replace)
+    ej.begin(root, _entries(ej))
+    journal = str(_journal(tmp_path))
+    parent = str(tmp_path / ".refdes")
+    visible = next(
+        i
+        for i, event in enumerate(events)
+        if event[0] == "replace" and event[2] == journal
+    )
+    staging = events[visible][1]
+    assert ("fsync", os.path.join(staging, "orig")) in events[:visible], (
+        "the backup files' directory must be fsynced before the journal appears"
+    )
+    assert ("fsync", staging) in events[:visible]
+    assert events[-1] == ("fsync", parent)
