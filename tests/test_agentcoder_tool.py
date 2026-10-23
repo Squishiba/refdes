@@ -1798,3 +1798,10 @@ def test_resume_and_status_require_jobdir(capsys):
     assert agentcoder.main(["resume"]) == 1
     assert agentcoder.main(["status"]) == 1  # F9: never read a stray ./job.json
     assert "usage" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("globs", [[123], [None], "tests/*"])
+def test_validate_spec_survives_non_string_globs(tmp_path, monkeypatch, globs, capsys):
+    env = build_env(tmp_path, monkeypatch, spec_overrides={"allowed_test_paths": globs})
+    assert env.run() == 1  # recorded as problems, no AttributeError from path_matches
+    assert "allowed_test_paths" in capsys.readouterr().out

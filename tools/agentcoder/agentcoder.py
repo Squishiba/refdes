@@ -181,22 +181,28 @@ def validate_spec(spec):
         globs = spec.get(key)
         if not isinstance(globs, list) or not globs:
             problems.append(f"{key} must be a non-empty list of globs")
-            return
+            return False
+        ok = True
         for g in globs:
             parts = g.split("/") if isinstance(g, str) else []
             if not isinstance(g, str) or not g or os.path.isabs(g) \
                     or parts[0] in ("", ".") or ".." in parts:
                 problems.append(f"{key} entry must be a relative glob with no '..' "
                                 f"component: {g!r}")
+                ok = False
+        return ok
 
     if "allow_no_prlimit" in spec and not isinstance(spec["allow_no_prlimit"], bool):
         problems.append(f"allow_no_prlimit must be a real JSON bool, not {spec['allow_no_prlimit']!r}")
     check_globs("allowed_code_paths")
-    check_globs("allowed_test_paths")
+    test_globs_ok = check_globs("allowed_test_paths")
     cases_file = spec.get("cases_file", f"tests/{tid}.cases.json")
     if not isinstance(cases_file, str) or os.path.isabs(cases_file) \
-            or any(ch in cases_file for ch in "*?[") or not any(
-            path_matches(cases_file, g) for g in spec.get("allowed_test_paths") or []):
+            or any(ch in cases_file for ch in "*?["):
+        problems.append(f"cases_file must be a plain path inside "
+                        f"allowed_test_paths: {cases_file!r}")
+    elif test_globs_ok and not any(
+            path_matches(cases_file, g) for g in spec["allowed_test_paths"]):
         problems.append(f"cases_file must be a plain path inside "
                         f"allowed_test_paths: {cases_file!r}")
     tc = spec.get("test_command", DEFAULT_TC)
@@ -492,6 +498,8 @@ def do_spawn(job):
 
 
 def path_matches(p, g):
+    if not isinstance(p, str) or not isinstance(g, str):
+        return False
     g = g.rstrip("/")
     plain = not any(ch in g for ch in "*?[")
     return (p == g or p.startswith(g + "/")) if plain else fnmatch.fnmatch(p, g)

@@ -50,12 +50,18 @@ mismatches to crash-window edge cases — round 15 closed the last HIGH: a
 cases.json with zero expected-fail tests was a false-green machine (a
 do-nothing coder passed the gate and landed a PR with no code change);
 the driver now requires one, feeds the designer back, and refuses to land
-a candidate sha equal to the base.
+a candidate sha equal to the base. Round 16 (last): validate_spec no
+longer raises AttributeError on non-string `allowed_test_paths` entries
+(the cases_file/path_matches checks are skipped while the globs list is
+invalid; `path_matches` tolerates non-str), and contested README claims
+were corrected or deleted (contract-violation escalation, the LoC
+figure, the pytest-example clause, re-spawn collision moved to
+not-live-verified, brace-pattern reframing, exact exit-path reasons).
 
 ## Numbers (measured on the final head)
 
-- Driver: 865 non-blank non-comment lines. Driver tests: 109, all passing
+- Driver: 873 non-blank non-comment lines. Driver tests: 112, all passing
   on Linux; the module skips off Linux and where `prlimit` is absent.
-- Full suite on this branch: 4371 passed / 2 skipped / 0 failed.
+- Full suite on this branch: 4374 passed / 2 skipped / 0 failed.
   `ruff --select E9,F` clean on the two files.
 - Exit codes: 0 ready-for-human-gate, 2 escalated, 1 paused/error.

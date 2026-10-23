@@ -1,7 +1,7 @@
 # agentcoder — a small driver for coder / blind test designer / executor loops
 
 `tools/agentcoder/agentcoder.py` is a **plain driver script** (stdlib only,
-one file; currently 865 non-blank/non-comment lines — ~1000 is a soft
+one file; currently 873 non-blank/non-comment lines — ~1000 is a soft
 sanity ceiling, not enforced by a check) that runs the AgentCoder paper
 loop against Paseo agents:
 
@@ -16,8 +16,8 @@ loop against Paseo agents:
   the tests, checks them against the *base* commit, then runs them against
   the coder's candidate and feeds precise failures back.
 
-It deliberately replaces the earlier Paseo-plugin attempt (~8,100 LoC of
-hooks/journal/receipts). There are **no event hooks here**: `paseo run` and
+It deliberately replaces the earlier Paseo-plugin attempt (hooks, journal,
+receipts). There are **no event hooks here**: `paseo run` and
 `paseo send` block until the agent's turn ends, so *the blocking subprocess
 call is the completion signal*. No daemon, no journal, no subscriptions.
 
@@ -34,15 +34,18 @@ dirs out of tracked paths (in this repo `.scratch/` is gitignored). Exit
 codes: **0** done (`ready-for-human-gate`), **2** escalated, **1**
 error/paused. `status` on an existing job prints a fixed **subset** of
 the job's recorded fields (task_id, phase, status, reason, the SHAs,
-pr_number, test_review, and the round counters) as JSON and exits 0; `status` on a
-missing/invalid jobdir prints a paused
-JSON (`"no job.json in ..."`) and exits 1, writing no report.
+pr_number, test_review, and the round counters) as JSON and exits 0; `status`
+with no job.json file prints paused JSON with reason
+`"no job.json in <jobdir>"`, and with an unparseable job.json
+`"unparseable job.json: ..."`, both exiting 1 and writing no report.
 Exits that run the loop with a `JOBDIR` (preflight pause, mid-run pause,
 escalation, completion) print JSON **and** write `JOBDIR/report.md`; the
 jobdir-in-use exit has a jobdir (the existing one) and writes **no**
 report. The exits with **no** jobdir (unknown command, unreadable spec
 file, invalid spec) print the JSON on stdout as their entire output; an
-**unparseable** spec file exits `status: "paused"` with rc 1. Running
+**unparseable** spec file exits `status: "paused"` with rc 1 (the no-jobdir
+list is not exhaustive: a Pause raised by a git call inside
+`validate_spec` exits the same way). Running
 with no arguments prints the usage text (not JSON) and exits 1.
 
 The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
@@ -87,21 +90,21 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
 - `cases_file` is where the designer writes its per-test expectations
   (`expected_on_base: "pass"|"fail"`); it defaults to
   `tests/<task_id>.cases.json` and must sit inside `allowed_test_paths`.
-- `test_command` must mention **pytest**: outcomes are judged from pytest's
-  `--junitxml` output only, so `validate_spec` requires some argv element to
-  **contain the substring `pytest`** — a substring check, not an invocation
-  check: an argv like `["mytool", "--only", "not-pytest"]` is rejected, while
-  one that merely embeds `pytest` in a larger argument passes validation and
-  then fails at the gate (no junit XML).
+- `test_command` is a fixed argv list that must contain a literal `{tests}`
+  element, and at least one element must **contain the substring `pytest`**
+  — a substring check, not an invocation check (outcomes are judged from
+  pytest's `--junitxml` output only).
 - `{tests}` in `test_command` expands to the files matching the
   `allowed_test_paths` globs, expanded by the driver with
   `glob.glob(..., recursive=True)` relative to the job's worktree, keeping
   only **directories and `.py` files** (a `tests/**` glob also matches the
   designer's data files, and pytest exits rc=4 on those). pytest does not
-  expand patterns itself, and a pattern matching nothing is a
-  Pause, not an empty pytest run. For pytest commands the driver appends
+  expand patterns itself; the driver expands them, and pauses when ALL the
+  `allowed_test_paths` globs together match no files — pytest is never run
+  against an empty selection. For pytest commands the driver appends
   `--junitxml` (written into the job dir — by default under the repo's
-  `.scratch/`, untracked and outside the worktrees under test) and `--rootdir`,
+  `.scratch/`, untracked and outside the worktrees under test) and
+  `--rootdir` (the worktree under test),
   and judges per-test outcomes from that XML only: agent-written stdout
   (e.g. a conftest printing `PASSED` lines) is not gate input. The guard
   protects against mistakes, not hostile coders — a coder who can edit
@@ -139,7 +142,8 @@ idempotent**: a crash after a side effect but before the next save
 replays it. Safe to replay: **spawn** (each completed turn records its
 agent id, and only the role with no saved id is re-spawned; a real
 re-spawn collides with the already-checked-out branch and pauses for a
-human, it never forks) and **land** (an existing PR for the branch is
+human, it never forks — that collision path is offline-tested only, see
+"Not verified live" below) and **land** (an existing PR for the branch is
 adopted, never forked). What can repeat: a **feedback send** to a
 designer/coder whose turn ended during the crash window — agents are
 re-prompted with the same text, which a human reviewing the PR can see.
@@ -250,8 +254,8 @@ Operational anomalies — a command/quota failure, a timeout, a missing
 verdict, an agent in an error state, a pending permission prompt (detected
 via `paseo permit ls` showing the job's agents), a failing `gh pr list` —
 **pause** the job: state saved, precise reason, `resume` continues (after
-re-running the preflight gates). Expected loop outcomes — a contract
-violation, a scope violation repeated after its one-shot revert round,
+re-running the preflight gates). Expected loop outcomes — a scope violation
+repeated after its one-shot revert round,
 `max_rounds` exhausted, dirt at land outside the frozen test paths (a
 coder head that MOVED is not an escalation: it bounces back to candidate
 for a re-gate), a CLOSED unmerged PR — **escalate** (exit 2) for a human. The
@@ -271,7 +275,8 @@ XML), the candidate round, `land` + real `gh pr create`, one feedback
 a permission pause. Every live-verified statement in this README comes
 from those two runs plus the author's direct observations of `paseo ls`
 and `paseo wait` output. **Not verified live** (offline-tested against the
-fake only): the remaining feedback `send` loops (test-review changes,
+fake only, incl. the re-spawn branch collision): the remaining feedback
+`send` loops (test-review changes,
 executor
 feedback, scope-feedback rounds, candidate-red feedback), the `test_review`
 phase end to end, the crash-window recovery paths in `land`, and
@@ -304,7 +309,10 @@ never raise a `UnicodeDecodeError` out of the driver and strand
   reasoned about, not swept.
 - On a spawn-turn timeout the driver kills the `paseo run` clients, then
   finds this job's agents by title (`paseo ls -g`), stops them (`paseo
-  stop`), and records the ids in `stopped_agents` in job.json. Remaining
+  stop`), and records the ids in `stopped_agents` in job.json; agents whose
+  ids are already recorded in job.json are spared (a recorded id means the
+  turn completed).
+  Remaining
   gap: a resume re-spawns any role with no recorded agent id, and its
   branch collides with the stopped agent's — that Pause is loud; delete
   the branch or start a fresh jobdir.
@@ -316,11 +324,12 @@ never raise a `UnicodeDecodeError` out of the driver and strand
   plain path (the file itself, or anything under that directory), and
   fnmatch applies only to patterns containing `*`, `?` or `[`. For
   `{tests}` they are expanded with `glob.glob(..., recursive=True)`. The
-  two dialects diverge: fnmatch treats `{`, `,`, `}` literally, so a
-  brace pattern like `tests/{a,b}.py` **matches nothing** — a
-  designer/coder commit is then flagged, buys the one-shot revert round,
-  and the scope check **escalates** loudly on the repeat; and fnmatch's
-  `*` crosses `/`, so `tests/*.py` also matches `tests/sub/x.py`.
+  two dialects diverge: fnmatch's `*` crosses `/` (`tests/*.py` also
+  matches `tests/sub/x.py` in a scope check), `glob.glob`'s does not;
+  a brace pattern like `tests/{a,b}.py` matches nothing in **both**
+  dialects (neither fnmatch nor `glob.glob` expands braces) — such a
+  commit is then flagged, buys the one-shot revert round,
+  and the scope check **escalates** loudly on the repeat.
   The job **pauses**
   when the expansion of ALL `allowed_test_paths` globs together matches no
   files. Both are loud; keep patterns in a dialect both sides read the
