@@ -96,8 +96,8 @@ def _read_page(project: Project, path: str, root: str) -> Page | None:
         in_nav=bool(meta.get("nav", True)),
         board=str(meta.get("board") or ""),
         workspace=str(meta.get("workspace") or ""),
+        front_matter_lines=front_matter_lines,
     )
-    page.front_matter_lines = front_matter_lines
     return page
 
 

@@ -124,3 +124,21 @@ def test_page_without_front_matter_keeps_reporting_true_line(blocks_project):
         project, "missing required parameter 'by'", "pages/control.md"
     )
     assert d.line == line
+
+
+# ------------------------------------------------------- invalid front matter
+
+
+def test_invalid_front_matter_page_reports_true_line(blocks_project):
+    """Invalid YAML front matter is not stripped: pages.py keeps the whole
+    file as the body, so front_matter_lines stays 0 and the directive's
+    body-relative line is already its file line."""
+    text = "---\ntitle: [unclosed\n---\n\nProse first.\n\n{{compare}}\n"
+    (blocks_project / "pages" / "broken.md").write_text(text, encoding="utf-8")
+    directive_line = text.split("\n").index("{{compare}}") + 1
+    assert directive_line == 7  # front matter 1-3, prose 5, directive 7
+    project = _build_at(blocks_project)
+    d = _block_diagnostic(
+        project, "compare is missing required parameter 'type'", "pages/broken.md"
+    )
+    assert d.line == directive_line

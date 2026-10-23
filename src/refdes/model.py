@@ -743,6 +743,7 @@ class Page:
     workspace: str = ""  # optional `workspace:` tag; groups this page under that workspace's nav entry
     body_html: str = ""
     headings: list[tuple[int, str, str]] = field(default_factory=list)  # level, text, anchor
+    front_matter_lines: int = 0  # lines the front matter occupies in the file (0 if none/invalid)
 
 
 @dataclass
