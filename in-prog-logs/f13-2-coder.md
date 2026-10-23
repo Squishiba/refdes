@@ -70,4 +70,43 @@ test_patcher_links.py, test_serve_api/state/create/custom_config = 293 +
 files: no new findings (one pre-existing DTZ011 in edit.py:1441, present
 on the clean tree, untouched).
 
-Status: finished.
+## Acceptance round 1 (RED) -- triage
+
+Ran the designer's `tests/test_serve_edit_keyless_handle.py` (read from
+`ac/f13-2/designer`, copied to `.scratch/f13-2-accept/`) against the fix:
+**8 passed, 2 failed**. Every product contract clause in the passing 8
+holds (yaml + md saves, the three stale/forged-handle refusals,
+display-id save, key save, 409-with-diff). Both failures are
+acceptance-test bugs, not product bugs; `tests/` is off-limits to me, so
+this is a report to the designer:
+
+1. `test_the_keyless_handle_save_matches_the_display_id_save` --
+   `KeyError: 'by-id'` at line 240. The loop (lines 223-237) stores
+   `payloads[ref_mode] = payload` with keys `"id"`/`"handle"` (the
+   *second* tuple element), then unpacks `payloads["by-id"]` (the *first*
+   element). Fix: store under `name`. Latent bug behind it: after that
+   fix, line 245 `by_id["describe"] == by_handle["describe"]` compares
+   strings that embed the absolute project path -- the two roots are
+   `tmp_path/"by-id"` and `tmp_path/"by-handle"`, so it can never match.
+   Verified in `.scratch/f13-2-accept/probe2.py`: the two saves produce
+   byte-identical files, equal `revision`, equal response shape, and
+   describes identical up to the root-path prefix
+   (`.../by-id/items/reqs.yaml:7 [232:240]` vs
+   `.../by-handle/...`) -- i.e. the contract's real claim is true.
+2. `test_saving_through_the_keyless_handle_lands_on_the_yaml_item` --
+   `assert "status: approved" in text, "REQ-002 keeps its status"`
+   (line 177) is unsatisfiable with the shared fixture: in
+   `serve_support.REQ_FILE` only REQ-001 has `status: approved`; REQ-002
+   has no status field. The test's own save sets REQ-001's status to
+   draft, which is the only `status: approved` in the file. Proven in
+   `.scratch/f13-2-accept/probe.py`: after the keyless-handle save,
+   REQ-002's block is byte-unchanged, REQ-001's block gets
+   `status: draft`, header + trailing comments survive -- the product is
+   right; the assertion contradicts the fixture. Suggested fix: give the
+   test its own fixture file with a statused REQ-002 (the shared
+   `REQ_FILE` is used by many modules), and assert the status lives
+   inside REQ-002's block.
+
+Product side needs no further change for round 1.
+
+Status: round-1 triage done; awaiting designer test fixes.
