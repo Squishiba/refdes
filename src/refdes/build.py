@@ -6,6 +6,7 @@ import difflib
 import errno
 import hashlib
 import html as html_entities
+import itertools
 import json
 import os
 import re
@@ -2569,9 +2570,10 @@ def calc_reference_snapshot(project: Project, item: Item) -> dict[str, str]:
     does not look like a moved value; the text is the readable result and
     bounds, e.g. ``12 V (11.4 V … 12.6 V)``. Empty for an item with none.
 
-    Inline spans enter the snapshot under the same format gate as the content
-    hash (``HASH_FORMAT >= 6``), so a stamped snapshot records exactly the
-    references the stamp's own format hashes.
+    Inline spans enter the snapshot always: snapshots are stamped at the
+    current format, and the current format hashes span references, so a
+    stamped snapshot records exactly the references the stamp's own format
+    hashes. There is no older-format snapshot to gate (round-14 review).
     """
     by_key = _key_index(project)
     snapshot: dict[str, str] = {}
@@ -2955,7 +2957,11 @@ def _span_composites_are_faithful(item: Item, project: Project) -> bool:
     (`links._planned_target`), so a *stale* display half naming a former
     id of the key's owner is the signature of the rename, not an edit --
     the hashes_in_format variants below offer the stripped readings over
-    those historical halves so pre-rename records keep matching.
+    those historical halves so pre-rename records keep matching. Build
+    order precondition (round-14 NIT): `project.former_ids` is populated
+    by `validate_former_ids`, which `build()` runs before any caller of
+    this gate (seal verify, lifecycle) -- an unpopulated map only widens
+    the fail-closed withdrawal.
     """
     by_key = {i.key: i for i in project.local_items if i.key}
     for _target, display, key in _span_composite_targets(item):
@@ -3058,8 +3064,6 @@ def hash_for_format_variants(item: Item, project: Project, hash_format: int) -> 
     # (Round-13 review; pinned by
     # test_former_id_readings_are_offered_up_to_the_cap_and_dropped_above.)
     if options and combinations <= 16:
-        import itertools
-
         for combo in itertools.product(*(opts for _target, opts in options)):
             mapping = dict(zip(authored_display, combo))
             if mapping == authored_display:

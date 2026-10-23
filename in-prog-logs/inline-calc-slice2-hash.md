@@ -126,3 +126,12 @@ longer rebinds `item`, `calc_reference_snapshot`'s always-true
 keys are targets without `.NAME` (debugged via direct
 `_calc_ref_rewrites` probes) and that the reused tmp items dir must be
 cleared between fixture calls. 75 targeted + 4476 full, 2 skipped.
+
+## Round 14 (fresh chunk-2 review: one stale docstring)
+
+`calc_reference_snapshot`'s docstring still described the round-13-removed
+include_inline gate; rewritten to the code's truth (spans always enter;
+snapshots stamped current-format). Swept src/docs/tests for the class --
+one site only (the round-13 history comment is accurate). NITs:
+itertools to module imports, former_ids build-order precondition
+documented. 75 targeted + 4476 full, 2 skipped.
