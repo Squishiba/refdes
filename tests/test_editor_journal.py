@@ -701,3 +701,113 @@ def test_begin_and_recover_survive_awkward_path_names(tmp_path):
     assert sorted(ej.recover(root)) == sorted(rel for rel, _, _ in weird)
     for rel, old, _ in weird:
         assert _read(tmp_path, rel) == old
+
+
+# ----------------------------------------- review round 1: disarm-first complete, dir fsync
+
+
+def _raise_oserror(*args, **kwargs):
+    raise OSError("simulated removal failure")
+
+
+def test_complete_disarms_the_manifest_before_a_removal_failure(tmp_path, monkeypatch):
+    """If deleting the journal directory fails, the manifest must already be
+    gone: a journal directory without a manifest is inert, so a later
+    recover() removes it as a crashed begin -- it can never restore the
+    originals over a save that completed."""
+    ej = _ej()
+    root = _project(tmp_path)
+    entries = _entries(ej)
+    ej.begin(root, entries)
+    _apply_save(tmp_path, entries)
+    monkeypatch.setattr(shutil, "rmtree", _raise_oserror)
+    with pytest.raises(OSError):
+        ej.complete(root)
+    monkeypatch.undo()
+    journal = _journal(tmp_path)
+    assert journal.is_dir(), "the simulated failure left the directory behind"
+    assert not (journal / MANIFEST_NAME).exists(), "the manifest must be deleted first"
+    assert ej.recover(root) == []
+    assert not journal.exists()
+    assert _read(tmp_path, P1) == NEW1, "the completed save must not be undone"
+    assert _read(tmp_path, P2) == NEW2
+    assert _read(tmp_path, P3) == NEW3
+
+
+def test_complete_raises_when_the_manifest_removal_fails(tmp_path, monkeypatch):
+    """A save is not complete while its manifest is still on disk: complete()
+    must not report success over a failed disarm, and the journal stays
+    armed and visible so recover can still restore."""
+    ej = _ej()
+    root = _project(tmp_path)
+    tx = ej.begin(root, _entries(ej))
+    monkeypatch.setattr(os, "remove", _raise_oserror)
+    with pytest.raises(OSError):
+        ej.complete(root)
+    monkeypatch.undo()
+    assert ej.pending(root) == tx
+
+
+def test_complete_on_disarmed_journal_is_a_noop(tmp_path):
+    """Debris of a failed complete (directory, no manifest): idempotent
+    completion stays silent; recover is what clears it."""
+    ej = _ej()
+    _journal(tmp_path).mkdir(parents=True)
+    ej.complete(str(tmp_path))
+
+
+def test_begin_fsyncs_staging_then_parent_around_the_visible_rename(tmp_path, monkeypatch):
+    """The rename that makes the journal visible must be durable before
+    begin() returns: fsync the staging content first, then the parent
+    directory after the rename."""
+    ej = _ej()
+    root = _project(tmp_path)
+    events: list[tuple] = []
+    monkeypatch.setattr(ej, "_fsync_dir", lambda path: events.append(("fsync", path)))
+    real_replace = os.replace
+
+    def spy_replace(src, dst):
+        events.append(("replace", src, dst))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", spy_replace)
+    ej.begin(root, _entries(ej))
+    journal = str(_journal(tmp_path))
+    parent = str(tmp_path / ".refdes")
+    visible = next(
+        i
+        for i, event in enumerate(events)
+        if event[0] == "replace" and event[2] == journal
+    )
+    staging = events[visible][1]
+    assert ("fsync", staging) in events[:visible], (
+        "journal content must be fsynced before the rename that exposes it"
+    )
+    assert ("fsync", parent) in events[visible + 1:], (
+        "the parent directory must be fsynced after the rename, before begin returns"
+    )
+    assert events[-1] == ("fsync", parent)
+
+
+def test_complete_fsyncs_the_journal_parent_after_removal(tmp_path, monkeypatch):
+    """A removal that is not durable can resurrect the journal on reboot and
+    arm a later recover against a save that succeeded."""
+    ej = _ej()
+    root = _project(tmp_path)
+    ej.begin(root, _entries(ej))
+    fsyncs: list[str] = []
+    monkeypatch.setattr(ej, "_fsync_dir", fsyncs.append)
+    ej.complete(root)
+    assert fsyncs[-1] == str(tmp_path / ".refdes")
+
+
+def test_recover_fsyncs_the_journal_parent_after_removal(tmp_path, monkeypatch):
+    ej = _ej()
+    root = _project(tmp_path)
+    entries = _entries(ej)
+    ej.begin(root, entries)
+    _apply_save(tmp_path, entries)
+    fsyncs: list[str] = []
+    monkeypatch.setattr(ej, "_fsync_dir", fsyncs.append)
+    ej.recover(root)
+    assert fsyncs[-1] == str(tmp_path / ".refdes")

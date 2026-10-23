@@ -28,6 +28,7 @@ wiring in ``serve/edit.py`` and ``cli.py`` is the only integration point.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import ntpath
@@ -151,16 +152,34 @@ def _atomic_write_bytes(path: str, data: bytes) -> None:
             os.unlink(tmp)
 
 
+# `os.open` of a directory is the POSIX-only half of a directory fsync;
+# Windows refuses with PermissionError (occasionally IsADirectoryError),
+# and some filesystems refuse the fsync itself (e.g. network mounts).
+# Those are the "platform does not support it" cases the contract allows
+# to pass quietly; everything else is a real I/O error and must surface.
+_FSYNC_DIR_OPEN_UNSUPPORTED = (PermissionError, IsADirectoryError)
+_FSYNC_UNSUPPORTED = (errno.ENOTSUP, errno.ENOSYS, errno.EBADF, errno.EOPNOTSUPP)
+
+
 def _fsync_dir(path: str) -> None:
-    """Best-effort directory fsync: POSIX durability, a no-op on Windows."""
+    """Directory fsync, where the platform supports it.
+
+    Callers depend on this for the durability of renames and unlinks:
+    without it, a power loss can resurrect a removed journal (undoing a
+    completed save on the next recover) or lose a created one (hiding a
+    live transaction). Only the unsupported-platform cases are swallowed;
+    a real I/O error propagates, because a silently non-durable journal
+    defeats the module's purpose.
+    """
     try:
         fd = os.open(path, os.O_RDONLY)
-    except OSError:
+    except _FSYNC_DIR_OPEN_UNSUPPORTED:
         return
     try:
         os.fsync(fd)
-    except OSError:
-        pass
+    except OSError as exc:
+        if exc.errno not in _FSYNC_UNSUPPORTED:
+            raise
     finally:
         os.close(fd)
 
@@ -286,6 +305,9 @@ def begin(project_root: str, entries: Sequence[Entry]) -> str:
             if os.path.exists(journal):
                 raise JournalPending(pending(project_root) or "unknown") from None
             raise
+        # Durable before the caller touches any live file: fsync the
+        # parent so the rename that made the journal visible survives.
+        _fsync_dir(_journal_parent(project_root))
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
@@ -314,8 +336,35 @@ def refuse_if_pending(project_root: str) -> None:
 
 
 def complete(project_root: str) -> None:
-    """Remove the journal after a successful save. Idempotent."""
-    shutil.rmtree(_journal_path(project_root), ignore_errors=True)
+    """Remove the journal after a successful save. Idempotent.
+
+    The manifest is deleted first, and that is the step whose failure this
+    must not swallow: a journal directory without a readable manifest is
+    inert (``recover`` removes it as a crashed begin), so once the
+    manifest is gone a completed save can never be undone by leftover
+    directory debris. A failed *manifest* delete therefore raises -- the
+    journal is still armed, and the caller has to know. So does a failed
+    removal of the leftover debris: the directory still blocks
+    ``refuse_if_pending``, and the message points at ``recover``, which
+    clears it.
+    """
+    journal = _journal_path(project_root)
+    manifest = os.path.join(journal, _MANIFEST_NAME)
+    try:
+        os.remove(manifest)
+    except FileNotFoundError:
+        return
+    _fsync_dir(journal)
+    try:
+        shutil.rmtree(journal)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise OSError(
+            f"journal is disarmed (manifest removed) but its leftovers in "
+            f"{journal} could not be deleted: {exc}. Run 'refdes recover'."
+        ) from exc
+    _fsync_dir(_journal_parent(project_root))
 
 
 def recover(project_root: str) -> list[str]:
@@ -336,6 +385,7 @@ def recover(project_root: str) -> list[str]:
         # renames in as one unit: a journal without a readable manifest is
         # a crash before any live file was touched. Nothing to restore.
         shutil.rmtree(journal)
+        _fsync_dir(_journal_parent(project_root))
         return []
     _transaction_id, entries = _manifest_entries(manifest)
 
@@ -372,6 +422,7 @@ def recover(project_root: str) -> list[str]:
         restored.append(entry["path"])
 
     shutil.rmtree(journal)
+    _fsync_dir(_journal_parent(project_root))
     return restored
 
 

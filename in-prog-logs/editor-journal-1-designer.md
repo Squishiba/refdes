@@ -2,8 +2,11 @@
 
 Task: write the blind test suite for the planned
 `src/refdes/editor_journal.py` (editor-save transaction journal) without
-touching product code. Deliverables: `tests/test_editor_journal.py` and
-`tests/editor-journal-1.cases.json`.
+touching product code. Deliverable: `tests/test_editor_journal.py` (an
+earlier draft of this log also listed
+`tests/editor-journal-1.cases.json`; that file was never committed and is
+not part of the PR — the mapping below was verification output, not a
+deliverable).
 
 ## What was done
 
@@ -51,8 +54,9 @@ touching product code. Deliverables: `tests/test_editor_journal.py` and
   the tests).
 - Base tree (`PYTHONPATH=src ... -m pytest -q tests/test_editor_journal.py`):
   3 controls pass, 44 functional fail (module absent).
-- cases.json maps all 47 collected node ids (44 fail / 3 pass), verified 1:1
-  against `--collect-only`.
+- Checked the 47 collected node ids (44 fail / 3 pass) 1:1 against
+  `--collect-only` during verification; no cases.json was delivered with
+  the PR.
 - `ruff check tests/test_editor_journal.py` clean.
 
 Status: finished. No product code touched.

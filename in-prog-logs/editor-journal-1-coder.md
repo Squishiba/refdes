@@ -45,4 +45,23 @@ recreation. All pass on the project venv (py3.13).
 One scratch-script bug along the way (stale journal path after a root
 re-creation) — module code was correct, the checks were fixed.
 
+## Review round 1 (PR #367)
+
+Cross-model review: complete()'s `ignore_errors=True` was a real safety
+bug (a swallowed removal leaves an armed journal; a later recover undoes
+the completed save), the journal's visible rename was not directory-fsync
+durable, and the designer log claimed an undelivered cases.json. Fixed
+all three, RED-first (5 new tests, all failing on the old code):
+complete() now deletes manifest.json first (FileNotFoundError = idempotent
+no-op; any other failure raises, journal stays armed); the inert debris
+left by a failed rmtree is removed by recover as a crashed begin, so a
+completed save can never be undone — complete raises on debris failure so
+pending() can't block silently, and the message points at recover.
+_fsync_dir now runs after the visible rename in begin, after the manifest
+unlink and after the removals in complete, and after both removals in
+recover; it swallows only unsupported-platform cases and propagates real
+I/O errors. Designer log corrected re cases.json (not delivered).
+tests/test_editor_journal.py: 53 pass (47 frozen designer tests unchanged,
+6 added).
+
 Finished.
