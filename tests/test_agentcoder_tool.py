@@ -1805,3 +1805,35 @@ def test_validate_spec_survives_non_string_globs(tmp_path, monkeypatch, globs, c
     env = build_env(tmp_path, monkeypatch, spec_overrides={"allowed_test_paths": globs})
     assert env.run() == 1  # recorded as problems, no AttributeError from path_matches
     assert "allowed_test_paths" in capsys.readouterr().out
+
+
+def test_land_dirt_in_space_named_frozen_test_is_redone(tmp_path, monkeypatch):
+    # porcelain C-quotes paths with spaces: the land dirt check must use -z so
+    # a dirty frozen test named "tests/test_a b.py" is recognized (reset + re-landed)
+    # instead of false-escalating as "dirt outside the frozen paths"
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={"designer_files": {
+        "tests/test_a b.py": TEST_FILE,
+        "tests/t1.cases.json": json.dumps({
+            "tests/test_a b.py::test_control":
+                {"expected_on_base": "pass", "requirement": "control on old code"},
+            "tests/test_a b.py::test_sub":
+                {"expected_on_base": "fail", "requirement": "sub() added"}})}})
+    real_cand = agentcoder.do_candidate
+
+    def cand(job):
+        real_cand(job)
+        (Path(job["coder_cwd"]) / "tests").mkdir(exist_ok=True)
+        (Path(job["coder_cwd"]) / "tests" / "test_a b.py").write_text("# scribbled\n")
+        gitat(job["coder_cwd"], "add", "tests/test_a b.py")
+
+    monkeypatch.setitem(agentcoder.HANDLERS, "candidate", cand)
+    assert env.run() == 0  # land redoes its own interrupted checkout and opens the PR
+    assert env.job()["status"] == "ready-for-human-gate"
+
+
+def test_permit_foreign_prefix_id_not_attributed(tmp_path, monkeypatch):
+    # one-way tolerance: a foreign permit whose id is a PREFIX of a job agent
+    # id (job "a1", permit "a") must not pause this job
+    env = build_env(tmp_path, monkeypatch,
+                    scenario_overrides={"permit_raw": '[{"agentId": "a"}]'})
+    assert env.run() == 0

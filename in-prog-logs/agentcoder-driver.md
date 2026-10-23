@@ -60,8 +60,21 @@ not-live-verified, brace-pattern reframing, exact exit-path reasons).
 
 ## Numbers (measured on the final head)
 
-- Driver: 873 non-blank non-comment lines. Driver tests: 112, all passing
+- Driver: 883 non-blank non-comment lines. Driver tests: 114, all passing
   on Linux; the module skips off Linux and where `prlimit` is absent.
-- Full suite on this branch: 4374 passed / 2 skipped / 0 failed.
+- Full suite on this branch: 4376 passed / 2 skipped / 0 failed.
   `ruff --select E9,F` clean on the two files.
 - Exit codes: 0 ready-for-human-gate, 2 escalated, 1 paused/error.
+
+## Follow-up 1 (post-merge, branch fix-agentcoder-followup1)
+
+Six README corrections from the merged chunk-3 review (resume/preflight
+wording qualified, dead recorded ids dropped+respawned for all roles incl.
+the collision consequence, usage-exit + completed-resume exits documented,
+git timeout split git()-120s vs validate_spec-60s, suite skips when prlimit
+absent on Linux, `paseo wait` rc-0 claim scoped to the observed not-found
+case) + two code edges with tests: land's dirt check uses `git status
+--porcelain -z` (porcelain C-quotes space paths; a dirty frozen
+`tests/test_a b.py` false-escalated - verified by probe), and check_permits
+is one-way prefix-tolerant (a foreign permit id that is a PREFIX of a job
+agent id no longer attributes to the job).
