@@ -9,129 +9,97 @@ baseline/seal risk. Plan: `docs/design/inline-calc.md` §3, four green steps.
 Step 1: `calc_hash_for` (`src/refdes/build.py`) hashes inline calc spans
 alongside fence blocks -- events at source offsets, spans rendered
 `name := rhs [| unit]` with the stored result excluded (a result-only edit
-leaves the probe fixed), a malformed span contributes its raw text.
-Span-free items produce the identical `{"calc_blocks": [...]}` payload.
+leaves the probe fixed), a malformed span contributes its raw text minus
+the result portion. Span-free items produce the identical payload.
 
 Step 2: cross-item span refs as dependency edges and hash inputs (gated
-`HASH_FORMAT >= 6`): `_calc_reference_targets` includes span targets
-(F12-5 is now a passing ordering-edge test), the ref-scan/hash helpers take
-`include_inline`, `links._calc_ref_rewrites` rewrites span target halves so
-expansion covers spans.
+`hash_format >= 6`): `_calc_reference_targets` includes span targets, the
+ref-scan/hash helpers take `include_inline`, `links._calc_ref_rewrites`
+rewrites span target halves so expansion covers spans.
 
 Step 3: `source()` in spans -- `citations.collect_source_uses` discovers
 them (fetch pins them), `serve/sources.py` shows them; the "move to the
-fence form" advice is retired (F12-6 rewritten).
+fence form" advice is retired.
 
-Step 4: `HASH_FORMAT` 5 -> 6 (steps 2-3 ride in it; full suite green at
-each step). Evidence (all green at every head since): (a) golden
-byte-identity -- `.scratch/record_golden.py` builds a fixture with archived
-`origin/main` code (format 5), the branch rebuilds the same on-disk state;
-all five items' content hashes, the baseline, the release baseline and the
-seal file byte-identical (committed mirrors
-`test_block_only_calc_hash_is_the_block_only_hash`,
+Step 4: `HASH_FORMAT` 5 -> 6. Evidence (green at every head since): (a)
+golden byte-identity -- a scratch script (gitignored, recreated as needed)
+records a fixture under archived `origin/main` code, the branch rebuilds
+the same on-disk state, every hash/baseline/seal byte-identical
+(committed mirrors: `test_block_only_calc_hash_is_the_block_only_hash`,
 `test_format5_reconstruction_excludes_span_inputs`). (b) Old seal + old
 baseline (main-recorded) verify clean under the new code; carry-forward
 migration silent (tests). (c) Referenced-value edits move the span item's
 hash and fire the stale signal; result-only edits not the probe. (d)
 `fetch --update` of a span's `source()` input moves the hash. (e) Cycle
 reports the path, missing target is a clean error, three spans on one item
-all enter probe and snapshot.
+all enter probe and snapshot. Docs: build.py format-history comment,
+`docs/lifecycle.md`, `docs/change-tracking.md`,
+`changelog.d/inline-calc-spans-hash.changed.md`.
 
-Docs: `build.py` format-history comment, `docs/lifecycle.md`,
-`docs/change-tracking.md`, `changelog.d/inline-calc-spans-hash.changed.md`.
+## Review rounds 1-10 (PR #347, cross-model chunks each round)
 
-## Review rounds 1-5 (PR #347, three cross-model chunks each round)
+R1-5 clustered into: scan-grammar parity (RHS comments and a `|` inside a
+comment hid span references -- scan helpers reproduce the evaluator's
+strip/pipe order), span-scan geometry (`item.body_line` anchoring,
+front-matter fences), list files (span-only targets excluded from
+expansion), historical-record safety (formats <= 5 reconstruction strips
+expanded span targets). R6: an *authored* composite's as-written reading
+was missing from legacy comparison -- `hash_for_format_variants` added,
+consumed by seal/lifecycle/keys comparison sites. R7: the stripped reading
+is gated by `_span_composites_are_faithful` (key-half-only edits keep only
+the as-written reading, fail-closed) + `stored_hash_matches` string
+guards. R8: `plan_surrogate_storage` format inference widened to
+1..HASH_FORMAT newest-first (a genuine fmt-5 seal had rolled back
+`keys adopt`). R9: docs/docstrings matched the landed full-range
+behavior. R10: an upstream display-id rename broke fmt-5 seals of
+referring items -- the gate accepts the owner's live id OR a declared
+former id, and `strip_display` stripped readings over historical display
+halves joined the comparison set (cap 16); six section-7 tests on
+main-stamped fmt-5 constants. LOWs: lifecycle docstrings,
+`serve/sources.py` span names/units.
 
-Findings clustered into scan-grammar parity (RHS comments and a comment
-containing `|` hid span references -- scan helpers now reproduce the
-evaluator's strip/pipe order), span-scan geometry (bounds anchored on
-`item.body_line`, front-matter fences, fence/span same-line edits), list
-files (span-only targets excluded from expansion; the crossed-reference
-refusal runs before the skip), and historical-record safety (formats <= 5
-reconstruction strips expanded span targets, so the bump never makes an
-unchanged item look edited). Every fix red-green verified; red checks swap
-HEAD module copies in place (conftest hard-prepends `src`, so a PYTHONPATH
-overlay is inert under pytest).
+## Round 11 (docs/changelog pass, chunk 1)
 
-## Rounds 6-10 (cross-model chunks each round; every fix red-green, main-code-stamped constants)
+Status block resolved against #363; changelog dropped-span-pin claim
+corrected to the reproduced hard error (`check` exits 1, "has no locked
+value"); YAML list-file bare-span exclusion documented in §3 + math.md
+(composite-spelling workaround verified in a throwaway scratch project);
+"since format 4" reworded (spans landed in the format-5 era); faithful
+gate sentence + lifecycle calc_refs/calc_hash split.
 
-Round 6 (chunk 1 changes requested): an *authored* composite span target
-was stripped by my reconstruction although format-5 code hashed it
-verbatim -- `build.hash_for_format_variants` adds the as-written reading to
-legacy comparison (`keys.hashes_in_format`), consumed by
-`migrate_hash_format`/`seal._matches_sealed_hash`/`plan_surrogate_storage`/
-`key_restore`.
+## Round 12 (chunk-2 LOWs)
 
-Round 7 (chunk 4 changes requested): the stripped reading must not be
-accepted unconditionally (a key-half-only edit stripped back to the bare
-recorded text) -- `build._span_composites_are_faithful` gates it: key half
-== the key of the item the display half names; a composite failing it keeps
-only the as-written reading (fail-closed). Plus `keys.stored_hash_matches`
-string-guards every comparison site against unhashable stored values.
+Restored the dangling `[inline-calc-later.md]` link; `_item_units` strips
+a span unit's trailing comment (`split_comment`) so suggestions are clean
+values.
 
-Round 8 (chunk 4 changes requested): `keys.plan_surrogate_storage`
-inferred a legacy scalar seal's format from an allowlist narrower than
-`seal._matches_sealed_hash`'s full range, so a genuine format-5 seal rolled
-back `refdes keys adopt` -- the inference now tries 1..HASH_FORMAT
-newest-first and a matched format migrates.
+## Round 13 (chunk 2: probe/cap LOWs + NITs)
 
-Round 9 (docs accuracy, approved): `keys.md` §5(c) and three docstrings
-(lifecycle `_stale_arithmetic`, `plan_surrogate_storage`,
-`stored_hash_matches`) now describe the landed full-range behavior.
+Malformed-span probe hashed `span.raw` (carries the stored result) -- now
+`inline_calc.resultless_raw` (raw up to the last top-level `=`);
+cap-16 drop documented + pinned both sides (above cap only historical
+readings drop; as-written + stripped-current stay: false-positive only).
+NITs: `authored_display` rename, `by_key` comprehension, dead
+include_inline gate dropped. Cap-test fixture lesson: mapping keys are
+targets without `.NAME`; clear the reused tmp items dir between fixture
+calls.
 
-Round 10 (chunk 1 changes requested): a format-5 seal/baseline of a
-REFERRING span item broke on an ordinary UPSTREAM display-id rename (the
-load's label refresh is a text move no edit produced, and formats <= 5
-hashed that text). The gate now resolves the composite's owner by key and
-accepts a display half that is the owner's live id or a declared former id
-(`project.former_ids`); `hash_for_format_variants` adds stripped readings
-over historical display halves (`strip_display` through
-`_hash_payload`/`_calc_ref_rewrites`, cap 16, fail-closed above; foreign
-live halves still fail -- round-7 posture). Six section-7 tests on
-main-stamped fmt-5 constants (three red at head). LOWs: lifecycle docstrings
-(fence and/or span) and `serve/sources.py` `_item_names`/`_item_units` now
-include span names/units (one item-wide scope).
-
-## Round 11 (docs/changelog pass after chunk 1's review)
-
-Status block in `docs/design/inline-calc.md` resolved against #363's
-rewrite (slice 2 lands with this PR, #333/#341/#351/#345 citations kept,
-numbers verified via `gh pr view`); the changelog's dropped-span-pin
-claim corrected to the real behavior (reproduced: `check` exits 1 with
-`source(...) has no locked value`, a hard error, not a stale warning);
-the YAML list-file bare-span exclusion documented in `inline-calc.md` §3
-and `docs/math.md` (workaround: hand-written composite spelling, verified
-clean across a rename in `.scratch/r11pin`, bare breaks with "no item");
-"since format 4" reworded in three docs + the build.py comment (spans
-landed in the format-5 era -- verified `HASH_FORMAT = 5` at #333's merge
-commit); faithful-composite sentence now includes the former-id/
-historical-display-half acceptance; lifecycle.md `calc_refs` vs
-`calc_hash` applicability split (pinned to `_items_map`'s
-non-empty-snapshot gate). Log collapsed per AGENTS.md.
-
-## Round 13 (chunk 2's review: probe/cap LOWs + NITs)
-
-Malformed-span probe fixed test-first: it hashed `span.raw`, which
-carries the stored result, so a result-only edit of a malformed span
-moved `calc_hash`; the probe now uses the new
-`inline_calc.resultless_raw` (raw up to the last top-level `=` the
-grammar reads as the separator). Cap-16 drop documented in code (above
-the cap only the historical former-id readings drop; as-written and
-current-display stripped readings stay, so the loss is a false-positive,
-never a silent pass) and pinned both sides by a test. The PR body's
-"stripped reading simply not offered above the cap" claim corrected.
-NITs: `as_written` -> `authored_display`, `by_key` comprehension no
-longer rebinds `item`, `calc_reference_snapshot`'s always-true
-`include_inline` gate dropped. Cap-test fixture taught me the mapping
-keys are targets without `.NAME` (debugged via direct
-`_calc_ref_rewrites` probes) and that the reused tmp items dir must be
-cleared between fixture calls. 75 targeted + 4476 full, 2 skipped.
-
-## Round 14 (fresh chunk-2 review: one stale docstring)
+## Round 14 (fresh chunk-2: one stale docstring)
 
 `calc_reference_snapshot`'s docstring still described the round-13-removed
-include_inline gate; rewritten to the code's truth (spans always enter;
-snapshots stamped current-format). Swept src/docs/tests for the class --
-one site only (the round-13 history comment is accurate). NITs:
-itertools to module imports, former_ids build-order precondition
-documented. 75 targeted + 4476 full, 2 skipped.
+gate; rewritten to the code's truth. Swept src/docs/tests for the class:
+one site. NITs: itertools to module imports, former_ids build-order
+precondition documented.
+
+## Round 15 (chunk 1: docs only)
+
+All findings verified against build.py first (2232: format 6 = 2026-10-19
+reference-hashing; `calc_hash_for` takes no format arg -- all six true):
+escaped the §3 source()-row pipe (row rendered truncated on GitHub --
+verified via GitHub's rendered HTML); reworded format-6 cause in
+named-calc-blocks (x2), inline-calc Status, lifecycle "so ... probe"
+clause; dropped the unverifiable landed date; era marker now says the
+section describes landed behavior; change-tracking source() aside split
+out of the change list, fetch-discovery stated as not-a-hash-input; log
+`.scratch/` pointers replaced with descriptions. No source changes.
+Docs tests 8+27 passed.

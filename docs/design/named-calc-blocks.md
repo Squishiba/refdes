@@ -479,8 +479,10 @@ Checked against `build.py`'s hash payload code (`_hash_payload`,
 `HASH_FORMAT` stays **4** (superseded: it is now **6** -- bumped the day
 after this section was written by c9e32e4/#35 to 5 (referenced image bytes
 entering the content hash, an editor-image-upload change, not a naming
-change), and to 6 by #347's slice 2 (inline calc spans entering
-`calc_hash`). The
+change), and to 6 by #347's slice 2 (an inline calc span's cross-item
+references counting as calc references in the content hash -- the
+`calc_hash` probe gained spans with the slice, but it takes no format
+argument and is not what moved). The
 property this section defends — naming adds no payload key — is unchanged,
 and `tests/test_calc_block_hash.py::test_hash_format_bumped_to_6_moves_nothing_here`
 re-pins it at 6). Nothing new enters any payload:
@@ -818,7 +820,7 @@ other, because there is one evaluator.
 
 | Test | Pins |
 |---|---|
-| `test_hash_format_bumped_to_6_moves_nothing_here` (originally `test_hash_format_stays_4`, re-pinned at 5 by the HASH_FORMAT 5 bump, c9e32e4/#35, and at 6 by #347's slice-2 span probe) | `build.HASH_FORMAT == 6`; no new payload key for an item with named blocks and no references. |
+| `test_hash_format_bumped_to_6_moves_nothing_here` (originally `test_hash_format_stays_4`, re-pinned at 5 by the HASH_FORMAT 5 bump, c9e32e4/#35, and at 6 by #347's slice-2 span cross-item references) | `build.HASH_FORMAT == 6`; no new payload key for an item with named blocks and no references. |
 | `test_naming_moves_owner_hash_only` | Adding `id="losses"` changes the owner's `content_hash` and no other item's. |
 | `test_rename_block_leaves_dependents_alone` | Renaming a block does not move a dependent item's hash or its `calc_reference_snapshot`. |
 | `test_calc_hash_unaffected_by_fence` | `calc_hash_for` is identical before and after adding/renaming a fence name, while `content_hash` differs. |

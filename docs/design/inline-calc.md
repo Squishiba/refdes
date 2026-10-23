@@ -2,8 +2,10 @@ Status: **Implemented.** The source form, parser, evaluator, and
 `check`/`build` diagnostics are implemented (slice 1, #333), as are the honest
 stale-result messages (#341), the grammar fixes (#351), and the §2 release gate
 (#345). The §3 hash, dependency-scan, and `source()` discovery changes
-(HASH_FORMAT 6, slice 2 — spans in `calc_hash`, the cross-item and `source()`
-dependency scans, and the composite-key refresh) land with this PR. The owner
+(HASH_FORMAT 6, slice 2 -- span cross-item references entering the content
+hash, the cross-item and `source()` dependency scans, and the composite-key
+refresh; the `calc_hash` probe extension ships with the slice and is not a
+format-gated payload change) land with this PR. The owner
 decided the four open questions on 2026-10-17, and on 2026-10-19 decided the
 hash-format change despite the baseline/seal risk named in section 3; the
 decisions are recorded under each question below.
@@ -22,12 +24,11 @@ Later directions are parked in [inline-calc-later.md](inline-calc-later.md).
 
 ## Implementation status by slice
 
-*Era marker:* this section is the slice-0 (2026-10) state the proposal was
-written against, quoted as history. Slices 1 and 2 have since landed most of
-what it marks as proposed: evaluation, the trigger grammar, and stored-result
-verification came with slice 1; span discovery in the hash, the dependency
-scans, and `fetch` came with slice 2. Read every "proposed"/"not current
-behavior" below as "then proposed, now landed."
+*Era marker:* this section was written against the slice-0 (2026-10)
+proposal state. Slices 1 and 2 have since landed, and the text below
+(including section 3) now describes landed behavior: evaluation, the
+trigger grammar, and stored-result verification came with slice 1; span
+discovery in the hash, the dependency scans, and `fetch` with slice 2.
 
 - Probe: in a fresh `refdes init` project holding one `log` item whose body
   is the single-backtick span `` `Vout := 2 V * 2 = 5 V` ``, the original
@@ -182,14 +183,14 @@ the ordinary build error floor. `refdes revision --help` describes the
 revision as unconditional apart from that floor; the revision half defaults
 false.
 
-## 3. Hashes, dependencies, and historical entries (landed, 2026-10-20)
+## 3. Hashes, dependencies, and historical entries (landed with slice 2, this PR)
 
 | Concern | Landed behavior |
 |---|---|
 | Item content hash | **Landed.** The authored span, including stored result, is body text. When the type's body `on_change` mode is `invalidate`, an edit to it changes the item hash under `src/refdes/build.py:_hash_payload`; other modes keep their existing meaning. A result correction is a real source edit, not a hash-neutral rewrite. |
 | `calc_hash` | **Landed.** `src/refdes/build.py:calc_hash_for` includes inline **name, RHS and unit assertion in source order**, excluding the stored result. An inline-only item then has a `calc_hash`; changing only the result leaves that probe fixed. The block-only hash value is preserved for an item without inline spans, so old baselines do not churn. `src/refdes/lifecycle.py:_stale_arithmetic` uses the same verdict-change signal for inline arithmetic. A stale-result warning comes from direct verification, regardless of baseline or verdict. |
 | Cross-item inputs | **Landed.** An inline RHS may use an existing cross-item value reference under the same restrictions as a fence line. The dependency scan, composite-key refresh, baseline snapshot, and content-hash input collection cover those spans (`src/refdes/build.py:_calc_reference_targets`, `_calc_reference_values`, `run_calcs`). An upstream value change can move the dependent hash and produce a stale-result warning even when its authored text is untouched. One exclusion: for items loaded from YAML list files (`Item.body_line is None`, where a line rewrite of `body:` corrupts the YAML) the expansion pass deliberately leaves the span's target bare on disk (`links.plan_calc_ref_expansion`; pinned by `test_yaml_list_file_span_targets_stay_bare_on_disk`) -- the dependency edge and hash input exist in memory, but a rename does not refresh the span, so an upstream rename breaks the bare target on the next build. Hand-write the target's composite `DISPLAY-ID@key` spelling (it keeps resolving by key across renames; the label goes stale) or edit the span at rename time. |
-| `source()` inputs | **Landed.** Used as the whole RHS with `| unit`, `refdes fetch` discovery and the locked-value hash input cover inline spans (`src/refdes/calc.py:_evaluate_source_line`, `src/refdes/citations.py:collect_source_uses`, `src/refdes/build.py:_source_inputs_hash_value`; `docs/math.md`, "Reading a value from a source file"). No new file reader is introduced. (The source-inputs hash is format 4's own input, counting every `source()` call the evaluator resolves, so a resolvable span call has fed it since slice 1 made spans evaluable -- the format 5 era; slice 2 added its `fetch` pinning -- see the format history in `src/refdes/build.py`.) |
+| `source()` inputs | **Landed.** Used as the whole RHS with the \| `unit` form, `refdes fetch` discovery and the locked-value hash input cover inline spans (`src/refdes/calc.py:_evaluate_source_line`, `src/refdes/citations.py:collect_source_uses`, `src/refdes/build.py:_source_inputs_hash_value`; `docs/math.md`, "Reading a value from a source file"). No new file reader is introduced. (The source-inputs hash is format 4's own input, counting every `source()` call the evaluator resolves, so a resolvable span call has fed it since slice 1 made spans evaluable -- the format 5 era; slice 2 added its `fetch` pinning -- see the format history in `src/refdes/build.py`.) |
 | Seals and captured history | **Landed.** Verification is read-only for both. A changed stored literal in a build-sealed entry remains subject to the existing seal check (`src/refdes/seal.py:verify`); a history-backed entry keeps the existing capture/edit signal (`src/refdes/history.py`, `src/refdes/build.py:warn_edited_after_captured`). No automatic reseal or recapture is part of this slice. |
 
 The authored span already enters the body hash where body invalidation is on.

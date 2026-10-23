@@ -294,8 +294,11 @@ locked text) it resolved. Format 5 added images: every local image an item's
 body references hashes its resolved project-relative path and content digest.
 Format 6 added inline calc spans: a span whose whole right-hand side is a
 cross-item reference (`v := DEC-001.V_in`) is hashed like a fence line's
-reference, so the item's dependencies and its arithmetic probe cover inline
-spans, not just fenced ones. A span's `source()` call is not a new hash input
+reference, so the item's dependencies cover inline spans, not just fenced
+ones. (The arithmetic probe covers spans at every format --
+`build.py:calc_hash_for` takes no format argument -- so a result-only edit
+of a span stays invisible to content hashing; see
+`docs/design/inline-calc.md` section 3.) A span's `source()` call is not a new hash input
 at this format -- the `source()` values input is format 4's own and counts
 every call the evaluator resolves, so a resolvable span call has fed it since
 spans landed in slice 1 (the format 5 era) -- but `refdes fetch` now
