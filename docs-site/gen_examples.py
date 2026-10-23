@@ -155,7 +155,21 @@ def render_vocabulary_block() -> str:
         f"not hand-edit this block: `tests/test_vocabulary_page.py` fails if "
         f"it differs from what the generator produces today.\n"
     )
-    return header + "\n" + vocabulary_mod.render_markdown(project)
+    return header + "\n" + _protect_citation_refs(vocabulary_mod.render_markdown(project))
+
+
+# A term's `doc:` text can name the citation-reference syntax itself (the
+# `citations` field says "an id for [[cite:]] references"). On the built
+# site that text is HTML-escaped, so it is inert; on this markdown page the
+# docs renderer parses `[[cite:...]]` as a live citation reference and warns
+# on the (empty) id. Wrap any such token in a code span -- `build.py`'s
+# PROTECTED_RE skips `<code>` regions -- so the page shows the syntax
+# literally instead of trying to resolve it.
+_CITE_REF_RE = re.compile(r"\[\[cite:[^\]]*\]\]")
+
+
+def _protect_citation_refs(markdown: str) -> str:
+    return _CITE_REF_RE.sub(lambda m: f"`{m.group(0)}`", markdown)
 
 
 def _extract(page_text: str, pattern: re.Pattern) -> str:

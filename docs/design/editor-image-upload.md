@@ -1,7 +1,8 @@
-Status: **proposed** (drafted 2026-09-25) — a design spec, not a decision;
-**all of §17 has landed** (Phase 0: 86baa20/#50, 2026-09-25; Phases 1–5:
-03625df/#52, 271ece6/#53, 8d34251/#60, 79eaacf/#63, 00ca9d3/#69 — all
-2026-09-27), so this design is now the record of a shipped feature. It picks
+Status: **implemented** (drafted 2026-09-25). **All of §17 has landed** (Phase
+0: 86baa20/#50, 2026-09-25; Phases 1–5: 03625df/#52, 271ece6/#53, 8d34251/#60,
+79eaacf/#63, 00ca9d3/#69 — all 2026-09-27), and the feature is documented for
+authors in `docs/markdown.md`, so this design is the record of a shipped
+feature. It picks
 up the one deferred item of `docs/design/browser-editor.md` that was left open
 with no design behind it (§1). Every open question in §15 carries a
 recommendation, and each recommendation is the default if Jared lets it stand

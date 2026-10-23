@@ -89,7 +89,7 @@ A part the design uses. A selected component closes coverage on what it satisfie
 | `tags` | Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash. | list | no |
 | `owner` | The person responsible for this item — who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work. | person | no |
 | `last_reviewed` | The date this item was last reviewed. Bookkeeping only: kept out of the content hash. | date | no |
-| `citations` | Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references. | citations | no |
+| `citations` | Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for `[[cite:]]` references. | citations | no |
 | `title` | What the component is, in one line. Required. | text | yes |
 | `part_number` | The manufacturer part number. Indexed into the parts page, alongside part numbers cited inside citations entries. | text | no |
 | `refdes` | Reference designators on the board — U14, R7 — where this part is placed. Kept out of the content hash. | list | no |
@@ -150,7 +150,7 @@ A design-log entry — narrative work or a verdict. Entries are append-only in t
 | `source` | Where the item's content came from — a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect. | text | no |
 | `note` | A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash. | text | no |
 | `tags` | Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash. | list | no |
-| `citations` | Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references. | citations | no |
+| `citations` | Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for `[[cite:]]` references. | citations | no |
 | `date` | When this entry was written, if known. Older decisions may not have a date. | date | no |
 | `summary` | One-line account of what happened, shown in log listings above the body. | text | yes |
 | `author` | Who wrote the entry. | person | no |
@@ -508,7 +508,7 @@ _No definition._
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
-| `citations` | Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references. | citations | no |
+| `citations` | Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for `[[cite:]]` references. | citations | no |
 
 **Example:**
 

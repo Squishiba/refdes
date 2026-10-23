@@ -1,6 +1,7 @@
-Status: **proposed** (drafted 2026-09-27) — a design spec, not a decision;
+Status: **partially implemented** (drafted 2026-09-27);
 **Slices V−1 and V0 of §8 have landed** (da2e44b/#58, 0f38619/#66 — the §7.1
-contract tests are pinned too, 3c24a63/#108); Slices V1 and V2, and every
+contract tests are pinned too, 3c24a63/#108; the §8 hover/deep-link client
+shipped with V0); Slices V1 and V2, and every
 webview, remain design only. It designs
 the one Later item of `docs/design/browser-editor.md` that was left with no
 design behind it: "VS Code custom-editor adapter over the same application
