@@ -162,8 +162,17 @@ def diag_dict(d: Diagnostic) -> dict:
 # A path token: an absolute-path spelling, at a boundary. The lookbehind is
 # what keeps NON-path text untouched -- `http://x/y` (the `p://` would
 # otherwise read as a drive-letter root), `and/or`, `5/6`, `path/to/x` --
-# a `/` mid-word is not the start of a path.
-_ABSOLUTE_TOKEN = re.compile(r"(?<![A-Za-z0-9.:\\/])(?:[A-Za-z]:[\\/]|[\\/])[^\s\"'`()\[\]{}<>,;]*")
+# a `/` mid-word is not the start of a path. The first branch admits the
+# `file://` URI spelling (the boundary lookbehind alone cannot: it must
+# keep `http://x/y` out, and `file:///...` is indistinguishable from it
+# until the scheme is named); it feeds the same under-root/outside-root
+# rule, which for a `file://` token outside the root yields the bare file
+# name like any other token.
+_ABSOLUTE_TOKEN = re.compile(
+    r"(?:(?<![A-Za-z0-9])file:/[/\\]{1,2}(?:[A-Za-z]:[\\/]|[\\/])"
+    r"|(?<![A-Za-z0-9.:\\/])(?:[A-Za-z]:[\\/]|[\\/]))"
+    r"[^\s\"'`()\[\]{}<>,;]*"
+)
 # Runs of separators collapse to one `/` BEFORE the under-root comparison:
 # a value containing ': ' is quoted by the patcher through `json.dumps`
 # (`_double_quoted`), so the file bytes -- and `current_text`/the `diff`
@@ -175,6 +184,50 @@ _SEP_RUNS = re.compile(r"[\\/]+")
 _TRAILING = ".,;:!?)]}'\"`>"
 _LINE_SUFFIX = re.compile(r"(.*):(\d+(?::\d+)?)")
 _DRIVE_ROOT = re.compile(r"[A-Za-z]:")
+# The token ends where the token regex stops; the root match must end there
+# too, or `/home/you/proj2` loses its head to the `/home/you/proj` root.
+_PATH_SEG = r"[^\s\"'`\(\)\[\]\{\}<>,;]+"
+_NOT_ABS_START = r"(?!(?:[A-Za-z]:[\\/]|[\\/]))"
+_ROOT_END = r"(?=$|[\s\"'`\(\)\[\]\{\}<>,;\.])"
+
+
+def _root_scrubber(root_raw: str, fold: bool):
+    """First pass for the text scrubber: the KNOWN project root, literal.
+
+    The token pass reads a path token up to the first space, so a root
+    containing a space -- `C:\\Users\\Jane Doe\\...`, a real project
+    directory -- is under-root text no token pass can see whole; it
+    matches the root literally instead, in every spelling the text
+    scrubber already speaks: native separators, forward slashes, the
+    JSON-escaped doubling, a `file://`/`file:///` URI prefix, and (for
+    drive-letter roots, via ``fold``) any letter case. The separator run
+    after the root is swallowed -- ``<root>/items/x.yaml:6`` continues as
+    ``items/x.yaml:6`` (its own separator runs collapsed) -- and the bare
+    root, with any trailing separators, becomes ``.``. The continuation
+    never re-starts at an absolute path, so prose after the root that
+    carries its own absolute path is left to the token pass, whole.
+    """
+    spellings = {root_raw, root_raw.replace("/", "\\"), root_raw.replace("/", "\\\\")}
+    alts: list[str] = []
+    for spelling in spellings:
+        escaped = re.escape(spelling)
+        alts.extend((r"file:///" + escaped, r"file://" + escaped, escaped))
+    alts.sort(key=len, reverse=True)
+    pattern = (
+        r"(?<![A-Za-z0-9])(?:"
+        + "|".join(alts)
+        + r")(?:(?P<sw>[\\/]+)"
+        + _NOT_ABS_START
+        + "(?P<cont>"
+        + _PATH_SEG
+        + r"(?:[ \t]+"
+        + _NOT_ABS_START
+        + _PATH_SEG
+        + r")*)|(?:[\\/]+)?"
+        + _ROOT_END
+        + r")"
+    )
+    return re.compile(pattern, re.IGNORECASE if fold else 0)
 
 
 def _relative_paths(value, root: str):
@@ -221,7 +274,12 @@ def _relative_paths_in_text(text: str, root: str) -> str:
         root_norm = os.path.abspath(root).replace("\\", "/")
     root_cmp = root_norm.rstrip("/") or "/"
     fold = bool(_DRIVE_ROOT.match(root_cmp))
+    scrubber = _root_scrubber(root_cmp, fold) if len(root_cmp) > 1 else None
     root_cmp = root_cmp.casefold() if fold else root_cmp
+
+    def swap_root(match) -> str:
+        cont = match.group("cont")
+        return _SEP_RUNS.sub("/", cont) if cont is not None else "."
 
     def swap(match) -> str:
         token = match.group(0)
@@ -245,6 +303,8 @@ def _relative_paths_in_text(text: str, root: str) -> str:
             rel = norm.rstrip("/").rpartition("/")[2] or "<outside project>"
         return rel + (":" + line if line else "") + punct
 
+    if scrubber is not None:
+        text = scrubber.sub(swap_root, text)
     return _ABSOLUTE_TOKEN.sub(swap, text)
 
 

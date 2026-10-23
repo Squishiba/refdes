@@ -78,5 +78,52 @@ fragment reworded for the escaped spelling and the trailing-separator
 that pre-exist on the designer's lines at HEAD remain; my lines are
 clean (AGENTS.md: no silencing unrelated pre-existing findings).
 
+## Review round 3 (PR #372, cross-model review of caa2142)
+
+Two MEDIUMs (api.py token regex, ~166), both Windows-likely:
+1. token regex stops at whitespace -> a root with spaces
+   (`C:\Users\Jane Doe\...`, `/home/user/my project`) is half-scrubbed:
+   fragment up to the space -> basename, rest of root walks out as prose.
+2. `file:///home/user/project/items/a.md` never scrubbed: the boundary
+   lookbehind (needed for `http://x/y`) excludes the slashes after the
+   scheme colon.
+
+Reviewer-prescribed design, followed: FIRST PASS matching the KNOWN root
+literally (`_root_scrubber`): spellings = native separators, forward
+slashes, JSON-escaped doubling, `file://`/`file:///` prefixes, IGNORECASE
+for drive roots; the separator run after the root is swallowed
+(`<root>/items/x.yaml:6` -> `items/x.yaml:6`, continuation separator runs
+collapsed), bare root (+ trailing seps) -> `.`; the continuation may not
+restart at an absolute start, so prose carrying its own absolute path is
+left whole to the token pass. Spaces inside the root are irrelevant to a
+literal match. Token pass keeps outside-root -> basename and gains a
+`file://` branch (slash arithmetic: `file:` + 1-2 slashes + drive-or-`/`
+lead; first draft's `{2}` missed the posix 3-slash spelling -- caught by
+its own RED test). Outside-root paths WITH spaces remain tokenized to
+the first space -- pinned as a documented limit (the protected secret is
+the project root; a literal pass cannot know other roots).
+
+RED-first: 8 tests added (posix/windows spaced roots, JSON-escaped spaced
+root, file:// under/outside root, outside-with-spaces pin, root-as-prefix
+of a longer dir, end-to-end project in `my project/`); 6 RED before the
+fix (2 pins pass by design). First-pass-not-applied bug caught by the
+RED run (return ran the token pass only). 25/25 file green, 58/58
+targeted, full suite green (see below), ruff api.py clean. Changelog
+fragment reworded (URI spelling, spaces, the documented limit).
+
+## Addendum (plugin reviews of caa2142, same push)
+
+Confirmed the file:// leak and the space-in-root problem (both fixed
+above); folded in: P2 casing pins (root `C:\Users\Jane Doe\Proj` vs
+texts at differing drive/directory casing, all three spellings -- the
+direct Windows helper cases had only ever used matching casing, so the
+case-insensitive rule was unpinned); P2 outside-root pins (POSIX and
+Windows-shaped paths -> bare name, `/` -> `<outside project>`, the
+with-spaces case pinned as the documented partial); NITs (the changelog
+fragment's create-route example path was broken across a line break
+inside backticks and the round-3 lines carried a stray indent --
+rewrapped; the designer log's `tests/f13-3.cases.json` line corrected:
+the manifest lives on the frozen-test branch, not in the PR diff).
+
 Finished. Touched: api.py, the acceptance test file, the changelog
-fragment, this log.
+fragment, both f13-3 logs.

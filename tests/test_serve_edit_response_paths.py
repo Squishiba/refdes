@@ -493,3 +493,172 @@ def test_write_route_payloads_are_json_shaped_and_contain_no_tuples(tmp_path):
     for payload in payloads:
         json.loads(json.dumps(payload))
         walk(payload)
+
+
+# ------------------------------------------------- round 3: spaces and file URIs
+#
+# The token regex stops at whitespace, so a root containing a space --
+# `C:\Users\Jane Doe\...`, `/home/user/my project` -- is common, and real,
+# and only half-scrubbed by a token pass: the token ends at the space, the
+# under-root test fails, and the fragment up to the space collapses to its
+# basename while the rest of the root walks out as prose. A root matched
+# LITERALLY has no such problem: spaces inside it are just characters. The
+# fix design (reviewer-prescribed): a first pass that replaces the KNOWN
+# root literally in every spelling it already normalises -- native
+# separators, forward slashes, the JSON-escaped doubling, a drive letter at
+# any case, optionally preceded by `file://`/`file:///` -- swallowing the
+# separator that follows so `<root>/items/x.yaml:6` becomes
+# `items/x.yaml:6` and the bare root becomes `.`. The token pass keeps its
+# job for absolute paths NOT under the root (-> bare file name), and gains
+# the `file://` prefix there too.
+
+
+def test_the_helper_relativeizes_a_posix_root_with_spaces():
+    root = "/home/user/my project"
+    assert (
+        api_mod._relative_paths_in_text(
+            "see /home/user/my project/items/file.yaml:8 ok", root
+        )
+        == "see items/file.yaml:8 ok"
+    )
+    assert (
+        api_mod._relative_paths_in_text("locked: /home/user/my project/ here", root)
+        == "locked: . here"
+    )
+
+
+def test_the_helper_relativeizes_a_windows_root_with_spaces():
+    root = "C:\\Users\\Jane Doe\\proj"
+    assert (
+        api_mod._relative_paths_in_text(
+            "at C:\\Users\\Jane Doe\\proj\\items\\a.md:3 now", root
+        )
+        == "at items/a.md:3 now"
+    )
+    assert (
+        api_mod._relative_paths_in_text("at c:\\users\\jane doe\\PROJ\\items\\a.md now", root)
+        == "at items/a.md now"
+    )
+
+
+def test_the_helper_relativeizes_the_json_escaped_spelling_of_a_spaced_root():
+    root = "C:\\Users\\Jane Doe\\proj"
+    escaped = json.dumps(f"See {root}/items/reqs.yaml: values")
+    assert "\\\\" in escaped, "the emitter must double the backslashes to pin the bug"
+    assert api_mod._relative_paths_in_text(escaped, root) == '"See items/reqs.yaml: values"'
+
+
+def test_the_helper_scrubs_file_uris_under_the_root():
+    assert (
+        api_mod._relative_paths_in_text(
+            "See file:///home/user/project/items/a.md", "/home/user/project"
+        )
+        == "See items/a.md"
+    )
+    root = "C:\\Users\\Jane Doe\\proj"
+    assert (
+        api_mod._relative_paths_in_text(
+            "open file:///C:/Users/Jane Doe/proj/items/a.md:2", root
+        )
+        == "open items/a.md:2"
+    )
+    assert api_mod._relative_paths_in_text("open file:///home/you/proj", "/home/you/proj") == (
+        "open ."
+    )
+
+
+def test_the_token_pass_scrubs_file_uris_outside_the_root():
+    assert (
+        api_mod._relative_paths_in_text("read file:///etc/private/secret.md:4", "/home/you/proj")
+        == "read secret.md:4"
+    )
+    assert (
+        api_mod._relative_paths_in_text("read file:///C:/Users/x/out.txt", "/home/you/proj")
+        == "read out.txt"
+    )
+    # an ordinary URL keeps passing through untouched:
+    assert (
+        api_mod._relative_paths_in_text("spec: http://example.com/a/b", "/home/you/proj")
+        == "spec: http://example.com/a/b"
+    )
+
+
+def test_an_outside_root_path_with_spaces_keeps_the_token_pass_partial():
+    # Pinned as a documented limit of the design (chunk-3 review): the token
+    # pass cannot know where a path with spaces ends, and the literal pass
+    # can only match the KNOWN root. The leak this protects is the project
+    # root, which is scrubbed in every spelling; an outside path with spaces
+    # reduces by its first token, and the remaining prose is unchanged.
+    assert (
+        api_mod._relative_paths_in_text("read /etc/my conf/secret.md", "/home/you/proj")
+        == "read my conf/secret.md"
+    )
+
+
+def test_the_root_as_a_prefix_of_a_longer_directory_name_is_not_matched():
+    assert (
+        api_mod._relative_paths_in_text("see /home/you/project/items/a.md", "/home/you/proj")
+        == "see a.md"
+    )
+
+
+def test_the_helper_matches_the_windows_root_at_any_casing():
+    # The plugin review (chunk-2): the direct Windows helper cases used the
+    # SAME casing for root and text, so a drive letter cased the other way,
+    # a directory cased the other way, or both, could regress while every
+    # suite stayed green. The drive-letter rule promises a case-insensitive
+    # match; pin it in all three spellings.
+    root = "C:\\Users\\Jane Doe\\Proj"
+    assert (
+        api_mod._relative_paths_in_text("see c:/users/jane doe/proj/items/x.yaml:4", root)
+        == "see items/x.yaml:4"
+    )
+    assert (
+        api_mod._relative_paths_in_text("see C:/USERS/JANE DOE/PROJ\\items\\x.yaml", root)
+        == "see items/x.yaml"
+    )
+    escaped = json.dumps("see c:\\users\\jane doe\\proj/items/x.yaml:2")
+    assert api_mod._relative_paths_in_text(escaped, root) == '"see items/x.yaml:2"'
+
+
+def test_the_helper_reduces_absolute_paths_outside_the_root_to_their_names():
+    # The plugin review (chunk-2): the ticket requires an absolute path NOT
+    # under the root to lose its directories; pin the documented choice
+    # (bare file name, `<outside project>` when there is none) for both
+    # path shapes, the Windows one through the helper's drive-letter rule,
+    # and the space case as the partial tokenization it is (pinned with its
+    # reasoning in the documented-limit test above).
+    root = "/home/you/proj"
+    assert (
+        api_mod._relative_paths_in_text("base /etc/refdes/base.yaml:9", root)
+        == "base base.yaml:9"
+    )
+    assert (
+        api_mod._relative_paths_in_text("base D:\\Data\\export.csv", root) == "base export.csv"
+    )
+    assert (
+        api_mod._relative_paths_in_text("rooted at / for now", root)
+        == "rooted at <outside project> for now"
+    )
+    assert (
+        api_mod._relative_paths_in_text("read /etc/my conf/secret.md", root)
+        == "read my conf/secret.md"
+    )
+
+
+def test_a_root_with_spaces_end_to_end(tmp_path):
+    """The reviewer's scenario on the real filesystem: a project whose root
+    contains a space, driven through the write routes. Today the applied
+    `message`/`describe` carry `my project/items/reqs.yaml:6` -- a fragment
+    of the root served as if it were the project-relative path, which is
+    also WRONG as a path (the real relative path is `items/reqs.yaml:6`)."""
+    spaced = tmp_path / "my project"
+    spaced.mkdir()
+    client, root = keyless_client(spaced)
+    _status, view = client.get("/api/item/REQ-001")
+    status, payload = save(client, "REQ-001", revision=view["edit"]["file_revision"])
+    assert status == 200, payload
+    assert payload["path"] == "items/reqs.yaml"
+    assert "my project/" not in payload["message"], payload["message"]
+    assert not any("my project/" in text for text in strings_of(payload)), payload
+    assert_no_root(payload, root, "spaced-root 200")

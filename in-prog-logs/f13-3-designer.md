@@ -26,7 +26,8 @@ project-relative spelling at one choke-point helper). No product code.
   absent, plus controls (payload keys, `path` field, gate wording,
   diagnostics dict, revision, handle).
 - `tests/f13-3.cases.json`: node ids -> expected_on_base (8 fail / 4 pass),
-  ids cross-checked against `pytest --collect-only`.
+  ids cross-checked against `pytest --collect-only` -- delivered on the
+  frozen-test branch (the PR body's frozen test SHA), not in the PR diff.
 
 ## Verification
 
