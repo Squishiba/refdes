@@ -445,3 +445,104 @@ console.log(JSON.stringify({{
         "plain": "REQ-002",
         "unknown": None,
     }
+
+
+PUBLISH_DIAGNOSTICS = re.compile(
+    r"function\s+publishDiagnostics\s*\(root,\s*data\)\s*\{(.*?)\n\}", re.DOTALL
+)
+
+
+@pytest.mark.skipif(NODE is None, reason="no node on PATH to execute the extracted logic")
+def test_imported_item_diagnostics_are_skipped_by_membership_not_path():
+    """CHK-ATTR-002's editor follow-through: imported diagnostics moved from
+    the `<import:platform>` pseudo-path to the import-qualified
+    `platform:items/req.yaml`, and `publishDiagnostics`' old skip keyed on
+    the `<` prefix alone -- the new spelling would have been joined onto the
+    workspace root and published as a phantom diagnostic against a file that
+    does not exist. Skipping decides by MEMBERSHIP of the item index (items
+    with `external`, retired ids included, the way itemsById indexes them),
+    not by path spelling: a path heuristic cannot tell `platform:items/req.yaml`
+    apart from a legitimate local file named `items/notes:2026.md`, and the
+    colon version of this filter hid those local diagnostics. Runs the real
+    `publishDiagnostics()` extracted verbatim from the source, so it cannot
+    pass on a hand-copied duplicate.
+    """
+    source = _read(EXTENSION_JS)
+    extracted = PUBLISH_DIAGNOSTICS.search(source)
+    assert extracted, (
+        "editors/vscode/extension.js no longer defines publishDiagnostics(root, data)"
+    )
+
+    items = [
+        {"id": "REQ-IF001", "external": True, "origin": "platform", "former_ids": ["REQ-OLD"]},
+        {"id": "REQ-002", "external": False, "former_ids": []},
+    ]
+    diagnostics = [
+        # Imported item, both location spellings: skip.
+        {"file": "platform:items/req.yaml", "item": "REQ-IF001", "message": "import new"},
+        {"file": "<import:platform>", "item": "REQ-IF001", "message": "import legacy"},
+        # Diagnostic naming a retired id of the imported item: skip.
+        {"file": "platform:items/req.yaml", "item": "REQ-OLD", "message": "import retired"},
+        # Local items: publish, colon in the filename or not.
+        {"file": "items/notes:2026.md", "item": "REQ-002", "message": "local colon name"},
+        {"file": "items/req.yaml", "item": "REQ-002", "message": "local plain"},
+        # No item id, normal path: publish.
+        {"file": "refdes-project.yaml", "message": "project level"},
+        # No file at all: skipped, as ever.
+        {"item": "REQ-002", "message": "no file"},
+    ]
+    script = f"""
+const path = require("path");
+const vscode = {{
+  Range: class {{
+    constructor(sl, sc, el, ec) {{
+      this.start = {{ line: sl, character: sc }};
+      this.end = {{ line: el, character: ec }};
+    }}
+  }},
+  Diagnostic: class {{
+    constructor(range, message, severity) {{
+      this.range = range;
+      this.message = message;
+      this.severity = severity;
+    }}
+  }},
+  DiagnosticSeverity: {{ Error: 0, Warning: 1 }},
+  Uri: {{ file: (f) => ({'{'}file: f{'}'}) }},
+}};
+const published = new Map();
+const diagnostics = {{
+  clear: () => published.clear(),
+  set: (uri, list) => published.set(uri.file, list),
+}};
+{extracted.group(0)}
+publishDiagnostics("{'/root'}", {json.dumps({'items': items, 'diagnostics': diagnostics})});
+// The extension joins the root and the relative diagnostic file with
+// Node's path.join, which emits platform separators -- on Windows that
+// is `\\root\\items\\req.yaml`. Normalize the published keys to slashes
+// with the same path module the extension used, so the expectations
+// below can stay platform-neutral POSIX strings.
+console.log(JSON.stringify(
+  [...published.entries()].map(([f, list]) => [
+    f.split(path.sep).join("/"),
+    list.map((d) => d.message),
+  ]))
+);
+"""
+    proc = subprocess.run(
+        [NODE, "-e", script],
+        capture_output=True,
+        text=True,
+        timeout=NODE_TIMEOUT_S,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout) == [
+        [
+            "/root/items/notes:2026.md",
+            ["[REQ-002] local colon name"],
+        ],  # a legal local name with a colon must publish
+        ["/root/items/req.yaml", ["[REQ-002] local plain"]],
+        ["/root/refdes-project.yaml", ["project level"]],  # no d.item: publish
+    ]
+

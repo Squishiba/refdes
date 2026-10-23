@@ -172,10 +172,24 @@ function publishDiagnostics(root, data) {
   /** @type {Map<string, vscode.Diagnostic[]>} */
   const byFile = new Map();
 
+  // Diagnostics on imported items name an upstream location nobody can
+  // open in this workspace -- the import-qualified `platform:items/req.yaml`
+  // or, for artifacts with no recorded source, the legacy `<import:platform>`
+  // pseudo-path. Membership of the item index decides, not path spelling:
+  // a local file may legitimately contain a colon (`items/notes:2026.md`)
+  // and its diagnostics must keep publishing. Retired ids count too, the
+  // way itemsById indexes them, so a diagnostic naming a retired id of an
+  // imported item is recognised as one.
+  const importedIds = new Set();
+  for (const item of data.items || []) {
+    if (!item.external) continue;
+    if (item.id) importedIds.add(item.id);
+    for (const former of item.former_ids || []) importedIds.add(former);
+  }
+
   for (const d of data.diagnostics || []) {
-    // Imported items report a pseudo-path like `<import:platform>`, which is not
-    // a file anyone can open.
     if (!d.file || d.file.startsWith("<")) continue;
+    if (d.item && importedIds.has(d.item)) continue;
     const abs = path.isAbsolute(d.file) ? d.file : path.join(root, d.file);
     const line = Math.max(0, (d.line || 1) - 1);
     const range = new vscode.Range(line, 0, line, 200);
