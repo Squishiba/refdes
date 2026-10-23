@@ -122,13 +122,17 @@ def _escapes_root(project_root: str, rel: str) -> bool:
 
 
 def _is_safe_relpath(path: str) -> bool:
+    """Project-relative and free of anything that makes two spellings name
+    one file: no ``..``, ``.``, empty segments (which covers trailing
+    slashes and ``a//b``), absolute form, backslash, colon.
+    """
     if not path:
         return False
     if "\\" in path or ":" in path:
         return False
     if posixpath.isabs(path) or ntpath.isabs(path):
         return False
-    return not any(segment == ".." for segment in path.split("/"))
+    return all(segment not in ("", ".", "..") for segment in path.split("/"))
 
 
 def _new_transaction_id() -> str:
@@ -267,6 +271,7 @@ def _manifest_entries(manifest: object) -> tuple[str, list[dict]]:
     if not isinstance(entries, list):
         raise JournalCorrupt("journal manifest has no entries list")
     normalized: list[dict] = []
+    seen: set[tuple[str, ...]] = set()
     for raw in entries:
         if not isinstance(raw, dict):
             raise JournalCorrupt("journal manifest entry is not an object")
@@ -276,6 +281,12 @@ def _manifest_entries(manifest: object) -> tuple[str, list[dict]]:
         replacement_sha = raw.get("replacement_sha256")
         if not isinstance(path, str) or not isinstance(existed, bool):
             raise JournalCorrupt("journal manifest entry is missing path/existed")
+        if not _is_safe_relpath(path):
+            raise JournalCorrupt(f"journal names an unsafe path: {path!r}")
+        key = tuple(path.split("/"))
+        if key in seen:
+            raise JournalCorrupt(f"journal manifest lists the path {path!r} twice")
+        seen.add(key)
         if not (original_sha is None or isinstance(original_sha, str)):
             raise JournalCorrupt(f"journal manifest entry for {path!r} has a bad hash")
         if existed and original_sha is None:
@@ -361,10 +372,16 @@ def begin(project_root: str, entries: Sequence[Entry]) -> str:
 
 
 def pending(project_root: str) -> str | None:
-    """The transaction id of a live journal, ``"unknown"`` if unreadable,
-    None if there is no journal."""
+    """The transaction id of a live journal, ``"unknown"`` if unreadable
+    (including a plain file squatting on the journal path), None if there
+    is no journal.
+
+    Existence is judged the way ``begin`` judges it -- any path at the
+    journal location -- so the guard refuses exactly the projects where a
+    save would be refused.
+    """
     journal = _journal_path(project_root)
-    if not os.path.isdir(journal):
+    if not os.path.exists(journal):
         return None
     try:
         manifest = _read_manifest_raw(journal)
@@ -394,26 +411,32 @@ def complete(project_root: str) -> None:
     inert (``recover`` removes it as a crashed begin), so once the
     manifest is gone a completed save can never be undone by leftover
     directory debris. A failed *manifest* delete therefore raises -- the
-    journal is still armed, and the caller has to know. So does a failed
-    removal of the leftover debris: the directory still blocks
-    ``refuse_if_pending``, and the message points at ``recover``, which
-    clears it.
+    journal is still armed, and the caller has to know. The directory is
+    then always cleared, inert debris (no manifest) included: a leftover
+    journal directory would keep ``refuse_if_pending`` blocking projects
+    whose saves succeeded, and a directory that outlives complete()
+    raises too, pointing at ``recover``, which clears it.
     """
     journal = _journal_path(project_root)
     manifest = os.path.join(journal, _MANIFEST_NAME)
     try:
         os.remove(manifest)
+        _fsync_dir(journal)
     except FileNotFoundError:
-        return
-    _fsync_dir(journal)
+        if not os.path.isdir(journal):
+            return  # no journal at all: the idempotent no-op
+    except OSError as exc:
+        raise OSError(
+            f"journal manifest in {journal} could not be removed: {exc}"
+        ) from exc
     try:
         shutil.rmtree(journal)
     except FileNotFoundError:
         return
     except OSError as exc:
         raise OSError(
-            f"journal is disarmed (manifest removed) but its leftovers in "
-            f"{journal} could not be deleted: {exc}. Run 'refdes recover'."
+            f"journal leftovers in {journal} could not be deleted: {exc}. "
+            "Run 'refdes recover'."
         ) from exc
     _fsync_dir(_journal_parent(project_root))
 
@@ -423,9 +446,12 @@ def recover(project_root: str) -> list[str]:
     actually changed, in manifest order.
 
     Refuses (``JournalCorrupt``, changing nothing, journal kept) when a
-    stored original is missing or does not match its recorded hash, or when
-    the manifest names an unsafe path. Leaves the journal in place on any
-    failure, so running it again is safe.
+    stored original is missing or does not match its recorded hash, when
+    the manifest names an unsafe path, lists one path twice, resolves
+    outside the root, or names a path that is a directory on disk.
+    Restored files' parent directories are fsynced before the journal is
+    removed. Leaves the journal in place on any failure, so running it
+    again is safe.
     """
     journal = _journal_path(project_root)
     if not os.path.isdir(journal):
@@ -441,11 +467,13 @@ def recover(project_root: str) -> list[str]:
     _transaction_id, entries = _manifest_entries(manifest)
 
     for entry in entries:
-        if not _is_safe_relpath(entry["path"]):
-            raise JournalCorrupt(f"journal names an unsafe path: {entry['path']!r}")
         if _escapes_root(project_root, entry["path"]):
             raise JournalCorrupt(
                 f"journal path {entry['path']!r} resolves outside the project root"
+            )
+        if os.path.isdir(_live_path(project_root, entry["path"])):
+            raise JournalCorrupt(
+                f"journal path {entry['path']!r} is a directory on disk, not a file"
             )
 
     originals: dict[int, bytes] = {}
@@ -464,6 +492,7 @@ def recover(project_root: str) -> list[str]:
         originals[index] = data
 
     restored: list[str] = []
+    synced: set[str] = set()
     for index, entry in enumerate(entries):
         live = _live_path(project_root, entry["path"])
         if entry["existed"]:
@@ -475,6 +504,14 @@ def recover(project_root: str) -> list[str]:
                 continue
             os.remove(live)
         restored.append(entry["path"])
+        # Durable before the safety net goes: the journal is removed at the
+        # end of this run, so every directory a restore landed in is fsynced
+        # first (each one once) -- a restore that reverted on power loss
+        # with the journal gone is the exact half-applied save again.
+        parent = os.path.dirname(live)
+        if parent not in synced:
+            _fsync_dir(parent)
+            synced.add(parent)
 
     shutil.rmtree(journal)
     _fsync_dir(_journal_parent(project_root))
@@ -490,7 +527,7 @@ def _validate_entries(project_root: str, entries: Sequence[Entry]) -> None:
             raise ValueError(
                 f"entry path {entry.path!r} resolves outside the project root"
             )
-        key = tuple(segment for segment in entry.path.split("/") if segment != ".")
+        key = tuple(entry.path.split("/"))
         if key in seen:
             raise ValueError(f"duplicate entry path: {entry.path!r}")
         seen.add(key)

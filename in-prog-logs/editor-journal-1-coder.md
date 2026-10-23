@@ -84,3 +84,45 @@ Targeted 58 pass (47 frozen unchanged), full suite 4468 passed / 2
 skipped (exit 0), ruff clean.
 
 Finished.
+
+## Round 3 (addendum of review 72b1902) — findings A-F
+
+All six fixed test-first in `src/refdes/editor_journal.py`, RED checked
+first (10 RED; the duplicate-paths test initially passed accidentally via
+the hash check on a tampered entry, rewritten to use not-existed entries
+so the duplicate itself is the operative cause):
+
+- A. `recover` fsyncs each restored file's parent directory (once each)
+  before `shutil.rmtree(journal)` — restored state is durable before the
+  safety net is removed.
+- B. `complete()` now clears inert debris: manifest-missing journals get
+  their directory removed too (a leftover directory kept
+  `refuse_if_pending` blocking projects whose save succeeded).
+  No-journal-at-all stays the silent no-op; manifest-removal and
+  directory-removal failures both raise, the latter pointing at recover.
+- C. `_is_safe_relpath` now rejects `.`, empty segments and trailing
+  slashes (so `a/`, `a//b`, `a/./b`, `.`), matching the "one spelling
+  per file" contract. Checked at begin (ValueError) and in
+  `_manifest_entries` (JournalCorrupt); the recover-side loop moved into
+  the parser so all readers get it.
+- D. `pending()` uses `os.path.exists` like `begin` does: a plain file at
+  the journal path now reports `"unknown"` instead of "clear", so the
+  guard and the save refuse exactly the same projects.
+- E. A journaled live path that is a directory on disk raises
+  `JournalCorrupt` naming it, as a pre-restore check — nothing is
+  touched, journal kept (previously a bare `IsADirectoryError` mid-
+  restore).
+- F. Duplicate/equivalent paths in a manifest raise `JournalCorrupt`
+  in `_manifest_entries` (keyed on the split segments, which the strict
+  path check now normalizes).
+
+One existing test changed, as the addendum allows:
+`test_complete_on_disarmed_journal_is_a_noop` (a round-1 test, not one
+of the 47 frozen designer tests) pinned the old "debris left behind"
+behavior; rewritten as `test_complete_removes_a_disarmed_journal_
+directory`. The 47 frozen designer tests are unchanged.
+
+Tests: 69 passed in tests/test_editor_journal.py (47 frozen + 22 added
+across rounds; 11 this round incl. 6 parametrized dot-path cases). ruff
+clean (default + E501,I on the two files). Full suite run recorded
+below.

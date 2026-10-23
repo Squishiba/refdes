@@ -748,12 +748,18 @@ def test_complete_raises_when_the_manifest_removal_fails(tmp_path, monkeypatch):
     assert ej.pending(root) == tx
 
 
-def test_complete_on_disarmed_journal_is_a_noop(tmp_path):
-    """Debris of a failed complete (directory, no manifest): idempotent
-    completion stays silent; recover is what clears it."""
+def test_complete_removes_a_disarmed_journal_directory(tmp_path):
+    """Debris of a failed complete (directory, no manifest) must not keep
+    refuse_if_pending blocking a project whose save succeeded: a journal
+    directory without a manifest is inert, so complete() finishes the job
+    and clears it. A wholly absent journal stays the silent no-op the
+    contract demands."""
     ej = _ej()
     _journal(tmp_path).mkdir(parents=True)
     ej.complete(str(tmp_path))
+    assert not _journal(tmp_path).exists()
+    assert ej.pending(str(tmp_path)) is None
+    ej.complete(str(tmp_path))  # still an idempotent no-op
 
 
 def test_begin_fsyncs_staging_then_parent_around_the_visible_rename(tmp_path, monkeypatch):
@@ -941,3 +947,121 @@ def test_begin_fsyncs_the_orig_directory_before_exposing_the_journal(tmp_path, m
     )
     assert ("fsync", staging) in events[:visible]
     assert events[-1] == ("fsync", parent)
+
+
+# ------------------------------- review round 2 addendum: restore fsync, inert debris, dot paths
+def test_recover_fsyncs_restored_parents_before_the_journal_goes(tmp_path, monkeypatch):
+    """The restored live files must be durable before the journal that is
+    their only safety net is removed: fsync each restored file's parent
+    directory before the journal directory goes away."""
+    ej = _ej()
+    root = _project(tmp_path)
+    entries = _entries(ej)
+    ej.begin(root, entries)
+    _apply_save(tmp_path, entries)
+    events: list[tuple] = []
+    monkeypatch.setattr(ej, "_fsync_dir", lambda path: events.append(("fsync", path)))
+    real_rmtree = shutil.rmtree
+
+    def spy_rmtree(path, *args, **kwargs):
+        events.append(("rmtree", path))
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", spy_rmtree)
+    assert ej.recover(root) == [P1, P2, P3]
+    removed = next(i for i, event in enumerate(events) if event[0] == "rmtree")
+    for parent in ("src", "notes", "items"):
+        assert ("fsync", str(tmp_path / parent)) in events[:removed], (
+            f"{parent}/ must be fsynced before the journal is removed"
+        )
+
+
+def test_recover_refuses_a_live_path_that_is_a_directory(tmp_path):
+    """A live path that is a directory surfaces as JournalCorrupt naming the
+    path -- nothing restored, journal kept -- not a bare IsADirectoryError."""
+    ej = _ej()
+    root = str(tmp_path)
+    _write(tmp_path, "keep.txt", b"K-OLD")
+    _write(tmp_path, "conflict", b"C-OLD")
+    entries = [
+        ej.Entry("keep.txt", b"K-OLD", b"K-NEW"),
+        ej.Entry("conflict", b"C-OLD", b"C-NEW"),
+    ]
+    ej.begin(root, entries)
+    _apply_save(tmp_path, entries)
+    (tmp_path / "conflict").unlink()
+    (tmp_path / "conflict").mkdir()
+    with pytest.raises(ej.JournalCorrupt) as excinfo:
+        ej.recover(root)
+    assert "conflict" in str(excinfo.value)
+    assert _read(tmp_path, "keep.txt") == b"K-NEW", "the refusal touches nothing"
+    assert ej.pending(root) is not None
+
+
+def test_recover_refuses_duplicate_paths_in_the_manifest(tmp_path):
+    """begin refuses duplicates; a tampered manifest that lists one path
+    twice is equally untrustworthy: JournalCorrupt, nothing touched. The
+    entries use not-existed originals so the hash check cannot be what
+    trips -- the refusal must be the duplicate itself."""
+    ej = _ej()
+    root = str(tmp_path)
+    ej.begin(root, [ej.Entry(P3, None, NEW3)])
+    _write(tmp_path, P3, NEW3)
+    manifest_path = _journal(tmp_path) / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_bytes())
+    entry_list = _find_entry_list(manifest)
+    entry_list.append(dict(entry_list[0]))
+    manifest_path.write_bytes(json.dumps(manifest).encode())
+    with pytest.raises(ej.JournalCorrupt) as excinfo:
+        ej.recover(root)
+    assert P3 in str(excinfo.value)
+    assert _read(tmp_path, P3) == NEW3
+    assert _journal(tmp_path).is_dir()
+
+
+DOT_PATHS = [".", "./", "./a.txt", "a/", "a//b", "a/./b"]
+
+
+@pytest.mark.parametrize("path", DOT_PATHS)
+def test_begin_rejects_dot_and_empty_path_segments(tmp_path, path):
+    """`"."`, trailing slashes and empty segments name the same files as
+    other paths (or the root itself) and must be refused at begin, with no
+    journal left behind."""
+    ej = _ej()
+    root = _project(tmp_path)
+    with pytest.raises(ValueError):
+        ej.begin(root, [ej.Entry(path, b"O", b"N")])
+    assert not _journal(tmp_path).exists()
+
+
+def test_recover_refuses_empty_segments_in_the_manifest(tmp_path):
+    """The recover-side validation refuses the same path shapes begin
+    refuses: JournalCorrupt, nothing touched, journal kept."""
+    ej = _ej()
+    root = _project(tmp_path)
+    ej.begin(root, [ej.Entry(P1, OLD1, NEW1)])
+    _write(tmp_path, P1, NEW1)
+    manifest_path = _journal(tmp_path) / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_bytes())
+    _find_entry_list(manifest)[0]["path"] = "src//main.c"
+    manifest_path.write_bytes(json.dumps(manifest).encode())
+    with pytest.raises(ej.JournalCorrupt):
+        ej.recover(root)
+    assert _read(tmp_path, P1) == NEW1
+    assert _journal(tmp_path).is_dir()
+
+
+def test_a_regular_file_at_the_journal_path_blocks_everything(tmp_path):
+    """begin treats any existing path at the journal location as pending;
+    pending/refuse_if_pending must agree, or the guard says clear while
+    every save is refused."""
+    ej = _ej()
+    root = _project(tmp_path)
+    journal = _journal(tmp_path)
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_bytes(b"not a directory")
+    assert ej.pending(root) == "unknown"
+    with pytest.raises(ej.JournalPending):
+        ej.refuse_if_pending(root)
+    with pytest.raises(ej.JournalPending):
+        ej.begin(root, _entries(ej))
