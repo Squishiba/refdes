@@ -51,6 +51,36 @@ def load_pages(project: Project) -> None:
     )
 
 
+def _front_matter_detail(exc: yaml.YAMLError) -> str:
+    """The YAML error's own words, without its position part.
+
+    `str(exc)` quotes the front matter as a standalone string, so its
+    "line N, column M" is front-matter-relative and sends the reader to
+    the wrong file line. The diagnostic names the FILE line on the
+    Diagnostic itself, so the message keeps context/problem and drops the
+    marks. Non-marked YAMLErrors keep their text as a last resort.
+    """
+    context = getattr(exc, "context", None)
+    problem = getattr(exc, "problem", None)
+    if context is None and problem is None:
+        return str(exc)
+    return "; ".join(part for part in (context, problem) if part)
+
+
+def _front_matter_file_line(text: str, match: re.Match, exc: yaml.YAMLError) -> int:
+    """The FILE line a reader should open for this front-matter YAML error.
+
+    `problem_mark.line` is 0-based within the front-matter text (regex
+    group 1), which starts on the line after the opening `---` fence —
+    line 2 for a plain file, later if `\\s*` swallowed blank lines after
+    the fence. With no mark at all, fall back to the fence's own line.
+    """
+    mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
+    if mark is not None and getattr(mark, "line", None) is not None:
+        return text.count("\n", 0, match.start(1)) + 1 + mark.line
+    return text.count("\n", 0, match.start(0)) + 1
+
+
 def _read_page(project: Project, path: str, root: str) -> Page | None:
     rel_to_root = os.path.relpath(path, project.root).replace("\\", "/")
     try:
@@ -75,7 +105,24 @@ def _read_page(project: Project, path: str, root: str) -> Page | None:
             # adds it back so page-block diagnostics name the real line.
             front_matter_lines = text.count("\n", 0, match.start(2))
         except yaml.YAMLError as exc:
-            project.warn(f"invalid page front-matter: {exc}", file=rel_to_root)
+            # A writable run loads the pages twice -- once in
+            # image_freeze.freeze_images (to scan page bodies for image
+            # references) and once in build() (to pick up freeze's disk
+            # rewrites) -- so the diagnostic is guarded on the project, per
+            # page, the way citations.read_lockfile guards a multi-reader
+            # message: the double load is intentional and cheap, the
+            # double report is not.
+            warned = getattr(project, "_front_matter_warned", None)
+            if warned is None:
+                warned = set()
+                project._front_matter_warned = warned
+            if rel_to_root not in warned:
+                warned.add(rel_to_root)
+                project.warn(
+                    f"invalid page front-matter: {_front_matter_detail(exc)}",
+                    file=rel_to_root,
+                    line=_front_matter_file_line(text, match, exc),
+                )
             # body stays the whole file -- front matter included -- so the
             # body-relative lines are already the file lines.
 
