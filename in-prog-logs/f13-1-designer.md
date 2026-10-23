@@ -35,7 +35,9 @@ contract's required behavior.
 - unreadable + TWO stale spans -> store line appears EXACTLY once, both
   offenders behind it. (fail)
 
-`tests/f13-1.cases.json` maps all 5 node ids.
+`tests/f13-1.cases.json` mapped all 5 node ids in my workspace, but it was
+NOT delivered in the PR -- the PR carries the test module only (verified
+against the PR head; only the frozen test SHA ca3c41e has it).
 
 ## Verification
 

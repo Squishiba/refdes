@@ -33,8 +33,10 @@ from refdes import build as build_mod
 from refdes import history, keys, lifecycle
 from refdes.schema import load_project
 
-# Relative store path, from history.HISTORY_DIR (os.path.join on this OS).
-STORE_REL = os.path.join(".refdes", "history")
+# The store path relative to the root, exactly as the gate prints it: the
+# implementation emits the forward-slash form on every platform, so this
+# literal (not os.path.join) is what the output must match on Windows too.
+STORE_REL = ".refdes/history"
 ERR_TEXT = "simulated store failure"
 
 
@@ -222,3 +224,32 @@ def test_named_store_line_appears_once_with_multiple_offenders(tmp_path, monkeyp
         f"DEC-001: inline calc Vout (items/dec.md:{line})",
         f"DEC-002: inline calc Vout (items/dec2.md:{line})",
     ]
+
+
+def test_multiline_error_text_collapses_into_one_gate_row(tmp_path, monkeypatch):
+    """A real HistoryError carries multi-line parser context. The gate table
+    joins offenders with ", " into ONE row per rule, so the named-store line
+    must carry the error text as whitespace-collapsed str(exc) and stay a
+    single line."""
+    project = _one_stale_project(tmp_path)
+    message = (
+        "event file does not parse (while parsing a flow sequence\n"
+        '  in "<unicode string>", line 1, column 7:\n'
+        "    kind: [unclosed\n"
+        "expected ',' or ']', but got '<stream end>'\n)"
+    )
+
+    def boom(project):
+        raise history.HistoryError(message)
+
+    monkeypatch.setattr(history, "capture_index", boom)
+
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    rule = results["inline_calc_results"]
+    assert rule.status == "FAIL"
+    collapsed = " ".join(message.split())
+    assert rule.offenders[0] == (
+        "stale inline-calc gate: cannot read the history store "
+        f"{STORE_REL} ({collapsed}) -- failing closed"
+    )
+    assert "\n" not in rule.offenders[0]

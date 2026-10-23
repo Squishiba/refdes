@@ -54,13 +54,21 @@ Changelog fragment: changelog.d/inline-calc-gate-names-history-store.fixed.md.
   `test_check_severity_status.py`: 141 passed. ruff on lifecycle.py: 3
   findings, identical to HEAD (pre-existing, not touched).
 
-## Flag for the designer
+## Review round (PR #368, CHANGES REQUESTED -> fixed on this branch)
 
-tests/test_lifecycle.py::test_inline_calc_results_unreadable_history_store_
-fails_closed and ..._fails_closed_captured assert the OLD single-generic-line
-format (`offenders == [one line]`, text "history store unreadable"). The
-contract's required output replaces that format, so both now fail; tests/ is
-outside my file list and the designer owns the acceptance tests -- these two
-need their assertions brought to the new shape.
+- The two pre-existing test_lifecycle.py assertions flagged above are now
+  updated to the contract shape (named-store line first, offender after;
+  intent kept: fail closed, the item is an offender, one-row line).
+- Designer's acceptance file: STORE_REL was os.path.join -> `.refdes\history`
+  on Windows against the implementation's forward-slash output (contract's
+  form); pinned as the literal ".refdes/history". No other os.sep-dependent
+  assertion in the file (rest uses os.path.isfile / literal "items/...").
+- Added test_multiline_error_text_collapses_into_one_gate_row (HistoryError
+  with newlines -> the named-store line stays one row, text = whitespace-
+  collapsed str(exc)); the lifecycle.py docstring already names the reason.
+- Designer log corrected: tests/f13-1.cases.json was not delivered in the PR.
+- Full suite at this head: `PYTHONPATH=src <venv> -m pytest -q tests/` ->
+  4423 passed, 2 skipped, exit 0 (foreground, 8m02s). ruff on the touched
+  test files: only findings pre-existing at base, untouched lines.
 
 Status: done, committed on ac/f13-1/coder.
