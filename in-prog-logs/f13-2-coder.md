@@ -17,14 +17,19 @@ file's `id:`/`key:` values.
   `resolved.handle` echo in `Applied` is unchanged (the read route echoes
   the same `~` handle for the same ref, so the parity of
   `payload["handle"] == GET["handle"]` holds for every spelling).
-- `tests/test_serve_edit_keyless_handle.py` (new, 7 tests, all pass):
-  yaml-list save via `~items/reqs.yaml:4` (comments survive),
-  md-front-matter save via `~items/notes.md:2`, controls (display-id save
-  on the keyless project, key save on a minted project), stale-line
-  refusal (file header inserted -> handle moved -> 422 "no item", tree
-  byte-identical), forged-handle refusal (404 read + 422 write, nothing
-  written), and a 409 conflict under the keyless handle keeping its diff.
 - `changelog.d/editor-save-keyless-handle.fixed.md`.
+- A test module `tests/test_serve_edit_keyless_handle.py` was written and
+  run here (yaml-list save via `~items/reqs.yaml:4` with comments
+  surviving, md-front-matter save via `~items/notes.md:2`, display-id
+  control, stale-line refusal with a byte-identical tree, forged-handle
+  404/422, and a 409 conflict under the keyless handle keeping its diff),
+  then REVERTED in a follow-up commit because that path is outside this
+  coder's allowed globs -- the designer owns the test side. The fix was
+  re-verified after the revert by a scratch drive of the same scenarios
+  against a live `EditorApp`: `.scratch/f13-2-check/check_f13_2.py`, all
+  six checks pass from a fresh project (key-handle save remains pinned by
+  the untouched `test_the_keyed_handle_from_the_row_saves_the_yaml_item`
+  in test_serve_edit_http.py, green in the suite runs below).
 
 ## Fix-site justification (one sentence, as the contract asks)
 
