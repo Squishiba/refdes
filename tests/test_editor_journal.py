@@ -1262,6 +1262,437 @@ def test_recover_refuses_a_manifest_path_inside_the_journal(tmp_path):
     assert (_journal(tmp_path) / MANIFEST_NAME).is_file()
 
 
+# ---------------- review round 7: alias identity, windows names, phase model
+def test_begin_refuses_paths_that_alias_one_file(tmp_path):
+    """`real/a` and `alias/a` (alias -> real) are two spellings of ONE
+    file: the save would apply both entries to it. Identity is the
+    resolved (parent, leaf), not the spelled path: ValueError, nothing
+    created."""
+    ej = _ej()
+    root = str(tmp_path)
+    (tmp_path / "real").mkdir()
+    _symlink(str(tmp_path / "real"), str(tmp_path / "alias"))
+    with pytest.raises(ValueError):
+        ej.begin(
+            root,
+            [ej.Entry("real/a", b"ONE", b"X"), ej.Entry("alias/a", b"TWO", b"Y")],
+        )
+    assert not _journal(tmp_path).exists()
+
+
+def test_recover_refuses_manifest_paths_that_alias_one_file(tmp_path):
+    ej = _ej()
+    root = str(tmp_path)
+    _write(tmp_path, P1, OLD1)
+    _symlink(str(tmp_path / "src"), str(tmp_path / "src2"))
+    ej.begin(root, [ej.Entry(P1, OLD1, NEW1)])
+    _write(tmp_path, P1, NEW1)
+    manifest_path = _journal(tmp_path) / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_bytes())
+    entries = _find_entry_list(manifest)
+    twin = dict(entries[0])
+    twin["path"] = "src2/main.c"
+    entries.append(twin)
+    manifest_path.write_bytes(json.dumps(manifest).encode())
+    with pytest.raises(ej.JournalCorrupt):
+        ej.recover(root)
+    assert _read(tmp_path, P1) == NEW1
+    assert _journal(tmp_path).is_dir()
+
+
+WINDOWS_NAMES = ["NUL", "nul.txt", "CON", "COM1", "LPT9.log", "a.", "a ", "dir/CON.txt"]
+
+
+@pytest.mark.parametrize("path", WINDOWS_NAMES)
+def test_begin_rejects_windows_mangled_names(tmp_path, path):
+    """Windows reserves device-name stems (with extension included) and
+    drops trailing dots/spaces: names valid as POSIX filenames become
+    unwriteable or mangled when the project moves to Windows. Refused
+    on every platform (conservative, documented in the module)."""
+    ej = _ej()
+    root = _project(tmp_path)
+    with pytest.raises(ValueError):
+        ej.begin(root, [ej.Entry(path, None, b"X")])
+    assert not _journal(tmp_path).exists()
+
+
+def test_begin_fsyncs_the_root_when_it_creates_the_refdes_dir(tmp_path, monkeypatch):
+    """A freshly created `.refdes` is durable in the project root only
+    once the root is fsynced; a power loss can make the whole journal
+    directory vanish. begin fsyncs the root (after the visible rename,
+    before the journal parent's own fsync)."""
+    ej = _ej()
+    root = _project(tmp_path)
+    events: list[tuple] = []
+    monkeypatch.setattr(ej, "_fsync_dir", lambda path: events.append(("fsync", path)))
+    real_replace = os.replace
+
+    def spy_replace(src, dst):
+        events.append(("replace", src, dst))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", spy_replace)
+    ej.begin(root, _entries(ej))
+    visible = next(i for i, event in enumerate(events) if event[0] == "replace")
+    assert ("fsync", str(tmp_path)) in events[visible + 1:]
+    assert events[-1] == ("fsync", str(tmp_path / ".refdes"))
+
+
+def test_begin_skips_the_root_fsync_when_refdes_already_exists(tmp_path, monkeypatch):
+    ej = _ej()
+    root = _project(tmp_path)
+    (tmp_path / ".refdes").mkdir()
+    fsynced: list[str] = []
+    monkeypatch.setattr(ej, "_fsync_dir", fsynced.append)
+    ej.begin(root, _entries(ej))
+    assert str(tmp_path) not in fsynced
+
+
+def test_recover_re_runs_the_durability_barrier_on_retries(tmp_path, monkeypatch):
+    """A retried recover must make the live files durable even when every
+    byte is already on disk: the first run restored the bytes, then its
+    barrier failed, and a retry that skips the fsyncs (nothing left to
+    write) reports recovery complete over data power loss can still
+    lose. The live parents are fsynced on a pass that restores nothing."""
+    ej = _ej()
+    root = str(tmp_path)
+    ej.begin(root, [ej.Entry("a.txt", b"old", b"new")])
+    _write(tmp_path, "a.txt", b"new")
+    real = ej._fsync_dir
+
+    def deny_root(path):
+        if os.path.realpath(path) == os.path.realpath(root):
+            raise OSError("injected live parent fsync failure")
+        return real(path)
+
+    with monkeypatch.context() as m:
+        m.setattr(ej, "_fsync_dir", deny_root)
+        with pytest.raises(OSError):
+            ej.recover(root)
+    assert _journal(tmp_path).exists(), "the journal is kept for the retry"
+    assert _read(tmp_path, "a.txt") == b"old"
+    fsynced: list[str] = []
+    monkeypatch.setattr(ej, "_fsync_dir", fsynced.append)
+    assert ej.recover(root) == []
+    assert os.path.realpath(root) in [os.path.realpath(path) for path in fsynced]
+
+
+def test_complete_retries_the_disarm_barrier(tmp_path, monkeypatch):
+    """complete() whose manifest delete landed but whose journal-directory
+    fsync failed leaves disarmed debris; the retry must re-run the disarm
+    barrier -- fsync the journal dir BEFORE the GC deletes the backups --
+    not skip the fsync because the manifest is already gone."""
+    ej = _ej()
+    root = _project(tmp_path)
+    ej.begin(root, _entries(ej))
+    journal = _journal(tmp_path)
+    real = ej._fsync_dir
+
+    def deny_journal(path):
+        if os.path.realpath(path) == os.path.realpath(str(journal)):
+            raise OSError("injected disarm fsync failure")
+        return real(path)
+
+    with monkeypatch.context() as m:
+        m.setattr(ej, "_fsync_dir", deny_journal)
+        with pytest.raises(OSError):
+            ej.complete(root)
+    assert not (journal / MANIFEST_NAME).exists(), "the disarm landed before the failure"
+    assert journal.is_dir()
+    fsynced: list[str] = []
+    monkeypatch.setattr(ej, "_fsync_dir", fsynced.append)
+    ej.complete(root)
+    assert os.path.realpath(str(journal)) in [os.path.realpath(path) for path in fsynced]
+
+
+def test_recover_disarms_the_journal_before_the_gc_replays(tmp_path, monkeypatch):
+    """Recovery restores, then DISARMS (manifest removed + barrier) and
+    then GCs the backups. An interrupted GC -- half the backups deleted,
+    the directory left -- must not leave a retry rereading a manifest
+    whose backups are gone (the old ordering: permanent JournalCorrupt);
+    the durable disarm makes the journal inert, so the retry finishes
+    with [] and the journal gone."""
+    ej = _ej()
+    root = _project(tmp_path)
+    entries = _entries(ej)
+    ej.begin(root, entries)
+    _apply_save(tmp_path, entries)
+    journal = _journal(tmp_path)
+    real_rmtree = shutil.rmtree
+    failed: list[bool] = []
+
+    def interrupt(path, *args, **kwargs):
+        if os.path.realpath(path) == os.path.realpath(str(journal)) and not failed:
+            failed.append(True)
+            (journal / "orig" / "0.bin").unlink()
+            raise OSError("injected cleanup interruption")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", interrupt)
+    with pytest.raises(OSError):
+        ej.recover(root)
+    assert not (journal / MANIFEST_NAME).exists(), "disarmed before the GC"
+    assert journal.is_dir()
+    monkeypatch.setattr(shutil, "rmtree", real_rmtree)
+    assert ej.recover(root) == []
+    assert not journal.exists()
+
+
+def test_recover_replaces_a_symlink_whose_target_already_matches(tmp_path):
+    """An equality check that follows the final symlink reads the TARGET's
+    bytes: an `a -> target` link carrying the original content reads as
+    "already restored" and survives recovery, silently redirecting the
+    project's file. The last component is lstat'ed: a symlink is not the
+    journaled file and is replaced by the regular file."""
+    ej = _ej()
+    root = str(tmp_path)
+    ej.begin(root, [ej.Entry("a", b"old", b"new")])
+    _write(tmp_path, "target", b"old")
+    _symlink(str(tmp_path / "target"), str(tmp_path / "a"))
+    assert _read(tmp_path, "a") == b"old", "the link resolves to the original"
+    assert ej.recover(root) == ["a"]
+    assert not (tmp_path / "a").is_symlink()
+    assert _read(tmp_path, "a") == b"old"
+    assert _read(tmp_path, "target") == b"old", "the link's target is untouched"
+
+
+def test_begin_rejects_paths_containing_nul_bytes(tmp_path):
+    """A NUL is a legal POSIX filename character and an ENAMETOOLONG-at-
+    byte-0 for every syscall: an entry that can never be named on disk
+    is not a safe path."""
+    ej = _ej()
+    root = _project(tmp_path)
+    with pytest.raises(ValueError):
+        ej.begin(root, [ej.Entry("bad\x00name", None, b"X")])
+    assert not _journal(tmp_path).exists()
+
+
+HASH_CASES = {
+    "replacement-not-hex": lambda e: e.update({"replacement_sha256": "not-a-hash"}),
+    "original-not-hex": lambda e: e.update({"original_sha256": "not-null"}),
+    "original-short-hex": lambda e: e.update({"original_sha256": "abc123"}),
+}
+
+
+@pytest.mark.parametrize(
+    "tweak", list(HASH_CASES.values()), ids=list(HASH_CASES.keys())
+)
+def test_recover_refuses_malformed_entry_hashes(tmp_path, tweak):
+    """The parser validates the whole schema -- hashes are 64 hex digits,
+    original_sha256 present exactly when existed -- BEFORE recover
+    touches a live file: the bytes it is about to restore are verified
+    against those very hashes, so a malformed one is an unverifiable
+    entry, not a cosmetic field."""
+    ej = _ej()
+    root = str(tmp_path)
+    ej.begin(root, [ej.Entry("a", b"old", b"new")])
+    _write(tmp_path, "a", b"new")
+    manifest_path = _journal(tmp_path) / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_bytes())
+    tweak(_find_entry_list(manifest)[0])
+    manifest_path.write_bytes(json.dumps(manifest).encode())
+    with pytest.raises(ej.JournalCorrupt):
+        ej.recover(root)
+    assert _read(tmp_path, "a") == b"new", "the refusal restores nothing"
+    assert _journal(tmp_path).is_dir()
+
+
+def test_recover_refuses_a_hash_for_a_file_that_never_existed(tmp_path):
+    """existed=False with an original_sha256 set is a manifest that
+    contradicts itself (a hash of nothing): refused, nothing touched."""
+    ej = _ej()
+    root = str(tmp_path)
+    ej.begin(root, [ej.Entry("a", None, b"new")])
+    _write(tmp_path, "a", b"new")
+    manifest_path = _journal(tmp_path) / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_bytes())
+    _find_entry_list(manifest)[0]["original_sha256"] = hashlib.sha256(b"ghost").hexdigest()
+    manifest_path.write_bytes(json.dumps(manifest).encode())
+    with pytest.raises(ej.JournalCorrupt):
+        ej.recover(root)
+    assert _read(tmp_path, "a") == b"new"
+    assert _journal(tmp_path).is_dir()
+
+
+def test_begin_refuses_ancestor_entry_paths(tmp_path):
+    """`a` and `a/b` cannot both land: writing one destroys the other's
+    parent, and the crash state is unrecoverable (recover hits the
+    directory conflict). A save that cannot be applied is refused at
+    begin, nothing created."""
+    ej = _ej()
+    root = str(tmp_path)
+    with pytest.raises(ValueError):
+        ej.begin(root, [ej.Entry("a", b"old", b"new"), ej.Entry("a/b", None, b"new")])
+    assert not _journal(tmp_path).exists()
+
+
+def test_recover_refuses_ancestor_paths_in_the_manifest(tmp_path):
+    ej = _ej()
+    root = str(tmp_path)
+    ej.begin(root, [ej.Entry("a", b"old", b"new")])
+    _write(tmp_path, "a", b"new")
+    manifest_path = _journal(tmp_path) / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_bytes())
+    entries = _find_entry_list(manifest)
+    twin = dict(entries[0])
+    twin.update({"path": "a/b", "existed": False, "original_sha256": None})
+    entries.append(twin)
+    manifest_path.write_bytes(json.dumps(manifest).encode())
+    with pytest.raises(ej.JournalCorrupt):
+        ej.recover(root)
+    assert _read(tmp_path, "a") == b"new"
+    assert _journal(tmp_path).is_dir()
+
+
+def test_recover_refuses_a_backup_that_is_a_symlink(tmp_path):
+    """The backups are read as the journal's own recovery data, so they
+    are read only as regular files: an orig/0.bin symlink points at
+    bytes the journal never wrote (here: OUTSIDE the project), and
+    reading through it restores attacker-chosen content. The last
+    component is lstat'ed; the journal is kept."""
+    ej = _ej()
+    root = str(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-backup"
+    outside.write_bytes(b"old")
+    ej.begin(root, [ej.Entry("a", b"old", b"new")])
+    _write(tmp_path, "a", b"new")
+    backup = _journal(tmp_path) / "orig" / "0.bin"
+    backup.unlink()
+    _symlink(str(outside), str(backup))
+    with pytest.raises(ej.JournalCorrupt) as excinfo:
+        ej.recover(root)
+    assert "a" in str(excinfo.value)
+    assert _read(tmp_path, "a") == b"new", "nothing is restored"
+    assert _journal(tmp_path).is_dir()
+    assert outside.read_bytes() == b"old"
+
+
+def test_recover_refuses_a_manifest_that_is_a_symlink(tmp_path):
+    """Same rule for the manifest: read as a regular file inside the
+    journal, never through a link."""
+    ej = _ej()
+    root = str(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-manifest"
+    ej.begin(root, [ej.Entry("a", b"old", b"new")])
+    _write(tmp_path, "a", b"new")
+    manifest = _journal(tmp_path) / MANIFEST_NAME
+    outside.write_bytes(manifest.read_bytes())
+    manifest.unlink()
+    _symlink(str(outside), str(manifest))
+    with pytest.raises(ej.JournalCorrupt):
+        ej.recover(root)
+    assert _read(tmp_path, "a") == b"new"
+    assert outside.read_bytes() == (
+        tmp_path.parent / f"{tmp_path.name}-manifest"
+    ).read_bytes()
+    assert _journal(tmp_path).is_dir()
+
+
+def test_recover_names_the_entry_when_a_backup_cannot_be_read(tmp_path, monkeypatch):
+    """An unreadable backup is neither absent (the journal is not inert)
+    nor verified: refuse naming the ENTRY whose recovery data is in
+    question, keep the journal, touch nothing."""
+    ej = _ej()
+    root = _project(tmp_path)
+    ej.begin(root, [ej.Entry(P1, OLD1, NEW1)])
+    _write(tmp_path, P1, NEW1)
+    backup = str(_journal(tmp_path) / "orig" / "0.bin")
+    real_open = open
+
+    def deny(file, *args, **kwargs):
+        if str(file) == backup:
+            raise PermissionError(13, "injected backup read failure", str(file))
+        return real_open(file, *args, **kwargs)
+
+    with monkeypatch.context() as m:
+        m.setattr("builtins.open", deny)
+        with pytest.raises(ej.JournalCorrupt) as excinfo:
+            ej.recover(root)
+    assert P1 in str(excinfo.value)
+    assert _read(tmp_path, P1) == NEW1
+    assert _journal(tmp_path).is_dir()
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX fifos")
+def test_recover_refuses_a_special_file_at_a_live_path(tmp_path):
+    """A fifo/socket/device at a journaled path is not a file the save
+    wrote: opening a fifo blocks, and nothing proves a plain file can
+    replace the object. Refused naming the path, the object left in
+    place, the journal kept."""
+    ej = _ej()
+    root = str(tmp_path)
+    ej.begin(root, [ej.Entry("a", None, b"new")])
+    os.mkfifo(tmp_path / "a")
+    with pytest.raises(ej.JournalCorrupt) as excinfo:
+        ej.recover(root)
+    assert "a" in str(excinfo.value)
+    assert (tmp_path / "a").exists(), "the object is left in place"
+    assert _journal(tmp_path).is_dir()
+
+
+def test_recover_syncs_the_live_directories_after_the_last_write(tmp_path, monkeypatch):
+    """A directory fsync makes durable the changes that landed BEFORE it:
+    fsyncing inline with the restore loop (deduplicated) leaves the last
+    write's directory unsynced when its chain ran earlier. The barriers
+    run AFTER the restore loop, over every entry's parent chain: each
+    directory is fsynced once, after the last change inside it."""
+    ej = _ej()
+    root = str(tmp_path)
+    _write(tmp_path, "a", b"A-OLD")
+    _write(tmp_path, "b", b"B-OLD")
+    entries = [
+        ej.Entry("a", b"A-OLD", b"A-NEW"),
+        ej.Entry("b", b"B-OLD", b"B-NEW"),
+    ]
+    ej.begin(root, entries)
+    _apply_save(tmp_path, entries)
+    events: list[tuple] = []
+    real_write = ej._atomic_write_bytes
+
+    def spy_write(path, data):
+        events.append(("write", path))
+        return real_write(path, data)
+
+    monkeypatch.setattr(ej, "_atomic_write_bytes", spy_write)
+    monkeypatch.setattr(ej, "_fsync_dir", lambda path: events.append(("sync", path)))
+    assert ej.recover(root) == ["a", "b"]
+    last_write = max(i for i, event in enumerate(events) if event[0] == "write")
+    assert ("sync", root) in events[last_write + 1:], (
+        "the last write in a directory must precede that directory's fsync"
+    )
+
+
+def test_begin_refuses_paths_through_a_control_directory_alias(tmp_path):
+    """An alias to `.refdes` (or to the journal inside it) is a save
+    writing the journal's own state: the journal-internal rule covers
+    the spelled path, realpath covers the alias. Refused at begin with
+    nothing created."""
+    ej = _ej()
+    root = str(tmp_path)
+    (tmp_path / ".refdes").mkdir()
+    _symlink(str(tmp_path / ".refdes"), str(tmp_path / "ctrl"))
+    with pytest.raises(ValueError):
+        ej.begin(root, [ej.Entry("ctrl/x", None, b"X")])
+    assert not _journal(tmp_path).exists()
+
+
+def test_recover_refuses_a_manifest_path_in_the_control_namespace(tmp_path):
+    ej = _ej()
+    root = str(tmp_path)
+    (tmp_path / ".refdes").mkdir()
+    _symlink(str(tmp_path / ".refdes"), str(tmp_path / "ctrl"))
+    ej.begin(root, [ej.Entry("a", b"old", b"new")])
+    _write(tmp_path, "a", b"new")
+    manifest_path = _journal(tmp_path) / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_bytes())
+    _find_entry_list(manifest)[0]["path"] = "ctrl/x"
+    manifest_path.write_bytes(json.dumps(manifest).encode())
+    with pytest.raises(ej.JournalCorrupt):
+        ej.recover(root)
+    assert _read(tmp_path, "a") == b"new"
+    assert (_journal(tmp_path) / MANIFEST_NAME).is_file()
+
+
 def test_recover_fsyncs_created_intermediate_directories(tmp_path, monkeypatch):
     """The restore's makedirs creates every missing directory from the
     root down (a/b for a/b/c.txt); fsyncing only the leaf parent leaves
