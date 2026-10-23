@@ -12,9 +12,12 @@
   response payload — `message`, `reason`, `describe`, the diff, the
   diagnostics, and whatever field is added next — has absolute paths
   rewritten to the project-relative forward-slash spelling
-  (`items/REQ-001.md`, and `items/REQ-007.md:6` when a line suffix
-  follows; the root itself becomes `.`), in both separator spellings, and
-  a drive-letter root matches case-insensitively. A path outside the
+   (`items/REQ-001.md`, and `items/REQ-007.md:6` when a line suffix
+   follows; the root itself — with or without a trailing separator —
+   becomes `.`), in every separator spelling, including the doubled-
+   backslash spelling the value quoting writes into file bytes and from
+   there into the diff text, and a drive-letter root matches
+   case-insensitively. A path outside the
   project root is reduced to its bare file name — the leaf is the part an
   author can act on, the directories outside the project are the leak.
   Relative spellings and non-path text pass through unchanged; reads,

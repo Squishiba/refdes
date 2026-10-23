@@ -40,6 +40,7 @@ Every assertion here is a status code, a payload string, or file bytes.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from urllib.parse import quote
 
@@ -410,3 +411,85 @@ def test_recursive_walk_of_every_write_response_finds_no_root_spelling(tmp_path)
 
     for note, (root, payload) in projects.items():
         assert_no_root(payload, root, note)
+
+
+# --------------------------------------------------- the helper, driven directly
+#
+# The two spellings the windows-latest run proved matter, pinned on any
+# platform with a Windows-shaped root named in the test itself (chunk-1
+# review finding 1): the patcher writes a value containing ': ' through
+# `json.dumps` (`_double_quoted`, patcher.py), so the file bytes -- and
+# through them `current_text` and `diff` -- carry the root with DOUBLED
+# backslashes: `text: "See C:\\Users\\x\\proj/items/reqs.yaml: values"`.
+# And the root quoted with its own trailing separator (finding 2), which
+# the changelog promises becomes `.`.
+
+
+def test_the_helper_relativeizes_the_json_escaped_windows_spelling():
+    root = "C:\\Users\\x\\proj"
+    escaped = json.dumps(f"See {root}/items/reqs.yaml: values")
+    assert "\\\\" in escaped, "the emitter must double the backslashes to pin the bug"
+    got = api_mod._relative_paths_in_text(escaped, root)
+    assert got == '"See items/reqs.yaml: values"', got
+
+
+def test_the_helper_relativeizes_the_escaped_spelling_under_a_posix_root():
+    # The CI shape: a native-separator root, the value JSON-escaped on the
+    # way into the file. On Linux there is nothing to escape (the root
+    # already has forward slashes), so the test feeds the helper the
+    # escaped spelling of a Windows-shaped root it hands in explicitly.
+    root = "C:\\Users\\x\\proj"
+    escaped = json.dumps(f"conflict: {root}\\items\\reqs.yaml changed")
+    got = api_mod._relative_paths_in_text(escaped, root)
+    assert got == '"conflict: items/reqs.yaml changed"', got
+    assert "\\\\" not in got and "C:" not in got, got
+
+
+def test_the_helper_turns_a_root_with_a_trailing_separator_into_dot():
+    assert (
+        api_mod._relative_paths_in_text("locked root: /home/you/proj/ here", "/home/you/proj")
+        == "locked root: . here"
+    )
+    assert (
+        api_mod._relative_paths_in_text("locked: C:\\root\\ here", "C:\\root")
+        == "locked: . here"
+    )
+
+
+def test_the_helper_walks_dict_keys_and_tuple_elements_too():
+    root = "C:\\Users\\x\\proj"
+    payload = {f"{root}/items/a.md": (f"at {root}/items/b.md:2", [f"{root}/items/c.md"])}
+    got = api_mod._relative_paths(payload, root)
+    assert got == {"items/a.md": ("at items/b.md:2", ["items/c.md"])}, got
+
+
+def test_write_route_payloads_are_json_shaped_and_contain_no_tuples(tmp_path):
+    """The guard behind the walk: every string of a write-route payload is
+    reachable through the JSON shape -- dict keys, string values, list
+    elements, and nothing tuple-shaped that a walker must be told about.
+    The payloads are asserted json-serializable, which repacks tuples to
+    lists and so proves none survived; the key types are pinned directly."""
+    client, root = keyless_client(tmp_path)
+    _status, view = client.get("/api/item/REQ-001")
+    payloads = [save(client, "REQ-001", revision=view["edit"]["file_revision"])[1]]
+    payloads.append(
+        client.post("/api/items/create", {"type": "requirement", "fields": {"text": "P."}})[1]
+    )
+    assert_no_root(payloads[0], root, "applied 200 (json-shape guard scenario)")
+
+    def walk(value):
+        assert not isinstance(value, tuple), f"tuple-shaped payload value: {value!r}"
+        assert value is None or isinstance(
+            value, (str, int, float, bool, list, dict)
+        ), value
+        if isinstance(value, dict):
+            for key, item in value.items():
+                assert isinstance(key, str), key
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    for payload in payloads:
+        json.loads(json.dumps(payload))
+        walk(payload)

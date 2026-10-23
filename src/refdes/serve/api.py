@@ -164,6 +164,14 @@ def diag_dict(d: Diagnostic) -> dict:
 # otherwise read as a drive-letter root), `and/or`, `5/6`, `path/to/x` --
 # a `/` mid-word is not the start of a path.
 _ABSOLUTE_TOKEN = re.compile(r"(?<![A-Za-z0-9.:\\/])(?:[A-Za-z]:[\\/]|[\\/])[^\s\"'`()\[\]{}<>,;]*")
+# Runs of separators collapse to one `/` BEFORE the under-root comparison:
+# a value containing ': ' is quoted by the patcher through `json.dumps`
+# (`_double_quoted`), so the file bytes -- and `current_text`/the `diff`
+# that carry them -- hold a Windows root DOUBLED, `C:\\Users\\...`. The
+# naive one-for-one map yields `C://Users//...`, the prefix test fails,
+# and the token collapses to its bare file name (windows-latest CI,
+# chunk-1 review finding 1).
+_SEP_RUNS = re.compile(r"[\\/]+")
 _TRAILING = ".,;:!?)]}'\"`>"
 _LINE_SUFFIX = re.compile(r"(.*):(\d+(?::\d+)?)")
 _DRIVE_ROOT = re.compile(r"[A-Za-z]:")
@@ -174,20 +182,34 @@ def _relative_paths(value, root: str):
 
     A path under ``root`` becomes its project-relative forward-slash spelling
     (``items/REQ-001.md``, and ``items/REQ-007.md:6`` when a line suffix
-    follows); the root itself becomes ``.``. A path OUTSIDE the root keeps
-    only its bare file name (with any line suffix) -- the file name is the
-    part an author can act on, and the directory outside the project is
-    exactly what this response must not disclose; a token with no file name
-    at all becomes ``<outside project>``. Relative spellings are untouched,
-    so the project-relative ``path`` fields and all ordinary text pass
-    through unchanged. Both separator spellings of the root are recognized;
-    a drive-letter root matches case-insensitively."""
+    follows), in any separator spelling -- a run of separators collapses to
+    one, which is what reaches the root the patcher's `json.dumps` quoting
+    writes into the file bytes (``C:\\\\Users\\\\...`` on Windows) and from
+    there into `current_text` and the `diff`; the root itself, with or
+    without a trailing separator, becomes ``.``. A path OUTSIDE the root
+    keeps only its bare file name (with any line suffix) -- the file name
+    is the part an author can act on, and the directory outside the project
+    is exactly what this response must not disclose; a token with no file
+    name at all becomes ``<outside project>``. Relative spellings are
+    untouched, so the project-relative ``path`` fields and all ordinary text
+    pass through unchanged. Both separator spellings of the root are
+    recognized; a drive-letter root matches case-insensitively. The walk
+    covers the whole payload shape -- dict keys and values, list and tuple
+    elements -- because a path is a string anywhere, and the keys are the
+    payload's own strings today (json-shaped: keys are names, values never
+    carry a tuple), so scrubbing them costs nothing and covers the day one
+    is not."""
     if isinstance(value, str):
         return _relative_paths_in_text(value, root)
     if isinstance(value, dict):
-        return {key: _relative_paths(item, root) for key, item in value.items()}
+        return {
+            _relative_paths(key, root): _relative_paths(item, root)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [_relative_paths(item, root) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_relative_paths(item, root) for item in value)
     return value
 
 
@@ -211,14 +233,14 @@ def _relative_paths_in_text(text: str, root: str) -> str:
         found = _LINE_SUFFIX.fullmatch(body)
         if found:
             rest, line = found.group(1), found.group(2)
-        norm = rest.replace("\\", "/")
+        norm = _SEP_RUNS.sub("/", rest)
         probe = norm.casefold() if fold else norm
         if probe == root_cmp:
             rel = "."
         elif root_cmp == "/":
             rel = norm[1:]
         elif probe.startswith(root_cmp + "/"):
-            rel = norm[len(root_cmp) + 1:]
+            rel = norm[len(root_cmp) + 1:] or "."
         else:
             rel = norm.rstrip("/").rpartition("/")[2] or "<outside project>"
         return rel + (":" + line if line else "") + punct

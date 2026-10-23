@@ -48,5 +48,35 @@ never stay absolute; one helper at the serialization choke point.
   tests/test_vscode_extension.py + tests/test_scalar_for_list_field.py green.
 - `ruff check src/refdes/serve/api.py` clean (same as the HEAD baseline).
 
-Finished. Touched only api.py, the changelog fragment, and this log
-(acceptance tests left to the designer, per the contract).
+## Review round (PR #372)
+
+Designer's acceptance file `tests/test_serve_edit_response_paths.py` landed
+(198b2d9); the windows-latest CI run failed its
+`test_a_conflict_whose_file_text_names_the_root_is_all_relative`. Three
+findings, all in the helpers; RED-first tests added to the same file
+before each fix:
+
+1. HIGH (Windows CI): the patcher quotes a `: `-bearing value through
+   `json.dumps` (`_double_quoted`), so file bytes -- and `current_text`/
+   `diff` -- carry the root DOUBLED (`C:\\Users\\...`). The per-character
+   `\\`->`/` map yielded `C://Users//...`, the under-root prefix test
+   failed, the token collapsed to its basename. Fix: collapse separator
+   runs before comparison (`_SEP_RUNS`). Pinned platform-neutral by
+   feeding the helper the `json.dumps` escaping of a Windows-shaped root
+   the test names itself.
+2. LOW: a root quoted *with* its trailing separator became the empty
+   string, not the `.` the changelog promises. Fix: `rel = ... or "."`.
+3. LOW: `_relative_paths` skipped dict keys and passed tuples through;
+   the designer's payload walker covers keys. Fix: walk keys and tuple
+   elements (payloads are json-shaped today -- a new guard test asserts
+   that -- this is defense in depth). Docstring updated.
+
+Verification: the 4 new tests RED before the fix (the json-shape guard
+passes by design), targeted suites green, full suite green. Changelog
+fragment reworded for the escaped spelling and the trailing-separator
+`.`. `ruff check` on the two touched files: only the 3 RUF059 findings
+that pre-exist on the designer's lines at HEAD remain; my lines are
+clean (AGENTS.md: no silencing unrelated pre-existing findings).
+
+Finished. Touched: api.py, the acceptance test file, the changelog
+fragment, this log.
