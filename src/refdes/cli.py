@@ -10,6 +10,7 @@ import sys
 from importlib.metadata import PackageNotFoundError
 
 from . import adopt as adopt_mod
+from . import boards as boards_mod
 from . import build as build_mod
 from . import calc_rewrite as calc_rewrite_mod
 from . import citations as citations_mod
@@ -31,6 +32,7 @@ from . import schema_json as schema_json_mod
 from . import seal as seal_mod
 from . import stub_tests as stub_tests_mod
 from . import threads as threads_mod
+from . import workspaces as workspaces_mod
 from .model import INVALIDATE, Item, Project
 from .schema import SCHEMA_NAME, SchemaError, load_project
 from .write_lock import LockUnavailable, project_write_lock
@@ -327,16 +329,63 @@ def _print_late_refusals(project: Project, announced: int) -> None:
         print(late)
 
 
+def _scope_of_items_path(project: Project, rel: str) -> tuple[str | None, str | None] | None:
+    """(board, workspace) keys for a file path under `items/`.
+
+    Reuses `boards_mod.path_segments` for the split and the same
+    `_path_index` registries `boards._derive`/`workspaces._derive` consult;
+    the segment pick below mirrors `boards._board_segment`, whose only twin
+    for a bare path string this is not (it takes an Item): the board is the
+    first `items/` segment under `item_layout: flat`, the second under
+    `item_layout: workspace` (the first being the workspace's). Returns None
+    when the path is not under `items/` at all.
+
+    An axis is None when its segment names no registered board/workspace --
+    the path is *unattributable* to that scope, and an unattributable
+    diagnostic must stay visible for every scope selection
+    (docs/cli-reference.md). That is deliberately not `boards._derive`'s
+    `""`: an item outside the registry has an item whose `board` is `""` and
+    `--board` filters on it; the id-less diagnostics attributed through here
+    have no item at all, and a stray `items/<unregistered>/` path must not
+    hide them from every board.
+    """
+    rel = rel.replace("\\", "/")
+    if not rel.startswith("items/"):
+        return None
+    parts = boards_mod.path_segments(Item(id="", type="", source_file=rel))
+    if project.item_layout == "workspace":
+        ws_seg = parts[0] if parts else ""
+        board_seg = parts[1] if len(parts) >= 2 else ""
+    else:
+        ws_seg = ""
+        board_seg = parts[0] if parts else ""
+    board = boards_mod._path_index(project).get(board_seg)
+    workspace = workspaces_mod._path_index(project).get(ws_seg)
+    return board, workspace
+
+
 def _visible(
     project: Project, verbose: bool, board: str | None, workspace: str | None = None
 ) -> list:
     """Diagnostics worth printing: info hidden unless `verbose`, and, when
     `board` and/or `workspace` is given, narrowed to that scope's own items --
-    a report filter only. A diagnostic with no `item_id`, or whose item isn't
-    found (nothing here resolves that far), is project-level rather than
-    scope-specific and is never hidden by either flag: an unattributable
-    problem could affect every board or workspace, and hiding it would defeat
-    the point of a review.
+    a report filter only. A diagnostic with no `item_id` is project-level
+    rather than scope-specific and is never hidden by either flag: an
+    unattributable problem could affect every board or workspace, and hiding
+    it would defeat the point of a review.
+
+    An item diagnostic whose `item_id` is the literal display id `?` is an
+    id-less item's diagnostic (parse reports those as `item.id or "?"`):
+    there is no item to resolve, but the diagnostic's file is the item's own
+    source file, so the scope is read off the path. Filtering those by id
+    alone leaked every board's id-less items' diagnostics into every
+    `--board` report (the display id `?` matches no item on any board).
+
+    Any *other* `item_id` that resolves to no item -- a dangling id from
+    `former_ids`, a cycle ref from `blocked`, an id a seal names -- is not
+    an id-less item's diagnostic and keeps the project-level visibility
+    above: its path is not reliably an item's file, so it is not
+    attributable to a scope.
     """
     out = []
     for d in project.diagnostics:
@@ -349,6 +398,18 @@ def _visible(
                     continue
                 if workspace is not None and item.workspace != workspace:
                     continue
+            elif d.item_id == "?" and d.file:
+                scope = _scope_of_items_path(project, d.file)
+                if scope is not None:
+                    d_board, d_workspace = scope
+                    if board is not None and d_board is not None and d_board != board:
+                        continue
+                    if (
+                        workspace is not None
+                        and d_workspace is not None
+                        and d_workspace != workspace
+                    ):
+                        continue
         out.append(d)
     return out
 

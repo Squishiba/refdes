@@ -1,0 +1,50 @@
+{
+  "tests/test_check_board_scope.py::test_id_less_item_warning_shown_for_its_own_board": {
+    "expected_on_base": "pass",
+    "requirement": "check --board board-a reports the id-less board-a item's unknown-field warning (display id [?])."
+  },
+  "tests/test_check_board_scope.py::test_own_board_summary_keeps_id_less_item_warning": {
+    "expected_on_base": "pass",
+    "requirement": "check --board board-a summary counts board-a's two warnings; fixing attribution must not hide the id-less item's warning from its own board."
+  },
+  "tests/test_check_board_scope.py::test_id_less_item_warning_absent_for_other_board": {
+    "expected_on_base": "fail",
+    "requirement": "check --board board-b must NOT report the id-less board-a item's warning (today it leaks because item id '?' matches no board)."
+  },
+  "tests/test_check_board_scope.py::test_other_board_summary_excludes_id_less_item_warning": {
+    "expected_on_base": "fail",
+    "requirement": "check --board board-b summary reads 0 warnings; the leaked id-less-item warning must not be counted for a board that does not own it."
+  },
+  "tests/test_check_board_scope.py::test_project_level_no_id_error_visible_on_every_board": {
+    "expected_on_base": "pass",
+    "requirement": "The project-level 'item has no id - run refdes id' error stays visible for every board selection and keeps check exiting 1."
+  },
+  "tests/test_check_board_scope.py::test_id_bearing_item_warning_scoping_unchanged": {
+    "expected_on_base": "pass",
+    "requirement": "Items with ids are unchanged: LOG-A-001's warning shows for --board board-a and is hidden for --board board-b."
+  },
+  "tests/test_check_board_scope.py::test_check_without_board_shows_all_diagnostics": {
+    "expected_on_base": "pass",
+    "requirement": "An unscoped check reports all diagnostics: both unknown-field warnings, the no-id error, summary 2 items / 1 errors / 2 warnings."
+  },
+  "tests/test_check_board_scope.py::test_unresolved_nonquestion_item_id_stays_visible_for_every_board": {
+    "expected_on_base": "pass",
+    "requirement": "A diagnostic whose item_id names no item and is not the id-less display id `?` (e.g. a blocked cycle ref, seal display_id, former_ids new_id) stays visible for every --board selection."
+  },
+  "tests/test_check_board_scope.py::test_id_less_item_under_unregistered_path_stays_visible": {
+    "expected_on_base": "pass",
+    "requirement": "An id-less item under items/<segment that is not a registered board> is unattributable: its warning stays visible for --board board-a, --board board-b and the unscoped run."
+  },
+  "tests/test_check_board_scope.py::test_workspace_layout_board_axis": {
+    "expected_on_base": "fail",
+    "requirement": "Under item_layout: workspace, check --board board-a reports the id-less item's warning and --board board-b does not (the board segment is the second path segment)."
+  },
+  "tests/test_check_board_scope.py::test_workspace_layout_workspace_axis": {
+    "expected_on_base": "fail",
+    "requirement": "Under item_layout: workspace, check --workspace ws-a reports the id-less item's warning and --workspace ws-b does not."
+  },
+  "tests/test_check_board_scope.py::test_workspace_layout_no_id_error_visible_everywhere": {
+    "expected_on_base": "pass",
+    "requirement": "Under item_layout: workspace the project-level 'item has no id' error stays visible for the unscoped run and for every --board/--workspace selection."
+  }
+}
