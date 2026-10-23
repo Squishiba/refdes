@@ -418,9 +418,17 @@ def _apply_locked(config: str, request: EditRequest):
     if item is None:
         return Refused(who, ref, f"no item {ref!r} in this project")
     # What the patcher matches in the file is the item's CURRENT spelling --
-    # a retired id is not in the file, and the resolver's handle is always a
-    # display id or key the patcher accepts.
-    patch_ref = resolved.handle
+    # a retired id is not in the file, and a keyless item's provisional
+    # `~<relpath>:<line>` dict key (what `/api/items` hands the browser as
+    # the row handle) is a view address, not a spelling the file holds. The
+    # patcher matches `id:`/`key:` values, so the save is planned against
+    # them: the key when the item carries one (the spelling the list route
+    # hands out), else the display id. The handle's relpath:line is not
+    # dropped unvalidated -- it was just proven by the resolution above,
+    # which accepted this handle only by exact dict-key hit against the tree
+    # loaded from disk under this lock: a stale line, or a line in a file
+    # the item does not live in, resolves to nothing and is refused there.
+    patch_ref = item.key or item.id or resolved.handle
     if item.external:
         return Refused(who, ref, f"{ref} is an imported item; imports are read-only here")
 
