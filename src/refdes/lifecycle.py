@@ -804,16 +804,19 @@ def _inline_calc_location(diagnostic) -> str:
     return ""
 
 
-def _unreadable_history_offender(exc: Exception) -> str:
-    """One gate-table-safe line for a store that cannot be read. History
-    errors can include multi-line parser context; the gate row must stay one
-    row."""
+def _unreadable_history_gate_line(exc: Exception) -> str:
+    """One gate-table-safe line naming the store the gate failed closed on.
+
+    History errors can include multi-line parser context; the gate row must
+    stay one row, and the CLI joins offenders with ", ", so the error text
+    is whitespace-collapsed. The store is named by its location relative to
+    the project root, the path the author can check."""
     detail = " ".join(str(exc).split())
-    prefix = (
-        "history: inline calc freshness cannot be checked: "
-        "history store unreadable"
+    store = history_mod.HISTORY_DIR.replace(os.sep, "/")
+    return (
+        f"stale inline-calc gate: cannot read the history store {store} "
+        f"({detail}) -- failing closed"
     )
-    return f"{prefix} ({detail})"
 
 
 def _rule_inline_calc_results(project: Project) -> list[str]:
@@ -844,12 +847,16 @@ def _rule_inline_calc_results(project: Project) -> list[str]:
     would let a stale editable result pass precisely when the tool cannot
     prove the frozen-text exemption. Sealed items remain exempt by their seal,
     imported spans by scope, and a broken store with no inline-calc work is
-    not this rule's business.
+    not this rule's business. In the fail-closed case the offender list opens
+    with one line naming the unreadable store and the cause, so a span that
+    was capture-exempt while the store was readable reads as "the gate could
+    not prove the exemption", not as "my capture expired".
     """
     stale = [d for d in project.warnings if d.code == model.INLINE_CALC_STALE]
     if not stale:
         return []
     local = {id(item) for item in project.local_items}
+    store_line: str | None = None
     try:
         frozen_captures = {
             key
@@ -857,16 +864,11 @@ def _rule_inline_calc_results(project: Project) -> list[str]:
             if not edited
         }
     except (history_mod.HistoryError, OSError) as exc:
-        for diagnostic in stale:
-            items = _inline_calc_local_items(project, diagnostic, local)
-            if not items:
-                if diagnostic.item_id and project.item_by_id(diagnostic.item_id):
-                    continue
-                return [_unreadable_history_offender(exc)]
-            if all(seal_mod.is_sealed(project, item) for item in items):
-                continue
-            return [_unreadable_history_offender(exc)]
-        return []
+        # Fail closed: the frozen-text exemption is unprovable, so no capture
+        # exempts anything and every editable stale span is adjudicated as
+        # if it had no capture at all.
+        frozen_captures = set()
+        store_line = _unreadable_history_gate_line(exc)
     offenders: set[str] = set()
     for diagnostic in stale:
         items = _inline_calc_local_items(project, diagnostic, local)
@@ -884,6 +886,8 @@ def _rule_inline_calc_results(project: Project) -> list[str]:
                 continue
             # The warning's own head, "inline calc Vout", is the span name.
             offenders.add(f"{item.id or item.key}: {span}{location}")
+    if store_line is not None and offenders:
+        return [store_line, *sorted(offenders)]
     return sorted(offenders)
 
 
