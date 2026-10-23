@@ -1111,3 +1111,55 @@ def test_recover_unlinks_a_dangling_symlink_at_a_new_file_path(tmp_path):
     assert not (tmp_path / P3).exists(), "the symlink is dangling"
     assert ej.recover(root) == [P3]
     assert not os.path.lexists(tmp_path / P3)
+
+
+# ---------------------- review round 5: un-wedge non-directory squatters; strict fsync errors
+def test_recover_clears_a_plain_file_squatting_on_the_journal_path(tmp_path):
+    """A plain file at the journal path wedges the project: pending
+    reports "unknown" and begin refuses, telling the user to run
+    recover -- so recover must clear it. Refuse -> recover -> begin, in
+    one sequence, is the documented remediation."""
+    ej = _ej()
+    root = _project(tmp_path)
+    journal = _journal(tmp_path)
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_bytes(b"not a journal")
+    with pytest.raises(ej.JournalPending):
+        ej.refuse_if_pending(root)
+    assert ej.recover(root) == [ej.JOURNAL_DIR]
+    assert not journal.exists()
+    ej.begin(root, _entries(ej))  # begin works again
+
+
+def test_recover_clears_a_dangling_symlink_at_the_journal_path(tmp_path):
+    """Same wedge via a dangling symlink: recover removes the LINK
+    itself -- never following it -- and reports it, and the gate reports
+    the project as pending exactly as begin refuses it (the link exists
+    at the journal location even though its target does not)."""
+    ej = _ej()
+    root = _project(tmp_path)
+    journal = _journal(tmp_path)
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    _symlink("nowhere", str(journal))
+    with pytest.raises(ej.JournalPending):
+        ej.refuse_if_pending(root)
+    assert ej.recover(root) == [ej.JOURNAL_DIR]
+    assert not os.path.lexists(journal)
+    assert not (tmp_path / "nowhere").exists(), "the link was never followed"
+    ej.begin(root, _entries(ej))
+
+
+def test_fsync_dir_propagates_posix_permission_errors(tmp_path, monkeypatch):
+    """PermissionError from opening a directory is Windows'
+    not-supported signal, not a universal one: on POSIX EACCES is a real
+    durability failure and must propagate, not be swallowed."""
+    ej = _ej()
+    if os.name == "nt":
+        pytest.skip("opening directories as fds is the unsupported case on Windows")
+
+    def deny_open(*args, **kwargs):
+        raise PermissionError(13, "denied")
+
+    monkeypatch.setattr(ej.os, "open", deny_open)
+    with pytest.raises(PermissionError):
+        ej._fsync_dir(str(tmp_path))

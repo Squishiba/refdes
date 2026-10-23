@@ -203,10 +203,15 @@ def _atomic_write_bytes(path: str, data: bytes) -> None:
 
 # `os.open` of a directory is the POSIX-only half of a directory fsync;
 # Windows refuses with PermissionError (occasionally IsADirectoryError),
-# and some filesystems refuse the fsync itself (e.g. network mounts).
-# Those are the "platform does not support it" cases the contract allows
-# to pass quietly; everything else is a real I/O error and must surface.
-_FSYNC_DIR_OPEN_UNSUPPORTED = (PermissionError, IsADirectoryError)
+# and that is the platform-unsupported signal. On POSIX an EACCES here is
+# a real durability failure, so PermissionError is swallowed on Windows
+# only.
+_FSYNC_DIR_OPEN_UNSUPPORTED: tuple[type[OSError], ...] = (IsADirectoryError,)
+if os.name == "nt":
+    _FSYNC_DIR_OPEN_UNSUPPORTED += (PermissionError,)
+# Some filesystems refuse the fsync itself (e.g. network mounts). Those
+# are the "platform does not support it" cases the contract allows to
+# pass quietly; everything else is a real I/O error and must surface.
 _FSYNC_UNSUPPORTED = (errno.ENOTSUP, errno.ENOSYS, errno.EBADF, errno.EOPNOTSUPP)
 
 
@@ -347,7 +352,7 @@ def begin(project_root: str, entries: Sequence[Entry]) -> str:
             "the journal location (.refdes) resolves outside the project root"
         )
     journal = _journal_path(project_root)
-    if os.path.exists(journal):
+    if os.path.lexists(journal):
         raise JournalPending(pending(project_root) or "unknown")
 
     transaction_id = _new_transaction_id()
@@ -409,7 +414,7 @@ def pending(project_root: str) -> str | None:
     save would be refused.
     """
     journal = _journal_path(project_root)
-    if not os.path.exists(journal):
+    if not os.path.lexists(journal):
         return None
     if _journal_escapes_root(project_root):
         # A journal location that symlinks out of the root is not a
@@ -489,10 +494,24 @@ def recover(project_root: str) -> list[str]:
     the manifest names an unsafe path, lists one path twice, resolves
     outside the root, or names a path that is a directory on disk.
     Restored files' parent directories are fsynced before the journal is
-    removed. Leaves the journal in place on any failure, so running it
-    again is safe.
+    removed. A non-directory squatter on the journal path (file, symlink)
+    is removed as the squatter it is, and reported. Restored files get
+    the process's default permissions: the journal stores bytes and their
+    hashes, not modes -- bytes are the contract. Leaves the journal in
+    place on any failure, so running it again is safe.
     """
     journal = _journal_path(project_root)
+    if os.path.lexists(journal) and not os.path.isdir(journal):
+        # A non-directory squatter (plain file, symlink -- a dangling one
+        # included) wedges the project: pending() reports "unknown" and
+        # begin refuses, pointing at recover, so recover must clear it.
+        # The link/file ITSELF is removed, never followed; journal_real
+        # is inside the real root by construction, so confinement holds
+        # even for a symlink whose target lives outside.
+        journal_real = _journal_path(os.path.realpath(project_root))
+        os.remove(journal_real)
+        _fsync_dir(os.path.dirname(journal_real))
+        return [JOURNAL_DIR]
     if _journal_escapes_root(project_root):
         raise JournalCorrupt(
             "the journal location (.refdes) resolves outside the project "

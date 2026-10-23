@@ -31,19 +31,13 @@ serve/edit.py and cli.py deliberately untouched, wiring is a later task.
 
 ## Verification
 
-`ruff check src/refdes/editor_journal.py` (also with `--select E501,I`)
-clean, and the scratch check
-`.scratch/editor-journal-1-check/check.py` covers every contract bullet:
-begin contents, JournalPending text, invalid-path ValueError with no dir
-left, lifecycle + idempotent complete, recover restore/delete/report-
-changed/idempotence, tampered and missing originals (JournalCorrupt,
-journal kept, live files untouched), missing/garbled manifest (journal
-removed, []), simulated mid-save crash (only the replaced file reported,
-non-journaled file untouched), unsafe manifest path, parent-directory
+`ruff check src/refdes/editor_journal.py --select E501,I` clean, and the
+scratch check `.scratch/editor-journal-1-check/check.py` covers every
+contract bullet: begin contents, JournalPending text, invalid-path
+ValueError with nothing left, lifecycle + idempotent complete, recover
+restore/delete/report-changed/idempotence, tampered and missing
+originals, manifest states, simulated mid-save crash, parent-directory
 recreation. All pass on the project venv (py3.13).
-
-One scratch-script bug along the way (stale journal path after a root
-re-creation) — module code was correct, the checks were fixed.
 
 ## Review round 1 (PR #367)
 
@@ -52,16 +46,12 @@ bug (a swallowed removal leaves an armed journal; a later recover undoes
 the completed save), the journal's visible rename was not directory-fsync
 durable, and the designer log claimed an undelivered cases.json. Fixed
 all three, RED-first (5 new tests, all failing on the old code):
-complete() now deletes manifest.json first (FileNotFoundError = idempotent
-no-op; any other failure raises, journal stays armed); the inert debris
-left by a failed rmtree is removed by recover as a crashed begin, so a
-completed save can never be undone — complete raises on debris failure so
-pending() can't block silently, and the message points at recover.
-_fsync_dir now runs after the visible rename in begin, after the manifest
-unlink and after the removals in complete, and after both removals in
-recover; it swallows only unsupported-platform cases and propagates real
-I/O errors. Designer log corrected re cases.json (not delivered).
-tests/test_editor_journal.py: 53 pass (47 frozen designer tests unchanged,
+complete() deletes manifest.json first (FileNotFoundError = idempotent
+no-op; any other failure raises, journal stays armed) and raises on
+debris-removal failure pointing at recover; _fsync_dir runs after the
+visible rename in begin, the removals in complete, and the removals in
+recover, swallowing only unsupported-platform cases. Designer log
+corrected. tests/test_editor_journal.py: 53 pass (47 frozen unchanged,
 6 added).
 
 ## Review round 2 (PR #367, manual review of 98cb7ae)
@@ -85,47 +75,32 @@ skipped (exit 0), ruff clean.
 
 Finished.
 
-## Round 3 (addendum of review 72b1902) — findings A-F
+## Round 3 (addendum of review session 72b1902) — findings A-F
 
-All six fixed test-first in `src/refdes/editor_journal.py`, RED checked
-first (10 RED; the duplicate-paths test initially passed accidentally via
-the hash check on a tampered entry, rewritten to use not-existed entries
-so the duplicate itself is the operative cause):
+All six fixed test-first, RED checked first (10 RED; the duplicate-paths
+test initially passed accidentally via the hash check on a tampered
+entry, rewritten to use not-existed entries so the duplicate itself is
+the operative cause):
 
 - A. `recover` fsyncs each restored file's parent directory (once each)
-  before `shutil.rmtree(journal)` — restored state is durable before the
-  safety net is removed.
-- B. `complete()` now clears inert debris: manifest-missing journals get
-  their directory removed too (a leftover directory kept
-  `refuse_if_pending` blocking projects whose save succeeded).
-  No-journal-at-all stays the silent no-op; manifest-removal and
-  directory-removal failures both raise, the latter pointing at recover.
-- C. `_is_safe_relpath` now rejects `.`, empty segments and trailing
-  slashes (so `a/`, `a//b`, `a/./b`, `.`), matching the "one spelling
-  per file" contract. Checked at begin (ValueError) and in
-  `_manifest_entries` (JournalCorrupt); the recover-side loop moved into
-  the parser so all readers get it.
-- D. `pending()` uses `os.path.exists` like `begin` does: a plain file at
-  the journal path now reports `"unknown"` instead of "clear", so the
-  guard and the save refuse exactly the same projects.
-- E. A journaled live path that is a directory on disk raises
-  `JournalCorrupt` naming it, as a pre-restore check — nothing is
-  touched, journal kept (previously a bare `IsADirectoryError` mid-
-  restore).
-- F. Duplicate/equivalent paths in a manifest raise `JournalCorrupt`
-  in `_manifest_entries` (keyed on the split segments, which the strict
-  path check now normalizes).
+  before removing the journal — durable before the safety net goes.
+- B. `complete()` clears inert debris (manifest-missing journal
+  directories), so a completed save never keeps `refuse_if_pending`
+  blocking; no-journal stays the silent no-op, both removal failures
+  raise.
+- C. `_is_safe_relpath` rejects `.`, empty segments, trailing slashes;
+  enforced at begin (ValueError) and in `_manifest_entries`
+  (JournalCorrupt).
+- D. `pending()` judges existence as `begin` does: a plain file on the
+  journal path reports "unknown", not "clear".
+- E. A journaled live path that is a directory raises `JournalCorrupt`
+  naming it, as a pre-restore check; journal kept.
+- F. Duplicate/equivalent manifest paths raise `JournalCorrupt`.
 
-One existing test changed, as the addendum allows:
-`test_complete_on_disarmed_journal_is_a_noop` (a round-1 test, not one
-of the 47 frozen designer tests) pinned the old "debris left behind"
-behavior; rewritten as `test_complete_removes_a_disarmed_journal_
-directory`. The 47 frozen designer tests are unchanged.
-
-Tests: 69 passed in tests/test_editor_journal.py (47 frozen + 22 added
-across rounds; 11 this round incl. 6 parametrized dot-path cases). ruff
-clean (default + E501,I on the two files). Full suite run recorded
-below.
+One existing test changed, as the addendum allows: the round-1
+`test_complete_on_disarmed_journal_is_a_noop` pinned the debris-leaving
+behavior; rewritten. The 47 frozen designer tests are unchanged. Tests:
+69; full suite 4479 passed / 2 skipped; ruff clean.
 
 ## Round 4 (review 5aea024) — findings 1-2
 
@@ -148,3 +123,28 @@ existing tests changed; 47 frozen designer tests untouched.
 Tests: 71 in tests/test_editor_journal.py; full suite 4481 passed,
 2 skipped; ruff clean on the two files. The reviewer's "533 lines"
 remark is explicitly out of scope for this round.
+
+## Round 5 (manual review of 853e519) — findings 1-3
+
+- MEDIUM wedged state: a non-directory squatter on the journal path
+  (plain file, symlink, dangling symlink) is now removed by recover as
+  the squatter it is -- os.remove of the path inside realpath(root),
+  never following a link -- and reported as [JOURNAL_DIR], so the
+  documented remediation (refuse -> recover -> begin) works. pending()
+  and begin() moved from os.path.exists to os.path.lexists so a dangling
+  journal symlink is refused as pending too (exists() follows it and
+  called the project clear). Directories keep the existing rules
+  (journal / inert debris / JournalCorrupt), and round 4's confinement
+  of a symlinked .refdes is untouched.
+- LOW fsync swallowing: _FSYNC_DIR_OPEN_UNSUPPORTED now swallows
+  PermissionError only on Windows (os.name == "nt"); on POSIX EACCES
+  from opening a directory is a real durability failure and propagates.
+  Test monkeypatches os.open.
+- The file-mode NIT is documented, not fixed: recover's docstring now
+  states restored files get the process's default permissions -- the
+  journal stores bytes and hashes, bytes are the contract.
+- The PR body's stale/fabricated SHAs are corrected (its "5aea024" is
+  the review session id, not a commit; head cited 98cb7ae, now 853e519).
+
+RED first (3 tests). No existing tests changed; 47 frozen untouched.
+Tests: 74; full suite 4484 passed / 2 skipped; ruff clean.
