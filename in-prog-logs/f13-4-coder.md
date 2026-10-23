@@ -31,5 +31,30 @@ Verified with a stack trace of `load_pages` on a scratch project in
 - Scratch project: top-of-file bad line -> `pages/badyaml.md:2`, later line
   -> `:3`, blank line after fence -> `:3`; one warning each through
   `refdes check` and `refdes build` (real CLI).
-- Full suite: 4417 passed, 2 skipped.
+- Full suite: 4427 passed, 2 skipped (the 4417 first reported was the pre-designer
+  count; re-run on the PR head after the review fixes: 4427).
 - Finished.
+
+## PR #369 review round (2026-10-23)
+
+Three findings, all fixed in one follow-up commit:
+1. No-mark fallback (`ReaderError`, e.g. a NUL byte) leaked
+   `in "<unicode string>", position 7` via `str(exc)` -- the exact
+   front-matter-relative position the ticket removes.
+   `_front_matter_detail` now strips the `in "...", position N` /
+   `line N, column M` tail with `_YAML_POSITION_TAIL_RE`, keeping the
+   cause. Extended `test_no_mark_falls_back_to_fence_line` with the
+   absence assertions (authorized one test edit; no existing assertion
+   weakened).
+2. `_front_matter_warned` getattr/setattr -> declared as a real field
+   `front_matter_warned: set[str] = field(default_factory=set)` on
+   `Project` (model.py, next to `pages`), plain like neighbouring fields
+   (no repr/compare exclusions exist on this dataclass), used directly.
+3. This log's stale 4417 count (above) and the designer log's mention of
+   `tests/f13-4.cases.json`, which is not in this PR -- both corrected.
+
+Verified: NUL page through the real CLI prints
+`pages/nul.md:1 -- invalid page front-matter: unacceptable character
+#x0000: special characters are not allowed` (no position tail, fence
+line). Targeted tests 26 passed; `ruff check --select E9,F,I001` clean on
+the touched files; full suite above.

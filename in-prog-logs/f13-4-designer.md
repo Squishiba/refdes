@@ -1,8 +1,7 @@
 # f13-4 designer — invalid page front-matter warning: once, with a file line
 
 Role: blind test designer. Wrote no product code. Tests only in
-`tests/test_page_front_matter_warning.py` and `tests/f13-4.cases.json`,
-plus this log.
+`tests/test_page_front_matter_warning.py`, plus this log.
 
 ## What I found (all verified by running, blind to the fix)
 
@@ -53,5 +52,4 @@ Assertions are implementation-agnostic: count once in CLI output; the printed
 column" wording is gone (file line > R always, so a fix that *replaces* the
 excerpt position with the file line also satisfies it).
 
-Ruff clean on the new test file. cases.json node ids match `--collect-only`
-1:1.
+Ruff clean on the new test file.

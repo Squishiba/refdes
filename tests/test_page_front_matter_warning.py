@@ -122,6 +122,8 @@ def test_no_mark_falls_back_to_fence_line(tmp_path, capsys):
     out = _captured(capsys)
     assert out.count(MARKER) == 1, out
     assert f"pages/{PAGE}:1" in out, out
+    assert "position" not in out, out
+    assert '"<unicode string>"' not in out, out
 
 
 # ------------------------------------------------------- exactly-once per command
