@@ -54,15 +54,18 @@ handle naming no item's definition both resolve to nothing -> the ordinary
 the keyless handle plans its draft against `patch_ref` (the file spelling),
 so the 409 keeps its diff -- the `~` spelling never reaches the patcher.
 
-## Known fallout (NOT touched, per the task's file rules)
+## Known fallout (designer's fixed tests landed; pins flipped in the final commit)
 
-Two pre-existing tests pin the OLD behavior and now fail -- they are
+Two pre-existing tests pinned the OLD behavior -- they were
 acceptance-side pins for the bug being fixed, owned by the designer:
 
 - `tests/test_serve_edit_http.py::test_the_keyless_provisional_handle_still_refuses_and_writes_nothing`
 - `tests/test_serve_edit_retired_ids.py::test_both_routes_accept_the_same_spellings_keyless`
-  (the `ref == provisional` branch: asserts 422 "in this file"; now 200
-  applied, which is the parity the test's own docstring demands).
+  (the `ref == provisional` branch: asserted 422 "in this file"; the fix
+  makes it 200 applied, the parity the test's own docstring demands).
+
+The designer's fixed acceptance tests landed on this branch, and the
+final commit flipped both pins to the new behavior.
 
 Everything else green: the six serve-edit modules, test_patcher.py,
 test_patcher_links.py, test_serve_api/state/create/custom_config = 293 +
@@ -109,4 +112,28 @@ this is a report to the designer:
 
 Product side needs no further change for round 1.
 
-Status: round-1 triage done; awaiting designer test fixes.
+## PR #370 review round (chunk 1) -- applied
+
+Three small findings, all addressed:
+
+- `_conflict`'s docstring called `patch_ref` "the resolver's live handle"
+  -- stale for exactly the case this PR fixes (for a keyless ref the
+  resolver's handle IS the `~` dict key). Rewritten: patch_ref is the
+  item's current file spelling (key, else display id), not the raw ref
+  and not the `~` handle; retired-id rationale kept. Grepped edit.py and
+  serve/api.py for the same stale framing: the remaining "live handle"
+  prose (`Applied.handle`, api.py) describes the response field, which
+  really is `resolved.handle` -- accurate, untouched.
+- `test_the_keyless_provisional_handle_saves_like_the_display_id`
+  asserted 200 + a whole-file substring. Strengthened: the status must
+  land inside REQ-001's own block (split on `- id: REQ-001` / next
+  `- id:`, as the acceptance module does). Not weakened.
+- This log ended mid-story; it now closes.
+
+Full suite on the final head: **4427 passed, 2 skipped** (exit 0,
+7m40s). Ruff: CI gate `--select E9,F src tests` clean; default rules on
+the touched files show the same 6 pre-existing findings as the clean
+tree (DTZ011 in edit.py, 4x RUF059 + PIE810 in test_serve_edit_http.py)
+-- no new findings.
+
+Status: finished.

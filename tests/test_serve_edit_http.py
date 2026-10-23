@@ -631,4 +631,6 @@ def test_the_keyless_provisional_handle_saves_like_the_display_id(served):
         client, ref=handle, revision=sha256(reqs_file(root)), field="status", value="draft"
     )
     assert status == 200, payload
-    assert "status: draft" in read(reqs_file(root))
+    text = read(reqs_file(root))
+    block = text.split("- id: REQ-001", 1)[1].split("- id:", 1)[0]
+    assert "status: draft" in block, "the edit landed inside REQ-001's own block"

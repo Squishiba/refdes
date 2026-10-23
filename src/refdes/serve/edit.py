@@ -990,10 +990,14 @@ def _conflict(who, ref, path, before, request, current_revision, patch_ref=None)
     current text cannot even be planned against (the item is gone, its span
     is now ambiguous), the conflict says so instead of inventing a diff.
 
-    `patch_ref` is the resolver's live handle, not the request's raw ref:
-    for a retired-id edit the retired spelling is not in the file, and
-    planning against it would refuse and strip the conflict screen of its
-    diff. The conflict still names the ref the author asked with.
+    `patch_ref` is the item's current file spelling -- the key when it
+    carries one, else the display id -- not the request's raw ref, and not
+    a keyless row's provisional `~<relpath>:<line>` handle (the resolver's
+    live handle for that ref is the `~` dict key, a view address the file
+    does not hold). For a retired-id edit the retired spelling is not in
+    the file, and planning against it would refuse and strip the conflict
+    screen of its diff. The conflict still names the ref the author asked
+    with.
     """
     try:
         with open(path, "rb") as fh:
