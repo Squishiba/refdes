@@ -49,8 +49,9 @@ deliverable).
 ## Verification
 
 - Reference: a contract-faithful throwaway implementation in `.scratch/`
-  (not committed) — all 45 functional tests pass against it (the 2
-  repo-layout controls can't run in the scratch tree; that's the tree, not
+  (not committed) — all 44 functional tests pass against it (as does the
+  stdlib-import control; the 2 repo-layout controls can't run in the
+  scratch tree; that's the tree, not
   the tests).
 - Base tree (`PYTHONPATH=src ... -m pytest -q tests/test_editor_journal.py`):
   3 controls pass, 44 functional fail (module absent).
