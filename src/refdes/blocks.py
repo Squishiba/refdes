@@ -940,10 +940,16 @@ def placeholder(index: int) -> str:
     return f"xxrefdesblock{index}xx"
 
 
-def extract_blocks(project: Project, source: str, where_file: str) -> tuple[str, list[str]]:
+def extract_blocks(
+    project: Project, source: str, where_file: str, line_offset: int = 0
+) -> tuple[str, list[str]]:
     """Scan raw markdown `source` for `{{name key="value"}}` lines, validate
     and render each recognized one, and replace it with a placeholder token.
     An unrecognized name is left completely untouched.
+
+    `line_offset` is the number of lines `source` is displaced from the top
+    of `where_file` (a page's stripped front matter); diagnostics report the
+    file line, not the body-relative one.
 
     Returns `(source_with_placeholders, [rendered_html, ...])` -- the caller
     (`render_pages`) swaps each placeholder for its entry in the returned
@@ -964,7 +970,7 @@ def extract_blocks(project: Project, source: str, where_file: str) -> tuple[str,
         if block_spec is None:
             return match.group(0)  # never meant as a directive -- literal text
 
-        line_no = source.count("\n", 0, match.start()) + 1
+        line_no = source.count("\n", 0, match.start()) + 1 + line_offset
         params = _parse_params(name_match.group(2))
         try:
             _validate_params(block_spec, params)
