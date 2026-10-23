@@ -882,7 +882,7 @@ def do_land(job):
         # driver's own test commit as landable on resume, without string matching
         job["test_landed_sha"] = git(wt, "rev-parse", "HEAD")
         save_job(job)
-    git(wt, "push", "-u", "origin", branch_name(job, "coder"), timeout=300)
+    git(wt, "push", "-u", "origin", f"HEAD:refs/heads/{branch_name(job, 'coder')}", timeout=300)
     job["pushed_sha"] = git(wt, "rev-parse", "HEAD")
     save_job(job)
     if job.get("pr_number") is None:

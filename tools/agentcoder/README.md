@@ -240,7 +240,9 @@ spawn ──► test_review ──► execute ──► candidate ──► land
       ride the land commit** (authored `agentcoder <noreply@refdes.local>`,
      trailer `Co-authored-by: <name> <noreply@refdes.local>` where `<name>`
      is the last path segment of `coder_model`) and the branch is pushed;
-     the pushed SHA is recorded.
+     the pushed SHA is recorded. The push is by HEAD refspec
+     (`git push -u origin HEAD:refs/heads/<branch>`), so a respawned coder
+     on a differently named local branch still lands correctly.
      `gh pr list --state all` runs first: an **OPEN** PR for the branch (the
      crash window between `gh pr create` and the state save leaves exactly
      this) — or a MERGED one whose head is the SHA the driver recorded as
