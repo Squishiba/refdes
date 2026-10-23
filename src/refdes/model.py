@@ -978,6 +978,14 @@ class Project:
     # go through this, not `items[...]` directly.
     items_by_id: dict[str, str] = field(default_factory=dict)
     pages: list[Page] = field(default_factory=list)
+    # Project-relative paths of pages whose invalid front matter has already
+    # been warned about this run. Pages load twice on a writable run (the
+    # load's image-freeze step, then build() reloading to pick up its disk
+    # rewrites), and pages._read_page guards the per-page
+    # `invalid page front-matter:` warning on this so the double load is
+    # not a double report. One Project is one run -- the set lives and dies
+    # with it.
+    front_matter_warned: set[str] = field(default_factory=set)
     pages_dir: str = "pages"
     nav_order: list[str] = field(default_factory=list)
     pending: list[Item] = field(default_factory=list)  # parsed but not yet allocated an id
