@@ -7,7 +7,7 @@ dependency scans, and the composite-key refresh) land with this PR. The owner
 decided the four open questions on 2026-10-17, and on 2026-10-19 decided the
 hash-format change despite the baseline/seal risk named in section 3; the
 decisions are recorded under each question below.
-Later directions are parked in
+Later directions are parked in [inline-calc-later.md](inline-calc-later.md).
 
 # Inline calc: stored results in item prose
 

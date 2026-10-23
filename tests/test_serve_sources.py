@@ -1236,3 +1236,34 @@ def test_a_readable_empty_lockfile_is_still_ordinary_unpinned(tmp_path):
         assert payload["files"][0]["state"] == "unpinned"
     finally:
         app.stop()
+
+
+SPAN_COMMENT_ITEMS = """\
+defaults: { type: decision }
+items:
+  - id: DEC-001
+    citations:
+      - path: analysis/budget.csv
+    body: |
+      Budget: `rail_load := source("analysis/budget.csv", "rail_load") | V # note = 1.85 V`.
+"""
+
+
+def test_a_span_unit_suggestion_never_carries_the_trailing_comment(tmp_path):
+    # parse_span stores the span's unit with a trailing `# comment` intact;
+    # the evaluator strips it (quote-aware split_comment) before interpreting
+    # the unit, so the panel must strip it the same way -- the suggestion is
+    # `V`, never `V # note`.
+    root = make_root(tmp_path, items=SPAN_COMMENT_ITEMS)
+    fetch(root)
+    app = start(root)
+    try:
+        client = Client(app)
+        status, payload = client.api_get(
+            sources_url("DEC-001", "/propose")
+            + "?path=analysis/budget.csv&key=eff&unit=1&name=my_eff"
+        )
+        assert status == 200, payload
+        assert payload["units"] == ["1", "V"]
+    finally:
+        app.stop()
