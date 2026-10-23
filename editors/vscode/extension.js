@@ -167,15 +167,30 @@ function updateStatusBar(data) {
   statusBar.show();
 }
 
+// A diagnostic location that names no workspace file, in its two spellings:
+// the old `<import:platform>` pseudo-path (imported items whose artifact
+// record had no source), and the import-qualified `platform:items/req.yaml`
+// (import name, colon, upstream-relative path) used since. Publishing these
+// would paint a phantom diagnostic onto a file that does not exist.
+function isImportedItemPath(file) {
+  if (file.startsWith("<")) return true;
+  const sep = file.search(/[\\/]/);
+  const first = sep === -1 ? file : file.slice(0, sep);
+  if (!first.includes(":")) return false;
+  // A Windows drive letter -- one letter, colon, separator (`C:\...`) -- is
+  // a real absolute path, not an import prefix.
+  return !(sep !== -1 && /^[A-Za-z]:$/.test(first));
+}
+
 function publishDiagnostics(root, data) {
   diagnostics.clear();
   /** @type {Map<string, vscode.Diagnostic[]>} */
   const byFile = new Map();
 
   for (const d of data.diagnostics || []) {
-    // Imported items report a pseudo-path like `<import:platform>`, which is not
-    // a file anyone can open.
-    if (!d.file || d.file.startsWith("<")) continue;
+    // Imported items report a pseudo-path or an import-qualified path,
+    // neither of which is a file anyone can open.
+    if (!d.file || isImportedItemPath(d.file)) continue;
     const abs = path.isAbsolute(d.file) ? d.file : path.join(root, d.file);
     const line = Math.max(0, (d.line || 1) - 1);
     const range = new vscode.Range(line, 0, line, 200);

@@ -47,3 +47,28 @@ style of the existing `.fixed.md` fragments.
 - Full suite `pytest -q tests/` → 4386 passed, 2 skipped.
 
 Status: finished.
+
+## PR #361 review round
+
+Review approved the core change and required the VS Code follow-through
+(the blind phase ended; editors/ is now in scope), done on this branch:
+
+- `editors/vscode/extension.js`: new named helper
+  `isImportedItemPath(file)` -- skips the `<` pseudo-path **and**
+  import-qualified paths (first segment before `/` or `\` contains a `:`
+  that is not a Windows drive letter: one letter, colon, separator), so
+  `platform:items/req.yaml` no longer publishes a phantom diagnostic at
+  `<workspace>/platform:items/req.yaml`; `C:\...` absolutes keep the
+  existing absolute-path handling. `publishDiagnostics` now calls the
+  helper.
+- Test: the extension does have a JS test setup -- pytest extracts JS
+  functions verbatim from the source and runs them under node -- so
+  `tests/test_vscode_extension.py` gained
+  `test_imported_item_paths_are_never_published_as_files` on that
+  pattern, pinning 10 spellings (pseudo-path, import-qualified with both
+  separators, no-separator, drive-relative `C:items.json` -> skip; local
+  relative, POSIX/Windows absolutes -> publish). node v22 present; all 10
+  tests in the file pass.
+- Changelog fragment: added the sentence that the VS Code extension keeps
+  ignoring imported-item diagnostics.
+- `tests/test_imports.py` re-run: 10 passed.

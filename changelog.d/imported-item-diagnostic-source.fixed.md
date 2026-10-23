@@ -13,4 +13,7 @@
   older versions load unchanged. Nothing else moves: imported items stay
   `external`, read-only, and keep their ids, keys, and hashes; the
   editor's and patcher's write refusals read the `external` flag, not the
-  path spelling.
+  path spelling. The VS Code extension keeps ignoring imported-item
+  diagnostics: its Problems-panel filter skips both the old `<import:NAME>`
+  pseudo-path and the new import-qualified spelling, so neither publishes
+  a phantom diagnostic against a file that does not exist locally.

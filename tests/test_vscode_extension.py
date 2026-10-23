@@ -445,3 +445,65 @@ console.log(JSON.stringify({{
         "plain": "REQ-002",
         "unknown": None,
     }
+
+
+IS_IMPORTED_ITEM_PATH = re.compile(
+    r"function\s+isImportedItemPath\s*\(file\)\s*\{(.*?)\n\}", re.DOTALL
+)
+
+
+@pytest.mark.skipif(NODE is None, reason="no node on PATH to execute the extracted logic")
+def test_imported_item_paths_are_never_published_as_files():
+    """CHK-ATTR-002's editor follow-through: imported diagnostics moved from
+    the `<import:platform>` pseudo-path to the import-qualified
+    `platform:items/req.yaml`, and `publishDiagnostics`' old skip keyed on
+    the `<` prefix alone -- the new spelling would have been joined onto the
+    workspace root and published as a phantom diagnostic against a file that
+    does not exist. Runs the real `isImportedItemPath()` extracted verbatim
+    from the source, so it cannot pass on a hand-copied duplicate, and pins
+    the Windows drive-letter exemption that keeps real `C:\\...` absolute
+    paths flowing to the existing absolute-path handling.
+    """
+    source = _read(EXTENSION_JS)
+    extracted = IS_IMPORTED_ITEM_PATH.search(source)
+    assert extracted, (
+        "editors/vscode/extension.js no longer defines isImportedItemPath(file)"
+    )
+
+    cases = [
+        "<import:platform>",  # old pseudo-path: skip
+        "platform:items/req.yaml",  # import-qualified: skip
+        "platform:items\\req.yaml",  # upstream path with backslashes: skip
+        "platform:req.md",  # import-qualified, no separator at all: skip
+        "C:items.json",  # colon not followed by a separator: not a drive letter
+        "items/req.yaml",  # ordinary local relative path: publish
+        "req.md",  # local path, no separator: publish
+        "/home/me/proj/items/req.yaml",  # POSIX absolute: publish
+        "C:\\Users\\me\\proj\\items\\req.yaml",  # Windows absolute: publish
+        "C:/proj/items/req.yaml",  # Windows absolute, forward slashes: publish
+    ]
+    script = f"""
+const cases = {json.dumps(cases)};
+{extracted.group(0)}
+console.log(JSON.stringify(cases.map((f) => [f, isImportedItemPath(f)])));
+"""
+    proc = subprocess.run(
+        [NODE, "-e", script],
+        capture_output=True,
+        text=True,
+        timeout=NODE_TIMEOUT_S,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert dict(json.loads(proc.stdout)) == {
+        "<import:platform>": True,
+        "platform:items/req.yaml": True,
+        "platform:items\\req.yaml": True,
+        "platform:req.md": True,
+        "C:items.json": True,
+        "items/req.yaml": False,
+        "req.md": False,
+        "/home/me/proj/items/req.yaml": False,
+        "C:\\Users\\me\\proj\\items\\req.yaml": False,
+        "C:/proj/items/req.yaml": False,
+    }
