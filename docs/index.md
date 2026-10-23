@@ -43,6 +43,7 @@ build time.
 | [Output formats](output.md) | The generated site and `items.json` |
 | [Performance](performance.md) | Measured `check`/`build`/`ls`/serve-rebuild times from 0 to 1500 items, and where the time goes |
 | [Troubleshooting](troubleshooting.md) | Error messages and what to do about them |
+| [Upgrading from 0.5.0](upgrading.md) | The ordered upgrade path, every breaking change with its symptom and fix |
 
 ## The one-paragraph version
 
