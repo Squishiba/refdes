@@ -236,7 +236,7 @@ def preflight(job):
             job["contract"] = Path(spec["repo"], spec["contract_file"]).read_text(
                 encoding="utf-8", errors="replace").replace("\x00", "")
         except OSError as exc:
-            job["contract"] = f"(contract unreadable: {exc})"
+            raise Pause(f"contract file {spec['contract_file']} is unreadable: {exc}")
     if not shutil.which("prlimit") and not spec.get("allow_no_prlimit"):
         raise Pause("prlimit is not on PATH: tests would run WITHOUT CPU/address-space "
                     "limits; install prlimit, or set \"allow_no_prlimit\": true to accept")
@@ -358,8 +358,9 @@ def record_turn(job, role, rc, out, err):
     agent_id = data.get("agentId")
     if not agent_id:
         raise Pause(f"{role} agent turn reported no agentId: {tail_text(out, 3)}")
+    cwd = agent_cwd(job, agent_id)  # derive BEFORE mutating: a Pause leaves the job untouched
     job[f"{role}_agent"] = agent_id
-    job[f"{role}_cwd"] = agent_cwd(job, agent_id)
+    job[f"{role}_cwd"] = cwd
     save_job(job)  # ids survive a hard crash mid-loop, so resume adopts them
 
 
@@ -371,7 +372,7 @@ def send_to(job, agent_key, message):
                                 timeout=int(job["spec"].get("agent_timeout", 1800)))
     if rc != 0:
         raise Pause(f"send to {agent_key} failed (rc={rc}): {tail_text(err, 5)}")
-    status = json_of(out, "send result").get("status")
+    status = last_json_of(out, "send result").get("status")  # send streams like run
     if status != "completed":
         raise Pause(f"send to {agent_key} ended with status {status!r}")
     check_permits(job)
@@ -436,6 +437,10 @@ def do_spawn(job):
     for role in ("coder", "designer"):  # resume: a recorded id that died must respawn
         if job.get(f"{role}_agent") and str(job[f"{role}_agent"]) not in live:
             job.pop(f"{role}_agent", None), job.pop(f"{role}_cwd", None)
+    for role in ("coder", "designer"):  # a half-recorded live id (no cwd): re-derive it
+        if job.get(f"{role}_agent") and not job.get(f"{role}_cwd"):
+            job[f"{role}_cwd"] = agent_cwd(job, job[f"{role}_agent"])
+            save_job(job)
     need = [r for r in ("coder", "designer") if not job.get(f"{r}_agent")]
     if need:
         prompts = {"coder": coder_prompt(job), "designer": designer_prompt(job)}
@@ -774,7 +779,8 @@ def co_trailer(job):
 def do_land(job):
     wt = job["coder_cwd"]
     head = git(wt, "rev-parse", "HEAD")
-    moved = [p for p in git(wt, "diff", "--name-only", "HEAD~1", "HEAD").splitlines() if p]
+    moved = [p for p in git(wt, "diff", "--name-only", "HEAD~1", "HEAD", check=False)
+             .splitlines() if p]
     frozen = job.get("test_paths") or []
     if (head != job["coder_sha"] and head != job.get("test_landed_sha")
             and git(wt, "rev-parse", "HEAD~1", check=False) == job["coder_sha"]
@@ -951,6 +957,11 @@ def main(argv):
                         "pr_number", "test_review", "execute_round", "review_round", "candidate_round")
                 print(json.dumps({k: job.get(k) for k in keep}, indent=1, sort_keys=True))
                 return EXIT_OK
+            if job.get("phase") == "done":  # completed: replay the summary, never clobber report.md
+                print(json.dumps({"status": job.get("status"), "reason": job.get("reason"),
+                                  "pr_number": job.get("pr_number")}, sort_keys=True))
+                return {"ready-for-human-gate": EXIT_OK, "escalated": EXIT_ESCALATED}.get(
+                    job.get("status"), EXIT_ERROR)
             job["status"], job["reason"] = "running", None
             rc = ensure_preflight(job)
             if rc is not None:

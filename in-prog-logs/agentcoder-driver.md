@@ -1,146 +1,57 @@
 # agentcoder driver
 
-Goal: replace the old Paseo-plugin AgentCoder with a small plain driver
-script. Done: `tools/agentcoder/agentcoder.py`, `tools/agentcoder/README.md`,
-`tests/test_agentcoder_tool.py`, committed off main tip.
+Goal: replace the old Paseo-plugin AgentCoder with a plain driver script.
+Built: `tools/agentcoder/agentcoder.py` (one file), `tools/agentcoder/README.md`,
+`tests/test_agentcoder_tool.py`. The driver runs a fixed phase loop
+(spawn -> test_review -> execute -> candidate -> land -> report), saves
+`job.json` atomically at every transition, and `resume` continues from the
+last save. A blind designer agent writes acceptance tests, a coder agent
+implements the contract; the driver gates both with pytest on base
+(cases.json controls/intended-reds) and on the coder's HEAD, scope-checks
+unfiltered diffs, lands the frozen test commit, opens the PR. It never
+merges anything.
 
-## Design (as shipped)
+## Pilot runs (real CLI)
 
-- Current size: driver 810 non-blank non-comment lines (~1000 soft sanity
-  ceiling, plain readable lines); 89 driver tests, all passing on Linux,
-  module skipped on non-Linux (prlimit is Linux-only); full suite
-  4351 passed / 2 skipped / 0 failed; ruff (E9,F on the two files) clean.
-  All measured with pytest's default basetemp: an earlier "15 failures"
-  claim was an artifact of running with `--basetemp` inside the repo tree
-  (scaffold/sealing tests are sensitive to a temp dir inside a git repo).
-- `run <spec.json> [jobdir]` / `resume <jobdir>` / `status <jobdir>`: every
-  run/resume/status exit prints a JSON object (`status` + `reason` at
-  minimum); a bare `main()` call prints usage and exits 1 (not JSON). The
-  JSON summary is printed exactly once per invocation; the PR line rides
-  stderr.
-- Phases: spawn -> test_review -> execute -> candidate -> land -> report ->
-  done. `job.json` rewritten atomically (temp + `os.replace`) at every
-  transition, so a resume continues from the last save; a crash between a
-  side effect and its save can replay that side effect on resume (README
-  "State machine"). The kill/resume test computes the
-  dry-run save count and parametrizes over every save point.
-- Default jobdir `<repo>/.scratch/agentcoder/<task_id>` (`.scratch/` is
-  gitignored here); keep job dirs out of tracked paths elsewhere.
-- Tools resolved via `AGENTCODER_PASEO` / `AGENTCODER_GH` env vars; the
-  tests use fake `paseo`/`gh` scripts this way. The fake rejects any flag
-  the real CLI does not accept (verified per `paseo <cmd> --help`).
-- Executor runs `test_command` (must be pytest) in a temp detached worktree
-  of base (and of coder HEAD) with frozen test files checked out, scrubbed
-  env, `prlimit` prefix when available, `--junitxml` (job dir) + `--rootdir`
-  pinned for pytest; temp worktrees are removed
-  (`worktree remove --force`) after each round, including on failure.
-- Scope guards: `in-prog-logs/**` (the AGENTS.md progress logs both agents
-  must write) is always allowed; one genuine violation buys the agent one
-  "revert these paths" feedback round before escalating.
-- Land: commit author `agentcoder <noreply@refdes.local>`, trailer
-  `Co-authored-by: <last path segment of coder_model>
-  <noreply@refdes.local>`; a moved coder head bounces back to re-gate at
-  candidate; existing OPEN PR for the branch (or MERGED at the
-  driver-recorded pushed sha) adopted before `gh pr create`; CLOSED
-  unmerged escalates; failing `gh pr list` pauses.
+- The default path (no reviewer, no feedback round-trips) was run end to
+  end on the real CLI; CHK-ATTR-003 produced PR #357.
+- What the pilots found: `--model` alone fails (provider string via
+  `--provider`; the fake now rejects every flag the real CLI lacks);
+  absolute-path `cd` in prompts triggers broad permission prompts (prompts
+  now demand relative paths); `paseo run --json` streams a running doc then
+  the final one (the LAST json doc is parsed); `paseo ls -g` keys differ
+  from the fake's invented ones; `in-prog-logs/**` is required of both
+  agents by AGENTS.md (now scope-exempt).
+- The EDIT-03 job added one live feedback send and one live resume.
+- Everything else that needs a failure to exercise — the feedback loops,
+  test review, crash-window recoveries, `paseo wait`/`stop` under failure —
+  is covered by the fake only, except the two live events above.
+
+## Difficulties
+
+- Parallel spawns raced the fake's state file; fixed with `fcntl.flock`.
+- Outcome judging started as a stdout regex (the `$` anchor missed
+  `-rA`-style summary lines; a `dict(re.findall(...))` inversion inverted
+  the map); it was replaced wholesale by driver-owned junit XML with a
+  pinned `--rootdir`, so agent-printed `PASSED` lines can't forge a green.
+- The fake had invented `paseo ls` keys, which silently disabled the Qwen
+  cap, the sweep and resume adoption; every consumer moved to live-verified
+  keys.
+- `--basetemp` inside a repo tree fails the scaffold/sealing tests
+  spuriously; every green number here is measured at pytest's default
+  basetemp.
+- One failure appeared on CI only: runners lack a git identity the author's
+  `~/.gitconfig` masked; tests are identity-free now.
+
+## Rounds
+
+13+ review rounds; findings shrank from forgeable gates and fake-CLI key
+mismatches to crash-window edge cases.
+
+## Numbers (measured on the final head)
+
+- Driver: 821 non-blank non-comment lines. Driver tests: 96, all passing
+  on Linux; the module skips off Linux and where `prlimit` is absent.
+- Full suite on this branch: 4358 passed / 2 skipped / 0 failed.
+  `ruff --select E9,F` clean on the two files.
 - Exit codes: 0 ready-for-human-gate, 2 escalated, 1 paused/error.
-
-## Difficulties hit
-
-- Parallel spawns raced on the fake paseo's state file; fixed with
-  `fcntl.flock` in the fake (test-side only, driver unaffected).
-- The outcome regex initially anchored `$`, which misses `-rA` summary
-  lines of the form `FAILED <id> - reason`; it was un-anchored with a
-  `[ \t]+` separator (stdout parsing was later replaced by junit XML, see
-  round 7).
-- `dict(re.findall(...))` inverted the outcomes map (status as key) --
-  every test looked NOT-RUN; now `{node: status}`.
-- The test-filter step used raw `fnmatch(p, g)`, so a bare-directory glob
-  like `tests` filtered every file out; `test_paths` became empty and
-  `git checkout <sha> --` (empty pathspec) fully detached the candidate
-  worktree at the *test* commit, making every candidate run red. Fixed to
-  use the same `path_matches` (directory-prefix) rule as `scope_check`,
-  plus an explicit escalation when the designer adds no test files.
-- Reviewed in numbered rounds, one sentence each. Round 1 added Windows
-  skip, spec validation, idempotent PR adoption at land, linked
-  worktree repos, timeouts on every blocking call, `cases_file` and JSON
-  on every early exit. Round 2 closed the false-green (strict outcomes from
-  cases.json, worktree reset on reuse, preflight ordering, prlimit gate).
-  Round 3 made preflight un-skippable via a `preflight_ok` flag, turned
-  swallowed timeouts into honest pauses, and added the land guards and
-  PR-state rules. Round 4 (docs) pinned `base_sha` at first resolution and
-  documented idempotency, blindness-by-instruction, timeout/exit-code
-  behavior and the basetemp caveat. Round 5 made land's moved-head guard
-  forge-proof (no commit-message string matching), sha-scoped the
-  test-review gate, persisted agent ids on every completed turn, and made
-  the tests independent of the machine's git identity (the local
-  `~/.gitconfig` had masked a CI-only failure).
-
-## Rounds 7-11 (review passes)
-
-Rounds were numbered 1-5 then 7+ (round 6 was folded into the next send,
-there was no separate round 6).
-
-Round 7: outcomes stopped trusting agent stdout (driver-owned `--junitxml`,
-pinned `--rootdir`; forged `PASSED` lines can no longer satisfy the gate),
-`{tests}` expands driver-side with a zero-match Pause, and the kill-sweep
-stops job agents by title; tests 43->47.
-
-Round 8: junit node ids resolve class-based classnames to real files, the
-sweep spares recorded agents, resume respawns recorded-dead ones, XPASS
-documented as PASSED, linux-only skip; tests 47->54.
-
-Round 9: every `paseo ls` consumer moved to the live-verified keys (the
-fake had invented keys that silently disabled the Qwen cap, the sweep and
-resume), verdicts must be the final log line, deleted/renamed-away test
-files no longer stall land, a failed land commit un-stages the driver's own
-files, dead reviewers respawn; tests 54->63.
-
-Round 10: land's two crash windows close (test-path-confined dirt on resume
-is the driver's own interrupted checkout; a committed-but-unsaved test head
-is adopted, not re-gated), a missing binary pauses instead of crashing,
-cases.json entries must be objects; mid-round the 700-line cap was lifted
-to ~1000 as a soft sanity ceiling and the fit-to-700 compressions were
-un-golfed; tests 63->67.
-
-Round 11 (first REAL pilot run end to end, plus round-10 reviews):
-`paseo run` takes the provider string via `--provider` (`--model` alone
-fails MISSING_PROVIDER; the fake now rejects unknown flags so this can't
-regress), `in-prog-logs/**` is scope-exempt for both agents and the
-designer's log rides along in the PR, out-of-scope gets one feedback round
-before escalating, prompts demand relative paths (absolute `cd` triggers
-permission prompts), a permission stop pauses with actionable text, the
-final streamed JSON doc wins and the summary/PR line print exactly once,
-dead = closed/error (no "stopped" in the real vocabulary), land's adopt
-matches globs per path (disjoint globs adopted), non-pytest
-`test_command` rejected up front, porcelain `R old -> new` rows parsed;
-tests 67->77.
-
-Round 12 (close-out of the HIGH/MEDIUMs): the scope guards read the
-UNFILTERED diff (`--no-renames`), so deletions and rename-away halves can
-no longer ride the PR (ACMR kept only for the checkout list, which also
-excludes the spec's exact `cases_file`); `paseo wait --json`'s status
-field gates the spawn phase (rc=0 on "error"/not-found is worthless, live
-verified), with the subprocess timeout sitting above the CLI's own; all
-subprocess/text reads decode `errors="replace"` (binary test output and
-binary contracts can't strand job.json in "running"; NULs stripped from
-the pinned contract, argv cannot carry them); land adopts only the
-driver's exact frozen blobs; reviewer ids survive their crash window;
-timeout/model types validated; the contract is pinned into job.json at
-preflight; tests 77->88.
-
-Round 13: land's dirt check accepts only the frozen `test_paths` LIST (the
-`allowed_test_paths` globs let a coder-staged `tests/conftest.py` ride the
-land commit untested), and the land commit itself carries an explicit
-pathspec; README corrected on the one-shot scope-revert round, the land
-gate, the cases exclusion (suffix AND exact `cases_file`), the junit XML's
-location (job dir, untracked), and `status` printing a fixed field subset;
-tests 88->89.
-
-## Status
-
-Finished: the driver ran the real loop end to end in the first pilot (see
-the README's "Verified against the real CLI"). CI state is per-head, not
-global: green is re-measured on each push, never assumed -- an early head
-went red on CI only, where runners lack a git identity that the author's
-local config masked; the identity-independence fixture fixed that.

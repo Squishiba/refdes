@@ -8,6 +8,7 @@ raising from inside the module's own helpers.
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -16,9 +17,9 @@ from types import SimpleNamespace
 import pytest
 
 pytestmark = pytest.mark.skipif(
-    sys.platform != "linux",
-    reason="agentcoder drives a Linux paseo host: fakes use shebang scripts, fcntl "
-           "and the driver's preflight gate requires prlimit, which is Linux-only")
+    sys.platform != "linux" or shutil.which("prlimit") is None,
+    reason="agentcoder drives a Linux paseo host: fakes use shebang scripts and fcntl, "
+           "and the driver's preflight gate requires prlimit (skipped when absent)")
 
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location(
@@ -148,7 +149,9 @@ if cmd == "ls":
                 "thinking": "auto", "status": status, "cwd": cwd, "created": "now"}
     rows = [row(k, v.get("title", ""), "opencode/qwenlocal/Qwen3.8-Flash-Next",
                 v.get("status", "idle"), v["ws"])
-            for k, v in state["agents"].items() if v["ws"]]
+            for k, v in state["agents"].items()
+            if v["ws"] and k not in S.get("ls_hide", [])
+            and v["role"] not in S.get("ls_hide_roles", [])]
     rows += [row("q%d" % i, "busy", "opencode/qwenlocal/Qwen3.8-Flash-Next",
                  "running", "~/busy") for i in range(S.get("running_qwen", 0))]
     rows += [row("o%d" % i, "other", "claude/claude-sonnet-5-5",
@@ -219,6 +222,8 @@ elif cmd == "send":
             write_commit(rec["ws"], queue[n]["files"], "fake fix")
         rec["sends"] = n + 1
         save()
+    if S.get("send_stream"):  # real send --json streams a running doc, then the final
+        print(json.dumps({"status": "running"}))
     print(json.dumps({"status": "completed"}))
 elif cmd == "stop":
     rec = state["agents"].get(ARGS[1])
@@ -1483,6 +1488,118 @@ def test_land_rejects_post_gate_test_path_commit(tmp_path, monkeypatch):
     gitat(wt, "commit", "-qm", "coder adds a test helper")
     assert env.resume() == 2
     assert "conftest.py" in env.job()["reason"]
+
+
+def test_land_rejects_frozen_path_commit_with_changed_blob(tmp_path, monkeypatch):
+    # the blob-equality arm of adoption: a coder commit on top of the gated
+    # sha that touches ONLY a frozen test path but CHANGES its content is not
+    # the driver's checkout; it bounces to candidate and trips the code guard
+    env = build_env(tmp_path, monkeypatch, name="blobarm")
+    real = agentcoder.run_cmd
+
+    def crash(argv, *a, **k):
+        if "commit" in argv:
+            raise KeyboardInterrupt
+        return real(argv, *a, **k)
+
+    monkeypatch.setattr(agentcoder, "run_cmd", crash)
+    with pytest.raises(KeyboardInterrupt):
+        env.run()  # died between land's staging and its commit
+    monkeypatch.setattr(agentcoder, "run_cmd", real)
+    wt = Path(env.job()["coder_cwd"])
+    gitat(wt, "checkout", "--", "tests/test_add.py")  # drop the driver's staged copy
+    (wt / "tests" / "test_add.py").write_text("def test_control():\n    assert 0\n")
+    gitat(wt, "add", "-A")
+    gitat(wt, "commit", "-qm", "coder edits the frozen test")
+    assert env.resume() == 2
+    assert "test_add.py" in env.job()["reason"]
+    assert not [c for c in env.gh_calls() if c[:2] == ["pr", "create"]]
+
+
+def test_record_turn_pause_leaves_no_half_record(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="halfrec",
+                    scenario_overrides={"ls_hide_roles": ["designer"]})
+    assert env.run() == 1  # designer's cwd is underivable: Pause, no half-mutated save
+    job = env.job()
+    assert job["status"] == "paused" and "no worktree path" in job["reason"]
+    assert not job.get("designer_agent") and not job.get("designer_cwd")
+    env.scenario["ls_hide_roles"] = []
+    env.scen_path.write_text(json.dumps(env.scenario))
+    assert env.resume() == 0  # clean resume: designer spawns fresh, job completes
+    assert env.job()["status"] == "ready-for-human-gate"
+
+
+def test_resume_derives_cwd_for_recorded_live_agent(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="recwd")
+    real = agentcoder.record_turn
+
+    def crash(job, role, rc, out, err):
+        if role == "designer":  # the pre-fix save: id set, cwd derivation died
+            job["designer_agent"] = json.loads(out.strip().splitlines()[-1])["agentId"]
+            job.pop("designer_cwd", None)
+            agentcoder.save_job(job)
+            raise KeyboardInterrupt
+        return real(job, role, rc, out, err)
+
+    monkeypatch.setattr(agentcoder, "record_turn", crash)
+    with pytest.raises(KeyboardInterrupt):
+        env.run()
+    monkeypatch.setattr(agentcoder, "record_turn", real)
+    assert env.resume() == 0  # live id without cwd: re-derived from paseo ls
+    assert env.job()["designer_cwd"]
+
+
+def test_send_accepts_streamed_json(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="sendstream", scenario_overrides={
+        "designer_files": {"tests/test_add.py": TEST_FILE, "tests/t1.cases.json": CASES_OK,
+                           "docs/bad.md": "out of scope"},
+        "on_send": {"designer": [{"files": {}, "delete": ["docs/bad.md"]}]},
+        "send_stream": True})  # real send --json streams a running doc, then the final
+    assert env.run() == 0  # strict json_of would see "extra data" and pause with rc 1
+    assert any(c[:1] == ["send"] for c in env.calls())
+
+
+def test_resume_done_job_keeps_report(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="donedup")
+    assert env.run() == 0
+    rep = Path(env.jobdir) / "report.md"
+    before = rep.read_text()
+    assert "ready-for-human-gate" in before
+    assert env.resume() == 0
+    assert rep.read_text() == before  # the completed report is never rewritten as running
+
+
+def test_unreadable_contract_pauses_at_preflight(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="badcontract")
+    contract = env.repo / "contract.md"
+    contract.chmod(0o000)  # a real file that read_text cannot open: PermissionError
+    try:
+        assert env.run() == 1
+        assert env.job()["status"] == "paused" and "unreadable" in env.job()["reason"]
+        assert spawn_count(env, "coder") == 0  # no agents run on contract garbage
+    finally:
+        contract.chmod(0o644)  # keep tmp_path teardown clean
+
+
+def test_junit_xml_in_jobdir_and_rootdir_passed(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, name="junitloc")
+    real = agentcoder.run_cmd
+    seen = []
+
+    def spy(argv, *a, **k):
+        if "-m" in argv and argv[argv.index("-m") + 1] == "pytest":
+            # rootdir must exist AT CALL TIME: temp worktrees are removed after rounds
+            seen.append((list(argv), Path(argv[argv.index("--rootdir") + 1]).is_dir()))
+        return real(argv, *a, **k)
+
+    monkeypatch.setattr(agentcoder, "run_cmd", spy)
+    assert env.run() == 0
+    assert seen  # execute + candidate rounds
+    for argv, rootdir_ok in seen:
+        assert rootdir_ok
+        xml = Path(argv[argv.index("--junitxml") + 1])
+        assert xml.parent == Path(env.jobdir)  # job dir, NOT inside a worktree under test
+    assert list(Path(env.jobdir).glob("junit-*.xml"))
 
 
 def test_reviewer_id_adopted_after_crash(tmp_path, monkeypatch):

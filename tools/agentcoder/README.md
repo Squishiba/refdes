@@ -1,7 +1,7 @@
 # agentcoder — a small driver for coder / blind test designer / executor loops
 
 `tools/agentcoder/agentcoder.py` is a **plain driver script** (stdlib only,
-one file; currently 810 non-blank/non-comment lines — ~1000 is a soft
+one file; currently 821 non-blank/non-comment lines — ~1000 is a soft
 sanity ceiling, not enforced by a check) that runs the AgentCoder paper
 loop against Paseo agents:
 
@@ -34,7 +34,7 @@ dirs out of tracked paths (in this repo `.scratch/` is gitignored). Exit
 codes: **0** done (`ready-for-human-gate`), **2** escalated, **1**
 error/paused. `status` on an existing job prints a fixed **subset** of
 the job's recorded fields (task_id, phase, status, reason, the SHAs,
-pr_number, and the round counters) as JSON and exits 0; `status` on a
+pr_number, test_review, and the round counters) as JSON and exits 0; `status` on a
 missing/invalid jobdir prints a paused
 JSON (`"no job.json in ..."`) and exits 1, writing no report.
 Exits that run the loop with a `JOBDIR` (preflight pause, mid-run pause,
@@ -190,8 +190,8 @@ spawn ──► test_review ──► execute ──► candidate ──► land
     `allowed_code_paths`. A round is
     green only when the pytest run exits 0 **and** **every** id declared in
     `cases.json` shows outcome PASSED for the coder's code; SKIPPED/ERROR/
-    missing and exit 5 (nothing collected) all count as red even if the exit
-    code is 0, with the observed outcome fed back per id. Outcomes come from
+    missing count as red even when pytest exits 0, and exit 5 (nothing
+    collected) is red by itself — with the observed outcome fed back per id. Outcomes come from
     junit XML, which has no XFAIL/XPASS status: a non-strict xfail arrives as
     SKIPPED (red), and an xfail that passes (XPASS) as a plain PASSED
     testcase — XPASS therefore counts as PASSED, by decision.
@@ -249,8 +249,9 @@ via `paseo permit ls` showing the job's agents), a failing `gh pr list` —
 **pause** the job: state saved, precise reason, `resume` continues (after
 re-running the preflight gates). Expected loop outcomes — a contract
 violation, a scope violation repeated after its one-shot revert round,
-`max_rounds` exhausted, a coder branch that moved or went dirty
-before land, a CLOSED unmerged PR — **escalate** (exit 2) for a human. The
+`max_rounds` exhausted, dirt at land outside the frozen test paths (a
+coder head that MOVED is not an escalation: it bounces back to candidate
+for a re-gate), a CLOSED unmerged PR — **escalate** (exit 2) for a human. The
 driver never guesses and has no stale-SHA detection of its own: coder heads
 are re-read from git each round, while the base SHA is pinned at its first
 resolution.
@@ -310,8 +311,9 @@ never raise a `UnicodeDecodeError` out of the driver and strand
   two dialects diverge: fnmatch treats `{`, `,`, `}` literally, so a
   brace pattern like `tests/{a,b}.py` **matches nothing** — a
   designer/coder commit is then flagged, buys the one-shot revert round,
-  and the scope check **escalates** loudly on the repeat. A test pattern that matches no file in the worktree **pauses**
-  the job. Both are loud; keep patterns in a dialect both sides read the
+  and the scope check **escalates** loudly on the repeat. The job **pauses**
+  when the expansion of ALL `allowed_test_paths` globs together matches no
+  files. Both are loud; keep patterns in a dialect both sides read the
   same way. `in-prog-logs/` is exempt from **both** scope checks, for
   both agents (the AGENTS.md progress logs) — designer and coder logs
   ride along into the PR.
