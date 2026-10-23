@@ -90,8 +90,9 @@ class Baseline:
     # deliberately does not store old field values, to avoid the new
     # machinery general field-level diffing would need. `verdict` (a copy of
     # the item's own `status` value, stored the same way `title` already is)
-    # and `calc_hash` (a hash of the item's ```calc block source, alongside
-    # the existing whole-item `hash`) are a narrow, deliberate exception to
+    # and `calc_hash` (a hash of the item's ```calc block source and inline
+    # calc spans, alongside the existing whole-item `hash`) are a narrow,
+    # deliberate exception to
     # that, not a reversal of it -- see docs/design/stale-arithmetic-signal.md
     # and lifecycle.md §3's own note on this. They exist for exactly one
     # purpose (lifecycle.diff_against's stale_arithmetic list: did the
@@ -345,7 +346,8 @@ def _items_map(project: Project) -> dict[str, dict]:
     deliberate exception to this module's \"assembly, not new machinery\"
     framing. Both are optional per item: ``verdict`` only for a type with a
     verdict-bearing status field, and ``calc_hash`` only for an item with at
-    least one ``calc`` block. They exist solely to identify the bounded
+    least one ``calc`` block or inline calc span (an inline-only item is
+    stamped). They exist solely to identify the bounded
     verdict-without-arithmetic transition; unlike general field-level
     history, they cannot reconstruct any other prior field value.
     """

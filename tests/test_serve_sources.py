@@ -922,6 +922,43 @@ def test_the_proposal_refuses_a_name_the_item_already_assigns(served):
     assert snapshot_tree(root) == before
 
 
+SPAN_ITEMS = """\
+defaults: { type: decision }
+items:
+  - id: DEC-001
+    citations:
+      - path: analysis/budget.csv
+    body: |
+      The rail budget: `rail_load := 3 V * 4 = 12 V` per the sheet.
+"""
+
+
+def test_an_inline_span_name_is_taken_and_its_unit_is_suggested(tmp_path):
+    # Spans and fences share one item-wide scope (inline-calc.md section 1),
+    # so a name an inline span assigns collides with a proposed source line
+    # exactly as a fence name does -- and the unit the span spells on its
+    # stored result belongs in the panel's unit suggestions.
+    root = make_root(tmp_path, items=SPAN_ITEMS)
+    fetch(root)
+    app = start(root)
+    try:
+        client = Client(app)
+        status, payload = client.api_get(
+            sources_url("DEC-001", "/propose")
+            + "?path=analysis/budget.csv&key=eff&unit=1&name=rail_load"
+        )
+        assert status == 422, payload
+        assert "already assigned in this item" in payload["error"]
+        status, payload = client.api_get(
+            sources_url("DEC-001", "/propose")
+            + "?path=analysis/budget.csv&key=eff&unit=1&name=my_eff"
+        )
+        assert status == 200, payload
+        assert payload["units"] == ["1", "V"]
+    finally:
+        app.stop()
+
+
 def test_the_proposal_refuses_a_row_that_is_not_selectable(tmp_path):
     root = make_root(tmp_path, csv=BROKEN_CSV)
     app = start(root)

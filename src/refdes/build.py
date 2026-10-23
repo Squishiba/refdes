@@ -2268,6 +2268,7 @@ def _hash_payload(
     source_inputs=None,
     image_inputs=None,
     strip_inline_composite: bool = False,
+    strip_display: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Everything compute_hashes() and hash_for_format() have in common: which
     fields/body enter the hash, and under what normalization. The two things
@@ -2348,7 +2349,12 @@ def _hash_payload(
 
             span_lines = body_text.splitlines()
             links_mod._calc_ref_rewrites(
-                span_lines, 0, len(span_lines), {}, strip_inline_composite=True
+                span_lines,
+                0,
+                len(span_lines),
+                {},
+                strip_inline_composite=True,
+                strip_display=strip_display,
             )
             body_text = "\n".join(span_lines)
         normalized = re.sub(r"\s+", " ", body_text).strip()
@@ -2788,7 +2794,12 @@ def compute_hashes(project: Project) -> None:
         item.content_hash = _hash_blob(payload_for(item, spec))
 
 
-def hash_payload_builder(project: Project, hash_format: int, strip_inline_composite: bool | None = None):
+def hash_payload_builder(
+    project: Project,
+    hash_format: int,
+    strip_inline_composite: bool | None = None,
+    strip_display: dict[str, str] | None = None,
+):
     """A ``(item, spec) -> payload`` closure computing _hash_payload() under
     ``hash_format``'s definition, reused by compute_hashes() (current
     format) and hash_for_format() (any earlier one) so the two can never
@@ -2828,6 +2839,7 @@ def hash_payload_builder(project: Project, hash_format: int, strip_inline_compos
             link_values=lambda targets: sorted(t.split("@", 1)[0] for t in targets),
             checks_values=_checks_display_only,
             strip_inline_composite=strip_inline_composite,
+            strip_display=strip_display,
         )
     by_key = _key_index(project)
     checks_values = (
@@ -2857,6 +2869,7 @@ def hash_payload_builder(project: Project, hash_format: int, strip_inline_compos
         source_inputs=source_inputs,
         image_inputs=image_inputs,
         strip_inline_composite=strip_inline_composite,
+        strip_display=strip_display,
     )
 
 
@@ -2893,10 +2906,32 @@ def hash_for_format(item: Item, project: Project, hash_format: int) -> str:
     return _hash_blob(payload)
 
 
+def _span_composite_targets(item: Item) -> list[tuple[str, str, str]]:
+    """(target, display, key) for every composite cross-item target in
+    this item's triggered inline spans, in source order. Shared by the
+    faithfulness gate and the historical-display variants so they can
+    never disagree about which targets they cover."""
+    from . import inline_calc as inline_calc_mod
+
+    found: list[tuple[str, str, str]] = []
+    for _offset, _start, _end, content in inline_calc_mod.triggered_span_events(
+        item.body.splitlines()
+    ):
+        ref = inline_calc_mod.span_cross_ref(inline_calc_mod.parse_span(0, content))
+        if ref is None:
+            continue
+        display, sep, key = ref.group("target").partition("@")
+        if not sep:
+            continue
+        found.append((ref.group("target"), display, key))
+    return found
+
+
 def _span_composites_are_faithful(item: Item, project: Project) -> bool:
     """True when every composite cross-item target in this item's triggered
-    inline spans is exactly what slice-2's expansion writes for it: the
-    display half names the item that owns the key half.
+    inline spans is a form slice-2's expansion (and its rename refresh)
+    legitimately writes: the key half names a live item, and the display
+    half is that item's current id OR one of its declared former ids.
 
     The format <= 5 strip (see _hash_payload) is the inverse of that
     expansion, so it is a faithful legacy reading of a composite *only*
@@ -2908,21 +2943,19 @@ def _span_composites_are_faithful(item: Item, project: Project) -> bool:
     withdrawn, the as-written reading stays -- which the format's own code
     hashed verbatim -- so the edit is reported, exactly as it was before
     the variant set existed. A bare target has no key half to fail on.
+    The former-id half of the display test (round-10 review): an
+    ordinary upstream display-id rename refreshes the composite label
+    (`links._planned_target`), so a *stale* display half naming a former
+    id of the key's owner is the signature of the rename, not an edit --
+    the hashes_in_format variants below offer the stripped readings over
+    those historical halves so pre-rename records keep matching.
     """
-    from . import inline_calc as inline_calc_mod
-
-    by_display = {i.id: i for i in project.local_items}
-    for _offset, _start, _end, content in inline_calc_mod.triggered_span_events(
-        item.body.splitlines()
-    ):
-        ref = inline_calc_mod.span_cross_ref(inline_calc_mod.parse_span(0, content))
-        if ref is None:
-            continue
-        display, sep, key = ref.group("target").partition("@")
-        if not sep:
-            continue
-        target_item = by_display.get(display)
-        if target_item is None or target_item.key != key:
+    by_key = {item.key: item for item in project.local_items if item.key}
+    for _target, display, key in _span_composite_targets(item):
+        owner = by_key.get(key)
+        if owner is None:
+            return False
+        if display != owner.id and project.former_ids.get(display) != owner.id:
             return False
     return True
 
@@ -2979,7 +3012,46 @@ def hash_for_format_variants(item: Item, project: Project, hash_format: int) -> 
     if not _span_composites_are_faithful(item, project):
         return {live}
     stripped = _hash_blob(hash_payload_builder(project, hash_format)(item, spec))
-    return {stripped, live}
+    variants = {stripped, live}
+    # Historical display halves (round-10 review): an ordinary upstream
+    # display-id rename refreshes a faithful composite's label, moving the
+    # stripped body off the text a pre-rename record was computed over.
+    # The key owner's declared former ids are legitimate historical
+    # display halves -- offer the stripped readings over every combination
+    # of (current id, former ids) per composite target, so a pre-rename
+    # baseline/seal hash over the old label keeps matching. The
+    # as-written-as-stripped combination is the `stripped` reading above.
+    # A target whose key resolves to no live item fails the gate above,
+    # so deletions never reach this code as a silent stripped pass.
+    by_key = {i.key: i for i in project.local_items if i.key}
+    formers: dict[str, list[str]] = {}
+    for old, current in project.former_ids.items():
+        formers.setdefault(current, []).append(old)
+    options: list[tuple[str, list[str]]] = []
+    as_written: dict[str, str] = {}
+    for target, display, key in _span_composite_targets(item):
+        if target in as_written:
+            continue
+        as_written[target] = display
+        owner = by_key[key]
+        opts = [owner.id] + sorted(formers.get(owner.id, ()))
+        options.append((target, opts))
+    combinations = 1
+    for _target, opts in options:
+        combinations *= len(opts)
+    if options and combinations <= 16:
+        import itertools
+
+        for combo in itertools.product(*(opts for _target, opts in options)):
+            mapping = dict(zip(as_written, combo))
+            if mapping == as_written:
+                continue
+            variants.add(
+                _hash_blob(
+                    hash_payload_builder(project, hash_format, strip_display=mapping)(item, spec)
+                )
+            )
+    return variants
 
 
 def legacy_hash_for(item: Item, project: Project) -> str:

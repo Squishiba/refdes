@@ -1071,6 +1071,7 @@ def _calc_ref_rewrites(
     include_inline: bool = False,
     inline_start: int = 0,
     strip_inline_composite: bool = False,
+    strip_display: dict[str, str] | None = None,
 ) -> set[str]:
     """Rewrite bare calc-reference targets inside one item's line span, and
     refresh stale composite display halves, in place. Operates only on the
@@ -1124,7 +1125,10 @@ def _calc_ref_rewrites(
             else:
                 if "@" not in target:
                     continue
-                new_target = target.partition("@")[0]
+                if strip_display and target in strip_display:
+                    new_target = strip_display[target]
+                else:
+                    new_target = target.partition("@")[0]
             inline_entries.setdefault(inline_start + offset, []).append(
                 (
                     span_start,

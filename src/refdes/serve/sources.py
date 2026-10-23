@@ -793,6 +793,23 @@ def _proposed_name(key: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_") or "value"
 
 
+def _live_spans(item: Item) -> list[inline_calc.InlineSpan]:
+    """The item's well-formed inline calc spans. A malformed span has no
+    meaningful name/unit (the build reports it at the line anyway), so it
+    contributes nothing to the suggestions below."""
+    return [span for span in inline_calc.triggered_spans(item.body) if not span.error]
+
+
+def _span_result_unit(span: inline_calc.InlineSpan) -> str:
+    """The unit spelled on a span's stored result (`12 V` -> `V`); empty
+    for a dimensionless result."""
+    match = inline_calc.LITERAL_RE.match(span.result)
+    if match is None:
+        return ""
+    tail = span.result[match.end(1):].strip()
+    return tail.strip("[]")
+
+
 def _item_units(item: Item) -> list[str]:
     """Units this item's own calc lines already declare, `1` first.
 
@@ -800,17 +817,31 @@ def _item_units(item: Item) -> list[str]:
     (docs/design/calc-sources.md §6), and it is listed as a *suggestion* like
     the rest of them: a defaulted unit is the silent 1000x wrong answer this
     whole feature is shaped around, so the panel offers and the author picks.
-    """
+
+    Inline calc spans count too: a span's declared `| unit` and the unit
+    spelled on its stored result are units this item already uses, and the
+    evaluator's one scope makes its names real assignments (see
+    `_item_names`)."""
     used = {line.annotation.strip() for line in item.calcs if line.annotation.strip()}
+    for span in _live_spans(item):
+        used.add(span.unit.strip())
+        used.add(_span_result_unit(span))
+    used.discard("")
     return ["1"] + sorted(u for u in used if u != "1")
 
 
 def _item_names(item: Item) -> set[str]:
     """Every name this item's calc blocks already assign, from the lines the
-    evaluator produced for it. A collision is a build error the diagnostic gate
-    would refuse anyway (the evaluator's own whole-item duplicate check), so
-    catching it here is a courtesy and not a new rule."""
-    return {line.name for line in item.calcs if line.name}
+    evaluator produced for it, plus every name its inline calc spans assign:
+    spans and fences share one item-wide scope, so a span name collides with
+    a proposed source line exactly as a fence name does. A collision is a
+    build error the diagnostic gate would refuse anyway (the evaluator's own
+    whole-item duplicate check), so catching it here is a courtesy and not a
+    new rule."""
+    return (
+        {line.name for line in item.calcs if line.name}
+        | {span.name for span in _live_spans(item)}
+    )
 
 
 def _checked_unit(value: str, unit: str) -> None:

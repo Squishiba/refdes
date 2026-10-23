@@ -1203,3 +1203,179 @@ def test_keys_adopt_control_edited_composite_span_stays_uncomparable(tmp_path):
     assert "id" not in left
     assert "DEC-005" in project.seal_violations  # build-time audit signal
     assert seal.load_seals(project)["DEC-005"] == AUTHORED_SEALED_UNDER_FORMAT5["DEC-005"]
+
+
+RENAME_CONFIG = (
+    "site: { title: T, out: _site }\n"
+    "types:\n"
+    "  decision: { prefix: DEC, append_only: true, fields: {} }\n"
+    "  log: { prefix: LOG, append_only: true, fields: {} }\n"
+)
+RENAME_FIXTURE = {
+    "a.md": (
+        "---\nkey: w4fq61wx8v7\nid: DEC-001\ntype: decision\n---\n\n"
+        "```calc\nV_in = 12 V\n```\n"
+    ),
+    "log.md": (
+        "---\nkey: rff8vmeh0av\nid: LOG-001\ntype: log\n---\n\n"
+        "Tracks it: `Vb := DEC-001.V_in = 12 V`.\n"
+    ),
+}
+# Real main-code (c3073c6, HASH_FORMAT 5) seal hashes over RENAME_FIXTURE's
+# exact bytes (build x2, 2026-10-22) -- the format-5 record a live project
+# carries when the owner of the span's target renames its display id.
+RENAME_SEALED_UNDER_FORMAT5 = {
+    "DEC-001": "e44d58abd0c521ca",
+    "LOG-001": "641abfaf38e45eae",
+}
+
+
+def _write_scalar_seal(tmp_path, entries: dict[str, str]) -> None:
+    (tmp_path / ".refdes").mkdir(exist_ok=True)
+    body = "".join(f"  {item_id}: {h}\n" for item_id, h in entries.items())
+    (tmp_path / ".refdes" / "log-seal.yaml").write_text(
+        f"sealed:\n{body}", encoding="utf-8"
+    )
+
+
+def _rename_item(tmp_path, name: str, old_id: str, new_id: str) -> None:
+    _edit(
+        tmp_path,
+        name,
+        f"id: {old_id}\n",
+        f"id: {new_id}\nformer_ids: [{old_id}]\n",
+    )
+
+
+def test_upstream_display_rename_keeps_format5_seal_of_referring_span(tmp_path):
+    """MEDIUM (round-10 review, reviewer's repro): a format-5 seal of a
+    REFERRING span item must survive an ordinary display-id rename of the
+    target. The writable load expands `DEC-001.V_in` to `DEC-001@key`; the
+    rename (id: DEC-002, former_ids: [DEC-001], key preserved) refreshes
+    the label to DEC-002@key -- an author-side text move no edit produced.
+    Format <= 5 hashed that span's text, so the stripped reading over the
+    *historical* display half (a declared former id of the key's owner)
+    belongs in hashes_in_format; the gate accepts a display half that is
+    the owner's live id OR one of its former ids. At head the load's build
+    fails the sealed item with 'modified since it was sealed' although the
+    authored text and the format-6 hash never moved. Renaming twice
+    (DEC-002 -> DEC-003) must keep the original DEC-001-era record valid
+    too."""
+    project = _build(tmp_path, RENAME_FIXTURE, RENAME_CONFIG)
+    assert "DEC-001@w4fq61wx8v7.V_in" in (tmp_path / "items" / "log.md").read_text()
+    _write_scalar_seal(tmp_path, RENAME_SEALED_UNDER_FORMAT5)
+    project = _rebuild(tmp_path)
+    assert project.seal_violations == []
+    before = project.item_by_id("LOG-001").content_hash
+    _rename_item(tmp_path, "a.md", "DEC-001", "DEC-002")
+    project = _rebuild(tmp_path)
+    assert "DEC-002@w4fq61wx8v7" in (tmp_path / "items" / "log.md").read_text()
+    assert project.item_by_id("LOG-001").content_hash == before
+    assert not project.errors, _errors(project)
+    assert project.seal_violations == []
+    _edit(
+        tmp_path, "a.md", "id: DEC-002\nformer_ids: [DEC-001]\n",
+        "id: DEC-003\nformer_ids: [DEC-001, DEC-002]\n",
+    )
+    project = _rebuild(tmp_path)
+    assert "DEC-003@w4fq61wx8v7" in (tmp_path / "items" / "log.md").read_text()
+    assert not project.errors, _errors(project)
+    assert project.seal_violations == []
+
+
+def test_keyed_format5_seal_survives_upstream_rename(tmp_path):
+    """The same record in adopted (key-keyed, hash_format: 5) shape -- the
+    form `refdes keys adopt` writes -- must survive the rename too."""
+    from refdes import seal
+
+    project = _build(tmp_path, RENAME_FIXTURE, RENAME_CONFIG)
+    (tmp_path / ".refdes").mkdir(exist_ok=True)
+    (tmp_path / ".refdes" / "log-seal.yaml").write_text(
+        "sealed:\n"
+        f"  w4fq61wx8v7: {{id: DEC-001, hash: {RENAME_SEALED_UNDER_FORMAT5['DEC-001']}, hash_format: 5}}\n"
+        f"  rff8vmeh0av: {{id: LOG-001, hash: {RENAME_SEALED_UNDER_FORMAT5['LOG-001']}, hash_format: 5}}\n",
+        encoding="utf-8",
+    )
+    project = _rebuild(tmp_path)
+    assert project.seal_violations == []
+    _rename_item(tmp_path, "a.md", "DEC-001", "DEC-002")
+    project = _rebuild(tmp_path)
+    assert not project.errors, _errors(project)
+    assert project.seal_violations == []
+    assert set(seal.load_seals(project)) == {"w4fq61wx8v7", "rff8vmeh0av"}
+
+
+def test_format5_baseline_survives_upstream_rename(tmp_path):
+    """Baseline half of the same story: a format-5 revision entry for the
+    referrer (recorded over the DEC-001-era text) must migrate -- carried
+    forward, not reported uncomparable -- across the target's rename. The
+    renamed target's own display-id-keyed entry is the ordinary removed/
+    added diff case (a display id with no live item is left alone), so it
+    is neither carried nor uncomparable."""
+    from refdes import lifecycle
+
+    project = _build(tmp_path, RENAME_FIXTURE, RENAME_CONFIG)
+    _write_baseline(
+        tmp_path,
+        {
+            "DEC-001": {"hash": RENAME_SEALED_UNDER_FORMAT5["DEC-001"], "hash_format": 5},
+            "LOG-001": {"hash": RENAME_SEALED_UNDER_FORMAT5["LOG-001"], "hash_format": 5},
+        },
+    )
+    baseline = lifecycle.load_baseline(project, "rev-a")
+    _rename_item(tmp_path, "a.md", "DEC-001", "DEC-002")
+    project = _rebuild(tmp_path)
+    baseline = lifecycle.load_baseline(project, "rev-a")
+    report = lifecycle.migrate_hash_format(project, baseline, write=False)
+    assert report.uncomparable == []
+    assert report.carried == ["LOG-001"]
+
+
+def test_renamed_referring_item_keeps_its_format5_seal(tmp_path):
+    """Renaming the DOWNSTREAM (referring) item is orthogonal: content
+    hashes never cover the display id, and the seal entry (keyed by the
+    referrer's old display id) still resolves through former_ids."""
+    project = _build(tmp_path, RENAME_FIXTURE, RENAME_CONFIG)
+    _write_scalar_seal(tmp_path, RENAME_SEALED_UNDER_FORMAT5)
+    project = _rebuild(tmp_path)
+    _rename_item(tmp_path, "log.md", "LOG-001", "LOG-002")
+    project = _rebuild(tmp_path)
+    assert not project.errors, _errors(project)
+    assert project.seal_violations == []
+
+
+def test_span_composite_with_foreign_display_half_stays_uncomparable(tmp_path):
+    """The negative: a display half that is NOT the key owner's live id
+    and NOT one of its former ids (here, a crossed reference to a
+    different LIVE item) is not a legitimate historical reading. The gate
+    fails, the stripped reading is withdrawn (round-7 posture), and the
+    format-5 record over the DEC-001-era text reports modified -- the
+    widening must certify renames, never crossed keys."""
+    files = dict(RENAME_FIXTURE)
+    files["c.md"] = (
+        "---\nid: DEC-003\ntype: decision\n---\n\n```calc\nV_x = 5 V\n```\n"
+    )
+    project = _build(tmp_path, files, RENAME_CONFIG)
+    _write_scalar_seal(tmp_path, RENAME_SEALED_UNDER_FORMAT5)
+    project = _rebuild(tmp_path)
+    assert project.seal_violations == []
+    _edit(tmp_path, "log.md", "DEC-001@w4fq61wx8v7", "DEC-003@w4fq61wx8v7")
+    project = _rebuild(tmp_path)
+    assert "DEC-003@w4fq61wx8v7" in (tmp_path / "items" / "log.md").read_text()
+    assert "LOG-001" in project.seal_violations
+
+
+def test_span_target_deleted_fails_loudly_after_rename_chain(tmp_path):
+    """Deleting the target of a composite span target must fail loudly
+    (missing-target error), never silently pass on a stripped reading: the
+    gate withdraws the stripped reading when the key resolves to no live
+    item, and the build's own missing-target error is what the author
+    sees."""
+    project = _build(tmp_path, RENAME_FIXTURE, RENAME_CONFIG)
+    _write_scalar_seal(tmp_path, RENAME_SEALED_UNDER_FORMAT5)
+    project = _rebuild(tmp_path)
+    (tmp_path / "items" / "a.md").unlink()
+    project = _rebuild(tmp_path)
+    assert any(
+        "DEC-001" in d.message and d.level == "error" for d in project.diagnostics
+    ), [d.message for d in project.diagnostics]
