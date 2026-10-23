@@ -93,3 +93,26 @@ and a phantom diagnostic was published.
   reviewer's `C:\work\x.md`/`C:/work/x.md` spellings.
 - `tests/test_vscode_extension.py` (11) + `tests/test_imports.py` (10) +
   `tests/test_import_diagnostic_source.py` (5): 26 passed.
+
+## PR #361 review round 3 (MEDIUM: path syntax is the wrong layer)
+
+Reviewer: the colon heuristic hid legitimate local diagnostics in files
+whose names contain a colon (`items/notes:2026.md`, legal on
+Linux/macOS). Replaced with a membership check:
+
+- `publishDiagnostics` now builds a Set of ids of `data.items` entries
+  with `external` (plus their `former_ids`, as itemsById indexes them)
+  and skips a diagnostic whose `d.item` is in it; the legacy
+  `<...>` pseudo-path skip is kept. The colon heuristic and
+  `isImportedItemPath` are gone; a diagnostic with no `d.item` and a
+  normal path always publishes.
+- Test replaced:
+  `test_imported_item_diagnostics_are_skipped_by_membership_not_path`
+  runs the real extracted `publishDiagnostics()` under node with stubbed
+  vscode/path and pins: imported item skipped under both spellings,
+  retired id of an imported item skipped, local `items/notes:2026.md`
+  published, local plain path published, no-`d.item` published, no-file
+  skipped.
+- Changelog fragment's extension sentence rewritten ("by the item index,
+  not by path spelling"). PR body refreshed via gh api.
+- Re-measured: vscode 11 + imports 10 + diagnostic-source 5 = 26 passed.

@@ -167,41 +167,29 @@ function updateStatusBar(data) {
   statusBar.show();
 }
 
-// A diagnostic location that names no workspace file, in its two spellings:
-// the old `<import:platform>` pseudo-path (imported items whose artifact
-// record had no source), and the import-qualified `platform:items/req.yaml`
-// (import name, colon, upstream-relative path) used since. Import names are
-// free strings that may contain "/", so the prefix is everything up to the
-// first colon in the whole string, not the first path segment
-// (`vendor/platform:items/req.yaml`). Publishing these would paint a phantom
-// diagnostic onto a file that does not exist. A Windows drive path (`C:\x`,
-// `C:/x`) is the one colon form that IS a real file, so it is exempt; the
-// trade-off is that a local path with a colon outside a drive prefix (a file
-// literally named `notes:2026.md`) is treated as import-qualified and stays
-// out of the panel.
-function isImportedItemPath(file) {
-  if (file.startsWith("<")) return true;
-  const colon = file.indexOf(":");
-  if (colon === -1) return false;
-  if (
-    colon === 1 &&
-    /^[A-Za-z]$/.test(file[0]) &&
-    (file[2] === "/" || file[2] === "\\")
-  ) {
-    return false;
-  }
-  return true;
-}
-
 function publishDiagnostics(root, data) {
   diagnostics.clear();
   /** @type {Map<string, vscode.Diagnostic[]>} */
   const byFile = new Map();
 
+  // Diagnostics on imported items name an upstream location nobody can
+  // open in this workspace -- the import-qualified `platform:items/req.yaml`
+  // or, for artifacts with no recorded source, the legacy `<import:platform>`
+  // pseudo-path. Membership of the item index decides, not path spelling:
+  // a local file may legitimately contain a colon (`items/notes:2026.md`)
+  // and its diagnostics must keep publishing. Retired ids count too, the
+  // way itemsById indexes them, so a diagnostic naming a retired id of an
+  // imported item is recognised as one.
+  const importedIds = new Set();
+  for (const item of data.items || []) {
+    if (!item.external) continue;
+    if (item.id) importedIds.add(item.id);
+    for (const former of item.former_ids || []) importedIds.add(former);
+  }
+
   for (const d of data.diagnostics || []) {
-    // Imported items report a pseudo-path or an import-qualified path,
-    // neither of which is a file anyone can open.
-    if (!d.file || isImportedItemPath(d.file)) continue;
+    if (!d.file || d.file.startsWith("<")) continue;
+    if (d.item && importedIds.has(d.item)) continue;
     const abs = path.isAbsolute(d.file) ? d.file : path.join(root, d.file);
     const line = Math.max(0, (d.line || 1) - 1);
     const range = new vscode.Range(line, 0, line, 200);

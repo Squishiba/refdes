@@ -14,6 +14,7 @@
   `external`, read-only, and keep their ids, keys, and hashes; the
   editor's and patcher's write refusals read the `external` flag, not the
   path spelling. The VS Code extension keeps ignoring imported-item
-  diagnostics: its Problems-panel filter skips both the old `<import:NAME>`
-  pseudo-path and the new import-qualified spelling, so neither publishes
-  a phantom diagnostic against a file that does not exist locally.
+  diagnostics: it skips diagnostics of imported items by the item index --
+  membership of the `external` items, retired ids included -- not by path
+  spelling, so a local diagnostic in a file whose name contains a colon
+  (`items/notes:2026.md`) still publishes.
