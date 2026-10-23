@@ -1004,11 +1004,18 @@ def test_inline_calc_results_unreadable_history_store_fails_closed(tmp_path):
         history.capture_index(project)
     results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
     assert results["inline_calc_results"].status == "FAIL"
-    assert len(results["inline_calc_results"].offenders) == 1
-    offender = results["inline_calc_results"].offenders[0]
-    assert offender.startswith("history: inline calc freshness cannot be checked")
-    assert "history store unreadable" in offender
+    offenders = results["inline_calc_results"].offenders
+    # the named-store line is the FIRST entry, then the offender itself
+    assert len(offenders) == 2
+    offender = offenders[0]
+    assert offender.startswith(
+        "stale inline-calc gate: cannot read the history store .refdes/history ("
+    )
+    assert "failing closed" in offender
     assert "\n" not in offender
+    text = (tmp_path / "items" / "dec.md").read_text(encoding="utf-8").splitlines()
+    line = next(i for i, ln in enumerate(text, start=1) if "Vout :=" in ln)
+    assert offenders[1:] == [f"DEC-001: inline calc Vout (items/dec.md:{line})"]
     outcome = lifecycle.stamp(project, kind="release", name="rel-a")
     assert outcome.status == "gate_failed"
     assert not os.path.isfile(lifecycle.baseline_path(project, "rel-a"))
@@ -1043,7 +1050,12 @@ def test_inline_calc_results_unreadable_history_store_fails_closed_captured(
     project = _ic_rebuild(tmp_path)
     results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
     assert results["inline_calc_results"].status == "FAIL"
-    assert "history store unreadable" in results["inline_calc_results"].offenders[0]
+    offenders = results["inline_calc_results"].offenders
+    assert offenders[0].startswith(
+        "stale inline-calc gate: cannot read the history store .refdes/history ("
+    )
+    assert "failing closed" in offenders[0]
+    assert any("LOG-001" in o for o in offenders[1:])
     outcome = lifecycle.stamp(project, kind="release", name="rel-a")
     assert outcome.status == "gate_failed"
 
