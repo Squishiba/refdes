@@ -90,14 +90,16 @@ def _absorb(project: Project, origin: str, version: str, data: dict) -> None:
             )
             continue
 
+        source_file, source_line = _upstream_source(origin, raw)
+
         item = Item(
             id=item_id,
             type=str(raw.get("type") or ""),
             key=key,
             fields=dict(raw.get("fields") or {}),
             links=dict(raw.get("links") or {}),
-            source_file=f"<import:{origin}>",
-            source_line=1,
+            source_file=source_file,
+            source_line=source_line,
             external=True,
             origin=origin,
             # Keep the upstream hash verbatim; recomputing it locally would be
@@ -120,3 +122,21 @@ def _absorb(project: Project, origin: str, version: str, data: dict) -> None:
         # graph and link resolver sees the same cross-project key scope.
         handle = project.add_item(item, item.key or provisional_handle(item))
         project.items_by_id[item_id] = handle
+
+
+def _upstream_source(origin: str, raw: dict) -> tuple[str, int]:
+    """Where the upstream artifact says this item is defined.
+
+    The artifact's ``source`` records the upstream-relative file and line, so
+    a diagnostic on an imported item points at the real definition (prefixed
+    with the import name to mark it as upstream) instead of a fabricated
+    ``<import:NAME>:1``. Older artifacts have no ``source``; they keep the
+    old pseudo-path.
+    """
+    source = raw.get("source")
+    if isinstance(source, dict):
+        file = source.get("file")
+        line = source.get("line")
+        if isinstance(file, str) and isinstance(line, int) and not isinstance(line, bool):
+            return f"{origin}:{file}", line
+    return f"<import:{origin}>", 1
