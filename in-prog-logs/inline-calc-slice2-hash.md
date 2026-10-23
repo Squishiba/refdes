@@ -108,3 +108,21 @@ commit); faithful-composite sentence now includes the former-id/
 historical-display-half acceptance; lifecycle.md `calc_refs` vs
 `calc_hash` applicability split (pinned to `_items_map`'s
 non-empty-snapshot gate). Log collapsed per AGENTS.md.
+
+## Round 13 (chunk 2's review: probe/cap LOWs + NITs)
+
+Malformed-span probe fixed test-first: it hashed `span.raw`, which
+carries the stored result, so a result-only edit of a malformed span
+moved `calc_hash`; the probe now uses the new
+`inline_calc.resultless_raw` (raw up to the last top-level `=` the
+grammar reads as the separator). Cap-16 drop documented in code (above
+the cap only the historical former-id readings drop; as-written and
+current-display stripped readings stay, so the loss is a false-positive,
+never a silent pass) and pinned both sides by a test. The PR body's
+"stripped reading simply not offered above the cap" claim corrected.
+NITs: `as_written` -> `authored_display`, `by_key` comprehension no
+longer rebinds `item`, `calc_reference_snapshot`'s always-true
+`include_inline` gate dropped. Cap-test fixture taught me the mapping
+keys are targets without `.NAME` (debugged via direct
+`_calc_ref_rewrites` probes) and that the reused tmp items dir must be
+cleared between fixture calls. 75 targeted + 4476 full, 2 skipped.

@@ -515,6 +515,20 @@ def triggered_spans(body: str) -> list[InlineSpan]:
     ]
 
 
+def resultless_raw(span: InlineSpan) -> str:
+    """A malformed span's raw text with its stored-result portion removed:
+    the grammar reads the *last* top-level ``=`` candidate as the result
+    separator, so everything from it on is the result the probe must not
+    carry (docs/design/inline-calc.md section 3: a result-only edit leaves
+    the arithmetic probe fixed -- round-13 review). With no separator
+    candidate there is no result portion, and the raw text is all head.
+    A parsed span's probe comes from its fields, not this function."""
+    positions = _result_equals_positions(span.raw)
+    if not positions:
+        return span.raw
+    return span.raw[: positions[-1]].rstrip(" \t")
+
+
 def unclosed_comment_offset(body: str) -> int | None:
     """The 0-indexed line of an unclosed ``<!--`` in `body`, or None.
 

@@ -2373,10 +2373,13 @@ def _inline_span_calc_text(span: inline_calc.InlineSpan) -> str:
     """One triggered span's arithmetic as the calc_hash probe sees it: name,
     RHS and unit assertion, stored result excluded (docs/design/inline-calc.md
     section 3 -- a result-only edit must leave this probe fixed). A malformed
-    span has no meaningful name/RHS/unit, so its raw text is the arithmetic
-    it declared; the build reports it as an error at the line anyway."""
+    span has no meaningful name/RHS/unit, so the probe is its raw text with
+    the result portion removed (`inline_calc.resultless_raw`): the raw text
+    verbatim would carry the stored result, and a result-only edit of a
+    malformed span would move the probe (round-13 review); the build reports
+    the span as an error at the line either way."""
     if span.error:
-        return span.raw
+        return inline_calc.resultless_raw(span)
     text = f"{span.name} := {span.rhs}"
     if span.unit:
         text += f" | {span.unit}"
@@ -2573,7 +2576,10 @@ def calc_reference_snapshot(project: Project, item: Item) -> dict[str, str]:
     by_key = _key_index(project)
     snapshot: dict[str, str] = {}
     for _target_str, name, target, value in _calc_reference_values(
-        by_key, project, item, include_inline=HASH_FORMAT >= 6
+        # always current-format: reconstruction never calls this, so the
+        # span inputs are always in scope (round-13 NIT: the old
+        # `include_inline=HASH_FORMAT >= 6` was a gate that never closed)
+        by_key, project, item, include_inline=True
     ):
         if target is None or value is None:
             continue
@@ -2951,7 +2957,7 @@ def _span_composites_are_faithful(item: Item, project: Project) -> bool:
     the hashes_in_format variants below offer the stripped readings over
     those historical halves so pre-rename records keep matching.
     """
-    by_key = {item.key: item for item in project.local_items if item.key}
+    by_key = {i.key: i for i in project.local_items if i.key}
     for _target, display, key in _span_composite_targets(item):
         owner = by_key.get(key)
         if owner is None:
@@ -3029,23 +3035,34 @@ def hash_for_format_variants(item: Item, project: Project, hash_format: int) -> 
     for old, current in project.former_ids.items():
         formers.setdefault(current, []).append(old)
     options: list[tuple[str, list[str]]] = []
-    as_written: dict[str, str] = {}
+    authored_display: dict[str, str] = {}
     for target, display, key in _span_composite_targets(item):
-        if target in as_written:
+        if target in authored_display:
             continue
-        as_written[target] = display
+        authored_display[target] = display
         owner = by_key[key]
         opts = [owner.id] + sorted(formers.get(owner.id, ()))
         options.append((target, opts))
     combinations = 1
     for _target, opts in options:
         combinations *= len(opts)
+    # The sweep is exhaustive below a small bound and abandoned above it:
+    # each extra display-half option doubles the reconstructions, and a
+    # target with many former ids (plus several composites in one item)
+    # would multiply out the comparison. Dropping the HISTORICAL readings
+    # above the cap is the safe direction: the as-written and current-id
+    # stripped readings stay in the set, so the loss is a false-positive
+    # "modified since sealed" on a pre-rename record (the author reseals
+    # or the record stays uncomparable), never a silent pass -- and the
+    # round-7 gate withdrawal above still fails closed on key-half edits.
+    # (Round-13 review; pinned by
+    # test_former_id_readings_are_offered_up_to_the_cap_and_dropped_above.)
     if options and combinations <= 16:
         import itertools
 
         for combo in itertools.product(*(opts for _target, opts in options)):
-            mapping = dict(zip(as_written, combo))
-            if mapping == as_written:
+            mapping = dict(zip(authored_display, combo))
+            if mapping == authored_display:
                 continue
             variants.add(
                 _hash_blob(

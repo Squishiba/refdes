@@ -1379,3 +1379,90 @@ def test_span_target_deleted_fails_loudly_after_rename_chain(tmp_path):
     assert any(
         "DEC-001" in d.message and d.level == "error" for d in project.diagnostics
     ), [d.message for d in project.diagnostics]
+
+
+# ------------------------------------ 8. probe/result separation for malformed spans, cap behavior
+
+
+def test_malformed_span_probe_ignores_the_stored_result(tmp_path):
+    """LOW (round-13 review): the probe's contract -- a result-only edit
+    leaves it fixed -- must hold for a MALFORMED span too. The raw text
+    includes the stored result, so `x := 1 V = 2 V x` -> `... = 2 V y`
+    (the trailing junk is part of the result portion) moved calc_hash at
+    head. The fix hashes the raw text with the result portion removed --
+    everything from the last top-level `=` the grammar reads as the
+    result separator. The body text still moved, so the content hash
+    moves: the malformed span keeps reporting its error and the item
+    still looks edited; only the arithmetic probe stays fixed."""
+    project = _build(
+        tmp_path, {"a.md": _item("DEC-001", "`x := 1 V = 2 V x`\n")}
+    )
+    item = project.item_by_id("DEC-001")
+    assert any("inline calc" in d.message for d in project.errors)
+    probe = build_mod.calc_hash_for(item)
+    content = item.content_hash
+    _edit(tmp_path, "a.md", "= 2 V x`", "= 2 V y`")
+    project = _rebuild(tmp_path)
+    item = project.item_by_id("DEC-001")
+    assert build_mod.calc_hash_for(item) == probe
+    assert item.content_hash != content
+
+
+def test_former_id_readings_are_offered_up_to_the_cap_and_dropped_above(tmp_path):
+    """LOW (round-13 review): the historical display-half sweep
+    (hash_for_format_variants) enumerates one stripped reading per
+    combination of (current id, former ids) across the item's composite
+    span targets, capped at 16 combinations. Pin both sides:
+
+    - at/under the cap (3 x 3 = 9): the stripped reading over a former-id
+      mapping joins the set, so a pre-rename record keeps matching;
+    - above the cap (5 x 4 = 20): the historical readings are dropped --
+      a FALSE POSITIVE risk (a pre-rename seal reports modified), never a
+      silent pass: the as-written and current-id stripped readings are
+      still offered, and the round-7 gate withdrawal still covers
+      key-half edits.
+    """
+    def fixture(formers_a: int, formers_b: int):
+        import shutil
+
+        shutil.rmtree(tmp_path / "items", ignore_errors=True)
+        fa = ", ".join(f"DEC-1{i:02d}" for i in range(2, formers_a + 2))
+        fb = ", ".join(f"DEC-2{i:02d}" for i in range(2, formers_b + 2))
+        files = {
+            "a.md": (
+                "---\nkey: aaaaaaaaaa\nid: DEC-101\ntype: decision\n"
+                f"former_ids: [{fa}]\n---\n\n```calc\nV_a = 1 V\n```\n"
+            ),
+            "b.md": (
+                "---\nkey: bbbbbbbbbb\nid: DEC-201\ntype: decision\n"
+                f"former_ids: [{fb}]\n---\n\n```calc\nV_b = 2 V\n```\n"
+            ),
+            "s.md": _item(
+                "DEC-301",
+                "`a := DEC-101.V_a = 1 V` and `b := DEC-201.V_b = 2 V`\n",
+            ),
+        }
+        return _build(tmp_path, files)
+
+    def stripped_over(project, mapping):
+        item = project.item_by_id("DEC-301")
+        spec = project.types[item.type]
+        ta = "DEC-101@aaaaaaaaaa"
+        tb = "DEC-201@bbbbbbbbbb"
+        full = {ta: mapping[0], tb: mapping[1]}
+        return build_mod._hash_blob(
+            build_mod.hash_payload_builder(project, 5, strip_display=full)(item, spec)
+        )
+
+    project = fixture(2, 2)  # 3 x 3 = 9 <= 16
+    variants = build_mod.hash_for_format_variants(project.item_by_id("DEC-301"), project, 5)
+    assert len(variants) == 10  # live + 9 distinct stripped mappings (the current/current one IS `stripped`)
+    assert stripped_over(project, ("DEC-101", "DEC-201")) in variants
+    assert stripped_over(project, ("DEC-102", "DEC-202")) in variants
+    assert stripped_over(project, ("DEC-103", "DEC-202")) in variants
+
+    project = fixture(4, 3)  # 5 x 4 = 20 > 16
+    variants = build_mod.hash_for_format_variants(project.item_by_id("DEC-301"), project, 5)
+    assert len(variants) == 2  # {as-written, stripped(current)} -- historical dropped
+    assert stripped_over(project, ("DEC-101", "DEC-201")) in variants
+    assert stripped_over(project, ("DEC-102", "DEC-202")) not in variants
