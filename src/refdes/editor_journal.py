@@ -121,6 +121,30 @@ def _escapes_root(project_root: str, rel: str) -> bool:
         return True
 
 
+def _journal_escapes_root(project_root: str) -> bool:
+    """True when the journal location itself escapes the root via a symlink.
+
+    ``_escapes_root`` guards the *entry* paths; the journal lives under
+    ``<root>/.refdes``, and nothing else resolves that directory. If it
+    is a symlink to outside the project, ``begin`` would stage the
+    originals and the manifest outside the root (defeating confinement
+    and exposing file contents), and ``recover``/``complete`` would
+    remove a directory outside the root. Require the parent directory
+    and the journal path to resolve inside the resolved root, and the
+    journal path to be no symlink of its own.
+    """
+    root_real = os.path.realpath(project_root)
+    journal = _journal_path(root_real)
+    for path in (os.path.dirname(journal), journal):
+        real = os.path.realpath(path)
+        try:
+            if os.path.commonpath([root_real, real]) != root_real:
+                return True
+        except ValueError:
+            return True
+    return os.path.islink(journal)
+
+
 def _is_safe_relpath(path: str) -> bool:
     """Project-relative and free of anything that makes two spellings name
     one file: no ``..``, ``.``, empty segments (which covers trailing
@@ -318,6 +342,10 @@ def begin(project_root: str, entries: Sequence[Entry]) -> str:
     a symlink) -- also with nothing created.
     """
     _validate_entries(project_root, entries)
+    if _journal_escapes_root(project_root):
+        raise ValueError(
+            "the journal location (.refdes) resolves outside the project root"
+        )
     journal = _journal_path(project_root)
     if os.path.exists(journal):
         raise JournalPending(pending(project_root) or "unknown")
@@ -383,6 +411,11 @@ def pending(project_root: str) -> str | None:
     journal = _journal_path(project_root)
     if not os.path.exists(journal):
         return None
+    if _journal_escapes_root(project_root):
+        # A journal location that symlinks out of the root is not a
+        # journal we can read (and must not be followed); it is still
+        # the condition begin refuses, so report it, unreadable.
+        return "unknown"
     try:
         manifest = _read_manifest_raw(journal)
     except JournalCorrupt:
@@ -419,6 +452,12 @@ def complete(project_root: str) -> None:
     """
     journal = _journal_path(project_root)
     manifest = os.path.join(journal, _MANIFEST_NAME)
+    if _journal_escapes_root(project_root):
+        raise OSError(
+            f"the journal location {_journal_path(os.path.realpath(project_root))} "
+            "resolves outside the project root; refusing to delete through it. "
+            "Remove the symlink, then run 'refdes recover'."
+        )
     try:
         os.remove(manifest)
         _fsync_dir(journal)
@@ -454,6 +493,11 @@ def recover(project_root: str) -> list[str]:
     again is safe.
     """
     journal = _journal_path(project_root)
+    if _journal_escapes_root(project_root):
+        raise JournalCorrupt(
+            "the journal location (.refdes) resolves outside the project "
+            "root; refusing to restore through the symlink"
+        )
     if not os.path.isdir(journal):
         return []
     manifest = _read_manifest_raw(journal)
@@ -500,7 +544,11 @@ def recover(project_root: str) -> list[str]:
                 continue
             _atomic_write_bytes(live, originals[index])
         else:
-            if not os.path.exists(live):
+            if not os.path.lexists(live):
+                # lexists, not exists: a dangling symlink at a path that
+                # did not exist before the save IS live state (it follows
+                # to nothing, so exists() calls it absent), and it must
+                # not survive to start resolving when its target appears.
                 continue
             os.remove(live)
         restored.append(entry["path"])

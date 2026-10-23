@@ -126,3 +126,25 @@ Tests: 69 passed in tests/test_editor_journal.py (47 frozen + 22 added
 across rounds; 11 this round incl. 6 parametrized dot-path cases). ruff
 clean (default + E501,I on the two files). Full suite run recorded
 below.
+
+## Round 4 (review 5aea024) — findings 1-2
+
+- P1 journal-location confinement: `_journal_escapes_root()` resolves
+  `<root>/.refdes` and the journal path and requires both inside
+  realpath(root), with the journal path not a symlink. begin() raises
+  ValueError before creating anything; pending() reports "unknown" (the
+  gate refuses exactly what begin refuses); recover() raises
+  JournalCorrupt; complete() raises OSError -- none of them follow the
+  link, nothing is written or deleted outside the root.
+- P2 dangling symlink at a not-existed path: recover's absence test is
+  now `os.path.lexists` (exists() follows links, so a dangling link
+  read as absent and survived recovery, ready to resolve later). The
+  link is removed as a link and counted as restored.
+
+Both RED first (the P1 test needed its symlink target genuinely outside
+the root -- pytest's tmp_path IS the root here, so the first version's
+target was inside it and the RED run caught that, not the code). No
+existing tests changed; 47 frozen designer tests untouched.
+Tests: 71 in tests/test_editor_journal.py; full suite 4481 passed,
+2 skipped; ruff clean on the two files. The reviewer's "533 lines"
+remark is explicitly out of scope for this round.

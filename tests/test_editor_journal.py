@@ -1065,3 +1065,49 @@ def test_a_regular_file_at_the_journal_path_blocks_everything(tmp_path):
         ej.refuse_if_pending(root)
     with pytest.raises(ej.JournalPending):
         ej.begin(root, _entries(ej))
+
+
+# ------------------------- review round 4: journal-location confinement, dangling-symlink restore
+def test_a_symlinked_journal_location_is_refused_everywhere(tmp_path):
+    """<root>/.refdes symlinking outside the project must not let begin
+    stage the originals outside the root, nor let recover/complete act
+    through the link: every entry point refuses, touching nothing. begin
+    raises ValueError with nothing created; recover raises JournalCorrupt
+    and restores nothing; complete raises and deletes nothing; the refusal
+    gate reports the project as pending, exactly as begin refuses it."""
+    ej = _ej()
+    root = _project(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    entries = _entries(ej)
+    ej.begin(root, entries)
+    _apply_save(tmp_path, entries)
+    shutil.move(str(tmp_path / ".refdes"), str(outside / "moved"))
+    _symlink(str(outside / "moved"), str(tmp_path / ".refdes"))
+    with pytest.raises(ValueError):
+        ej.begin(root, entries)
+    with pytest.raises(ej.JournalCorrupt):
+        ej.recover(root)
+    assert _read(tmp_path, P1) == NEW1, "recover touched nothing"
+    with pytest.raises(OSError):
+        ej.complete(root)
+    assert (outside / "moved" / "editor-transaction").is_dir()
+    assert ej.pending(root) == "unknown"
+    with pytest.raises(ej.JournalPending):
+        ej.refuse_if_pending(root)
+
+
+def test_recover_unlinks_a_dangling_symlink_at_a_new_file_path(tmp_path):
+    """os.path.exists() follows symlinks: a dangling symlink at a path
+    that did not exist before the save reads as absent and would survive
+    recovery, ready to start resolving when its target appears. The link
+    IS the live state: recover removes it as a link (never following) and
+    reports the path as restored."""
+    ej = _ej()
+    root = str(tmp_path)
+    ej.begin(root, [ej.Entry(P3, None, NEW3)])
+    (tmp_path / "items").mkdir()
+    _symlink("never-exists", str(tmp_path / P3))
+    assert not (tmp_path / P3).exists(), "the symlink is dangling"
+    assert ej.recover(root) == [P3]
+    assert not os.path.lexists(tmp_path / P3)
