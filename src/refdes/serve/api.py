@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import posixpath
+import re
 import urllib.parse
 
 from .. import citations as citations_mod
@@ -47,7 +48,7 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
     if path.startswith("/api/item/") and path.endswith("/edit"):
         ref = urllib.parse.unquote(path[len("/api/item/"):-len("/edit")])
         if method == "POST":
-            return _apply_edit(app, ref, body)
+            return _write_outcome(app, _apply_edit(app, ref, body))
         return 405, {"error": "method not allowed"}
     if path == "/api/create/schema" and method in ("GET", "HEAD"):
         return _create_schema(app)
@@ -60,7 +61,7 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
             return _upload_asset(app, query, body)
         return 405, {"error": "method not allowed"}
     if path == "/api/items/create" and method == "POST":
-        return _create_item(app, body)
+        return _write_outcome(app, _create_item(app, body))
     if path.startswith("/api/item/"):
         for suffix, handler in _SOURCE_ROUTES:
             if not path.endswith(suffix):
@@ -143,6 +144,95 @@ def diag_dict(d: Diagnostic) -> dict:
         "line": d.line,
         "code": d.code,
     }
+
+
+# ---------------------------------------------------- root-relative write answers
+#
+# One choke point for both write routes: `handle()` runs the (status, payload)
+# of the edit and create routes through `_write_outcome`, which rewrites
+# every absolute path under the project root in the whole payload to the
+# project-relative spelling the sibling `path` fields already carry. Those
+# fields got `shown()` from the start; the free-text ones -- `message`,
+# `reason`, `describe`, the diff, the diagnostics -- kept the machine path
+# inside sentences built at the service layer (user-sim run 13, section 3.5),
+# and a per-field patch at each site is the rule re-implemented ten times.
+# The walk is payload-wide so a field added next month is covered by the
+# same rule.
+
+# A path token: an absolute-path spelling, at a boundary. The lookbehind is
+# what keeps NON-path text untouched -- `http://x/y` (the `p://` would
+# otherwise read as a drive-letter root), `and/or`, `5/6`, `path/to/x` --
+# a `/` mid-word is not the start of a path.
+_ABSOLUTE_TOKEN = re.compile(r"(?<![A-Za-z0-9.:\\/])(?:[A-Za-z]:[\\/]|[\\/])[^\s\"'`()\[\]{}<>,;]*")
+_TRAILING = ".,;:!?)]}'\"`>"
+_LINE_SUFFIX = re.compile(r"(.*):(\d+(?::\d+)?)")
+_DRIVE_ROOT = re.compile(r"[A-Za-z]:")
+
+
+def _relative_paths(value, root: str):
+    """Every string in a response payload, with the project root rewritten away.
+
+    A path under ``root`` becomes its project-relative forward-slash spelling
+    (``items/REQ-001.md``, and ``items/REQ-007.md:6`` when a line suffix
+    follows); the root itself becomes ``.``. A path OUTSIDE the root keeps
+    only its bare file name (with any line suffix) -- the file name is the
+    part an author can act on, and the directory outside the project is
+    exactly what this response must not disclose; a token with no file name
+    at all becomes ``<outside project>``. Relative spellings are untouched,
+    so the project-relative ``path`` fields and all ordinary text pass
+    through unchanged. Both separator spellings of the root are recognized;
+    a drive-letter root matches case-insensitively."""
+    if isinstance(value, str):
+        return _relative_paths_in_text(value, root)
+    if isinstance(value, dict):
+        return {key: _relative_paths(item, root) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_relative_paths(item, root) for item in value]
+    return value
+
+
+def _relative_paths_in_text(text: str, root: str) -> str:
+    if not text:
+        return text
+    root_norm = (root or "").replace("\\", "/")
+    if not (os.path.isabs(root_norm) or _DRIVE_ROOT.match(root_norm)):
+        root_norm = os.path.abspath(root).replace("\\", "/")
+    root_cmp = root_norm.rstrip("/") or "/"
+    fold = bool(_DRIVE_ROOT.match(root_cmp))
+    root_cmp = root_cmp.casefold() if fold else root_cmp
+
+    def swap(match) -> str:
+        token = match.group(0)
+        body = token.rstrip(_TRAILING)
+        punct = token[len(body):]
+        if not body:
+            return token
+        rest, line = body, ""
+        found = _LINE_SUFFIX.fullmatch(body)
+        if found:
+            rest, line = found.group(1), found.group(2)
+        norm = rest.replace("\\", "/")
+        probe = norm.casefold() if fold else norm
+        if probe == root_cmp:
+            rel = "."
+        elif root_cmp == "/":
+            rel = norm[1:]
+        elif probe.startswith(root_cmp + "/"):
+            rel = norm[len(root_cmp) + 1:]
+        else:
+            rel = norm.rstrip("/").rpartition("/")[2] or "<outside project>"
+        return rel + (":" + line if line else "") + punct
+
+    return _ABSOLUTE_TOKEN.sub(swap, text)
+
+
+def _write_outcome(app, result: tuple[int, dict]) -> tuple[int, dict]:
+    """The serialization point of the write routes: every edit/create response
+    leaves `handle()` through here, so the root-relative rule of
+    `_relative_paths` is applied to the whole payload once, at the choke
+    point, for both routes."""
+    status, payload = result
+    return status, _relative_paths(payload, app.state.snapshot.project.root)
 
 
 # ------------------------------------------------------------- edit affordances
