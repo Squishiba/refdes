@@ -27,7 +27,10 @@ token and the origin gate, which test_serve_edit_http and the upload gate
 tests pin. A route's identity resolution must be gradeable on a box with
 no spare threads for a live server (RLIMIT_NPROC/pids.max), and threads
 buy this module nothing: every assertion is a status code, a payload
-field, or file bytes.
+field, or file bytes. Two tests at the end break that rule on purpose --
+the ticket asked for HTTP-level coverage where the repo has it -- driving
+the real `EditorApp` socket for the main path and for the loud refusal;
+the direct drives stay as the thread-free spine of the module.
 
 The fixtures are projects of their own (like the retired-id tests in
 test_serve_api.py): a `former_ids:` entry burns an id into the ledger, which
@@ -43,11 +46,12 @@ from pathlib import Path
 
 import pytest
 from conftest import write_project_config
-from serve_support import snapshot_tree
+from serve_support import Client, snapshot_tree
 
 from refdes import cli as cli_mod
 from refdes.serve import api as api_mod
 from refdes.serve import state as state_mod
+from refdes.serve.server import EditorApp
 
 RETIRE_SCHEMA = """\
 site:
@@ -229,6 +233,23 @@ def is_find_refusal(status, payload) -> bool:
     )
 
 
+def is_ambiguity_refusal(payload) -> bool:
+    """The write route's AMBIGUITY refusal, in the resolver's distinctive
+    words: it names the mechanism (`former_ids`), the rule ("exactly one
+    item") and the posture ("refuses to pick one"). The generic find refusal
+    -- "no item X in this project" -- says none of these, so a regression to
+    a plain unknown-ref refusal cannot satisfy a test that checks this."""
+    reason = payload.get("reason", "")
+    return (
+        isinstance(payload, dict)
+        and payload.get("kind") == "refused"
+        and "no item" not in reason
+        and "former_ids" in reason
+        and "exactly one item" in reason
+        and "refuses to pick one" in reason
+    )
+
+
 # ------------------------------------------------------- the read route's bar
 #
 # The write route has to match the read route; pin what that route does
@@ -349,7 +370,15 @@ def test_a_retired_id_claimed_by_two_items_writes_neither(tmp_path):
     status, payload = edit(client, "REQ-900", reqs_file(root), field="text", value="x")
     assert status == 422, payload
     assert payload["kind"] != "applied"
-    assert "REQ-900" in payload.get("reason", ""), payload
+    # the refusal is THIS task's ambiguity refusal, not a generic "no item":
+    # the resolver's own words, and both claimants named, so a regression to
+    # the unknown-ref refusal (or to picking one) cannot pass
+    assert is_ambiguity_refusal(payload), payload
+    reason = payload["reason"]
+    assert "REQ-900" in reason, payload
+    assert "REQ-002" in reason and "REQ-003" in reason, (
+        f"the refusal must name both claimants: {reason!r}"
+    )
     assert snapshot_tree(root) == before_tree, "the first claimant must not absorb the write"
 
     # the project says out loud why: the claimant the linker reported
@@ -520,3 +549,68 @@ def test_no_refusing_path_writes_anything(tmp_path):
             assert status == 422, (ref, payload, _body)
         assert snapshot_tree(root) == before_tree
         assert sorted(os.listdir(root / "items")) == item_files
+
+
+# -------------------------------------------------------------- over the socket
+#
+# The drives above grade the route's resolution; these two pin the same
+# contract on the real transport -- the `EditorApp` + `Client` pattern of
+# test_serve_edit_http -- because the ticket asked for HTTP-level coverage
+# where the repo has it. One for the main path, one for the loud refusal.
+
+
+def test_over_http_a_retired_id_save_lands_and_reports_the_current_ref(tmp_path):
+    app = EditorApp(str(make_root(tmp_path, {"reqs.yaml": REQS, "decs.yaml": DECS}) / "refdes-project.yaml"), poll_interval=60)
+    root = tmp_path
+    app.start()
+    try:
+        client = Client(app)
+        _status, item = client.api_get("/api/item/REQ-900")
+        assert _status == 200 and item["id"] == "REQ-001"
+        status, payload = client.api_post(
+            "/api/item/REQ-900/edit",
+            {
+                "op": "set_field",
+                "field": "status",
+                "value": "draft",
+                "expected_revision": item["edit"]["file_revision"],
+            },
+        )
+        assert status == 200, payload
+        assert payload["kind"] == "applied"
+        # the browser's correction: the CURRENT id and handle, never REQ-900
+        assert payload["id"] == "REQ-001" and payload["handle"] == "REQ-001"
+        text = read(reqs_file(root))
+        assert "status: draft" in text.split("- id: REQ-001", 1)[1].split("- id:", 1)[0]
+        assert text.count("status: draft") == 1, "REQ-002's approved status stands"
+    finally:
+        app.stop()
+
+
+def test_over_http_a_double_claimed_retired_id_is_the_ambiguity_refusal(tmp_path):
+    app = EditorApp(
+        str(make_root(tmp_path, {"reqs.yaml": CLAIM_REQS, "claim2.yaml": CLAIM_CLAIM2}) / "refdes-project.yaml"),
+        poll_interval=60,
+    )
+    root = tmp_path
+    app.start()
+    try:
+        client = Client(app)
+        before_tree = snapshot_tree(root)
+        _status, item = client.api_get("/api/item/REQ-002")
+        assert _status == 200
+        status, payload = client.api_post(
+            "/api/item/REQ-900/edit",
+            {
+                "op": "set_field",
+                "field": "text",
+                "value": "x",
+                "expected_revision": item["edit"]["file_revision"],
+            },
+        )
+        assert status == 422, payload
+        assert is_ambiguity_refusal(payload), payload
+        assert "REQ-002" in payload["reason"] and "REQ-003" in payload["reason"], payload
+        assert snapshot_tree(root) == before_tree
+    finally:
+        app.stop()

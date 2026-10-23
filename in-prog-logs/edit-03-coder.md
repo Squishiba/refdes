@@ -75,7 +75,12 @@ find's); `test_no_refusing_path_writes_anything` now drives both refusals
 project dirs with a finished docstring; dropped the trivially-true
 `"REQ-001" in text` for a REQ-001-block assertion; fixed the
 `make_root`/`serve_minted` return annotations to `Path`. 11/11 pass, plus the
-serve edit/api suites.
+serve edit/api suites. Round 2: the double-claim test now pins the
+resolver's AMBIGUITY wording (former_ids / exactly one item / refuses to
+pick one, no "no item" text) and both claimants by name; two tests added on
+the real socket (EditorApp + Client): a retired-id save landing with the
+current id/handle in the JSON, and the double claim answering 422 with the
+ambiguity refusal. 46 passed with test_serve_edit_http.
 
 Task finished.
 
