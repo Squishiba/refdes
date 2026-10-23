@@ -25,12 +25,13 @@ contract the browser consumes, the same real `ProjectState` with the same
 post-save refresh. What it leaves out is the transport: the socket, the
 token and the origin gate, which test_serve_edit_http and the upload gate
 tests pin. A route's identity resolution must be gradeable on a box with
-no spare threads for a live server (RLIMIT_NPROC/pids.max), and threads
-buy this module nothing: every assertion is a status code, a payload
-field, or file bytes. Two tests at the end break that rule on purpose --
-the ticket asked for HTTP-level coverage where the repo has it -- driving
-the real `EditorApp` socket for the main path and for the loud refusal;
-the direct drives stay as the thread-free spine of the module.
+no spare threads for a live server (RLIMIT_NPROC/pids.max), and the
+direct drives need none: every assertion in them is a status code, a
+payload field, or file bytes. The two socket tests at the end are the
+deliberate exception -- the ticket asked for HTTP-level coverage where the
+repo has it -- starting a real `EditorApp` for the main path and for the
+loud refusal; the direct drives stay as the thread-free spine of the
+module.
 
 The fixtures are projects of their own (like the retired-id tests in
 test_serve_api.py): a `former_ids:` entry burns an id into the ledger, which
@@ -239,7 +240,7 @@ def is_ambiguity_refusal(payload) -> bool:
     item") and the posture ("refuses to pick one"). The generic find refusal
     -- "no item X in this project" -- says none of these, so a regression to
     a plain unknown-ref refusal cannot satisfy a test that checks this."""
-    reason = payload.get("reason", "")
+    reason = payload.get("reason", "") if isinstance(payload, dict) else ""
     return (
         isinstance(payload, dict)
         and payload.get("kind") == "refused"
@@ -287,8 +288,8 @@ def test_an_edit_addressed_by_a_retired_id_lands_on_the_live_item(tmp_path):
     was 422 "no item 'REQ-900'". The save resolves exactly like the read,
     lands inside REQ-001's own span (the file spells REQ-001, not REQ-900),
     and leaves REQ-002's status approved standing."""
-    client, root = serve(retired_root(tmp_path)), tmp_path
-    path = reqs_file(root)
+    client = serve(retired_root(tmp_path))
+    path = reqs_file(tmp_path)
     status, payload = edit(client, "REQ-900", path)
     assert status == 200, payload
     assert payload["kind"] == "applied" and payload["ok"] is True
@@ -306,8 +307,8 @@ def test_the_write_reports_the_current_handle(tmp_path):
     """The browser holding the retired spelling must be able to correct its
     ref: the 200 payload carries the item's current handle -- the same field
     the read view hands back -- and not the retired spelling as an identity."""
-    client, root = serve(retired_root(tmp_path)), tmp_path
-    status, payload = edit(client, "REQ-900", reqs_file(root))
+    client = serve(retired_root(tmp_path))
+    status, payload = edit(client, "REQ-900", reqs_file(tmp_path))
     assert status == 200, payload
     assert payload["handle"] == "REQ-001"
     _status, view = client.get("/api/item/REQ-900")
@@ -323,8 +324,8 @@ def test_a_retired_id_conflict_keeps_its_diff(tmp_path):
     current_text=None and diff="": the screen lost its diff exactly for the
     spelling this task added. The conflict plans against the resolver's
     live handle, like the save itself."""
-    client, root = serve(retired_root(tmp_path)), tmp_path
-    before_tree = snapshot_tree(root)
+    client = serve(retired_root(tmp_path))
+    before_tree = snapshot_tree(tmp_path)
     status, payload = client.post(
         "/api/item/REQ-900/edit",
         {"op": "set_field", "field": "status", "value": "draft", "expected_revision": "0" * 64},
@@ -334,7 +335,7 @@ def test_a_retired_id_conflict_keeps_its_diff(tmp_path):
     assert payload["current_text"], payload
     assert payload["diff"], payload
     assert "status: draft" in payload["diff"]
-    assert snapshot_tree(root) == before_tree, "a conflict writes nothing"
+    assert snapshot_tree(tmp_path) == before_tree, "a conflict writes nothing"
 
 
 def test_the_write_reports_the_surrogate_key_handle_on_a_keyed_project(tmp_path):
@@ -434,14 +435,14 @@ def test_a_retired_id_claimed_by_two_items_writes_neither(tmp_path):
 def test_an_unknown_ref_is_the_same_refusal_as_always(tmp_path):
     """A ref that resolves nowhere keeps the existing refusal, verbatim; the
     retired-id step must not turn 404-energy into anything softer."""
-    client, root = serve(retired_root(tmp_path)), tmp_path
-    before_tree = snapshot_tree(root)
-    status, payload = edit(client, "REQ-999", reqs_file(root), field="text", value="x")
+    client = serve(retired_root(tmp_path))
+    before_tree = snapshot_tree(tmp_path)
+    status, payload = edit(client, "REQ-999", reqs_file(tmp_path), field="text", value="x")
     assert status == 422
     assert payload["kind"] == "refused"
     assert "no item" in payload["reason"] and "REQ-999" in payload["reason"]
     assert client.get("/api/item/REQ-999")[0] == 404
-    assert snapshot_tree(root) == before_tree
+    assert snapshot_tree(tmp_path) == before_tree
 
 
 # ---------------------------------------------------------------------- parity
@@ -457,8 +458,8 @@ def test_an_unknown_ref_is_the_same_refusal_as_always(tmp_path):
 
 
 def test_both_routes_accept_the_same_spellings_keyless(tmp_path):
-    client, root = serve(retired_root(tmp_path)), tmp_path
-    path = reqs_file(root)
+    client = serve(retired_root(tmp_path))
+    path = reqs_file(tmp_path)
     status, listing = client.get("/api/items")
     assert status == 200
     provisional = next(
@@ -565,14 +566,20 @@ def test_no_refusing_path_writes_anything(tmp_path):
     claim_root = tmp_path / "claim"
     claim_root.mkdir()
     cases = [
-        (retired_root(unknown_root), "REQ-999", ["decs.yaml", "reqs.yaml"]),
+        (
+            retired_root(unknown_root),
+            "REQ-999",
+            ["decs.yaml", "reqs.yaml"],
+            is_find_refusal,
+        ),
         (
             make_root(claim_root, {"reqs.yaml": CLAIM_REQS, "claim2.yaml": CLAIM_CLAIM2}),
             "REQ-900",
             ["claim2.yaml", "reqs.yaml"],
+            lambda status, body: status == 422 and is_ambiguity_refusal(body),
         ),
     ]
-    for root, ref, item_files in cases:
+    for root, ref, item_files, refusal in cases:
         client = serve(root)
         path = reqs_file(root)
         before_tree = snapshot_tree(root)
@@ -582,8 +589,13 @@ def test_no_refusing_path_writes_anything(tmp_path):
             {"op": "add_link", "verb": "satisfies", "target": "REQ-001",
              "expected_revision": sha256(path)},
         ):
-            status, _body = client.post(f"/api/item/{ref}/edit", payload)
-            assert status == 422, (ref, payload, _body)
+            status, body = client.post(f"/api/item/{ref}/edit", payload)
+            # the refusal is pinned by KIND, not just by status: the unknown
+            # ref keeps the ordinary "no item ... in this project" refusal,
+            # the double claim answers the ambiguity refusal naming both
+            # claimants -- a regression that refuses REQ-900 as a plain
+            # unknown ref (status 422, tree untouched) fails here
+            assert refusal(status, body), (ref, payload, body)
         assert snapshot_tree(root) == before_tree
         assert sorted(os.listdir(root / "items")) == item_files
 
@@ -597,8 +609,8 @@ def test_no_refusing_path_writes_anything(tmp_path):
 
 
 def test_over_http_a_retired_id_save_lands_and_reports_the_current_ref(tmp_path):
-    app = EditorApp(str(make_root(tmp_path, {"reqs.yaml": REQS, "decs.yaml": DECS}) / "refdes-project.yaml"), poll_interval=60)
-    root = tmp_path
+    config = make_root(tmp_path, {"reqs.yaml": REQS, "decs.yaml": DECS}) / "refdes-project.yaml"
+    app = EditorApp(str(config), poll_interval=60)
     app.start()
     try:
         client = Client(app)
@@ -617,7 +629,7 @@ def test_over_http_a_retired_id_save_lands_and_reports_the_current_ref(tmp_path)
         assert payload["kind"] == "applied"
         # the browser's correction: the CURRENT id and handle, never REQ-900
         assert payload["id"] == "REQ-001" and payload["handle"] == "REQ-001"
-        text = read(reqs_file(root))
+        text = read(reqs_file(tmp_path))
         assert "status: draft" in text.split("- id: REQ-001", 1)[1].split("- id:", 1)[0]
         assert text.count("status: draft") == 1, "REQ-002's approved status stands"
     finally:
@@ -625,15 +637,12 @@ def test_over_http_a_retired_id_save_lands_and_reports_the_current_ref(tmp_path)
 
 
 def test_over_http_a_double_claimed_retired_id_is_the_ambiguity_refusal(tmp_path):
-    app = EditorApp(
-        str(make_root(tmp_path, {"reqs.yaml": CLAIM_REQS, "claim2.yaml": CLAIM_CLAIM2}) / "refdes-project.yaml"),
-        poll_interval=60,
-    )
-    root = tmp_path
+    config = make_root(tmp_path, {"reqs.yaml": CLAIM_REQS, "claim2.yaml": CLAIM_CLAIM2})
+    app = EditorApp(str(config / "refdes-project.yaml"), poll_interval=60)
     app.start()
     try:
         client = Client(app)
-        before_tree = snapshot_tree(root)
+        before_tree = snapshot_tree(tmp_path)
         _status, item = client.api_get("/api/item/REQ-002")
         assert _status == 200
         status, payload = client.api_post(
@@ -648,6 +657,6 @@ def test_over_http_a_double_claimed_retired_id_is_the_ambiguity_refusal(tmp_path
         assert status == 422, payload
         assert is_ambiguity_refusal(payload), payload
         assert "REQ-002" in payload["reason"] and "REQ-003" in payload["reason"], payload
-        assert snapshot_tree(root) == before_tree
+        assert snapshot_tree(tmp_path) == before_tree
     finally:
         app.stop()
