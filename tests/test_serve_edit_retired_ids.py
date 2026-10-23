@@ -476,15 +476,6 @@ def test_both_routes_accept_the_same_spellings_keyless(tmp_path):
             f"the read route answers {ref} with 200, so the write route's "
             f"_find_item must resolve it too, not refuse it: {payload}"
         )
-        if ref == provisional:
-            # The find resolves the provisional handle (it IS the items dict
-            # key); the patcher then declines it -- the file spells the item
-            # by id, not by `~`-handle. Pinned as the write route's own
-            # behavior by test_serve_edit_http; the parity here is that it is
-            # the PATCH refusing, not the find.
-            assert write_status == 422, (ref, payload)
-            assert "in this file" in payload["reason"], payload
-            continue
         assert write_status == 200, (ref, payload)
         assert payload["kind"] == "applied"
         # one identity, both routes: the write reports what the read answers

@@ -619,18 +619,16 @@ def test_the_keyed_handle_is_blocked_by_the_gate_not_a_find_failure(served_minte
     assert snapshot_tree(root) == before_tree
 
 
-def test_the_keyless_provisional_handle_still_refuses_and_writes_nothing(served):
+def test_the_keyless_provisional_handle_saves_like_the_display_id(served):
     """The keyless project's rows carry the item's provisional `~` handle,
-    which is a view address, not a spelling the file holds. The write route
-    resolves it at the model (so the refusal is about the patch, not a 404)
-    and the patcher refuses it -- unchanged behavior, pinned here."""
+    a view address rather than a spelling the file holds. The browser posts
+    exactly that handle, so the write route plans the save against the item's
+    display id (F13-2); it used to refuse it with a 422 on every save."""
     _app, client, root = served
     handle = handle_for(client, "REQ-001")
     assert handle.startswith("~")
-    before_tree = snapshot_tree(root)
     status, payload = edit(
         client, ref=handle, revision=sha256(reqs_file(root)), field="status", value="draft"
     )
-    assert status == 422 and payload["kind"] == "refused"
-    assert "no item" in payload["reason"]
-    assert snapshot_tree(root) == before_tree
+    assert status == 200, payload
+    assert "status: draft" in read(reqs_file(root))
