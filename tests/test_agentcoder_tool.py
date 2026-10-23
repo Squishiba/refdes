@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -158,6 +159,9 @@ if cmd == "ls":
                  "running", "~/other") for i in range(S.get("running_other", 0))]
     print(json.dumps(rows))
 elif cmd == "permit":
+    if S.get("permit_raw") is not None:
+        print(S["permit_raw"])
+        sys.exit(0)
     ids = {}
     for k, v in state["agents"].items():
         ids[v["role"]] = k
@@ -210,6 +214,10 @@ elif cmd == "run":
 elif cmd == "send":
     if S.get("hang", {}).get("send"):
         time.sleep(120)
+    if state.get("sfails", 0) < int(S.get("send_fails", 0)):
+        state["sfails"] = state.get("sfails", 0) + 1
+        save()
+        sys.exit(1)  # transport failure: the driver must NOT consume the one-shot
     rec = state["agents"].get(ARGS[1])
     if rec is not None:
         queue = S.get("on_send", {}).get(rec["role"], [])
@@ -739,12 +747,16 @@ def test_xpass_counts_as_passed(tmp_path, monkeypatch):
     # plain PASSED testcase in junit, so the gate judges XPASS as PASSED
     tests = _HEADER + (
         "@pytest.mark.xfail(reason='green on base')\n"
-        "def test_sub():\n    assert callable(app.add)\n")
+        "def test_sub():\n    assert callable(app.add)\n"
+        "\ndef test_real():\n    assert app.sub(1, 2) == -1\n")
     env = build_env(tmp_path, monkeypatch, scenario_overrides={
         "designer_files": {"tests/test_add.py": tests,
                            "tests/t1.cases.json": json.dumps({
                                "tests/test_add.py::test_control": {"expected_on_base": "pass"},
-                               "tests/test_add.py::test_sub": {"expected_on_base": "pass"}})},
+                               "tests/test_add.py::test_sub": {"expected_on_base": "pass"},
+                                "tests/test_add.py::test_real":
+                                    {"expected_on_base": "fail",
+                                     "requirement": "sub() added (required red)"}})},
         "coder_files": {"app.py": FIX_APP}})
     assert env.run() == 0
 
@@ -1665,3 +1677,124 @@ def test_binary_contract_file_no_traceback(tmp_path, monkeypatch):
     env = build_env(tmp_path, monkeypatch, name="bincon")
     (env.repo / "contract.md").write_bytes(b"\xff\xfe\x00binary contract\xff")
     assert env.run() == 0  # preflight pins a replaced-decoded text; the loop runs on
+
+
+CASES_ALLPASS = json.dumps({
+    "tests/test_add.py::test_control":
+        {"expected_on_base": "pass", "requirement": "control passes on old code"},
+    "tests/test_add.py::test_sub":
+        {"expected_on_base": "pass", "requirement": "mislabelled: cannot pass on base"},
+})
+LEGACY_TEST = (
+    "import os, sys\n"
+    "sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))\n"
+    "import app\n\n\n"
+    "def test_legacy_add():\n    assert app.add(2, 3) == 2\n")
+
+
+def test_zero_fail_cases_feeds_back_then_escalates(tmp_path, monkeypatch):
+    # F1 HIGH: a cases.json of pure pass-controls is a false-green machine: with
+    # zero expected-fail tests a do-nothing coder passes the gate and lands a PR
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={
+        "designer_files": {"tests/test_add.py": TEST_FILE,
+                           "tests/t1.cases.json": CASES_ALLPASS}})
+    assert env.run() == 2
+    assert "no 'fail' case" in env.job()["reason"]
+    sends = sum(1 for c in env.calls() if c[:1] == ["send"])
+    assert sends == 2  # designer fed back within the budget, then escalated
+
+
+def test_land_refuses_candidate_equal_to_base(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch)
+
+    def fake_candidate(job):  # a green gate over a candidate that IS the base
+        job["coder_sha"] = job["base_sha"]
+        return "land"
+
+    monkeypatch.setitem(agentcoder.HANDLERS, "candidate", fake_candidate)
+    assert env.run() == 2
+    assert "no coder commit" in env.job()["reason"]
+
+
+def test_deleted_base_test_does_not_haunt_candidate(tmp_path, monkeypatch):
+    # F2: designer DELETES a base test whose old-behaviour assert the fix breaks;
+    # base/coder worktrees are built at shas where it exists, so the driver must
+    # apply the deletion there too — else a correct green candidate is red forever
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={
+        "designer_files": {"tests/test_legacy.py": None,
+                           "tests/test_add.py": TEST_FILE,
+                           "tests/t1.cases.json": CASES_OK}})
+    (env.repo / "tests").mkdir()
+    (env.repo / "tests" / "test_legacy.py").write_text(LEGACY_TEST)
+    gitat(env.repo, "add", "-A")
+    gitat(env.repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "legacy")
+    assert env.run() == 0  # FIX_APP makes add(2,3)==5: only the rm keeps it green
+    assert env.job()["status"] == "ready-for-human-gate"
+
+
+@pytest.mark.parametrize("raw", ['["abc"]', '{"permits": ["abc"]}',
+                                 '{"permits": {"x": {"agentId": "zzz"}}}', "[null]"])
+def test_permits_malformed_payloads_never_crash(tmp_path, monkeypatch, raw):
+    # F3: the permit entry shape is unverified upstream: strings/None/nested
+    # containers must be skipped silently, not AttributeError, not Pause
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={"permit_raw": raw})
+    assert env.run() == 0
+
+
+def test_failed_scope_send_retries_on_resume(tmp_path, monkeypatch):
+    # F4: the one-shot marker must persist only AFTER a successful send
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={
+        "designer_files": {"tests/test_add.py": TEST_FILE,
+                           "tests/t1.cases.json": CASES_OK,
+                           "docs/bad.md": "out of scope"},
+        "on_send": {"designer": [{"files": {}, "delete": ["docs/bad.md"]}]},
+        "send_fails": 1})
+    assert env.run() == 1
+    assert "send to designer_agent failed" in env.job()["reason"]
+    assert env.job()["status"] == "paused"  # round NOT consumed by the failed send
+    assert env.resume() == 0  # the send is retried and the fix lands
+    assert env.job()["status"] == "ready-for-human-gate"
+
+
+def test_invalid_cases_json_escalates(tmp_path, monkeypatch):
+    env = build_env(tmp_path, monkeypatch, scenario_overrides={
+        "designer_files": {"tests/test_add.py": TEST_FILE,
+                           "tests/t1.cases.json": "{not json"}})
+    assert env.run() == 2  # F5: designer-shape errors escalate, never Pause forever
+    assert "not valid JSON" in env.job()["reason"]
+
+
+def test_spawn_popen_oserror_cleans_up(tmp_path, monkeypatch):
+    # F6: an OSError mid parallel-spawn must stop the already-launched agent
+    env = build_env(tmp_path, monkeypatch)
+    real, calls = subprocess.Popen, []
+
+    def flaky(argv, *a, **kw):
+        if "run" in argv and any("AgentCoder" in str(x) for x in argv):
+            calls.append(argv)  # subprocess.run shares Popen: count spawns only
+            if len(calls) == 2:
+                time.sleep(0.8)  # let the coder fake save its agent record first
+                raise OSError("no fork left")
+        return real(argv, *a, **kw)
+
+    monkeypatch.setattr(subprocess, "Popen", flaky)
+    assert env.run() == 1
+    assert "cannot launch paseo" in env.job()["reason"]
+    assert any(c[:1] == ["stop"] for c in env.calls())  # launched coder was stopped
+
+
+@pytest.mark.parametrize("mut,frag", [
+    ({"allowed_code_paths": ["app.py", "src/../evil.py"]}, "no '..'"),
+    ({"qwen_cap": 2, "reserve": 2}, "reserve"),
+])
+def test_validate_spec_rejects_dotdot_and_stuck_pool(tmp_path, monkeypatch, mut, frag,
+                                                     capsys):
+    env = build_env(tmp_path, monkeypatch, spec_overrides=mut)
+    assert env.run() == 1  # F8: .. anywhere; reserve >= cap pauses preflight forever
+    assert frag in capsys.readouterr().out
+
+
+def test_resume_and_status_require_jobdir(capsys):
+    assert agentcoder.main(["resume"]) == 1
+    assert agentcoder.main(["status"]) == 1  # F9: never read a stray ./job.json
+    assert "usage" in capsys.readouterr().out

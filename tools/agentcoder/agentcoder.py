@@ -183,9 +183,11 @@ def validate_spec(spec):
             problems.append(f"{key} must be a non-empty list of globs")
             return
         for g in globs:
+            parts = g.split("/") if isinstance(g, str) else []
             if not isinstance(g, str) or not g or os.path.isabs(g) \
-                    or g.split("/")[0] in ("", "..", "."):
-                problems.append(f"{key} entry must be a relative glob: {g!r}")
+                    or parts[0] in ("", ".") or ".." in parts:
+                problems.append(f"{key} entry must be a relative glob with no '..' "
+                                f"component: {g!r}")
 
     if "allow_no_prlimit" in spec and not isinstance(spec["allow_no_prlimit"], bool):
         problems.append(f"allow_no_prlimit must be a real JSON bool, not {spec['allow_no_prlimit']!r}")
@@ -210,6 +212,11 @@ def validate_spec(spec):
                                "agent_timeout": 1800, "test_timeout": 120}[key])
         if not isinstance(value, int) or isinstance(value, bool) or value < lo:
             problems.append(f"{key} must be an int >= {lo}, got {value!r}")
+    cap, res = spec.get("qwen_cap", 8), spec.get("reserve", 1)
+    if all(isinstance(v, int) and not isinstance(v, bool) for v in (cap, res)) \
+            and res >= cap:
+        problems.append(f"reserve ({res}) must be < qwen_cap ({cap}): with no headroom "
+                        "the preflight pool check can never pass")
     for key in ("coder_model", "designer_model", "test_reviewer_model"):
         if key in spec and spec[key] is not None \
                 and (not isinstance(spec[key], str) or not spec[key].strip()):
@@ -332,7 +339,13 @@ def check_permits(job):
         raise Pause(f"cannot list pending permits (paseo permit ls rc={rc}): "
                     f"{tail_text(err, 3)}")
     data = json_of(out, "paseo permit ls output")
-    entries = data.get("permits", []) if isinstance(data, dict) else data
+    entries = data
+    if isinstance(entries, dict):
+        entries = entries.get("permits", [])
+    if isinstance(entries, dict):
+        entries = list(entries.values())
+    if not isinstance(entries, list):
+        return  # malformed payload: never crash, never pause on it
     ids = {str(i) for i in (job.get("coder_agent"), job.get("designer_agent"),
                             *(job.get("reviewers") or {}).values()) if i}
 
@@ -340,7 +353,7 @@ def check_permits(job):
         vals = {str(e[k]) for k in ("id", "agentId", "agent", "shortId") if e.get(k)}
         return any(v == i or v.startswith(i) or i.startswith(v) for v in vals for i in ids)
     hit = sorted(str(e.get("id") or e.get("agentId") or e.get("agent") or e)
-                 for e in entries if relates(e))
+                 for e in entries if isinstance(e, dict) and relates(e))
     if hit:
         raise Pause(f"permission prompt pending for job agents: {hit}")
 
@@ -455,7 +468,9 @@ def do_spawn(job):
                 procs[role] = subprocess.Popen(argv, cwd=spec["repo"], stdout=subprocess.PIPE,
                                                stderr=subprocess.PIPE, text=True,
                                                errors="replace")
-            except OSError as exc:
+            except OSError as exc:  # same cleanup as the other spawn failures
+                _kill_all(procs)
+                stop_job_agents(job)
                 raise Pause(f"cannot launch paseo ({role} spawn): {exc}")
         for role, proc in procs.items():
             try:
@@ -511,11 +526,10 @@ def scope_feedback(job, exc, agent_key, round_key, rnd, sha):
     key = f"scope_sent@{agent_key}@{sha[:9]}"
     if job.get(key) or rnd >= int(job["spec"]["max_rounds"]):
         raise Escalate(f"{exc.reason} (scope feedback round already used)")
-    job[key] = True
-    save_job(job)
     send_to(job, agent_key,
             f"Revert these paths; they are outside your allowed globs: {exc.paths}. "
             "Keep only work under your allowed paths, commit on your branch.")
+    job[key] = True  # persisted only AFTER the send: a failed send must retry on resume
     job[round_key] = rnd + 1
     save_job(job)
 
@@ -632,7 +646,11 @@ def run_tests(job, wt):
 def load_cases(job, test_sha):
     cf = job["spec"].get("cases_file", f"tests/{job['task_id']}.cases.json")
     raw = git(job["spec"]["repo"], "show", f"{test_sha}:{cf}", check=False)
-    cases = json_of(raw, "cases.json") if raw else None
+    try:
+        cases = json_of(raw, "cases.json") if raw else None
+    except Pause as exc:
+        raise Escalate(f"{cf} in frozen test commit {test_sha[:9]} is not valid JSON: "
+                       f"{exc.reason}")
     if not isinstance(cases, dict) or not cases:
         raise Escalate(f"no usable {cf} in frozen test commit {test_sha}; "
                        f"designer must declare every test id")
@@ -675,6 +693,15 @@ def drop_worktree(job, wt):
     git(job["spec"]["repo"], "worktree", "remove", "--force", wt, check=False)
 
 
+def apply_removals(job, wt, test_sha):
+    # tests the designer DELETED (or renamed away) still exist at base/coder shas:
+    # without this they run in the temp worktrees and can keep a candidate red forever
+    for p in git(job["spec"]["repo"], "diff", "--name-only", "--no-renames",
+                 "--diff-filter=D", job["base_sha"], test_sha, check=False).splitlines():
+        if p:
+            git(wt, "rm", "-q", "-f", "--", p, check=False)
+
+
 def do_execute(job):
     spec = job["spec"]
     rnd = int(job.get("execute_round", 0))
@@ -695,9 +722,23 @@ def do_execute(job):
             raise Escalate(f"test designer commit {test_sha[:9]} adds no files "
                            f"under {spec['allowed_test_paths']}")
         cases = load_cases(job, test_sha)
+        if not any(d["expected_on_base"] == "fail" for d in cases.values()):
+            if rnd >= int(spec["max_rounds"]):
+                raise Escalate(f"{spec['cases_file']} still has no 'fail' case after {rnd} "
+                               "round(s): tests that cannot fail on the base prove nothing")
+            send_to(job, "designer_agent",
+                    f"{spec['cases_file']} declares zero tests with expected_on_base \"fail\": "
+                    "at least one test must FAIL on the base commit — it is the proof the "
+                    "change is needed. Add it (never weaken the rest), commit, done.")
+            rnd += 1
+            job["execute_round"] = rnd
+            job["test_sha"] = None
+            save_job(job)
+            continue
         wt = ensure_worktree(job, "base-wt", job["base_sha"])
         try:
             git(wt, "checkout", "-f", test_sha, "--", *test_paths)
+            apply_removals(job, wt, test_sha)
             rc, out, outcomes = run_tests(job, wt)
         finally:
             drop_worktree(job, wt)
@@ -746,6 +787,7 @@ def do_candidate(job):
         wt = ensure_worktree(job, f"cand-wt-{rnd}", coder_sha)
         try:
             git(wt, "checkout", "-f", job["test_sha"], "--", *job["test_paths"])
+            apply_removals(job, wt, job["test_sha"])
             rc, out, outcomes = run_tests(job, wt)
         finally:
             drop_worktree(job, wt)
@@ -777,6 +819,9 @@ def co_trailer(job):
 
 
 def do_land(job):
+    if job.get("coder_sha") == job.get("base_sha"):
+        raise Escalate("no coder commit: the candidate sha IS the base sha; a PR "
+                       "without code changes proves nothing")
     wt = job["coder_cwd"]
     head = git(wt, "rev-parse", "HEAD")
     moved = [p for p in git(wt, "diff", "--name-only", "HEAD~1", "HEAD", check=False)
@@ -920,6 +965,9 @@ def main(argv):
         print("usage: agentcoder.py run SPEC.json [JOBDIR] | resume JOBDIR | status JOBDIR")
         return EXIT_ERROR
     cmd, arg = argv[0], argv[1] if len(argv) > 1 else ""
+    if cmd in ("resume", "status") and not arg:  # never read a stray ./job.json
+        print("usage: agentcoder.py resume JOBDIR | status JOBDIR")
+        return EXIT_ERROR
     try:
         if cmd == "run":
             try:

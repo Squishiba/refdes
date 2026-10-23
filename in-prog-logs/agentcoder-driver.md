@@ -45,13 +45,17 @@ merges anything.
 
 ## Rounds
 
-13+ review rounds; findings shrank from forgeable gates and fake-CLI key
-mismatches to crash-window edge cases.
+15+ review rounds; findings shrank from forgeable gates and fake-CLI key
+mismatches to crash-window edge cases — round 15 closed the last HIGH: a
+cases.json with zero expected-fail tests was a false-green machine (a
+do-nothing coder passed the gate and landed a PR with no code change);
+the driver now requires one, feeds the designer back, and refuses to land
+a candidate sha equal to the base.
 
 ## Numbers (measured on the final head)
 
-- Driver: 821 non-blank non-comment lines. Driver tests: 96, all passing
+- Driver: 865 non-blank non-comment lines. Driver tests: 109, all passing
   on Linux; the module skips off Linux and where `prlimit` is absent.
-- Full suite on this branch: 4358 passed / 2 skipped / 0 failed.
+- Full suite on this branch: 4371 passed / 2 skipped / 0 failed.
   `ruff --select E9,F` clean on the two files.
 - Exit codes: 0 ready-for-human-gate, 2 escalated, 1 paused/error.

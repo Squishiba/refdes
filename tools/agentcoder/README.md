@@ -1,7 +1,7 @@
 # agentcoder — a small driver for coder / blind test designer / executor loops
 
 `tools/agentcoder/agentcoder.py` is a **plain driver script** (stdlib only,
-one file; currently 821 non-blank/non-comment lines — ~1000 is a soft
+one file; currently 865 non-blank/non-comment lines — ~1000 is a soft
 sanity ceiling, not enforced by a check) that runs the AgentCoder paper
 loop against Paseo agents:
 
@@ -87,9 +87,12 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
 - `cases_file` is where the designer writes its per-test expectations
   (`expected_on_base: "pass"|"fail"`); it defaults to
   `tests/<task_id>.cases.json` and must sit inside `allowed_test_paths`.
-- `test_command` must invoke **pytest**: outcomes are judged from pytest's
-  `--junitxml` output only, so a non-pytest argv is rejected by
-  `validate_spec` (it could never reach the gate).
+- `test_command` must mention **pytest**: outcomes are judged from pytest's
+  `--junitxml` output only, so `validate_spec` requires some argv element to
+  **contain the substring `pytest`** — a substring check, not an invocation
+  check: an argv like `["mytool", "--only", "not-pytest"]` is rejected, while
+  one that merely embeds `pytest` in a larger argument passes validation and
+  then fails at the gate (no junit XML).
 - `{tests}` in `test_command` expands to the files matching the
   `allowed_test_paths` globs, expanded by the driver with
   `glob.glob(..., recursive=True)` relative to the job's worktree, keeping
@@ -258,13 +261,18 @@ resolution.
 
 ## Verified against the real CLI
 
-The first real pilot (task CHK-ATTR-003, which produced PR #357) exercised,
-against the live `paseo` CLI and real Qwen agents: `run`/spawn of both
+The two real pilot tasks (ids `chk-attr-003c`, the CHK-ATTR-003 fix, which
+produced PR #357, and `edit-03`, which produced PR #358) exercised, against
+the live `paseo` CLI and real Qwen agents: `run`/spawn of both
 agents in parallel, designer and coder turns, `execute` (controls and
 intended reds on the base commit under `prlimit` with driver-owned junit
-XML), the candidate round, `land` + real `gh pr create`, and `resume` after
-a permission pause. **Not yet verified live** (offline-tested against the
-fake only): the feedback `send` loops (test-review changes, executor
+XML), the candidate round, `land` + real `gh pr create`, one feedback
+`send` + `resume` (the `edit-03` scope round), and `resume` after
+a permission pause. Every live-verified statement in this README comes
+from those two runs plus the author's direct observations of `paseo ls`
+and `paseo wait` output. **Not verified live** (offline-tested against the
+fake only): the remaining feedback `send` loops (test-review changes,
+executor
 feedback, scope-feedback rounds, candidate-red feedback), the `test_review`
 phase end to end, the crash-window recovery paths in `land`, and
 `paseo wait`/`stop` semantics under failure.
@@ -311,7 +319,9 @@ never raise a `UnicodeDecodeError` out of the driver and strand
   two dialects diverge: fnmatch treats `{`, `,`, `}` literally, so a
   brace pattern like `tests/{a,b}.py` **matches nothing** — a
   designer/coder commit is then flagged, buys the one-shot revert round,
-  and the scope check **escalates** loudly on the repeat. The job **pauses**
+  and the scope check **escalates** loudly on the repeat; and fnmatch's
+  `*` crosses `/`, so `tests/*.py` also matches `tests/sub/x.py`.
+  The job **pauses**
   when the expansion of ALL `allowed_test_paths` globs together matches no
   files. Both are loud; keep patterns in a dialect both sides read the
   same way. `in-prog-logs/` is exempt from **both** scope checks, for
