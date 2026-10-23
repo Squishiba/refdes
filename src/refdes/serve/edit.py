@@ -430,7 +430,7 @@ def _apply_locked(config: str, request: EditRequest):
 
     current_revision = file_revision(path)
     if current_revision != request.expected_revision:
-        return _conflict(who, ref, path, before, request, current_revision)
+        return _conflict(who, ref, path, before, request, current_revision, patch_ref)
 
     if seal.is_sealed(before, item):
         return Refused(
@@ -544,7 +544,7 @@ def _apply_locked(config: str, request: EditRequest):
         with _disk_write_lock(before.root):
             current_revision = file_revision(path)
             if current_revision != request.expected_revision:
-                return _conflict(who, ref, path, before, request, current_revision)
+                return _conflict(who, ref, path, before, request, current_revision, patch_ref)
             if accept is not None:
                 reason = _land_lockfile(before, accept)
                 if reason is not None:
@@ -560,7 +560,7 @@ def _apply_locked(config: str, request: EditRequest):
                 # accept -- landed a moment ago under this lock and must go
                 # back with the body that never lands.
                 _restore_lockfile(accept)
-                return _conflict(who, ref, path, before, request, moved.current)
+                return _conflict(who, ref, path, before, request, moved.current, patch_ref)
             if failure is not None:
                 _restore_lockfile(accept)
                 return Refused(who, ref, failure, path=path)
@@ -971,7 +971,7 @@ def _resolve_link_op(project: Project, item: Item, op):
     return AddLink(op.verb, composite), None
 
 
-def _conflict(who, ref, path, before, request, current_revision) -> Conflict:
+def _conflict(who, ref, path, before, request, current_revision, patch_ref=None) -> Conflict:
     """The disk moved. Show the author their draft against the current file;
     offer nothing that merges.
 
@@ -981,6 +981,11 @@ def _conflict(who, ref, path, before, request, current_revision) -> Conflict:
     save would have written, expressed against what is there now. When the
     current text cannot even be planned against (the item is gone, its span
     is now ambiguous), the conflict says so instead of inventing a diff.
+
+    `patch_ref` is the resolver's live handle, not the request's raw ref:
+    for a retired-id edit the retired spelling is not in the file, and
+    planning against it would refuse and strip the conflict screen of its
+    diff. The conflict still names the ref the author asked with.
     """
     try:
         with open(path, "rb") as fh:
@@ -988,7 +993,7 @@ def _conflict(who, ref, path, before, request, current_revision) -> Conflict:
     except (OSError, UnicodeDecodeError):
         return Conflict(who, ref, path, request.expected_revision, current_revision, None, "")
 
-    plan = patcher.plan_patch(text, ref, request.op, path=path)
+    plan = patcher.plan_patch(text, patch_ref or ref, request.op, path=path)
     if isinstance(plan, Refusal):
         return Conflict(who, ref, path, request.expected_revision, current_revision, None, "")
     draft = patcher.apply_patch(text, plan)

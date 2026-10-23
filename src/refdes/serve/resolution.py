@@ -18,18 +18,23 @@ Accepted spellings, in order:
 A live spelling always wins a retired one: step 3 runs last, and the item
 whose *current* id is `ref` is found by step 1/2 before the scan starts.
 Two items claiming the same retired id resolve to nothing: the resolver
-reports the claimants and each route refuses with them (on a built project
-this is the same case `ids.collect_former_ids` raises a build error for and
-deliberately leaves out of `project.former_ids`).
+reports the claimants and each route refuses with them. The built map does
+NOT behave this way -- `ids.collect_former_ids` records the FIRST claimant
+under the contested id and reports the second claim as a build error (only
+a retired id colliding with a live id is left out of the map) -- so
+reading the map here would pick a winner, which is exactly what the write
+route must never do.
 
 The retired step scans the declared `former_ids:` fields directly rather
-than reading `project.former_ids`, because that map is build output and the
-write route's `_load_before` deliberately runs on an *unbuilt* `load_tree`
-snapshot where it is empty. The scan applies the same rules the map's
-builder applies -- live ids excluded, multiple claimants not recorded --
-so on a built snapshot it agrees with the map, and on an unbuilt one it
-still resolves, which is the point: the write route must not depend on a
-build to answer identity questions.
+than reading `project.former_ids`, because that map is build output and
+the write route's `_load_before` deliberately runs on an *unbuilt*
+`load_tree` snapshot where it is empty. A retired id that is also a live
+id resolves to the live item by ordering alone: the live lookups run
+first, the scan is never reached. Within the scan, an item recording its
+own current id is excluded (a build error, not an identity), and several
+claimants are reported, never picked -- where the built map would have
+kept the first. The point of scanning: the write route must not depend on
+a build to answer identity questions.
 """
 
 from __future__ import annotations

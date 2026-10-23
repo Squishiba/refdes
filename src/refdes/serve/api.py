@@ -93,19 +93,20 @@ def _find_item(project: Project, ref: str) -> tuple[Item | None, str | None]:
     keyless item — what `/api/items` rows carry as `handle`), then display id,
     then surrogate key via `item_by_ref`, then a retired id some item still
     records in `former_ids:`. A provisional handle is never a linkable
-    identity, so it is deliberately looked up only here, only by exact dict
-    hit, and echoed back so the UI can address the item again.
+    identity, so the resolver accepts it only by exact dict hit and echoes it
+    back, letting the UI address the item again.
 
     The retired-id step is what makes the hover promise of docs/ids.md true:
     the id people have from a schematic or a commit message is the retired
     one, and `refdes ls` already answers it. Without this step the API 404'd
     on it (run-5 finding B5), so the hover card for a schematic id was
-    silent. A retired id that collides with a live id never reaches here as a
-    match at all: `ids.collect_former_ids` refuses to record one (it is a
-    build error), and the live lookups above run first regardless. A retired
-    id claimed by two items resolves to nothing on this route (as on the
-    built map this delegates to); the write route names the claimants and
-    refuses.
+    silent. A retired id that is also a live display id resolves to the live
+    item: the live lookups run first, the retired scan is never reached. A
+    retired id claimed by two items resolves to nothing on this route (404)
+    and on the write route (422 naming the claimants) -- the resolver refuses
+    to pick. That is a real change from the map this route used to consult:
+    `ids.collect_former_ids` keeps the FIRST claimant of a contested id in
+    `project.former_ids`, and the old route answered 200 with it.
 
     The resolution itself lives in `serve.resolution.resolve_ref` -- the
     write route calls the same function, which is the point: two routes over

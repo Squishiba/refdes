@@ -75,7 +75,10 @@ load/refresh). Zero threads, zero sockets; the token/origin gate stays
 pinned through the real socket by test_serve_edit_http. All 11 test
 bodies kept verbatim in assertions; per-test fresh projects (function
 scope) removed the shared-fixture order coupling entirely. File runs in
-0.35s.
+0.35s. (Superseded by review round two: the module now has 13 tests and
+two of them drive the real `EditorApp` socket, so "zero threads, zero
+sockets" is no longer true of the whole file — the thread-free spine is
+the 11 direct `api.handle` drives, kept verbatim.)
 
 Re-validated after the redesign: base 6 fail / 5 pass (assertion
 failures, no ERRORs — matches cases.json exactly); with the reference

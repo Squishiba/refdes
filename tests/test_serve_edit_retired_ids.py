@@ -266,6 +266,19 @@ def test_the_read_route_answers_a_retired_id(tmp_path):
     assert item["handle"] == "REQ-001"
 
 
+def test_the_read_route_refuses_a_double_claimed_retired_id(tmp_path):
+    """The read-route change this task ships, pinned. A retired id claimed
+    by two items used to answer 200 with the FIRST claimant: the read route
+    consulted `project.former_ids`, and `ids.collect_former_ids` keeps the
+    first claim in that map (the double claim is reported as a build error,
+    and only live-id collisions are left out of the map). The shared
+    resolver refuses to pick, so the read 404s -- the read-side spelling of
+    the write route's 422 naming both claimants."""
+    client = serve(make_root(tmp_path, {"reqs.yaml": CLAIM_REQS, "claim2.yaml": CLAIM_CLAIM2}))
+    status, _payload = client.get("/api/item/REQ-900")
+    assert status == 404
+
+
 # ------------------------------------------------------------------ happy path
 
 
@@ -299,6 +312,29 @@ def test_the_write_reports_the_current_handle(tmp_path):
     assert payload["handle"] == "REQ-001"
     _status, view = client.get("/api/item/REQ-900")
     assert payload["handle"] == view["handle"], "one handle, one spelling, both routes"
+
+
+def test_a_retired_id_conflict_keeps_its_diff(tmp_path):
+    """The conflict screen on the retired spelling. A stale expected_revision
+    addressed by the retired ref must answer 409 WITH the diff and the
+    current span text: the conflict plans the author's draft in order to
+    show it, and planning against the RAW retired ref -- which is not in
+    the file -- made the plan refuse, so the conflict came back with
+    current_text=None and diff="": the screen lost its diff exactly for the
+    spelling this task added. The conflict plans against the resolver's
+    live handle, like the save itself."""
+    client, root = serve(retired_root(tmp_path)), tmp_path
+    before_tree = snapshot_tree(root)
+    status, payload = client.post(
+        "/api/item/REQ-900/edit",
+        {"op": "set_field", "field": "status", "value": "draft", "expected_revision": "0" * 64},
+    )
+    assert status == 409, payload
+    assert payload["kind"] == "conflict"
+    assert payload["current_text"], payload
+    assert payload["diff"], payload
+    assert "status: draft" in payload["diff"]
+    assert snapshot_tree(root) == before_tree, "a conflict writes nothing"
 
 
 def test_the_write_reports_the_surrogate_key_handle_on_a_keyed_project(tmp_path):
@@ -353,16 +389,17 @@ def test_a_retired_id_that_is_a_live_id_writes_the_live_item(tmp_path):
 
 
 def test_a_retired_id_claimed_by_two_items_writes_neither(tmp_path):
-    """REQ-002 and REQ-003 each record retired REQ-900. The read route
-    answers this spelling with the FIRST claimant on record (files load
-    alphabetically, so project.former_ids holds REQ-900 -> REQ-003 and the
-    second claim is a build error on REQ-002) -- a shared resolver with no
-    ambiguity check would silently write REQ-003's span. A WRITE must refuse
-    an ambiguous id: it has to name one item's span to patch, and picking
-    one of the two is exactly what it must never do. So: the write is
-    refused, the tree is byte-identical -- neither claimant is touched --
-    and the loudness lives where the reader can see it: the project reports
-    the double claim as its own build diagnostic."""
+    """REQ-002 and REQ-003 each record retired REQ-900. The built map is NOT
+    the resolver's answer here: `ids.collect_former_ids` keeps the FIRST
+    claimant under the contested id (files load alphabetically, so
+    project.former_ids holds REQ-900 -> REQ-003 and the second claim is a
+    build error on REQ-002) -- a resolver reading that map, like the read
+    route used to, would write REQ-003's span. The resolver scans and
+    refuses to pick instead: the write is refused, the tree is
+    byte-identical -- neither claimant is touched -- the read 404s
+    (test_the_read_route_refuses_a_double_claimed_retired_id), and the
+    loudness lives where the reader can see it: the project reports the
+    double claim as its own build diagnostic."""
     root = make_root(tmp_path, {"reqs.yaml": CLAIM_REQS, "claim2.yaml": CLAIM_CLAIM2})
     client = serve(root)
     before_tree = snapshot_tree(root)

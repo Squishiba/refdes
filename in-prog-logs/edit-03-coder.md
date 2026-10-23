@@ -80,7 +80,16 @@ resolver's AMBIGUITY wording (former_ids / exactly one item / refuses to
 pick one, no "no item" text) and both claimants by name; two tests added on
 the real socket (EditorApp + Client): a retired-id save landing with the
 current id/handle in the JSON, and the double claim answering 422 with the
-ambiguity refusal. 46 passed with test_serve_edit_http.
+ambiguity refusal. 46 passed with test_serve_edit_http. Round 3: F1 -- the
+"collect_former_ids leaves double claims out" claims in resolution.py,
+api.py and the changelog were false (the map keeps the FIRST claimant; only
+live-id collisions drop out), rewritten, and the real read-route change
+(double claim now 404s where it answered the first claimant) is pinned by a
+new test; F2 -- _conflict now plans the draft with the resolver's live
+handle (threaded patch_ref through all three call sites), so a retired-id
+edit on a stale revision returns 409 with a real diff/current_text instead
+of the blank screen (new test fails pre-fix, passes post-fix); F3 -- the
+designer log's "zero threads, zero sockets / 11 tests" line corrected.
 
 Task finished.
 
