@@ -9,121 +9,129 @@ never stay absolute; one helper at the serialization choke point.
 
 ## What was done
 
-- `src/refdes/serve/api.py`: added `_write_outcome(app, result)` as the single
-  choke point -- `handle()` now wraps the POST results of `/api/item/<ref>/edit`
+- `src/refdes/serve/api.py`: `_write_outcome(app, result)` is the single
+  choke point -- `handle()` wraps the POST results of `/api/item/<ref>/edit`
   and `/api/items/create` through it (server.py:829 calls `api.handle`, and
-  the tests drive `api.handle` thread-free, so both paths are covered).
-  The old `_apply_edit`/`_create_item` bodies are untouched; their `shown()`
-  closures stay as-is (relative `path` values pass through the scrub unchanged).
-- `_relative_paths` walks the whole payload (dicts/lists/strings);
-  `_relative_paths_in_text` rewrites every absolute-path token:
-  - under root -> project-relative forward-slash spelling; `items/REQ-007.md:6`
-    keeps its line suffix; the root itself -> `.`
-  - outside root -> bare file name (documented choice in the docstring),
-    `<outside project>` when there is no leaf
-  - token regex has a lookbehind boundary so `http://x/y`, `and/or`, `5/6`
-    and relative `path/to/x` are NOT touched (the first draft mangled
-    `http://`; the `p://` reads as a drive root without the boundary)
-  - drive-letter roots compare case-insensitively; both separator spellings
-    match (tokens are separator-normalized before comparison)
-  - on Linux a Windows-shaped root must not go through `os.path.abspath`
-    (it prefixes cwd and destroys the drive spelling) -- that was the one
-    real bug the scratch probe caught.
+  the tests drive `api.handle` thread-free, so both paths are covered). The
+  service-layer bodies are untouched.
+- `_relative_paths` walks the whole payload (dict keys/values, list and
+  tuple elements); `_relative_paths_in_text` is a two-pass text rule:
+  a literal first pass for the KNOWN root (rounds 3-4, below), then a
+  token pass: under root -> project-relative forward-slash spelling with
+  line suffix, outside root -> bare file name (`<outside project>` with no
+  leaf), the root itself -> `.`. A lookbehind boundary keeps `http://x/y`,
+  `and/or`, `5/6` and relative `path/to/x` untouched; drive-letter roots
+  compare case-insensitively; separator runs collapse before comparison
+  (the patcher's `json.dumps` quoting doubles Windows backslashes in file
+  bytes -- the round-1 windows-latest CI failure).
+  On Linux a Windows-shaped root must not go through `os.path.abspath`
+  (it prefixes cwd and destroys the drive spelling).
 - Changelog fragment `changelog.d/editor-responses-relative-paths.fixed.md`.
+- Verification practice all rounds: RED-first test per finding, targeted
+  suites, full suite, `ruff check` on touched files (the designer test
+  file's RUF059s are fixed in round 4; no silencing of unrelated findings).
 
-## Verification
+## Review rounds 1-3 (PR #372, summarized)
 
-- `.scratch/f13-3/probe.py`: drives `api.handle` over the shared
-  serve_support fixture project (keyless). Asserted, walking every string of
-  every payload: 200 applied, 409 conflict (message/diff/current_text), 422
-  invalid (diagnostics) and create all carry no root in either separator
-  spelling; messages show `items/reqs.yaml`, `items/decs.yaml`, describe
-  shows `items/reqs.yaml:7`. Helper unit cases: run-13 `:6` suffix, Windows
-  case-fold root, outside-root basename, URL/`and/or`/`5/6` untouched,
-  root->`.`.
-- `PYTHONPATH=src .../pytest -q tests/test_serve_edit_http.py
-  tests/test_serve_edit_retired_ids.py tests/test_serve_edit_keyless_handle.py
-  tests/test_serve_upload.py` -> 168 passed, 1 skipped (the skipped upload
-  case needs a case-insensitive filesystem, pre-existing).
-  tests/test_vscode_extension.py + tests/test_scalar_for_list_field.py green.
-- `ruff check src/refdes/serve/api.py` clean (same as the HEAD baseline).
+Round 1 (windows CI): separator-run collapsing for the `json.dumps`
+doubled-backslash spelling; trailing-separator root -> `.`; walk dict keys
+and tuple elements (+ json-shape guard test).
+Round 3 (cross-model review of caa2142): two MEDIUMs -- a space-bearing
+root is half-scrubbed by a token pass that stops at whitespace, and
+`file://` URIs escape the boundary lookbehind. Reviewer-prescribed design:
+a first pass matching the KNOWN root literally (spellings: native,
+forward-slash, JSON-escaped doubling, `file://`/`file:///` prefixes,
+IGNORECASE for drive roots), swallowing the separator after the root;
+token pass keeps outside-root -> basename and gains a `file:` branch.
+Addendum (plugin reviews of caa2142): casing pins, outside-root pins,
+changelog/log NITs. All verified RED-first, full suite green each round.
 
-## Review round (PR #372)
+## Review round 4 (plugin reviews of 5cf61a2): SIMPLIFY
 
-Designer's acceptance file `tests/test_serve_edit_response_paths.py` landed
-(198b2d9); the windows-latest CI run failed its
-`test_a_conflict_whose_file_text_names_the_root_is_all_relative`. Three
-findings, all in the helpers; RED-first tests added to the same file
-before each fix:
+Root cause of all three findings: the first pass swallowed the whole
+whitespace-separated run after the root and re-emitted it with separator
+runs collapsed. HIGH: a `file://<root>/...` pasted after an under-root
+path came back `file:/tmp/.../secret/x.md:4` -- the ROOT in the 409
+`current_text`/`diff` (reachable through file text; the ticket's exact
+property). MEDIUM: `https://example.com/a//b` lost slashes; an outside
+`file:///etc/private/...` kept its directories. LOW: bare-root boundary
+missing `! ? :` (spaced root before them leaked its tail) and including
+`.` (`proj.old` sibling -> `..old`, sentence-ending root -> `..`).
 
-1. HIGH (Windows CI): the patcher quotes a `: `-bearing value through
-   `json.dumps` (`_double_quoted`), so file bytes -- and `current_text`/
-   `diff` -- carry the root DOUBLED (`C:\\Users\\...`). The per-character
-   `\\`->`/` map yielded `C://Users//...`, the under-root prefix test
-   failed, the token collapsed to its basename. Fix: collapse separator
-   runs before comparison (`_SEP_RUNS`). Pinned platform-neutral by
-   feeding the helper the `json.dumps` escaping of a Windows-shaped root
-   the test names itself.
-2. LOW: a root quoted *with* its trailing separator became the empty
-   string, not the `.` the changelog promises. Fix: `rel = ... or "."`.
-3. LOW: `_relative_paths` skipped dict keys and passed tuples through;
-   the designer's payload walker covers keys. Fix: walk keys and tuple
-   elements (payloads are json-shaped today -- a new guard test asserts
-   that -- this is defense in depth). Docstring updated.
+Reviewer-prescribed algorithm, followed: the first pass consumes the root
+(as ONE separator-run pattern -- native/forward/JSON-doubled spellings
+collapse into `[\\/]+` joins) with an optional `file:/{2,3}` prefix, plus
+the separator run that follows (-> ``), or the bare root at an end
+boundary (letter/digit/`_`/`-` and `.`+letter are NOT boundaries; the
+sentence-ending `.` IS consumed) -> `.`. NOTHING after is consumed; the
+token pass keeps its full job. Net code shrank: `_PATH_SEG`,
+`_NOT_ABS_START`, `_ROOT_END`, the spelling set and the cont group are
+gone. Consequence pinned in tests: the continuation is left as written
+(escaped text stays escaped -- r2/r3 expectations updated to
+`items\reqs.yaml`-style outputs; a spec change prescribed by the reviewer,
+not a test weakening).
 
-Verification: the 4 new tests RED before the fix (the json-shape guard
-passes by design), targeted suites green, full suite green. Changelog
-fragment reworded for the escaped spelling and the trailing-separator
-`.`. `ruff check` on the two touched files: only the 3 RUF059 findings
-that pre-exist on the designer's lines at HEAD remain; my lines are
-clean (AGENTS.md: no silencing unrelated pre-existing findings).
+RED-first: 3 tests (HIGH end-to-end 409 with a pasted `file://` URI,
+MEDIUM text-unchanged pair, LOW punctuation-boundary set) -- all 3 RED on
+`5cf61a2`, all green after. Chunk-2 test findings F1-F5: `assert_no_root`
+added to both front-matter saves (clears 2 RUF059; the full-payload walk
+now covers the ticket's headline md shape), json-shape guard docstring
+truthfulness (the `walk()` is the tuple proof, not the discarded
+round-trip), the "posix root" test renamed to what it feeds
+(Windows-shaped, doubled continuation), five 101-111-char lines wrapped,
+`_root` for the unused unpack. Helper docstring now states the
+outside-path-with-spaces outcome (the ticket's documented limit).
+Changelog's "non-path text pass through unchanged" is now true, and says
+why.
 
-## Review round 3 (PR #372, cross-model review of caa2142)
+## Review round 4 escalation (deep analysis of 5cf61a2): SPAN SCANNER
 
-Two MEDIUMs (api.py token regex, ~166), both Windows-likely:
-1. token regex stops at whitespace -> a root with spaces
-   (`C:\Users\Jane Doe\...`, `/home/user/my project`) is half-scrubbed:
-   fragment up to the space -> basename, rest of root walks out as prose.
-2. `file:///home/user/project/items/a.md` never scrubbed: the boundary
-   lookbehind (needed for `http://x/y`) excludes the slashes after the
-   scheme colon.
+Probe baseline on this tree (`deep-analysis-pr372-probes.py`, saved in
+`.scratch/probes-r4-baseline.jsonl`): CORE FAIL 9 (outside-space-quoted,
+outside-space-root, json-root-quote/newline/tab, quoted-child-parentheses/
+brackets/braces, outside-win-space), EXT FAIL 14, POLICY FAIL 3. Directive:
+stop adding regex alternatives; replace the two passes with ONE span
+scanner; every CORE cell must PASS.
 
-Reviewer-prescribed design, followed: FIRST PASS matching the KNOWN root
-literally (`_root_scrubber`): spellings = native separators, forward
-slashes, JSON-escaped doubling, `file://`/`file:///` prefixes, IGNORECASE
-for drive roots; the separator run after the root is swallowed
-(`<root>/items/x.yaml:6` -> `items/x.yaml:6`, continuation separator runs
-collapsed), bare root (+ trailing seps) -> `.`; the continuation may not
-restart at an absolute start, so prose carrying its own absolute path is
-left whole to the token pass. Spaces inside the root are irrelevant to a
-literal match. Token pass keeps outside-root -> basename and gains a
-`file://` branch (slash arithmetic: `file:` + 1-2 slashes + drive-or-`/`
-lead; first draft's `{2}` missed the posix 3-slash spelling -- caught by
-its own RED test). Outside-root paths WITH spaces remain tokenized to
-the first space -- pinned as a documented limit (the protected secret is
-the project root; a literal pass cannot know other roots).
+Decisions (fixed, not to be re-litigated): scope = CORE cells (EXT cells
+stay documented gaps: `file:/` single-slash, `FILE://` on posix roots,
+`file://localhost` authority, `%20`/long-path aliases, 8.3 names, symlink
+realpath -- no filesystem access at all); a bare outside token extends
+over ONE space only when the next piece is unambiguously path-shaped
+(contains a separator, no colon, ends in a file extension), spaces are
+fully honored inside the exact known root and inside quoted scalars;
+regex/switch/POSIX-backslash-filename stay POLICY documented limits (no
+intent detector); dict-key collisions get `#2`/`#3` suffixes (no data
+lost); a sentence-ending root keeps ONE period; lexical-only, no Windows
+filesystem claims.
 
-RED-first: 8 tests added (posix/windows spaced roots, JSON-escaped spaced
-root, file:// under/outside root, outside-with-spaces pin, root-as-prefix
-of a longer dir, end-to-end project in `my project/`); 6 RED before the
-fix (2 pins pass by design). First-pass-not-applied bug caught by the
-RED run (return ran the token pass only). 25/25 file green, 58/58
-targeted, full suite green (see below), ruff api.py clean. Changelog
-fragment reworded (URI spelling, spaces, the documented limit).
+Scanner (per response, compiled root pattern cached): one left-to-right
+scan per string. Precedence at each position: quoted scalar span
+(`"`-delimited, escapes honored) > `file:` URI prefix > long-path prefix
+(`\\?\`, `//?/` -> `<outside project>`, no alias matching) > drive/
+absolute span. A span is classified by trying the separator-run root
+pattern (native/forward/JSON-doubled spellings as ONE pattern, sentence
+`.` consumed, bare-root `:6`/`:6:2` suffixes, IGNORECASE for drive roots)
+anchored at its start; under-root renders the remainder AS-WRITTEN with
+the suffix riding; outside reduces the whole token (plus path-shaped
+space-joined pieces) to its leaf, `<outside project>` with none. Quoted
+scalars decode (JSON, YAML-fallback incl. `\xHH`), scrub, re-encode;
+unchanged content re-emits the original bytes. Replacements are never
+re-scanned (this is what fixes quoted-child-* and the HIGH URI case).
 
-## Addendum (plugin reviews of caa2142, same push)
-
-Confirmed the file:// leak and the space-in-root problem (both fixed
-above); folded in: P2 casing pins (root `C:\Users\Jane Doe\Proj` vs
-texts at differing drive/directory casing, all three spellings -- the
-direct Windows helper cases had only ever used matching casing, so the
-case-insensitive rule was unpinned); P2 outside-root pins (POSIX and
-Windows-shaped paths -> bare name, `/` -> `<outside project>`, the
-with-spaces case pinned as the documented partial); NITs (the changelog
-fragment's create-route example path was broken across a line break
-inside backticks and the round-3 lines carried a stray indent --
-rewrapped; the designer log's `tests/f13-3.cases.json` line corrected:
-the manifest lives on the frozen-test branch, not in the PR diff).
-
-Finished. Touched: api.py, the acceptance test file, the changelog
-fragment, both f13-3 logs.
+Result: probe CORE FAIL = [] (154 PASS; baseline 9 FAILs all fixed:
+outside-space-quoted/-root, json-root-quote/newline/tab,
+quoted-child-parentheses/brackets/braces, outside-win-space). EXT FAIL 13
+= the pre-declared out-of-scope list (file:/, FILE:// posix, localhost
+authority, %20, long-path aliases, 8.3, dot segments); json-unicode-root
+flipped to PASS as a freebie of the JSON decode. POLICY FAIL = regex,
+switch only (documented grammar, decision 3); key-collision and
+posix-backslash-name PASS. Bugs found while landing: the greedy
+`file:/{2,3}` prefix ate the slash the root's leading separator run
+needs (try 3, fall back to 2); the consumed sentence period must NOT be
+re-emitted (the `.` replacement is the dot); suffix/punctuation travel
+inside the replacement, never back into the scan.
+Full suite green: 4618 passed, 2 skipped. (A basetemp INSIDE the repo
+breaks tests/test_scaffold.py + sealing gitignore tests -- git's
+ignore/rev-parse rules leak into tmp_path projects; run the suite with
+the default basetemp.)

@@ -42,7 +42,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from itertools import product
+from types import SimpleNamespace
 from urllib.parse import quote
+
+import pytest
 
 from serve_support import make_project, snapshot_tree
 
@@ -168,6 +172,7 @@ def test_applied_message_and_describe_use_the_relative_spelling_with_line_suffix
     _status, view = client.get("/api/item/REQ-001")
     status, payload = save(client, "REQ-001", revision=view["edit"]["file_revision"])
     assert status == 200, payload
+    assert_no_root(payload, root, "yaml-item applied 200 (full payload)")
     assert payload["describe"].startswith("yaml-item REQ-001: set_field status at ")
     assert re.search(r"at items/reqs\.yaml:\d+ \[\d+:\d+\]$", payload["describe"]), (
         payload["describe"]
@@ -186,6 +191,7 @@ def test_applied_message_and_describe_use_the_relative_spelling_with_line_suffix
         revision=view2["edit"]["file_revision"],
     )
     assert status == 200, payload2
+    assert_no_root(payload2, root2, "md-front-matter applied 200 (full payload)")
     assert payload2["describe"].startswith("md-front-matter REQ-010: set_field text at ")
     assert re.search(r"at items/notes\.md:\d+ \[\d+:\d+\]$", payload2["describe"]), (
         payload2["describe"]
@@ -218,7 +224,9 @@ def test_applied_response_shape_path_and_non_path_text_are_unchanged(tmp_path):
     assert any(
         d["message"].startswith("8 items have no key yet") for d in payload["diagnostics"]
     ), payload["diagnostics"]
-    assert all(set(d) == {"level", "message", "file", "line", "code"} for d in payload["diagnostics"])
+    assert all(
+        set(d) == {"level", "message", "file", "line", "code"} for d in payload["diagnostics"]
+    )
 
 
 # ------------------------------------------------------------------ 409
@@ -300,18 +308,25 @@ def test_a_conflict_whose_file_text_names_the_root_is_all_relative(tmp_path):
 def test_gate_blocked_invalid_response_carries_no_project_root(tmp_path):
     client, root = keyless_client(tmp_path)
     _status, view = client.get("/api/item/REQ-001")
-    status, payload = save(client, "REQ-001", value="banana", revision=view["edit"]["file_revision"])
+    status, payload = save(
+        client, "REQ-001", value="banana", revision=view["edit"]["file_revision"]
+    )
     assert status == 422 and payload["kind"] == "invalid", payload
     assert payload["diagnostics"], "the gate must say which error it blocked"
     assert_no_root(payload, root, "invalid 422 (message, reason, diagnostics)")
 
 
 def test_gate_blocked_invalid_response_text_is_unchanged(tmp_path):
-    client, root = keyless_client(tmp_path)
+    client, _root = keyless_client(tmp_path)
     _status, view = client.get("/api/item/REQ-001")
-    status, payload = save(client, "REQ-001", value="banana", revision=view["edit"]["file_revision"])
+    status, payload = save(
+        client, "REQ-001", value="banana", revision=view["edit"]["file_revision"]
+    )
     assert status == 422, payload
-    blocked = "blocked: the edit would leave 1 error(s): status: 'banana' is not one of draft, approved."
+    blocked = (
+        "blocked: the edit would leave 1 error(s): status: 'banana' is not"
+        " one of draft, approved."
+    )
     assert payload["message"] == payload["reason"] == blocked, payload
     assert payload["path"] == "items/reqs.yaml"
     assert payload["diagnostics"][0] == {
@@ -328,7 +343,12 @@ def test_refused_response_carries_no_project_root(tmp_path):
     before_tree = snapshot_tree(root)
     status, payload = client.post(
         "/api/item/REQ-999/edit",
-        {"op": "set_field", "field": "status", "value": "draft", "expected_revision": sha256(reqs_file(root))},
+        {
+            "op": "set_field",
+            "field": "status",
+            "value": "draft",
+            "expected_revision": sha256(reqs_file(root)),
+        },
     )
     assert status == 422 and payload["kind"] == "refused", payload
     assert payload["reason"] == "no item 'REQ-999' in this project", payload
@@ -433,16 +453,18 @@ def test_the_helper_relativeizes_the_json_escaped_windows_spelling():
     assert got == '"See items/reqs.yaml: values"', got
 
 
-def test_the_helper_relativeizes_the_escaped_spelling_under_a_posix_root():
-    # The CI shape: a native-separator root, the value JSON-escaped on the
-    # way into the file. On Linux there is nothing to escape (the root
-    # already has forward slashes), so the test feeds the helper the
-    # escaped spelling of a Windows-shaped root it hands in explicitly.
+def test_the_helper_relativeizes_the_escaped_spelling_with_doubled_continuation():
+    # The Windows CI shape on any platform: the root is native-backslash,
+    # the value JSON-escaped on the way into the file. The first pass
+    # consumes the root and the separator run that follows it and leaves
+    # the continuation exactly as written -- escaped text stays escaped
+    # (round-4 design: nothing after the root is rewritten, so a `\\` in
+    # the continuation is no one's business to collapse).
     root = "C:\\Users\\x\\proj"
     escaped = json.dumps(f"conflict: {root}\\items\\reqs.yaml changed")
     got = api_mod._relative_paths_in_text(escaped, root)
-    assert got == '"conflict: items/reqs.yaml changed"', got
-    assert "\\\\" not in got and "C:" not in got, got
+    assert got == '"conflict: items\\\\reqs.yaml changed"', got
+    assert "C:" not in got, got
 
 
 def test_the_helper_turns_a_root_with_a_trailing_separator_into_dot():
@@ -467,8 +489,9 @@ def test_write_route_payloads_are_json_shaped_and_contain_no_tuples(tmp_path):
     """The guard behind the walk: every string of a write-route payload is
     reachable through the JSON shape -- dict keys, string values, list
     elements, and nothing tuple-shaped that a walker must be told about.
-    The payloads are asserted json-serializable, which repacks tuples to
-    lists and so proves none survived; the key types are pinned directly."""
+    The `walk` below IS that proof (it fails on any tuple and pins every
+    key to a string); the json round-trip beside it pins only
+    serializability, which a tuple survives as a list."""
     client, root = keyless_client(tmp_path)
     _status, view = client.get("/api/item/REQ-001")
     payloads = [save(client, "REQ-001", revision=view["edit"]["file_revision"])[1]]
@@ -497,20 +520,20 @@ def test_write_route_payloads_are_json_shaped_and_contain_no_tuples(tmp_path):
 
 # ------------------------------------------------- round 3: spaces and file URIs
 #
-# The token regex stops at whitespace, so a root containing a space --
+# The token rule stops at whitespace, so a root containing a space --
 # `C:\Users\Jane Doe\...`, `/home/user/my project` -- is common, and real,
-# and only half-scrubbed by a token pass: the token ends at the space, the
-# under-root test fails, and the fragment up to the space collapses to its
-# basename while the rest of the root walks out as prose. A root matched
-# LITERALLY has no such problem: spaces inside it are just characters. The
-# fix design (reviewer-prescribed): a first pass that replaces the KNOWN
-# root literally in every spelling it already normalises -- native
-# separators, forward slashes, the JSON-escaped doubling, a drive letter at
-# any case, optionally preceded by `file://`/`file:///` -- swallowing the
-# separator that follows so `<root>/items/x.yaml:6` becomes
-# `items/x.yaml:6` and the bare root becomes `.`. The token pass keeps its
-# job for absolute paths NOT under the root (-> bare file name), and gains
-# the `file://` prefix there too.
+# and only half-scrubbed by a pass that cannot cross the space: the match
+# ends at the space, the under-root test fails, and the fragment up to the
+# space collapses to its basename while the rest of the root walks out as
+# prose. A root matched LITERALLY has no such problem: spaces inside it are
+# just characters. The rule that satisfies this (reviewer-prescribed, and
+# the shape the round-4 span scanner kept): the KNOWN root matches as a
+# literal in every spelling it normalises -- native separators, forward
+# slashes, the JSON-escaped doubling, a drive letter at any case, optionally
+# preceded by `file://`/`file:///` -- swallowing the separator that follows
+# so `<root>/items/x.yaml:6` becomes `items/x.yaml:6` and the bare root
+# becomes `.`. Absolute paths NOT under the root keep their own rule: reduce
+# to the bare file name, the `file://` prefix included.
 
 
 def test_the_helper_relativeizes_a_posix_root_with_spaces():
@@ -528,16 +551,18 @@ def test_the_helper_relativeizes_a_posix_root_with_spaces():
 
 
 def test_the_helper_relativeizes_a_windows_root_with_spaces():
+    # The continuation is left exactly as written (round-4 design): the
+    # backslashes after the root stay the file's own bytes.
     root = "C:\\Users\\Jane Doe\\proj"
     assert (
         api_mod._relative_paths_in_text(
             "at C:\\Users\\Jane Doe\\proj\\items\\a.md:3 now", root
         )
-        == "at items/a.md:3 now"
+        == "at items\\a.md:3 now"
     )
     assert (
         api_mod._relative_paths_in_text("at c:\\users\\jane doe\\PROJ\\items\\a.md now", root)
-        == "at items/a.md now"
+        == "at items\\a.md now"
     )
 
 
@@ -567,7 +592,7 @@ def test_the_helper_scrubs_file_uris_under_the_root():
     )
 
 
-def test_the_token_pass_scrubs_file_uris_outside_the_root():
+def test_the_scrubber_reduces_file_uris_outside_the_root():
     assert (
         api_mod._relative_paths_in_text("read file:///etc/private/secret.md:4", "/home/you/proj")
         == "read secret.md:4"
@@ -583,15 +608,23 @@ def test_the_token_pass_scrubs_file_uris_outside_the_root():
     )
 
 
-def test_an_outside_root_path_with_spaces_keeps_the_token_pass_partial():
-    # Pinned as a documented limit of the design (chunk-3 review): the token
-    # pass cannot know where a path with spaces ends, and the literal pass
-    # can only match the KNOWN root. The leak this protects is the project
-    # root, which is scrubbed in every spelling; an outside path with spaces
-    # reduces by its first token, and the remaining prose is unchanged.
+def test_an_outside_path_with_spaces_reduces_to_the_leaf():
+    # The round-4 escalation: the scanner reads a quoted scalar whole, so
+    # spaces inside it are part of the path; an unquoted token extends over
+    # a space only when the next piece is unambiguously path-shaped (a
+    # separator, an extension). The grammar limit of that rule is pinned
+    # beside it: prose that merely contains a separator is not swallowed.
+    assert (
+        api_mod._relative_paths_in_text('"/etc/my conf/secret.md"', "/home/you/proj")
+        == '"secret.md"'
+    )
     assert (
         api_mod._relative_paths_in_text("read /etc/my conf/secret.md", "/home/you/proj")
-        == "read my conf/secret.md"
+        == "read secret.md"
+    )
+    assert (
+        api_mod._relative_paths_in_text("read /etc/my config", "/home/you/proj")
+        == "read my config"
     )
 
 
@@ -615,8 +648,8 @@ def test_the_helper_matches_the_windows_root_at_any_casing():
     )
     assert (
         api_mod._relative_paths_in_text("see C:/USERS/JANE DOE/PROJ\\items\\x.yaml", root)
-        == "see items/x.yaml"
-    )
+        == "see items\\x.yaml"
+    )  # continuation as written (round-4 design)
     escaped = json.dumps("see c:\\users\\jane doe\\proj/items/x.yaml:2")
     assert api_mod._relative_paths_in_text(escaped, root) == '"see items/x.yaml:2"'
 
@@ -626,8 +659,7 @@ def test_the_helper_reduces_absolute_paths_outside_the_root_to_their_names():
     # under the root to lose its directories; pin the documented choice
     # (bare file name, `<outside project>` when there is none) for both
     # path shapes, the Windows one through the helper's drive-letter rule,
-    # and the space case as the partial tokenization it is (pinned with its
-    # reasoning in the documented-limit test above).
+    # and the space case (pinned with its grammar in the leaf test above).
     root = "/home/you/proj"
     assert (
         api_mod._relative_paths_in_text("base /etc/refdes/base.yaml:9", root)
@@ -641,8 +673,7 @@ def test_the_helper_reduces_absolute_paths_outside_the_root_to_their_names():
         == "rooted at <outside project> for now"
     )
     assert (
-        api_mod._relative_paths_in_text("read /etc/my conf/secret.md", root)
-        == "read my conf/secret.md"
+        api_mod._relative_paths_in_text("read /etc/my conf/secret.md", root) == "read secret.md"
     )
 
 
@@ -662,3 +693,329 @@ def test_a_root_with_spaces_end_to_end(tmp_path):
     assert "my project/" not in payload["message"], payload["message"]
     assert not any("my project/" in text for text in strings_of(payload)), payload
     assert_no_root(payload, root, "spaced-root 200")
+
+
+# ------------------------------------------- round 4: nothing after the root
+#
+# The plugin review (round 4, chunks 1+2): the first pass swallowed the
+# whole whitespace-separated run following the root and re-emitted it with
+# separator runs collapsed -- so `https://example.com/a//b` lost a slash,
+# an outside `file:///etc/private/...` kept its directories (the leak the
+# ticket forbids), and a `file://<root>/...` pasted after an under-root
+# path re-emitted `file:/home/...`: the ROOT itself, in `current_text` and
+# `diff`. The fix consumes ONLY the root and the separator run that follows
+# it; the rest of the text is left exactly as written. (The round-4
+# escalation below replaced the token pass with the span scanner; this
+# section pins the boundary grammar and URI reduction both algorithms
+# share.)
+
+
+def test_a_pasted_file_uri_after_a_path_leaves_no_root_in_the_409(tmp_path):
+    """The reviewer's HIGH reproducer, end to end: a project file whose
+    text is an under-root path followed by a `file://` URI naming the root
+    again. The continuation-swallowing first pass turned the URI into
+    `file:/tmp/.../secret/x.md:4` -- the absolute project root in the 409
+    `current_text` and `diff`, exactly the leak the ticket forbids."""
+    client, root = keyless_client(tmp_path)
+    _status, view = client.get("/api/item/REQ-001")
+    text = f"See {reqs_file(root)} then file://{root}/secret/x.md:4"
+    status, payload = save(
+        client,
+        "REQ-001",
+        field="text",
+        value=text,
+        revision=view["edit"]["file_revision"],
+    )
+    assert status == 200, payload
+    status, payload, _stale = _stale_save(
+        client, root, "REQ-001", field="text", value=text + " edited"
+    )
+    assert status == 409, payload
+    assert_no_root(payload, root, "409: file:// URI naming the root after a path")
+
+
+def test_the_text_after_a_scrubbed_path_is_left_exactly_as_written():
+    """The reviewer's MEDIUM reproducer: prose and URLs after a scrubbed
+    path are non-path text. The double slash of `https://` survives, and
+    an outside `file://` path reaches the token pass whole and reduces to
+    its file name -- not to `file:/etc/private/secret.md:4`."""
+    root = "/home/you/proj"
+    assert (
+        api_mod._relative_paths_in_text(
+            "saved /home/you/proj/items/a.md then https://example.com/a//b", root
+        )
+        == "saved items/a.md then https://example.com/a//b"
+    )
+    assert (
+        api_mod._relative_paths_in_text(
+            "saved /home/you/proj/items/a.md then file:///etc/private/secret.md:4",
+            root,
+        )
+        == "saved items/a.md then secret.md:4"
+    )
+
+
+def test_a_root_at_punctuation_scrubs_whole_and_a_prefixed_sibling_not_at_all():
+    """The reviewer's LOW: the bare-root boundary was both under- and
+    over-inclusive. Missing `!`, `?`, `:` meant a space-bearing root
+    before one of them leaked its tail (the token pass stops at the
+    space). Including `.` meant a sibling sharing the root plus a dot
+    (`/home/you/proj.old/items/a.md`) was scrubbed to `..old/items/a.md`
+    instead of its file name, and a sentence-ending root became `..`."""
+    spaced = "C:\\Users\\Jane Doe\\Proj"
+    assert (
+        api_mod._relative_paths_in_text("root is C:\\Users\\Jane Doe\\Proj! done", spaced)
+        == "root is .! done"
+    )
+    assert (
+        api_mod._relative_paths_in_text("root C:\\Users\\Jane Doe\\Proj? yes", spaced)
+        == "root .? yes"
+    )
+    assert (
+        api_mod._relative_paths_in_text("at C:\\Users\\Jane Doe\\Proj:6", spaced) == "at .:6"
+    )
+    assert (
+        api_mod._relative_paths_in_text(
+            "see /home/you/proj.old/items/a.md", "/home/you/proj"
+        )
+        == "see a.md"
+    )
+    assert (
+        api_mod._relative_paths_in_text("see /home/you/proj.md", "/home/you/proj")
+        == "see proj.md"
+    )
+    assert (
+        api_mod._relative_paths_in_text("locked: /home/you/proj. ok", "/home/you/proj")
+        == "locked: . ok"
+    )
+
+
+# ------------------------------------------- round 4 escalation: probe cells
+#
+# The deep analysis of `5cf61a2` (`.scratch/analysis/deep-analysis-pr372.md`)
+# enumerated the whole contract surface as probe cells; the mandated fix is
+# ONE span scanner -- quoted scalar spans first, `file:` URIs next, bare
+# absolute spans last -- each classified by the literal root pattern, with
+# replacement text never re-scanned. The cells below pin the report's
+# golden strings. Its EXT cells (`file:/` single-slash and `FILE://` on a
+# posix root, the `file://localhost` authority, `%20`/long-path aliases,
+# 8.3 names, dot-segment canonicalization) stay documented grammar limits,
+# as do the POLICY rows: the scanner is a grammar, never an intent
+# detector.
+
+P = "/home/you/proj"
+SPACED = "/home/you/my project"
+DRIVE = "C:/Users/Jane Doe/Proj"
+UNC = "//server/share/proj"
+LONG = "//?/C:/Users/x/proj"
+
+PROBE_ROOTS = [
+    ("posix", P),
+    ("space", SPACED),
+    ("drive", DRIVE),
+    ("unc", UNC),
+    ("long", LONG),
+]
+
+
+@pytest.mark.parametrize(
+    "kind,root,spelling,tail,expected",
+    [
+        pytest.param(
+            kind, root, root.replace("/", sep), tail, out, id=f"{kind}-{sep_name}-{tail_name}"
+        )
+        for (kind, root), (sep_name, sep), (tail_name, tail, out) in product(
+            PROBE_ROOTS,
+            [("slash", "/"), ("backslash", "\\"), ("escaped", "\\\\")],
+            [
+                ("child", "/items/a.md:6:2", "items/a.md:6:2"),
+                ("bare", "", "."),
+                ("trailing", "/", "."),
+            ],
+        )
+    ],
+)
+def test_response_paths_root_spellings(kind, root, spelling, tail, expected):
+    assert api_mod._relative_paths_in_text(spelling + tail, root) == expected
+
+
+@pytest.mark.parametrize(
+    "end,expected",
+    [(end, "at ." + ("" if end == "." else end)) for end in
+     [".", "!", "?", ":", ",", ";", ")", "]", "}", "'", '"', "`", ">", "\n", ":6", ":6:2"]],
+)
+@pytest.mark.parametrize("root", [P, SPACED], ids=["plain", "space"])
+def test_response_paths_root_terminators(root, end, expected):
+    # A root ending a sentence keeps ONE period; `:6`/`:6:2` ride along
+    # whole; every declared boundary punctuation survives the scrub.
+    assert api_mod._relative_paths_in_text("at " + root + end, root) == expected
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        (P + ".old", "proj.old"),
+        (P + "2/a.md", "a.md"),
+    ],
+    ids=["prefix-dot", "prefix-alpha"],
+)
+def test_response_paths_component_boundary(text, expected):
+    # Siblings that share the root as a string prefix are OUTSIDE paths,
+    # never the root with a suffix of dots or digits.
+    assert api_mod._relative_paths_in_text(text, P) == expected
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        (P + "/a.md see https://example.org/a/b", "a.md see https://example.org/a/b"),
+        (P + "/a.md then /etc/private/b.md", "a.md then b.md"),
+        (P + "/a.md then D:\\private\\b.md", "a.md then b.md"),
+        (P + "/a.md then relative\\name", "a.md then relative\\name"),
+        (P + "/a.md and " + P + "/b.md", "a.md and b.md"),
+        (P + " https://example.org/a/b", ". https://example.org/a/b"),
+        (P + " /etc/private/a.md", ". a.md"),
+    ],
+)
+def test_response_paths_continuation_is_untouched(text, expected):
+    assert api_mod._relative_paths_in_text(text, P) == expected
+
+
+@pytest.mark.parametrize(
+    "root",
+    ['/home/you/my"project', "/home/you/my\nproject", "/home/you/my\tproject"],
+    ids=["quote", "newline", "tab"],
+)
+def test_response_paths_serialized_escapes(root):
+    # The patcher quotes through `json.dumps`, so a root with a quote,
+    # newline, or tab reaches the response as an escaped scalar; the
+    # scalar decodes, the path inside it scrubs, the scalar re-encodes
+    # with its full relative subdirectories.
+    text = json.dumps(root + "/items/a.md", ensure_ascii=False)
+    assert api_mod._relative_paths_in_text(text, root) == '"items/a.md"'
+
+
+def test_response_paths_escaped_spans_keep_their_syntax():
+    assert api_mod._relative_paths_in_text('"' + P + '/a.md\\nnext"', P) == '"a.md\\nnext"'
+    assert api_mod._relative_paths_in_text('"' + P + '/a.md\\" end"', P) == '"a.md\\" end"'
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ('"/etc/my conf/secret.md"', '"secret.md"'),
+        ('"D:\\Jane Doe\\private\\a.md"', '"a.md"'),
+        ("/etc/my conf/secret.md", "secret.md"),
+        ("\\\\server\\share\\private\\a.md", "a.md"),
+        ("/etc/private/a.md:6:2", "a.md:6:2"),
+        ("/", "<outside project>"),
+    ],
+)
+def test_response_paths_outside_paths_lose_every_directory(text, expected):
+    assert api_mod._relative_paths_in_text(text, P) == expected
+
+
+@pytest.mark.parametrize("root", [P, SPACED], ids=["plain", "space"])
+@pytest.mark.parametrize("variant", ["mixed", "runs"])
+def test_response_paths_spaced_mixed_separators(root, variant):
+    path = (
+        root.replace("/you/", "\\you/") if variant == "mixed" else root.replace("/you/", "//you/")
+    )
+    assert api_mod._relative_paths_in_text(path + "/items/a.md", root) == "items/a.md"
+
+
+@pytest.mark.parametrize(
+    "component",
+    ["(draft)", "[draft]", "{draft}", "a,b", "a;b", "a'b", "my draft"],
+    ids=["parentheses", "brackets", "braces", "comma", "semicolon", "apostrophe", "space"],
+)
+def test_response_paths_quoted_child_components(component):
+    # The whole relative path survives -- a punctuation-laden child name
+    # must not split the path so far that the scanner mistakes `/sub/a.md`
+    # for an outside path and eats `/sub/`.
+    text = '"' + P + "/items/" + component + '/sub/a.md"'
+    assert api_mod._relative_paths_in_text(text, P) == '"items/' + component + '/sub/a.md"'
+
+
+@pytest.mark.parametrize(
+    "prefix,root",
+    [("file://", P), ("file:///", P), ("file://", DRIVE), ("file:///", DRIVE)],
+)
+def test_response_paths_file_uri_variants(prefix, root):
+    assert api_mod._relative_paths_in_text(prefix + root + "/items/a.md", root) == "items/a.md"
+
+
+@pytest.mark.parametrize("status", [200, 400, 403, 409, 422])
+@pytest.mark.parametrize("field", ["message", "reason", "describe", "diff", "current_text",
+                                   "diagnostics"])
+def test_response_paths_all_payload_roles(status, field):
+    app = SimpleNamespace(
+        state=SimpleNamespace(snapshot=SimpleNamespace(project=SimpleNamespace(root=P)))
+    )
+    if field == "diagnostics":
+        payload = {field: [{"message": P + "/items/a.md:6", "file": P + "/items/a.md"}]}
+        expected = {field: [{"message": "items/a.md:6", "file": "items/a.md"}]}
+    else:
+        payload = {field: "at " + P + "/items/a.md:6"}
+        expected = {field: "at items/a.md:6"}
+    assert api_mod._write_outcome(app, (status, payload)) == (status, expected)
+
+
+def test_response_paths_recursive_shapes_and_key_collisions():
+    got = api_mod._relative_paths({P + "/a.md": [P + "/b.md", (P + "/c.md", None, 1, False)]}, P)
+    assert got == {"a.md": ["b.md", ("c.md", None, 1, False)]}
+    # Scrubbed keys that collide take a `#2`/`#3` suffix: the walk never
+    # loses a record of the payload.
+    assert api_mod._relative_paths({P + "/a.md": 1, "a.md": 2}, P) == {
+        "a.md": 1,
+        "a.md#2": 2,
+    }
+    assert api_mod._relative_paths(
+        {P + "/a.md": 1, "\\home\\you\\proj\\a.md": 2, "a.md": 3}, P
+    ) == {"a.md": 1, "a.md#2": 2, "a.md#3": 3}
+
+
+def test_response_paths_urls_and_relative_text_are_never_paths():
+    for text in [
+        "items/a.md:6 and/or 5/6 path/to/x",
+        "https://example.org/a/b?q=yes",
+        "https://example.org" + P + "/a.md",
+        "prefix" + P + "/a.md",
+    ]:
+        assert api_mod._relative_paths_in_text(text, P) == text
+
+
+def test_response_paths_documented_ambiguity_limits():
+    # The S12 boundary, pinned as chosen grammar: a bare token that reads
+    # as a path is scrubbed as one (a switch is a path; there is no intent
+    # detector), a POSIX filename containing a backslash under the root
+    # keeps its spelling, and an unquoted outside token crosses a space
+    # only when the next piece is path-shaped.
+    assert api_mod._relative_paths_in_text("pattern /a+/g", P) == "pattern g"
+    assert api_mod._relative_paths_in_text("use /verbose", P) == "use verbose"
+    assert api_mod._relative_paths_in_text(P + "/a\\b.md", P) == "a\\b.md"
+    assert api_mod._relative_paths_in_text("read /etc/my config", P) == "read my config"
+
+
+def test_response_paths_conflict_preserves_quoted_source(tmp_path):
+    """Escaped scalars, quote pairs, URLs and file URIs in one source line,
+    on a real 409: every non-path byte (backslashes, escapes, double
+    slashes) comes back as written; only the paths are rewritten."""
+    client, root = keyless_client(tmp_path)
+    _status, view = client.get("/api/item/REQ-001")
+    text = (
+        f"See {reqs_file(root)}\\nthen \"quoted\" and https://example.org/a//b "
+        f"then file://{root}/secret/x.md:4"
+    )
+    status, payload = save(
+        client, "REQ-001", field="text", value=text, revision=view["edit"]["file_revision"]
+    )
+    assert status == 200, payload
+    status, payload, _stale = _stale_save(
+        client, root, "REQ-001", field="text", value=text + " edited"
+    )
+    assert status == 409, payload
+    assert_no_root(payload, root, "409: escaped and URL text survives scrubbing")
+    assert "See items/reqs.yaml" in payload["current_text"], payload["current_text"]
+    assert "https://example.org/a//b" in payload["current_text"], payload["current_text"]
+    assert 'secret/x.md:4' in payload["current_text"], payload["current_text"]
