@@ -46,6 +46,12 @@ JOURNAL_DIR = ".refdes/editor-transaction"
 _MANIFEST_NAME = "manifest.json"
 _ORIG_DIR_NAME = "orig"
 
+# Returned by _read_manifest_raw for the inert state (manifest missing,
+# or bytes that are not JSON at all). Distinct from every JSON value:
+# a manifest that parses -- to null, a list, a number -- is a readable
+# document saying something impossible, i.e. corruption, not a crash.
+_NO_MANIFEST = object()
+
 
 class JournalPending(Exception):
     """A journal already exists: the project may be half-applied.
@@ -143,6 +149,36 @@ def _journal_escapes_root(project_root: str) -> bool:
         except ValueError:
             return True
     return os.path.islink(journal)
+
+
+def _journal_parent_escapes_root(project_root: str) -> bool:
+    """True when ``<root>/.refdes`` resolves outside the resolved root.
+
+    The confinement test recover runs BEFORE it mutates anything: the
+    journal path itself may be the symlink (a dangling one is the
+    squatter recover removes), and realpath of the root does not
+    resolve a symlinked ``.refdes`` component -- only resolving the
+    parent does. Removing the journal path itself is then safe:
+    ``os.remove`` acts on the final component, never its target chain.
+    """
+    root_real = os.path.realpath(project_root)
+    parent = os.path.dirname(_journal_path(root_real))
+    real = os.path.realpath(parent)
+    try:
+        return os.path.commonpath([root_real, real]) != root_real
+    except ValueError:
+        return True
+
+
+def _points_into_journal(path: str) -> bool:
+    """True when a project-relative path is the journal directory or
+    anything under it -- an entry writing journal state as part of a
+    save. Segments are compared after the strict-path check, which has
+    already removed every lexical spelling trick (``.``, empty, ``..``).
+    """
+    parts = JOURNAL_DIR.split("/")
+    segments = path.split("/")
+    return segments[: len(parts)] == parts
 
 
 def _is_safe_relpath(path: str) -> bool:
@@ -256,8 +292,9 @@ def _read_orig(journal: str, index: int) -> bytes | None:
 # ---------------------------------------------------------------------------
 
 
-def _read_manifest_raw(journal: str) -> object | None:
-    """The parsed manifest; None when it is missing or unparseable.
+def _read_manifest_raw(journal: str) -> object:
+    """The parsed manifest (any JSON value); ``_NO_MANIFEST`` when it is
+    missing or unparseable.
 
     Missing/unparseable is the inert state: begin() writes manifest.json
     last, so a journal without one is a crash before any live file was
@@ -272,7 +309,7 @@ def _read_manifest_raw(journal: str) -> object | None:
         with open(manifest_path, "rb") as fh:
             data = fh.read()
     except FileNotFoundError:
-        return None
+        return _NO_MANIFEST
     except OSError as exc:
         raise JournalCorrupt(
             f"journal manifest at {manifest_path} cannot be read ({exc}); "
@@ -281,7 +318,7 @@ def _read_manifest_raw(journal: str) -> object | None:
     try:
         return json.loads(data)
     except ValueError:
-        return None
+        return _NO_MANIFEST
 
 
 def _manifest_entries(manifest: object) -> tuple[str, list[dict]]:
@@ -312,6 +349,10 @@ def _manifest_entries(manifest: object) -> tuple[str, list[dict]]:
             raise JournalCorrupt("journal manifest entry is missing path/existed")
         if not _is_safe_relpath(path):
             raise JournalCorrupt(f"journal names an unsafe path: {path!r}")
+        if _points_into_journal(path):
+            raise JournalCorrupt(
+                f"journal entry path {path!r} writes inside the journal directory"
+            )
         key = tuple(path.split("/"))
         if key in seen:
             raise JournalCorrupt(f"journal manifest lists the path {path!r} twice")
@@ -344,7 +385,11 @@ def begin(project_root: str, entries: Sequence[Entry]) -> str:
     Raises ``JournalPending`` if a journal already exists (nothing is
     created), ``ValueError`` for unusable entry paths (absolute, ``..``,
     backslash, colon, empty, duplicated, resolving outside the root via
-    a symlink) -- also with nothing created.
+    a symlink, pointing inside the journal directory) -- also with
+    nothing created. If the final durability fsync fails after the
+    journal's visible rename, the just-created journal (no live file
+    touched, no id returned) is removed before the failure propagates:
+    a failed begin leaves nothing behind.
     """
     _validate_entries(project_root, entries)
     if _journal_escapes_root(project_root):
@@ -397,7 +442,14 @@ def begin(project_root: str, entries: Sequence[Entry]) -> str:
             raise
         # Durable before the caller touches any live file: fsync the
         # parent so the rename that made the journal visible survives.
-        _fsync_dir(_journal_parent(project_root))
+        try:
+            _fsync_dir(_journal_parent(project_root))
+        except BaseException:
+            # The journal is ours, live files are untouched, and no
+            # transaction id has been returned: withdraw it, so a failed
+            # begin leaves the state it promises -- nothing created.
+            shutil.rmtree(journal, ignore_errors=True)
+            raise
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
@@ -491,39 +543,56 @@ def recover(project_root: str) -> list[str]:
 
     Refuses (``JournalCorrupt``, changing nothing, journal kept) when a
     stored original is missing or does not match its recorded hash, when
-    the manifest names an unsafe path, lists one path twice, resolves
-    outside the root, or names a path that is a directory on disk.
-    Restored files' parent directories are fsynced before the journal is
-    removed. A non-directory squatter on the journal path (file, symlink)
-    is removed as the squatter it is, and reported. Restored files get
-    the process's default permissions: the journal stores bytes and their
-    hashes, not modes -- bytes are the contract. Leaves the journal in
-    place on any failure, so running it again is safe.
+    the manifest names an unsafe path, lists one path twice, names the
+    journal directory itself, resolves outside the root, names a path
+    that is a directory on disk, parses to a non-object value, or when
+    the journal location is confined out of reach (a symlinked
+    ``.refdes``). Confinement runs before anything is mutated.
+    Restored files' directories are fsynced from leaf to root before
+    the journal is removed. A non-directory squatter on the journal
+    path (file, symlink) is removed as the squatter it is, when its
+    parent resolves inside the root, and reported. Restored files get
+    the process's default permissions: the journal stores bytes and
+    their hashes, not modes -- bytes are the contract. Leaves the
+    journal in place on any failure, so running it again is safe.
     """
     journal = _journal_path(project_root)
-    if os.path.lexists(journal) and not os.path.isdir(journal):
-        # A non-directory squatter (plain file, symlink -- a dangling one
-        # included) wedges the project: pending() reports "unknown" and
-        # begin refuses, pointing at recover, so recover must clear it.
-        # The link/file ITSELF is removed, never followed; journal_real
-        # is inside the real root by construction, so confinement holds
-        # even for a symlink whose target lives outside.
-        journal_real = _journal_path(os.path.realpath(project_root))
-        os.remove(journal_real)
-        _fsync_dir(os.path.dirname(journal_real))
-        return [JOURNAL_DIR]
-    if _journal_escapes_root(project_root):
+    # Confinement BEFORE anything that mutates, and it resolves the
+    # PARENT: realpath(root) does not resolve a symlinked .refdes, and
+    # removing through one deletes outside the root. A squatter is
+    # removable only when its parent resolves inside the real root.
+    if _journal_parent_escapes_root(project_root):
         raise JournalCorrupt(
             "the journal location (.refdes) resolves outside the project "
             "root; refusing to restore through the symlink"
         )
+    if os.path.lexists(journal) and not os.path.isdir(journal):
+        # A non-directory squatter (plain file, symlink -- a dangling one
+        # included) wedges the project: pending() reports "unknown" and
+        # begin refuses, pointing at recover, so recover must clear it.
+        # The link/file ITSELF is removed, never followed, and the parent
+        # is confined (checked above), so nothing outside the root is
+        # touched even when the squatter is a symlink pointing out.
+        journal_real = _journal_path(os.path.realpath(project_root))
+        os.remove(journal_real)
+        _fsync_dir(os.path.dirname(journal_real))
+        return [JOURNAL_DIR]
+    if os.path.islink(journal):
+        # A symlink AT the journal path whose target is a directory:
+        # following it is exactly what confinement forbids.
+        raise JournalCorrupt(
+            f"the journal path {journal} is a symlink; refusing to follow it"
+        )
     if not os.path.isdir(journal):
         return []
     manifest = _read_manifest_raw(journal)
-    if manifest is None:
+    if manifest is _NO_MANIFEST:
         # begin() writes manifest.json last, from a staging directory it
-        # renames in as one unit: a journal without a readable manifest is
-        # a crash before any live file was touched. Nothing to restore.
+        # renames in as one unit: a journal without a manifest (or whose
+        # bytes are not JSON at all) is a crash before any live file was
+        # touched. A manifest that PARSES -- to null, a list, anything
+        # non-object -- is a readable document saying something
+        # impossible, i.e. corruption: JournalCorrupt, journal kept.
         shutil.rmtree(journal)
         _fsync_dir(_journal_parent(project_root))
         return []
@@ -556,6 +625,7 @@ def recover(project_root: str) -> list[str]:
 
     restored: list[str] = []
     synced: set[str] = set()
+    root_real = os.path.realpath(project_root)
     for index, entry in enumerate(entries):
         live = _live_path(project_root, entry["path"])
         if entry["existed"]:
@@ -571,14 +641,28 @@ def recover(project_root: str) -> list[str]:
                 continue
             os.remove(live)
         restored.append(entry["path"])
-        # Durable before the safety net goes: the journal is removed at the
-        # end of this run, so every directory a restore landed in is fsynced
-        # first (each one once) -- a restore that reverted on power loss
-        # with the journal gone is the exact half-applied save again.
-        parent = os.path.dirname(live)
-        if parent not in synced:
-            _fsync_dir(parent)
-            synced.add(parent)
+        # Durable before the safety net goes: fsync every directory from
+        # the restore's leaf up to the root (each one once, leaf first).
+        # The atomic write makes the leaf durable; a directory that the
+        # restore's makedirs created is itself durable only once its own
+        # parent is fsynced, and so on up to the root -- the journal is
+        # removed at the end of this run, so a chain that reverted on
+        # power loss is the exact half-applied save again.
+        chain: list[str] = []
+        current = os.path.dirname(live)
+        while True:
+            if current in synced:
+                break  # its ancestors were synced by the walk that got it
+            chain.append(current)
+            if os.path.realpath(current) == root_real:
+                break
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+        for directory in chain:
+            _fsync_dir(directory)
+            synced.add(directory)
 
     shutil.rmtree(journal)
     _fsync_dir(_journal_parent(project_root))
@@ -590,6 +674,10 @@ def _validate_entries(project_root: str, entries: Sequence[Entry]) -> None:
     for entry in entries:
         if not _is_safe_relpath(entry.path):
             raise ValueError(f"unusable entry path: {entry.path!r}")
+        if _points_into_journal(entry.path):
+            raise ValueError(
+                f"entry path {entry.path!r} writes inside the journal directory"
+            )
         if _escapes_root(project_root, entry.path):
             raise ValueError(
                 f"entry path {entry.path!r} resolves outside the project root"

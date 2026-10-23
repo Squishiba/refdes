@@ -1163,3 +1163,118 @@ def test_fsync_dir_propagates_posix_permission_errors(tmp_path, monkeypatch):
     monkeypatch.setattr(ej.os, "open", deny_open)
     with pytest.raises(PermissionError):
         ej._fsync_dir(str(tmp_path))
+
+
+# ----------------- review round 6: confinement first, parsed manifests, late fsync,
+# journal-internal paths, intermediate-directory fsync
+def test_recover_refuses_to_delete_through_a_symlinked_journal_parent(tmp_path):
+    """<root>/.refdes -> outside with a plain-file squatter in the
+    outside directory: the squatter branch must not run before the
+    confinement check -- realpath(root) does not resolve the .refdes
+    component -- or recover deletes a file OUTSIDE the root."""
+    ej = _ej()
+    root = _project(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-out6"
+    outside.mkdir()
+    squatter = outside / "editor-transaction"
+    squatter.write_bytes(b"squatter")
+    _symlink(str(outside), str(tmp_path / ".refdes"))
+    with pytest.raises(ej.JournalCorrupt):
+        ej.recover(root)
+    assert squatter.read_bytes() == b"squatter"
+    assert ej.pending(root) == "unknown"
+    with pytest.raises(ValueError):
+        ej.begin(root, _entries(ej))
+    with pytest.raises(OSError):
+        ej.complete(root)
+
+
+NOT_OBJECTS = ["null", "[]", '"x"', "3"]
+
+
+@pytest.mark.parametrize("literal", NOT_OBJECTS)
+def test_recover_refuses_a_manifest_that_is_not_an_object(tmp_path, literal):
+    """A manifest that PARSES to null/list/str/int is a readable,
+    trustworthy document saying something impossible -- not the inert
+    crashed-begin state, which is a MISSING manifest. recover must keep
+    the journal (it may hold the only rollback copy) and refuse."""
+    ej = _ej()
+    root = _project(tmp_path)
+    ej.begin(root, [ej.Entry(P1, OLD1, NEW1)])
+    _write(tmp_path, P1, NEW1)
+    (_journal(tmp_path) / MANIFEST_NAME).write_text(literal)
+    with pytest.raises(ej.JournalCorrupt):
+        ej.recover(root)
+    assert (_journal(tmp_path) / MANIFEST_NAME).read_text() == literal
+    assert _read(tmp_path, P1) == NEW1, "nothing restored"
+
+
+def test_begin_withdraws_the_journal_when_the_final_fsync_fails(tmp_path, monkeypatch):
+    """After the rename the journal is ours and no live file is touched;
+    a failure of the final durability fsync must not leave the caller
+    with a failure AND an armed journal whose id was never returned.
+    begin removes the just-created journal and re-raises."""
+    ej = _ej()
+    root = _project(tmp_path)
+    parent = tmp_path / ".refdes"
+
+    def spy(path):
+        if os.path.realpath(path) == os.path.realpath(str(parent)):
+            raise OSError("disk full")
+
+    monkeypatch.setattr(ej, "_fsync_dir", spy)
+    with pytest.raises(OSError):
+        ej.begin(root, _entries(ej))
+    assert not _journal(tmp_path).exists()
+    assert ej.pending(root) is None
+
+
+JOURNAL_INTERNAL = [
+    ".refdes/editor-transaction",
+    ".refdes/editor-transaction/manifest.json",
+    ".refdes/editor-transaction/orig/0.bin",
+]
+
+
+@pytest.mark.parametrize("path", JOURNAL_INTERNAL)
+def test_begin_refuses_paths_inside_the_journal(tmp_path, path):
+    """An entry writing inside the journal directory would overwrite
+    journal state the moment the save lands: refused at begin (ValueError,
+    nothing created) and by the manifest parser on the recover side."""
+    ej = _ej()
+    root = _project(tmp_path)
+    with pytest.raises(ValueError):
+        ej.begin(root, [ej.Entry(path, b"O", b"N")])
+    assert not _journal(tmp_path).exists()
+
+
+def test_recover_refuses_a_manifest_path_inside_the_journal(tmp_path):
+    ej = _ej()
+    root = _project(tmp_path)
+    ej.begin(root, [ej.Entry(P1, OLD1, NEW1)])
+    _write(tmp_path, P1, NEW1)
+    manifest_path = _journal(tmp_path) / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_bytes())
+    _find_entry_list(manifest)[0]["path"] = ".refdes/editor-transaction/manifest.json"
+    manifest_path.write_bytes(json.dumps(manifest).encode())
+    with pytest.raises(ej.JournalCorrupt):
+        ej.recover(root)
+    assert (_journal(tmp_path) / MANIFEST_NAME).is_file()
+
+
+def test_recover_fsyncs_created_intermediate_directories(tmp_path, monkeypatch):
+    """The restore's makedirs creates every missing directory from the
+    root down (a/b for a/b/c.txt); fsyncing only the leaf parent leaves
+    the leaf directory itself undurable in its parent. Every directory
+    from the leaf up to the root gets a guarded fsync, leaf first."""
+    ej = _ej()
+    root = str(tmp_path)
+    (tmp_path / "a").mkdir()
+    ej.begin(root, [ej.Entry("a/b/c.txt", b"OLD", b"NEW")])
+    fsynced: list[str] = []
+    monkeypatch.setattr(ej, "_fsync_dir", lambda path: fsynced.append(path))
+    assert ej.recover(root) == ["a/b/c.txt"]
+    leaf = str(tmp_path / "a" / "b")
+    assert leaf in fsynced
+    assert str(tmp_path / "a") in fsynced
+    assert fsynced.index(leaf) < fsynced.index(str(tmp_path / "a"))
