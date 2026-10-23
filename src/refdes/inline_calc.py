@@ -254,6 +254,19 @@ def _evaluator_rhs(span: InlineSpan) -> str:
     return pipe.group("lhs").strip() if pipe else text
 
 
+def _evaluator_unit(span: InlineSpan) -> str:
+    """The span's `| unit` exactly as the evaluator sees it: '' when the
+    line carries no unit under the evaluator's order. The mirror of
+    `_evaluator_rhs` -- the comment is stripped off the joined text before
+    the pipe split, so a comment containing a `|` cannot steal the unit
+    field (`x := 1 | V # note | b = 1` evaluates under unit `V`, while
+    `span.unit` says `b`)."""
+    text = f"{span.rhs} | {span.unit}" if span.unit else span.rhs
+    text = calc.split_comment(text)[0].strip()
+    pipe = calc.PIPE_UNIT_RE.match(text)
+    return pipe.group("unit").strip() if pipe else ""
+
+
 def span_cross_ref(span: InlineSpan) -> re.Match[str] | None:
     """The cross-item reference a parsed span's RHS is -- `TARGET.NAME` as
     the whole right-hand side, matched with the evaluator's own

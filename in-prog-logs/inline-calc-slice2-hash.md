@@ -110,21 +110,38 @@ Docs tests 8+27 passed.
 lifecycle.md said a result-only span edit "stays invisible to content
 hashing" -- inverted; it moves the content hash (body text) and not the
 probe. Reworded; nothing in round 15's diff was a code change. Full
-verification pass over every round-15 docs claim, claim -> proof:
-- "span cross-item references entering the content hash" (Status,
-  named-calc x2, change-tracking list) -> build.py:2232-2236.
-- "`calc_hash` probe extension ... not a format-gated payload change"
-  (Status), "takes no format argument and is not what moved" (named-calc
-  x2), "probe covers spans at every format" (lifecycle) ->
-  build.py:2390 `def calc_hash_for(item)`;
-  test_calc_block_hash.py:61 pins the payload property at 6.
-- "result-only edit moves the content hash ... not the probe" (lifecycle,
-  fixed) -> test_inline_calc_hash.py:460.
-- "source() values input is format 4's own ... fetch discovery is not a
-  hash input" (change-tracking, lifecycle, §3 row) -> build.py:2237-2240,
-  citations.py:1544 (span discovery, not hashing).
-- "landed with slice 2, this PR" (§3 heading) -> gh pr view 347: OPEN.
-- era marker / named-calc table re-pins -> #333/#341/#351/#345 merged,
-  tests named in the table exist and pass.
-NIT: log header base corrected to 899ab91 (#358, merge-base verified).
+claim -> proof sweep of round 15's docs edits (build.py:2232-2240,
+build.py:2390, citations.py:1544, test_calc_block_hash.py:61,
+test_inline_calc_hash.py:460, gh pr view 347 OPEN, merged-slice PRs):
+all confirmed. NIT: log header base corrected to 899ab91 (#358,
+merge-base verified).
 Docs tests 8+27 passed; full suite green (see PR body note).
+
+Round 17 (chunk 3 + chunk 4 reviews):
+- MEDIUM: stripped all EXPECTED-RED markers from the trial file -- the
+  tests are green here; base-state note now says they were red on the
+  base (pilot ran there first) and pin the new behavior.
+- LOWs in test_inline_calc_hash.py: _setup now rmtree's items/ first (a
+  second build in one tmp_path must not inherit the first's items -- the
+  exact bug behind round 13's cap failure); the deleted-target test lost
+  "after_rename_chain" from its name/docstring (it only deletes; the
+  rename side is the test above it); the YAML-list test's --no-write
+  claim is now asserted (dry rebuild resolves clean, disk unchanged);
+  hashlib/json/re/yaml hoisted to module imports; REWITES typo fixed.
+- LOW (verified, not edited): re-derived all four format-5 seal constants
+  by building the same fixtures with main's archived code
+  (git archive <sha> src | tar -x -C .scratch/r17/<sha>; driver built each
+  fixture via the test module's own _build with PYTHONPATH at the
+  archived src). Table (constant -> sha -> matched):
+  SEALED_UNDER_FORMAT5 -> d620ab5 + c3073c6 -> yes (both)
+  AUTHORED_SEALED_UNDER_FORMAT5 -> c3073c6 (d620ab5 too) -> yes
+  SPAN_AND_FENCE_SEALED_UNDER_FORMAT5 -> c3073c6 (d620ab5 too) -> yes
+  RENAME_SEALED_UNDER_FORMAT5 -> c3073c6 (d620ab5 too) -> yes
+  All 8 entries reproduce exactly; comments stand, no edits.
+- Chunk 4 LOW: _item_units suggested parse_span's field unit; an
+  evaluator-order helper inline_calc._evaluator_unit (strip comment off
+  the joined rhs|unit text, then split the pipe -- the mirror of
+  _evaluator_rhs) now feeds it. RED first: `x := 1 | V # note | b = 1`
+  suggested ['1', 'b'], now ['1', 'V'].
+- NIT: diff_against docstring "hash_format 1 to 2" -> "to the current
+  hash format" (pre-keys entries record no format; through 5).

@@ -8,8 +8,8 @@ Base-state note (probe, not assumption): the trigger/verify slice (sections
 1-2) is already merged on the base (#333/#341), so the section-1/2 tests are
 old-behavior controls, green on the base. The section-3 slice -- calc_hash
 extension, cross-item/source() dependency scans over spans -- is what #347
-adds: those tests are EXPECTED RED on this base and are marked EXPECTED-RED
-in their docstrings. The `release_gate.inline_calc_results` rule is
+adds: those tests were red on that base (the pilot was run there first)
+and pin the new behavior here -- they are green at this head. The `release_gate.inline_calc_results` rule is
 #345's (merged c3073c6, not #347's work): the gate pair below integrates
 #347's spans against it (see GATE_INTEGRATION). Unresolved
 oracles (exact tie boundary, gate message wording, span-ref display-half
@@ -254,7 +254,7 @@ def test_duplicate_and_forward_use_errors(tmp_path, capsys):
 
 # ---------------------------------------------------------------- Case 3
 # calc_hash probe and content hash. Contract section 3 rows 1-2.
-# calc_hash probes: EXPECTED RED on base (calc_hash_for is fences-only).
+# calc_hash probes (red on the base, where calc_hash_for was fences-only).
 
 
 def test_inline_only_item_has_calc_hash_probe(tmp_path, capsys):
@@ -270,7 +270,7 @@ def test_inline_only_item_has_calc_hash_probe(tmp_path, capsys):
     items = baseline_items(tmp_path, "rev1")
     # section 3: "An inline-only item then has a calc_hash"
     assert items["LOG-A"].get("calc_hash"), (
-        "EXPECTED-RED: inline-only item has no calc_hash (calc_hash_for is "
+        "inline-only item has no calc_hash (calc_hash_for is "
         "fences-only on this base; section 3 extends it to inline spans)"
     )
     assert items["LOG-B"].get("calc_hash")  # fence item, control
@@ -287,7 +287,7 @@ def test_result_only_edit_fixes_calc_hash_moves_content_hash(tmp_path, capsys):
     assert cli(cfg, "revision", "rev1") == 0
     out(capsys)
     rev1 = baseline_items(tmp_path, "rev1")
-    assert rev1["LOG-A"].get("calc_hash"), "EXPECTED-RED: probe absent on base"
+    assert rev1["LOG-A"].get("calc_hash"), "probe absent on base"
 
     # edit ONLY the stored result of A's span
     edit_file(tmp_path, "LOG-A.md", "= 6`", "= 5`")
@@ -315,7 +315,7 @@ def test_result_only_edit_fixes_calc_hash_moves_content_hash(tmp_path, capsys):
     out(capsys)
     rev3 = baseline_items(tmp_path, "rev3")
     assert rev3["LOG-A"]["calc_hash"] != rev2["LOG-A"]["calc_hash"], (
-        "EXPECTED-RED: inline RHS is not in calc_hash on this base"
+        "inline RHS is not in calc_hash on this base"
     )
 
 
@@ -343,7 +343,7 @@ def test_mixed_item_probe_tracks_inline_rhs(tmp_path, capsys):
     out(capsys)
     rev3 = baseline_items(tmp_path, "rev3")
     assert rev3["LOG-A"]["calc_hash"] != rev2["LOG-A"]["calc_hash"], (
-        "EXPECTED-RED: inline RHS not in calc_hash on this base"
+        "inline RHS not in calc_hash on this base"
     )
 
 
@@ -378,7 +378,8 @@ def test_old_hash_format_baseline_reads_and_no_inline_churn(tmp_path, capsys):
 
 # ---------------------------------------------------------------- Case 4
 # cross-item reference used only in an inline span. Contract section 3 row 3.
-# EXPECTED RED on base (span refs are not parsed; scan covers fences only).
+# Span cross-item refs (red on the base: span refs were not parsed; the scan
+# covered fences only).
 
 
 CROSS_ITEMS = {
@@ -392,14 +393,14 @@ def test_cross_item_ref_in_span_evaluates(tmp_path, capsys):
     code = cli(cfg, "check")
     text = out(capsys)
     assert code == 0, (
-        f"EXPECTED-RED: span-only cross-item ref fails on this base: {text}"
+        f"span-only cross-item ref fails on this base: {text}"
     )
     assert "inline calc" not in text
 
 
 def test_upstream_change_marks_dependent(tmp_path, capsys):
     cfg = setup(tmp_path, items=dict(CROSS_ITEMS))
-    assert cli(cfg, "check") == 0, "EXPECTED-RED: base errors the span ref"
+    assert cli(cfg, "check") == 0, "base errors the span ref"
     out(capsys)
     assert cli(cfg, "revision", "rev1") == 0
     out(capsys)
@@ -413,7 +414,7 @@ def test_upstream_change_marks_dependent(tmp_path, capsys):
     assert item_files_bytes(tmp_path / "items" / "main" / "LOG-B.md") == before
     # ...yet the baseline diff lists B: the resolved value is a hash input
     changed = audit_changed_ids(cfg, capsys)
-    assert "LOG-B" in changed, "EXPECTED-RED: span ref is no content-hash input"
+    assert "LOG-B" in changed, "span ref is no content-hash input"
 
 
 def test_span_ref_expands_to_composite_key(tmp_path, capsys):
@@ -424,7 +425,7 @@ def test_span_ref_expands_to_composite_key(tmp_path, capsys):
     out(capsys)
     text = (tmp_path / "items" / "main" / "LOG-B.md").read_text(encoding="utf-8")
     assert "LOG-A@" in text, (
-        "EXPECTED-RED: span ref not composite-expanded on this base "
+        "span ref not composite-expanded on this base "
         f"(file holds: {text!r})"
     )
     assert cli(cfg, "check") == 0
@@ -433,7 +434,8 @@ def test_span_ref_expands_to_composite_key(tmp_path, capsys):
 
 # ---------------------------------------------------------------- Case 5
 # source() used only in an inline span. Contract section 3 row 4.
-# EXPECTED RED on base (fetch discovers keys from fences only).
+# fetch discovery in spans (red on the base: fetch discovered keys from fences
+# only).
 
 CSV = "key,value,note\neff,0.93,probe row\n"
 SPAN_SRC = '`eff := source("analysis/pb.csv", "eff") | 1 = 0.93`'
@@ -460,12 +462,12 @@ def test_fetch_discovers_span_source_key(tmp_path, capsys):
     )
     entry = lock["citations"]["analysis/pb.csv"]
     assert "eff" in (entry.get("values") or {}), (
-        "EXPECTED-RED: fetch pinned no source key from the span: "
+        "fetch pinned no source key from the span: "
         f"{entry!r}"
     )
     code = cli(cfg, "check")
     text = out(capsys)
-    assert code == 0, f"EXPECTED-RED: span source() has no locked value: {text}"
+    assert code == 0, f"span source() has no locked value: {text}"
     assert "inline calc" not in text
 
 
@@ -476,7 +478,7 @@ def test_accepted_source_update_marks_item_changed(tmp_path, capsys):
     csv_path.write_text(CSV, encoding="utf-8")
     assert cli(cfg, "fetch") == 0
     out(capsys)
-    assert cli(cfg, "check") == 0, "EXPECTED-RED: base cannot lock the span key"
+    assert cli(cfg, "check") == 0, "base cannot lock the span key"
     out(capsys)
     assert cli(cfg, "revision", "rev1") == 0
     out(capsys)
@@ -487,10 +489,10 @@ def test_accepted_source_update_marks_item_changed(tmp_path, capsys):
     text = out(capsys)
     assert code == 0  # accepted value moves the computed result
     assert "inline calc eff: stored result says 0.93, now computes 0.95" in text, (
-        "EXPECTED-RED: span source() not evaluated from the lockfile on base"
+        "span source() not evaluated from the lockfile on base"
     )
     # the locked value is a content-hash input: text untouched, item changed
-    assert "LOG-C" in audit_changed_ids(cfg, capsys), "EXPECTED-RED on base"
+    assert "LOG-C" in audit_changed_ids(cfg, capsys), "red on the base"
 
 
 def test_span_source_without_same_item_citation_is_error(tmp_path, capsys):
@@ -612,9 +614,9 @@ def test_release_gate_fails_stale_editable_revision_passes(tmp_path, capsys):
     code = cli(cfg, "release", "relgate")
     text = out(capsys)
     assert "not a known rule" not in text, (
-        "EXPECTED-RED: inline_calc_results is not a known gate rule on base"
+        "inline_calc_results is not a known gate rule on base"
     )
-    assert code == 1, f"EXPECTED-RED on base: release returned {code}: {text}"
+    assert code == 1, f"release returned {code}: {text}"
     assert not (tmp_path / ".refdes" / "baselines" / "relgate.yaml").exists()
     # revision half defaults false: the checkpoint stamps with warnings up
     assert cli(cfg, "revision", "revgate") == 0
@@ -640,9 +642,9 @@ def test_release_gate_exempt_for_captured_history(tmp_path, capsys):
     out(capsys)
     code = cli(cfg, "release", "relgate2")
     text = out(capsys)
-    assert "not a known rule" not in text, "EXPECTED-RED: rule absent on base"
+    assert "not a known rule" not in text, "rule absent on base"
     assert code == 0, (
-        f"EXPECTED-RED on base: stale CAPTURED entry must be exempt from the "
+        f"stale CAPTURED entry must be exempt from the "
         f"freshness gate (release returned {code}): {text}"
     )
     # warning stays visible even though the gate exempts it

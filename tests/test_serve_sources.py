@@ -1219,6 +1219,39 @@ def test_a_lockfile_repaired_mid_build_does_not_unpoison_the_memo(tmp_path, monk
         app.stop()
 
 
+SPAN_PIPE_COMMENT_ITEMS = """\
+defaults: { type: decision }
+items:
+  - id: DEC-001
+    citations:
+      - path: analysis/budget.csv
+    body: |
+      Budget: `x := 1 | V # note | b = 1`.
+"""
+
+
+def test_a_span_unit_comment_containing_a_pipe_uses_the_evaluators_unit(tmp_path):
+    # Round-17 review (chunk 4): parse_span's pipe split runs BEFORE comment
+    # stripping, so a comment containing a `|` steals the unit field --
+    # `x := 1 | V # note | b = 1` parses with unit `b`. The evaluator strips
+    # the comment off the whole line FIRST, then splits the unit, so the
+    # unit it evaluates under is `V`. The panel's suggestions must follow
+    # the evaluator, not the field text.
+    root = make_root(tmp_path, items=SPAN_PIPE_COMMENT_ITEMS)
+    fetch(root)
+    app = start(root)
+    try:
+        client = Client(app)
+        status, payload = client.api_get(
+            sources_url("DEC-001", "/propose")
+            + "?path=analysis/budget.csv&key=eff&unit=1&name=my_eff"
+        )
+        assert status == 200, payload
+        assert payload["units"] == ["1", "V"]
+    finally:
+        app.stop()
+
+
 def test_a_readable_empty_lockfile_is_still_ordinary_unpinned(tmp_path):
     # The refusal is for a lockfile that could not be read, not for one that
     # says nothing: a well-formed lockfile with no records is the ordinary

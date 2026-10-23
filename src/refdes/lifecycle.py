@@ -1197,10 +1197,11 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
     `Baseline.items` and docs/design/stale-arithmetic-signal.md), not a
     second field-level diff mechanism.
 
-    Migrates `baseline` from hash_format 1 to 2 first, in place (§5) -- a
-    baseline stamped before keys existed would otherwise show every one of
-    its items as "changed" purely because the hash *definition* moved, which
-    isn't the question this function exists to answer. `write` threads
+    Migrates `baseline` to the current hash format first, in place (§5) --
+    an entry recorded under an older format (pre-keys, which records no
+    format at all, through format 5) would otherwise show as "changed"
+    purely because the hash *definition* moved, which isn't the question
+    this function exists to answer. `write` threads
     through to migrate_hash_format() (`--no-write`, docs/design/keys.md §2);
     defaults True for callers that load a project writably by construction,
     and `cli` threads `not args.no_write` from both `audit` and

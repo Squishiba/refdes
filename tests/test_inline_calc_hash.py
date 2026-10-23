@@ -21,6 +21,13 @@ paired with the mutation that ought to falsify it. The section-3 contract:
 
 from __future__ import annotations
 
+import hashlib
+import shutil
+import json
+import re
+
+import yaml
+
 from conftest import write_project_config
 
 from refdes import build as build_mod
@@ -40,6 +47,8 @@ def _item(item_id: str, body: str) -> str:
 def _setup(tmp_path, files: dict[str, str], config=BASIC_CONFIG) -> str:
     write_project_config(tmp_path, config)
     items = tmp_path / "items"
+    shutil.rmtree(items, ignore_errors=True)  # a second build in one tmp_path must
+    # not inherit the items of the first (round-17 review)
     items.mkdir(exist_ok=True)
     for name, text in files.items():
         (items / name).write_text(text, encoding="utf-8")
@@ -127,9 +136,6 @@ def test_block_only_calc_hash_is_the_block_only_hash(tmp_path):
     probe computed it, so no existing baseline's calc_hash churns."""
     body = "```calc\nV = 2 V\nP = V * 2 A | W\n```\n"
     project = _build(tmp_path, {"a.md": _item("DEC-001", body)})
-    import hashlib
-    import json
-    import re
 
     blocks = [re.sub(r"\s+", " ", b).strip() for b in
               re.findall(r"```calc\n(.*?)```", body, re.DOTALL)]
@@ -238,7 +244,6 @@ def test_span_reference_expands_to_composite_form(tmp_path):
     same `DISPLAY-ID@key` expansion as a fence line (docs/design/keys.md
     rule, applied to spans by slice 2), and the expanded text re-builds
     clean and idempotently."""
-    import re
 
     _build(tmp_path, SPAN_REF)
     text = (tmp_path / "items" / "a.md").read_text(encoding="utf-8")
@@ -273,7 +278,6 @@ def test_span_reference_with_a_rhs_comment_expands(tmp_path):
     and expands to composite form like a comment-free span. Matching the
     raw RHS made it invisible to the scans: the span ran before its
     target and leaked an internal AttributeError instead of resolving."""
-    import re
 
     files = {
         "a.md": "---\nid: DEC-001\ntype: decision\n---\n\n"
@@ -294,7 +298,6 @@ def test_span_source_with_a_rhs_comment_is_discovered(tmp_path):
     evaluates -- a commented span is a live `source()` to both. `fetch`
     must pin the key it names: a span `fetch` does not see is a value
     the build demands and fetch never takes (the F12-6 dead end)."""
-    import yaml
 
     from refdes import cli as cli_mod
 
@@ -353,7 +356,6 @@ def test_a_comment_containing_a_pipe_keeps_the_span_a_source_call(tmp_path):
     must pin its key -- the split-order hole made the key invisible to
     discovery while the build demanded the pin (the F12-6 dead end, this
     shape)."""
-    import yaml
 
     from refdes import cli as cli_mod
 
@@ -397,7 +399,6 @@ def test_unclosed_fence_in_front_matter_does_not_hide_the_span(tmp_path):
     in a block scalar) left the span scan's fence state open across the
     body -- every span of the item silently stopped being a reference:
     no expansion, no report, forever. The scan is bounded to the body."""
-    import re
 
     files = {"a.md": FRONT_MATTER_FENCE, "b.md": SPAN_REF["b.md"]}
     project = _build(tmp_path, files)
@@ -414,7 +415,6 @@ def test_span_in_front_matter_is_not_rewritten(tmp_path):
     `item.body` splits file and memory apart. The item's body carries a
     reference to the same target, which is what puts the item in the
     plan and starts the scan."""
-    import re
 
     files = {
         "a.md": '---\nid: DEC-001\ntype: decision\nsummary: "see `x := DEC-002.V_in = 1 V`"\n---\n\n'
@@ -547,7 +547,6 @@ def test_several_spans_one_item_all_enter_the_snapshot(tmp_path):
     assert entry["calc_hash"] == build_mod.calc_hash_for(
         project.item_by_id("DEC-003")
     )
-    import re
 
     path = tmp_path / "items" / "mid.md"
     text = path.read_text(encoding="utf-8")
@@ -657,7 +656,6 @@ def test_span_name_matching_the_target_prefix_is_not_eaten(tmp_path):
     the name first and corrupts the span into a composite-named calc. The
     rewriter splices the target at its recorded range, so name and target
     each stay their own text, and the expansion re-builds clean."""
-    import re
 
     config = "site: { title: T, out: _site }\n" \
         "types:\n  volt: { prefix: v, fields: {} }\n"
@@ -704,11 +702,15 @@ def test_yaml_list_file_span_targets_stay_bare_on_disk(tmp_path):
     assert not project.errors, _errors(project)
     text = (items / "b.yaml").read_text(encoding="utf-8")
     assert "v := DEC-001.V_in = 12 V" in text, text  # span bare, geometry-safe
-    import re
 
     assert re.search(r"w = DEC-001@[A-Za-z0-9_-]+\.V_in", text), text  # fence expands
     project2 = _rebuild(tmp_path)
     assert not project2.errors, _errors(project2)
+    dry = _rebuild(tmp_path, write=False)
+    assert not dry.errors, _errors(dry)  # --no-write resolves the same graph
+    assert "v := DEC-001.V_in = 12 V" in (items / "b.yaml").read_text(
+        encoding="utf-8"
+    )  # and leaves the disk exactly as the writable build found it
 
 
 def test_yaml_list_file_span_hash_is_stable_across_runs(tmp_path):
@@ -761,7 +763,6 @@ def test_span_and_fence_rewrites_on_one_line_both_land(tmp_path):
     `plan.rewrites`) already counted it: a reported rewrite that never
     happened. The assignment pass anchors on the span-edited line, so both
     rewrites land on the first writable run."""
-    import re
 
     files = {
         "a.md": _item("DEC-001", "```calc\nV_in = 12 V\n```\n"),
@@ -852,7 +853,6 @@ STRIPPED_UNDER_FORMAT5 = "833d7cb975540ba9"
 
 
 def _write_baseline(tmp_path, entries: dict):
-    import yaml
 
     baselines = tmp_path / ".refdes" / "baselines"
     baselines.mkdir(parents=True, exist_ok=True)
@@ -1126,7 +1126,7 @@ def test_keys_adopt_migrates_real_format5_scalar_seals(tmp_path, capsys):
     scalar seal's format from only (HASH_FORMAT, 2, 1), so after the bump
     to 6 a genuine format-5 seal of an item whose format-4/5 payload (a
     fence cross-item reference) differs from its format-2/1 one is
-    matched by nothing: adopt reports it uncomparable, REWITES the entry
+    matched by nothing: adopt reports it uncomparable, rewrites the entry
     to format 1, and the adopted project's own build then fails with
     "modified since it was sealed" -- adoption rolls back, and a run that
     skips the post-check leaves a record pinned to format 1. Seal
@@ -1365,12 +1365,14 @@ def test_span_composite_with_foreign_display_half_stays_uncomparable(tmp_path):
     assert "LOG-001" in project.seal_violations
 
 
-def test_span_target_deleted_fails_loudly_after_rename_chain(tmp_path):
+def test_span_target_deleted_fails_loudly(tmp_path):
     """Deleting the target of a composite span target must fail loudly
     (missing-target error), never silently pass on a stripped reading: the
     gate withdraws the stripped reading when the key resolves to no live
     item, and the build's own missing-target error is what the author
-    sees."""
+    sees. (The rename side of this pair lives in
+    test_upstream_display_rename_keeps_format5_seal_of_referring_span
+    above -- this test itself only deletes.)"""
     project = _build(tmp_path, RENAME_FIXTURE, RENAME_CONFIG)
     _write_scalar_seal(tmp_path, RENAME_SEALED_UNDER_FORMAT5)
     project = _rebuild(tmp_path)

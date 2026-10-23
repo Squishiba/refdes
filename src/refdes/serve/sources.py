@@ -821,13 +821,16 @@ def _item_units(item: Item) -> list[str]:
     Inline calc spans count too: a span's declared `| unit` and the unit
     spelled on its stored result are units this item already uses, and the
     evaluator's one scope makes its names real assignments (see
-    `_item_names`). A span's stored `unit` keeps a trailing `# comment`
-    (`inline_calc.parse_span` never strips it), so the evaluator's own
-    stripping runs on it here too -- `V # note` suggests `V`, not the
-    comment."""
+    `_item_names`). The declared unit is read through
+    `inline_calc._evaluator_unit` -- the evaluator's own order (strip the
+    comment off the whole line, THEN split the unit) -- so a span carrying
+    a comment suggests the unit the evaluator runs under, even when the
+    comment contains a `|` (`x := 1 | V # note | b = 1` suggests `V`, not
+    the `b` that `parse_span`'s earlier pipe split leaves in `span.unit`).
+    """
     used = {line.annotation.strip() for line in item.calcs if line.annotation.strip()}
     for span in _live_spans(item):
-        used.add(calc_mod.split_comment(span.unit)[0].strip())
+        used.add(inline_calc._evaluator_unit(span))
         used.add(_span_result_unit(span))
     used.discard("")
     return ["1"] + sorted(u for u in used if u != "1")
