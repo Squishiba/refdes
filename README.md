@@ -16,7 +16,9 @@ cd docs-site && refdes build   # -> _docs/index.html at the repo root
 ```
 
 Start with [getting started](docs/getting-started.md) for a ten-minute tutorial, or
-[concepts](docs/concepts.md) for the model behind it. What follows is a summary.
+[concepts](docs/concepts.md) for the model behind it. Coming from the 0.5.0
+release? [Upgrading from 0.5.0](docs/upgrading.md) is the ordered, evidence-based
+path. What follows is a summary.
 
 ## Install
 
