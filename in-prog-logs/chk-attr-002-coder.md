@@ -72,3 +72,24 @@ Review approved the core change and required the VS Code follow-through
 - Changelog fragment: added the sentence that the VS Code extension keeps
   ignoring imported-item diagnostics.
 - `tests/test_imports.py` re-run: 10 passed.
+
+## PR #361 review round 2 (P2: import names may contain "/")
+
+Reviewer reproduced: `imports[].name` is an unrestricted string
+(configcheck.py ~527 takes any non-empty `self.string`), so an import
+named `vendor/platform` yields `vendor/platform:items/req.yaml`, whose
+first segment `vendor` has no colon -- the segment-based helper missed it
+and a phantom diagnostic was published.
+
+- Rewrote `isImportedItemPath` to decide on the first colon in the WHOLE
+  string: no colon -> false; colon at index 1 with a letter at index 0
+  and a separator at index 2 (`C:\x`, `C:/x`) -> false (real drive path);
+  anything else with a colon -> true. `<` rule kept. Comment now names
+  the "/"-in-name case and documents the one-sentence trade-off: a local
+  path with a colon outside a drive prefix is treated as import-qualified
+  and stays out of the panel.
+- Test cases now include `vendor/platform:items/req.yaml` -> true and
+  the reviewer's exact list; the Windows-absolute cases are the
+  reviewer's `C:\work\x.md`/`C:/work/x.md` spellings.
+- `tests/test_vscode_extension.py` (11) + `tests/test_imports.py` (10) +
+  `tests/test_import_diagnostic_source.py` (5): 26 passed.

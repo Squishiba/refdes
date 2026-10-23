@@ -170,16 +170,27 @@ function updateStatusBar(data) {
 // A diagnostic location that names no workspace file, in its two spellings:
 // the old `<import:platform>` pseudo-path (imported items whose artifact
 // record had no source), and the import-qualified `platform:items/req.yaml`
-// (import name, colon, upstream-relative path) used since. Publishing these
-// would paint a phantom diagnostic onto a file that does not exist.
+// (import name, colon, upstream-relative path) used since. Import names are
+// free strings that may contain "/", so the prefix is everything up to the
+// first colon in the whole string, not the first path segment
+// (`vendor/platform:items/req.yaml`). Publishing these would paint a phantom
+// diagnostic onto a file that does not exist. A Windows drive path (`C:\x`,
+// `C:/x`) is the one colon form that IS a real file, so it is exempt; the
+// trade-off is that a local path with a colon outside a drive prefix (a file
+// literally named `notes:2026.md`) is treated as import-qualified and stays
+// out of the panel.
 function isImportedItemPath(file) {
   if (file.startsWith("<")) return true;
-  const sep = file.search(/[\\/]/);
-  const first = sep === -1 ? file : file.slice(0, sep);
-  if (!first.includes(":")) return false;
-  // A Windows drive letter -- one letter, colon, separator (`C:\...`) -- is
-  // a real absolute path, not an import prefix.
-  return !(sep !== -1 && /^[A-Za-z]:$/.test(first));
+  const colon = file.indexOf(":");
+  if (colon === -1) return false;
+  if (
+    colon === 1 &&
+    /^[A-Za-z]$/.test(file[0]) &&
+    (file[2] === "/" || file[2] === "\\")
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function publishDiagnostics(root, data) {

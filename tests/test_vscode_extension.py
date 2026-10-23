@@ -462,7 +462,9 @@ def test_imported_item_paths_are_never_published_as_files():
     does not exist. Runs the real `isImportedItemPath()` extracted verbatim
     from the source, so it cannot pass on a hand-copied duplicate, and pins
     the Windows drive-letter exemption that keeps real `C:\\...` absolute
-    paths flowing to the existing absolute-path handling.
+    paths flowing to the existing absolute-path handling. Import names are
+    unrestricted strings and may contain "/", which the helper must not
+    mistake for a path segment boundary (`vendor/platform:items/req.yaml`).
     """
     source = _read(EXTENSION_JS)
     extracted = IS_IMPORTED_ITEM_PATH.search(source)
@@ -473,14 +475,15 @@ def test_imported_item_paths_are_never_published_as_files():
     cases = [
         "<import:platform>",  # old pseudo-path: skip
         "platform:items/req.yaml",  # import-qualified: skip
+        "vendor/platform:items/req.yaml",  # import name with a "/": skip
         "platform:items\\req.yaml",  # upstream path with backslashes: skip
-        "platform:req.md",  # import-qualified, no separator at all: skip
+        "platform:req.yaml",  # import-qualified, no separator at all: skip
         "C:items.json",  # colon not followed by a separator: not a drive letter
         "items/req.yaml",  # ordinary local relative path: publish
         "req.md",  # local path, no separator: publish
         "/home/me/proj/items/req.yaml",  # POSIX absolute: publish
-        "C:\\Users\\me\\proj\\items\\req.yaml",  # Windows absolute: publish
-        "C:/proj/items/req.yaml",  # Windows absolute, forward slashes: publish
+        "C:\\work\\x.md",  # Windows absolute: publish
+        "C:/work/x.md",  # Windows absolute, forward slashes: publish
     ]
     script = f"""
 const cases = {json.dumps(cases)};
@@ -498,12 +501,13 @@ console.log(JSON.stringify(cases.map((f) => [f, isImportedItemPath(f)])));
     assert dict(json.loads(proc.stdout)) == {
         "<import:platform>": True,
         "platform:items/req.yaml": True,
+        "vendor/platform:items/req.yaml": True,
         "platform:items\\req.yaml": True,
-        "platform:req.md": True,
+        "platform:req.yaml": True,
         "C:items.json": True,
         "items/req.yaml": False,
         "req.md": False,
         "/home/me/proj/items/req.yaml": False,
-        "C:\\Users\\me\\proj\\items\\req.yaml": False,
-        "C:/proj/items/req.yaml": False,
+        "C:\\work\\x.md": False,
+        "C:/work/x.md": False,
     }
