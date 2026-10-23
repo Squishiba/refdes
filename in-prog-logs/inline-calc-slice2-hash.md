@@ -1,7 +1,8 @@
 # inline-calc slice 2: spans enter calc_hash, dependency scans, content hash
 
-Branch `feat-inline-calc-slice2-hash`, base `main` @ `c9ecc30`, rebased
-through #363. Owner decision 2026-10-19: change the hash format despite
+Branch `feat-inline-calc-slice2-hash`, based on `899ab91` (#358); created
+from `main` @ `c9ecc30` and rebased through several releases. Owner
+decision 2026-10-19: change the hash format despite
 baseline/seal risk. Plan: `docs/design/inline-calc.md` §3, four green steps.
 
 ## Steps 1-4 (done)
@@ -103,3 +104,27 @@ section describes landed behavior; change-tracking source() aside split
 out of the change list, fetch-discovery stated as not-a-hash-input; log
 `.scratch/` pointers replaced with descriptions. No source changes.
 Docs tests 8+27 passed.
+
+## Round 16 (chunk 1: one false sentence from round 15's reword)
+
+lifecycle.md said a result-only span edit "stays invisible to content
+hashing" -- inverted; it moves the content hash (body text) and not the
+probe. Reworded; nothing in round 15's diff was a code change. Full
+verification pass over every round-15 docs claim, claim -> proof:
+- "span cross-item references entering the content hash" (Status,
+  named-calc x2, change-tracking list) -> build.py:2232-2236.
+- "`calc_hash` probe extension ... not a format-gated payload change"
+  (Status), "takes no format argument and is not what moved" (named-calc
+  x2), "probe covers spans at every format" (lifecycle) ->
+  build.py:2390 `def calc_hash_for(item)`;
+  test_calc_block_hash.py:61 pins the payload property at 6.
+- "result-only edit moves the content hash ... not the probe" (lifecycle,
+  fixed) -> test_inline_calc_hash.py:460.
+- "source() values input is format 4's own ... fetch discovery is not a
+  hash input" (change-tracking, lifecycle, §3 row) -> build.py:2237-2240,
+  citations.py:1544 (span discovery, not hashing).
+- "landed with slice 2, this PR" (§3 heading) -> gh pr view 347: OPEN.
+- era marker / named-calc table re-pins -> #333/#341/#351/#345 merged,
+  tests named in the table exist and pass.
+NIT: log header base corrected to 899ab91 (#358, merge-base verified).
+Docs tests 8+27 passed; full suite green (see PR body note).
