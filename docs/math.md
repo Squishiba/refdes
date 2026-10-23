@@ -112,7 +112,12 @@ and the reference is stored expanded as a `DISPLAY-ID@key` composite like every
 other structured reference, so renaming `LOG-PWR-001` refreshes the label and
 keeps resolving. The next writable command anchors the bare spelling to its
 composite; under `--no-write` the bare reference still resolves on the display
-id, and nothing is written.
+id, and nothing is written. One exclusion: a bare cross-item reference inside
+an inline span of an item loaded from a YAML list file is deliberately left
+bare — a line rewrite of its `body:` block would corrupt the YAML — so a
+rename does not refresh it and breaks the span on the next build; hand-write
+the composite `DISPLAY-ID@key` spelling there (it keeps resolving by key
+across renames, with a stale label) or edit the span at rename time.
 
 Any named value in the target's calc blocks is referenceable — there is no
 exports list. The pipe unit works on a reference like on any line:
@@ -350,7 +355,10 @@ A cross-item reference or a `source()` call in a span is read exactly as it
 is in a fence: the build evaluates the referenced item first, `refdes fetch`
 pins the key the span names, and a moved upstream value or a re-pinned
 source value moves the item's content hash — an inline span is a dependency
-like a fence line, with no fence-only forms left. The span's arithmetic
+like a fence line, with no fence-only forms left. One form is not covered:
+a bare span reference in an item loaded from a YAML list file stays bare on
+disk, so the rename refresh above does not reach it (see "Referencing
+another item's values"). The span's arithmetic
 (name, right-hand side, unit assertion) is what the build's arithmetic
 probe and baselines track; the stored result is body text like any other
 edit, so correcting it is a real source change.

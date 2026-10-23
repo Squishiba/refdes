@@ -2233,10 +2233,11 @@ def run_checks(project: Project) -> None:
 #      cross-item reference (`v := DEC-001.V_in`) is a real dependency, so the
 #      scheduler orders the target first, the reference's resolved key and
 #      resolved value enter the calc-reference hash, and the body reduces the
-#      reference's target half to that key exactly as a fence line's does. (A
-#      span's resolvable source() call has fed the source-inputs hash since
-#      format 4 -- the resolver appended it under the same gate; what is new
-#      here is that `refdes fetch` *discovers and pins* it, not a hash input.)
+#      reference's target half to that key exactly as a fence line's does. (The
+#      source-inputs hash is format 4's own input, counting every source()
+#      call the evaluator resolves, so a resolvable span call has fed it since
+#      slice 1 made spans evaluable -- the format 5 era; what is new here is
+#      that `refdes fetch` *discovers and pins* it, not a hash input.)
 #      The arithmetic of every triggered span (name, rhs, unit -- never the
 #      author's stored result) joins the narrow arithmetic probe, so an
 #      inline-only item finally gets a calc_hash. An item with no triggered

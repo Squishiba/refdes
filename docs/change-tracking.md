@@ -126,8 +126,10 @@ targets switching from display-id text to resolved keys, `checks: against:`
 entries being reduced to keys, a cross-item calc reference's resolved value
 joining the hash, referenced image bytes joining it (format 5), or — format 6 — the
 cross-item references of *inline calc spans* joining the hash alongside a
-fence's; a span's resolvable `source()` value has been hashing there since
-format 4, and format 6 only adds its discovery by `refdes fetch`), a baseline
+fence's; the `source()` values input is format 4's own and counts every call
+the evaluator resolves, so a span's resolvable one has fed it since spans
+landed in slice 1 (the format 5 era), and format 6 only adds its discovery
+by `refdes fetch`), a baseline
 stamped under the old definition
 would show every item as "changed" purely because the *definition* moved, not
 because content changed.

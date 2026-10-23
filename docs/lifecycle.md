@@ -264,8 +264,9 @@ project, as `id:` under a surrogate map key once `refdes keys adopt` has run
 (the key *is* the map key there). A pre-keys baseline entry, or a keyless
 item, carries neither. The rest only when they apply —
 `verdict` for a type with a verdict-bearing status field,
-`calc_hash`/`calc_refs` for an item with calc blocks, inline calc spans, or
-cross-item calc references.
+`calc_hash` for an item with calc blocks or inline calc spans,
+`calc_refs` for an item with cross-item calc references (fenced or span --
+it is written only when the reference snapshot is non-empty).
 
 Scoped to local items only, matching every other manifest in the project
 (imports are read-only, and not this project's readiness question).
@@ -295,8 +296,10 @@ Format 6 added inline calc spans: a span whose whole right-hand side is a
 cross-item reference (`v := DEC-001.V_in`) is hashed like a fence line's
 reference, so the item's dependencies and its arithmetic probe cover inline
 spans, not just fenced ones. A span's `source()` call is not a new hash input
-at this format -- a resolvable one has joined the `source()` values since
-format 4 -- but `refdes fetch` now discovers and pins it like a fence's.
+at this format -- the `source()` values input is format 4's own and counts
+every call the evaluator resolves, so a resolvable span call has fed it since
+spans landed in slice 1 (the format 5 era) -- but `refdes fetch` now
+discovers and pins it like a fence's.
 
 An item with no cross-item calc reference and no `source()` line hashes
 exactly as it did under format 3, an item with no image hashes exactly as
