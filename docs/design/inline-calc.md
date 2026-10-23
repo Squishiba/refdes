@@ -1,7 +1,9 @@
 Status: **Partially landed.** The source form, parser, evaluator, and
-`check`/`build` diagnostics are implemented, as is the §2 release gate.
-The §3 hash, dependency-scan, and `source()` discovery changes remain
-proposed. The owner decided the four open
+`check`/`build` diagnostics are implemented (slice 1, #333), as are the honest
+stale-result messages (#341), the grammar fixes (#351), and the §2 release gate
+(#345). The §3 hash, dependency-scan, and `source()` discovery changes
+(HASH_FORMAT 6, slice 2) are in review — PR #347, not merged. The owner decided
+the four open
 questions on 2026-10-17; the decisions are recorded under each question below.
 Later directions are parked in
 [inline-calc-later.md](inline-calc-later.md).

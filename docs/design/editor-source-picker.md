@@ -1,4 +1,6 @@
-Status: **proposed**; **Slices A, B, and C landed** (§11). `sources.list_entries` +
+Status: **implemented** — Slices A, B and C landed (reads #49, accept #59,
+panel #62; the PDF page read is #57), and the author user guide shipped (#349)
+(§11). `sources.list_entries` +
 `SourceEntry` and the three read endpoints ship (a fourth read endpoint,
 `sources/page`, joined them with the PDF picker's Slice P-A), with their
 authorization and

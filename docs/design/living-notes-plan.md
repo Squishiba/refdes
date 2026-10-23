@@ -1,4 +1,9 @@
-Status: Proposed — implementation plan for living notes; the decisions it
+Status: **Implemented** — this is the plan `living-notes.md` was waiting for,
+and its phases have landed: the history store, capture and the uncaptured-edit
+warning (H4 capture/redact/migrate-seals 1f4eed9, B3 #166), history-backed
+sealing (H5 #157), the log fold (H6 #183), the thread projection and
+`refdes thread` (H7a #187, H7b #191) and `refdes work` (H7c #194), and the
+open-tasks / captured-edits gate rules (H8 #193). The decisions it
 implements are in `docs/design/living-notes.md` and are not reopened here. All
 eight open questions (§Open questions for Jared) were ratified by Jared on
 2026-09-19 as the conservative defaults this plan already assumed, so **H1 is
