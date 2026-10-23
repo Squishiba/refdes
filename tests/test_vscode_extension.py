@@ -517,9 +517,17 @@ const diagnostics = {{
 }};
 {extracted.group(0)}
 publishDiagnostics("{'/root'}", {json.dumps({'items': items, 'diagnostics': diagnostics})});
+// The extension joins the root and the relative diagnostic file with
+// Node's path.join, which emits platform separators -- on Windows that
+// is `\\root\\items\\req.yaml`. Normalize the published keys to slashes
+// with the same path module the extension used, so the expectations
+// below can stay platform-neutral POSIX strings.
 console.log(JSON.stringify(
-  [...published.entries()].map(([f, list]) => [f, list.map((d) => d.message)])
-));
+  [...published.entries()].map(([f, list]) => [
+    f.split(path.sep).join("/"),
+    list.map((d) => d.message),
+  ]))
+);
 """
     proc = subprocess.run(
         [NODE, "-e", script],
