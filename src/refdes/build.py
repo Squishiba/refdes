@@ -3659,7 +3659,7 @@ def render_pages(project: Project) -> None:
             project,
             page.body,
             page.source_file,
-            getattr(page, "front_matter_lines", 0),
+            page.front_matter_lines,
         )
         html = md.render(source)
         for index, block_html in enumerate(block_htmls):
