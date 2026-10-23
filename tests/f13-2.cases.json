@@ -1,0 +1,42 @@
+{
+  "tests/test_serve_edit_keyless_handle.py::test_the_row_handle_of_a_keyless_item_is_the_provisional_handle": {
+    "expected_on_base": "pass",
+    "requirement": "Control: the list route hands the keyless row its ~<relpath>:<line> handle and the read route answers it; handle minting is unchanged by this task."
+  },
+  "tests/test_serve_edit_keyless_handle.py::test_saving_through_the_keyless_handle_lands_on_the_yaml_item": {
+    "expected_on_base": "fail",
+    "requirement": "POST /api/item/<~handle>/edit saves the yaml-list-item (200 applied, lands in the item's own span, no key minted); base answers 422 'in this file'."
+  },
+  "tests/test_serve_edit_keyless_handle.py::test_saving_through_the_keyless_handle_lands_on_the_markdown_item": {
+    "expected_on_base": "fail",
+    "requirement": "The same save through the keyless handle of a md-front-matter item (items/notes.md) succeeds and leaves the body prose standing."
+  },
+  "tests/test_serve_edit_keyless_handle.py::test_the_keyless_handle_save_matches_the_display_id_save": {
+    "expected_on_base": "fail",
+    "requirement": "Saving through the keyless handle is identical to saving through the display id: same bytes, same patch describe, same new revision, same response shape; each response reports what the read route reports for its own ref."
+  },
+  "tests/test_serve_edit_keyless_handle.py::test_a_stale_keyless_handle_refuses_without_touching_the_file": {
+    "expected_on_base": "pass",
+    "requirement": "The handle's line is validated, not guessed: a handle whose line no longer points at the item's definition (file shifted on disk) refuses and writes nothing."
+  },
+  "tests/test_serve_edit_keyless_handle.py::test_a_keyless_handle_naming_a_line_that_is_not_an_item_definition_refuses": {
+    "expected_on_base": "pass",
+    "requirement": "A hand-built handle naming a real file and a line that is no item's definition is the ordinary refusal, with the tree byte-identical."
+  },
+  "tests/test_serve_edit_keyless_handle.py::test_a_keyless_handle_naming_a_line_in_another_file_refuses": {
+    "expected_on_base": "pass",
+    "requirement": "The handle's file is part of its identity: REQ-002's reqs.yaml line number spelled against notes.md (where no item is defined) refuses and writes nothing."
+  },
+  "tests/test_serve_edit_keyless_handle.py::test_the_display_id_save_still_saves_on_the_keyless_project": {
+    "expected_on_base": "pass",
+    "requirement": "Control: the display-id handle keeps saving on the keyless project."
+  },
+  "tests/test_serve_edit_keyless_handle.py::test_the_key_handle_save_still_saves_on_the_keyed_project": {
+    "expected_on_base": "pass",
+    "requirement": "Control: the surrogate-key handle keeps saving on the keyed project (EDIT-01 behavior stands)."
+  },
+  "tests/test_serve_edit_keyless_handle.py::test_the_keyless_handle_stale_revision_conflict_keeps_its_diff": {
+    "expected_on_base": "fail",
+    "requirement": "A stale-revision save through the keyless handle is the 409 with a real diff (current_text + diff, like the display-id save); base strips the conflict of its text because the plan cannot use the raw ~ spelling."
+  }
+}
