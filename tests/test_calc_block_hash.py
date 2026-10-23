@@ -58,15 +58,16 @@ def _edit(tmp_path, name: str, old: str, new: str) -> None:
     path.write_text(text.replace(old, new), encoding="utf-8")
 
 
-def test_hash_format_bumped_to_5_moves_nothing_here(tmp_path):
-    """§6.1, re-pinned by the HASH_FORMAT 5 bump (editor-image-upload.md
-    §15.6): naming still enters no payload as a new key -- the format-3-vs-4
-    identity holds. And because this project has no images, the format-4-vs-5
-    identity holds too: the image-bytes bump moves no image-free item, the
-    same no-churn argument every earlier bump made. Sabotage: a `block`/
-    `calc_blocks` key added to _hash_payload, or a format 5 that looks at
-    anything but images, fails here."""
-    assert build_mod.HASH_FORMAT == 5
+def test_hash_format_bumped_to_6_moves_nothing_here(tmp_path):
+    """§6.1, re-pinned by the HASH_FORMAT 6 bump (inline-calc.md §3): naming
+    still enters no payload as a new key -- the format-3-vs-4 identity holds.
+    And because this project has no images and no inline calc spans, the
+    format-4-vs-5-vs-6 identity holds too: neither the image-bytes bump nor
+    the inline-span bump moves an image-free, span-free item, the same
+    no-churn argument every earlier bump made. Sabotage: a `block`/
+    `calc_blocks` key added to _hash_payload, or a format 6 that looks at
+    anything but inline spans, fails here."""
+    assert build_mod.HASH_FORMAT == 6
     p = _build(tmp_path, {
         "a.md": _item("DEC-001", '```calc id="losses"\nV_in = 12 V\n```\n'),
         "b.md": _item("DEC-002", "prose only, no calc at all\n"),

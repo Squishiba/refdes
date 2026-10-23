@@ -244,9 +244,9 @@ gate:
 
 items:
   CMP-PWR-001: {hash: 673e6ba11269f350, type: component, title: "Buck converter",
-    hash_format: 5, key: pktmysgxn8x, verdict: selected}
+    hash_format: 6, key: pktmysgxn8x, verdict: selected}
   LOG-PWR-001: {hash: a1b2c3d4e5f60718, type: log, title: "LDO vs. buck for 3V3 rail",
-    hash_format: 5, key: fd24s541bbt, verdict: accepted, calc_hash: d73ecea8e6f01f1e}
+    hash_format: 6, key: fd24s541bbt, verdict: accepted, calc_hash: d73ecea8e6f01f1e}
   # ... one entry per local item
 ```
 
@@ -264,8 +264,9 @@ project, as `id:` under a surrogate map key once `refdes keys adopt` has run
 (the key *is* the map key there). A pre-keys baseline entry, or a keyless
 item, carries neither. The rest only when they apply —
 `verdict` for a type with a verdict-bearing status field,
-`calc_hash`/`calc_refs` for an item with calc blocks or cross-item calc
-references.
+`calc_hash` for an item with calc blocks or inline calc spans,
+`calc_refs` for an item with cross-item calc references (fenced or span --
+it is written only when the reference snapshot is non-empty).
 
 Scoped to local items only, matching every other manifest in the project
 (imports are read-only, and not this project's readiness question).
@@ -281,9 +282,9 @@ does.
 
 ### Hash format versioning
 
-Each baseline entry records `hash_format` (currently **5**).
+Each baseline entry records `hash_format` (currently **6**).
 
-Five definitions so far, oldest first. Format 1 hashed display-id link
+Six definitions so far, oldest first. Format 1 hashed display-id link
 targets. Format 2 switched those to resolved keys and left `checks: against:`
 raw. Format 3 reduced `checks: against:` to keys too. Format 4 added
 cross-item calc references, hashing each one's resolved key and the value it
@@ -291,10 +292,24 @@ resolved to, and joined to the same format number `source()` values: an item
 with a `source("path", "key")` calc line hashes each (canonical path, key,
 locked text) it resolved. Format 5 added images: every local image an item's
 body references hashes its resolved project-relative path and content digest.
+Format 6 added inline calc spans: a span whose whole right-hand side is a
+cross-item reference (`v := DEC-001.V_in`) is hashed like a fence line's
+reference, so the item's dependencies cover inline spans, not just fenced
+ones. (The arithmetic probe covers spans at every format --
+`build.py:calc_hash_for` takes no format argument: a result-only edit of a
+span moves the content hash -- the authored span is body text -- but not
+the probe, which hashes name, RHS and unit and never the author's written
+result; see `docs/design/inline-calc.md` section 3.) A span's `source()` call is not a new hash input
+at this format -- the `source()` values input is format 4's own and counts
+every call the evaluator resolves, so a resolvable span call has fed it since
+spans landed in slice 1 (the format 5 era) -- but `refdes fetch` now
+discovers and pins it like a fence's.
 
 An item with no cross-item calc reference and no `source()` line hashes
-exactly as it did under format 3, and an item with no image hashes exactly as
-it did under format 4, so those additions cost an ordinary item nothing.
+exactly as it did under format 3, an item with no image hashes exactly as
+it did under format 4, and an item with no triggered inline span hashes
+exactly as it did under format 5, so those additions cost an ordinary item
+nothing.
 
 When the hash definition evolves, a baseline read for a diff or a stamp
 migrates itself. Each legacy-format entry's hash is recomputed under its

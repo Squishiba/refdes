@@ -63,6 +63,7 @@ from pathlib import Path
 
 from .. import calc as calc_mod
 from .. import citations as citations_mod
+from .. import inline_calc
 from .. import sources as sources_mod
 from ..model import Item, Project
 
@@ -792,6 +793,23 @@ def _proposed_name(key: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_") or "value"
 
 
+def _live_spans(item: Item) -> list[inline_calc.InlineSpan]:
+    """The item's well-formed inline calc spans. A malformed span has no
+    meaningful name/unit (the build reports it at the line anyway), so it
+    contributes nothing to the suggestions below."""
+    return [span for span in inline_calc.triggered_spans(item.body) if not span.error]
+
+
+def _span_result_unit(span: inline_calc.InlineSpan) -> str:
+    """The unit spelled on a span's stored result (`12 V` -> `V`); empty
+    for a dimensionless result."""
+    match = inline_calc.LITERAL_RE.match(span.result)
+    if match is None:
+        return ""
+    tail = span.result[match.end(1):].strip()
+    return tail.strip("[]")
+
+
 def _item_units(item: Item) -> list[str]:
     """Units this item's own calc lines already declare, `1` first.
 
@@ -799,17 +817,37 @@ def _item_units(item: Item) -> list[str]:
     (docs/design/calc-sources.md §6), and it is listed as a *suggestion* like
     the rest of them: a defaulted unit is the silent 1000x wrong answer this
     whole feature is shaped around, so the panel offers and the author picks.
+
+    Inline calc spans count too: a span's declared `| unit` and the unit
+    spelled on its stored result are units this item already uses, and the
+    evaluator's one scope makes its names real assignments (see
+    `_item_names`). The declared unit is read through
+    `inline_calc._evaluator_unit` -- the evaluator's own order (strip the
+    comment off the whole line, THEN split the unit) -- so a span carrying
+    a comment suggests the unit the evaluator runs under, even when the
+    comment contains a `|` (`x := 1 | V # note | b = 1` suggests `V`, not
+    the `b` that `parse_span`'s earlier pipe split leaves in `span.unit`).
     """
     used = {line.annotation.strip() for line in item.calcs if line.annotation.strip()}
+    for span in _live_spans(item):
+        used.add(inline_calc._evaluator_unit(span))
+        used.add(_span_result_unit(span))
+    used.discard("")
     return ["1"] + sorted(u for u in used if u != "1")
 
 
 def _item_names(item: Item) -> set[str]:
     """Every name this item's calc blocks already assign, from the lines the
-    evaluator produced for it. A collision is a build error the diagnostic gate
-    would refuse anyway (the evaluator's own whole-item duplicate check), so
-    catching it here is a courtesy and not a new rule."""
-    return {line.name for line in item.calcs if line.name}
+    evaluator produced for it, plus every name its inline calc spans assign:
+    spans and fences share one item-wide scope, so a span name collides with
+    a proposed source line exactly as a fence name does. A collision is a
+    build error the diagnostic gate would refuse anyway (the evaluator's own
+    whole-item duplicate check), so catching it here is a courtesy and not a
+    new rule."""
+    return (
+        {line.name for line in item.calcs if line.name}
+        | {span.name for span in _live_spans(item)}
+    )
 
 
 def _checked_unit(value: str, unit: str) -> None:
@@ -989,6 +1027,14 @@ def body_source_pairs(project: Project, item: Item, body: str) -> set[tuple[str,
     `citations.stage_source_pins` is about to pin one, and a pin nothing cites is
     dead state in a tracked file (editor-source-picker.md §4).
 
+    Both source forms are walked, as in `collect_source_uses`: `source()` calls
+    in calc fences, and calls inside inline calc spans -- the span loop's
+    `inline_calc.span_source_call` applies the same evaluator-order rules the
+    spans get at build time, so a span's `source()` is a pair here exactly when
+    it is one to the evaluator. The authorization check is shared: the same
+    citations field authorizes both forms, and a span names no new reader
+    (docs/design/inline-calc.md §3).
+
     A path this item does not cite is not a pair, and is not reported here: that
     is the validator's error to make, on the line that made it.
     """
@@ -998,6 +1044,13 @@ def body_source_pairs(project: Project, item: Item, body: str) -> set[tuple[str,
             canon, why = citations_mod.authorize_source_path(project, item, raw_path)
             if not why:
                 pairs.add((canon, key))
+    for span in inline_calc.triggered_spans(body):
+        call = inline_calc.span_source_call(span)
+        if call is None:
+            continue
+        canon, why = citations_mod.authorize_source_path(project, item, call[0])
+        if not why:
+            pairs.add((canon, call[1]))
     return pairs
 
 

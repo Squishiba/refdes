@@ -6,6 +6,7 @@ import difflib
 import errno
 import hashlib
 import html as html_entities
+import itertools
 import json
 import os
 import re
@@ -20,12 +21,12 @@ from markdown_it.common.utils import escapeHtml
 from . import blocked as blocked_mod
 from . import blocks as blocks_mod
 from . import boards as boards_mod
-from . import calc, dates, history as history_mod, imports, seal
+from . import calc, dates, imports, inline_calc, seal
 from . import chains as chains_mod
 from . import citations as citations_mod
 from . import docs_url as docs_url_mod
+from . import history as history_mod
 from . import ids as ids_mod
-from . import inline_calc
 from . import keys as keys_mod
 from . import nav as nav_mod
 from . import pages as pages_mod
@@ -1504,11 +1505,15 @@ def compute_coverage(project: Project, chain_graph=None) -> None:
 
 
 def _calc_reference_targets(item) -> list[str]:
-    """The target strings of every cross-item reference in this item's calc
-    blocks, in source order, deduped -- the dependency edges the scheduler
-    walks. Parsed with the same regexes `evaluate_block` uses (pipe unit
-    stripped first), so a line is a dependency edge here exactly when it is a
-    reference line there."""
+    """The target strings of every cross-item reference in this item -- calc
+    blocks and inline calc spans -- fence lines first, then spans, each group
+    in source order, deduped: the dependency edges the scheduler walks.
+    Parsed with the same regexes `evaluate_block` uses (pipe unit stripped
+    first; a span's whole right-hand side must be the reference, same
+    `CROSS_REF_RE` as the evaluator), so a line is a dependency edge here
+    exactly when it is a reference there -- run-12
+    F12-5: an edge from a fence line only was the gap that let a span
+    reference run before its target's calc."""
     targets: list[str] = []
     for block in calc.extract_blocks(item.body):
         for raw_line in block.splitlines():
@@ -1524,7 +1529,51 @@ def _calc_reference_targets(item) -> list[str]:
             ref = calc.CROSS_REF_RE.match(match.group(2).strip())
             if ref and ref.group("target") not in targets:
                 targets.append(ref.group("target"))
+    for span in inline_calc.triggered_spans(item.body):
+        ref = inline_calc.span_cross_ref(span)
+        if ref and ref.group("target") not in targets:
+            targets.append(ref.group("target"))
     return targets
+
+
+def _calc_fence_reference_targets(item) -> set[str]:
+    """The target strings of this item's fenced cross-item references only
+    (the `calc.extract_blocks` loop of `_calc_reference_targets`)."""
+    targets: set[str] = set()
+    for block in calc.extract_blocks(item.body):
+        for raw_line in block.splitlines():
+            line = raw_line.partition("#")[0].rstrip()
+            if not line.strip():
+                continue
+            pipe = calc.PIPE_UNIT_RE.match(line)
+            if pipe:
+                line = pipe.group("lhs").rstrip()
+            match = calc.ASSIGN_RE.match(line)
+            if not match:
+                continue
+            ref = calc.CROSS_REF_RE.match(match.group(2).strip())
+            if ref:
+                targets.add(ref.group("target"))
+    return targets
+
+
+def _calc_span_reference_targets(item) -> set[str]:
+    """The target strings of this item's inline-span cross-item references
+    only -- the subset of `_calc_reference_targets` whose rewrite is a span
+    *content* replacement. The expansion plan drops these (and only these --
+    a target a fenced reference also uses stays, its fence rewrite being a
+    file-line edit) for an item whose body has no file position
+    (`body_line is None`, e.g. an item body built from a YAML/list file):
+    the span scan needs body geometry the file lines cannot supply, so the
+    write-back can never apply them, and promising an expansion in the
+    `--no-write` report that no write applies is worse than not counting it.
+    The references still resolve, evaluate and hash -- only the composite
+    expansion skips them."""
+    return {
+        ref.group("target")
+        for span in inline_calc.triggered_spans(item.body)
+        if (ref := inline_calc.span_cross_ref(span)) is not None
+    }
 
 
 def _calc_ref_display(target_str: str, target) -> str:
@@ -1570,21 +1619,12 @@ def _make_calc_resolver(project: Project, by_key: dict[str, Item]):
             raise calc.CalcError(
                 f"cannot resolve {reference!r}: {display}'s own calc failed"
             )
-        if not hasattr(target, "_env"):
-            # The scheduler's edges come from fence lines only
-            # (docs/math.md, known gaps), so a reference that lives only
-            # in an inline span runs before its target is evaluated.
-            # Listing what the target "defines" from its empty env would
-            # blame the target for a value it does define -- run-12
-            # F12-5: `DEC-001 does not define 'V_in' (it defines no calc
-            # values)` for a target whose fence defines V_in, exactly.
-            raise calc.CalcError(
-                f"cross-item reference {reference!r}: {display} has not "
-                "been evaluated yet -- a reference used only in an "
-                "inline span creates no evaluation-order edge, so this "
-                "span can run before the target's calc; keep this "
-                "reference in a calc fence"
-            )
+        # `not hasattr(target, "_env")` is unreachable here: the scheduler
+        # walks `_calc_reference_targets`, which names every cross-item
+        # reference of the item -- fence lines and inline spans alike -- so
+        # a resolvable, non-external, non-failed target is always evaluated
+        # (or cycle-marked, caught above) before this resolver runs. Run-12
+        # F12-5's "has not been evaluated yet" message died with the gap.
         value = target._env.get(name)
         if value is None:
             defined = sorted(target._env)
@@ -1607,7 +1647,6 @@ def _make_source_resolver(
     records: dict,
     resolved: dict,
     uses: list,
-    inline_span: list[bool] | None = None,
 ):
     """The resolver a `source("path", "key")` line calls: authorization by the
     same-item citation rule, then the value the lockfile pinned. It never opens
@@ -1617,11 +1656,11 @@ def _make_source_resolver(
 
     `resolved` maps the authored (path, key) to (canonical path, locked text or
     None) for the row's provenance badge; `uses` accumulates every use for the
-    content hash, `None` standing for a value that did not resolve.
-    `inline_span`, when given, is a one-slot flag the caller sets while an
-    inline span is evaluating: key discovery reads calc fences only, so the
-    span form's miss needs the fence-form advice, not a fetch it can never
-    complete (run-12 F12-6)."""
+    content hash, `None` standing for a value that did not resolve. The span
+    form is the same call with the same advice: `collect_source_uses` reads
+    spans too (slice 2), so `refdes fetch` pins what a span names, and the
+    run-12 F12-6 fence-form-only dead end is gone.
+    """
 
     def resolve(path: str, key: str) -> str:
         canon, problem = citations_mod.authorize_source_path(project, item, path)
@@ -1632,14 +1671,6 @@ def _make_source_resolver(
         resolved[(path, key)] = (canon, text)
         uses.append((canon, key, text))
         if text is None:
-            if inline_span is not None and inline_span[0]:
-                raise calc.CalcError(
-                    f"source({path!r}, {key!r}) has no locked value -- "
-                    "key discovery reads calc fences only, so a source() "
-                    "used only in an inline span is never pinned; write "
-                    f"the line in a calc fence and run 'refdes fetch "
-                    f"--path {canon}'"
-                )
             raise calc.CalcError(
                 f"source({path!r}, {key!r}) has no locked value -- run "
                 f"'refdes fetch --path {canon}' to extract and pin it"
@@ -1733,15 +1764,10 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
         project._lockfile_problem = problem
     source_resolved: dict[tuple[str, str], tuple[str, str | None]] = {}
     item._source_uses = []
-    # True while an inline span is evaluating, so the source resolver can
-    # tell the span form's dead end from a fence form's fixable miss
-    # (run-12 F12-6); the event loop below is sequential, so a list is
-    # enough -- no locking.
-    span_context = [False]
     env: dict[str, calc.Value] = {
         calc.RESOLVER_KEY: _make_calc_resolver(project, by_key),
         calc.SOURCE_RESOLVER_KEY: _make_source_resolver(
-            project, item, records, source_resolved, item._source_uses, span_context
+            project, item, records, source_resolved, item._source_uses
         ),
     }
     # name -> line first assigned, threaded across every block of this item
@@ -1820,12 +1846,8 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
     events.sort(key=lambda event: event[0])
     for _offset, event in events:
         if isinstance(event, inline_calc.InlineSpan):
-            span_context[0] = True
-            try:
-                if _run_inline_span(project, item, event, env, origins):
-                    failed = True
-            finally:
-                span_context[0] = False
+            if _run_inline_span(project, item, event, env, origins):
+                failed = True
             continue
         block, block_id = event
         start_line = item.body_line + _offset if item.body_line is not None else None
@@ -1913,15 +1935,19 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
 
 
 def run_calcs(project: Project) -> None:
-    """Evaluate every local item's calc blocks in dependency order.
+    """Evaluate every local item's calc blocks and inline calc spans in
+    dependency order.
 
     A cross-item reference (`V_in = DEC-PWR-001.V_in`, finding 35) makes the
     per-item passes of the past a graph over items: the reference edges are
     walked first and each item is evaluated only after everything it reads
-    from, so a target's `env` is ready when the resolver asks for it. Each
-    item's env is computed exactly once and cached on the item (`_env`),
-    which is the whole state, so the scheduler is a memoised DFS post-order
-    and `run_checks` keeps finding `_env` where it always did.
+    from, so a target's `env` is ready when the resolver asks for it. The edges
+    come from fence lines *and* inline span references
+    (docs/design/inline-calc.md section 3), so a reference lives in whichever
+    form an author chose. Each item's env is computed exactly once and cached
+    on the item (`_env`), which is the whole state, so the scheduler is a
+    memoised DFS post-order and `run_checks` keeps finding `_env` where it
+    always did.
 
     A cycle is an error naming the full path (`a -> b -> a`), following the
     `blocked_by cycle:` (blocked.py) and `equation cycle:` (calc.py) shapes.
@@ -2203,10 +2229,35 @@ def run_checks(project: Project) -> None:
 #      never recorded image digests, and reconstructing formats <= 4 ignores
 #      images, which is what keeps the bump from making any existing item or
 #      seal look edited (the keys.md §5(c) carry-forward rule).
+#   6 (2026-10-19, docs/design/inline-calc.md section 3) -- inline calc spans
+#      join the dependency scans and the hash: a span whose whole rhs is a
+#      cross-item reference (`v := DEC-001.V_in`) is a real dependency, so the
+#      scheduler orders the target first, the reference's resolved key and
+#      resolved value enter the calc-reference hash, and the body reduces the
+#      reference's target half to that key exactly as a fence line's does. (The
+#      source-inputs hash is format 4's own input, counting every source()
+#      call the evaluator resolves, so a resolvable span call has fed it since
+#      slice 1 made spans evaluable -- the format 5 era; what is new here is
+#      that `refdes fetch` *discovers and pins* it, not a hash input.)
+#      The arithmetic of every triggered span (name, rhs, unit -- never the
+#      author's stored result) joins the narrow arithmetic probe, so an
+#      inline-only item finally gets a calc_hash. An item with no triggered
+#      span has the exact same payload as format 5, so no existing item's
+#      hash moves; spans with only literal arithmetic keep their old content
+#      hash (they gain only a probe, which content hashing never sees).
+#      Reconstruction of formats <= 5 excludes the span cross-item inputs
+#      (span source() values ride `_source_uses` there exactly as they rode
+#      the old code's hash), which is what keeps the bump from making any
+#      existing baseline entry, seal, or audit look edited (the keys.md §5(c)
+#      carry-forward rule -- and it is why the reconstruction also strips an
+#      expanded span target back to its display half, restoring the
+#      pre-expansion body text the recorded hash was computed from; an
+#      author-written composite was hashed as written back then, so the
+#      comparison side accepts both readings through keys.hashes_in_format).
 # Recorded per baseline entry (lifecycle.py) so a partially-migrated baseline
 # stays precisely describable; consulted by the migration in
 # lifecycle.py/seal.py/keys.py, never by an ordinary build.
-HASH_FORMAT = 5
+HASH_FORMAT = 6
 
 
 def _hash_payload(
@@ -2218,6 +2269,8 @@ def _hash_payload(
     calc_refs=None,
     source_inputs=None,
     image_inputs=None,
+    strip_inline_composite: bool = False,
+    strip_display: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Everything compute_hashes() and hash_for_format() have in common: which
     fields/body enter the hash, and under what normalization. The two things
@@ -2281,6 +2334,31 @@ def _hash_payload(
                 # entirely for a body that references no image, so an
                 # image-free item's format-5 payload is its format-4 payload.
                 payload["images"] = images
+        if strip_inline_composite:
+            # Formats <= 5: a triggered span's cross-item reference was
+            # invisible to the hash then, so the pre-slice-2 expansion of a
+            # span target (`DISPLAY.V_in` -> `DISPLAY@key.V_in` on disk)
+            # must not move a reconstruction: reduce it back to the display
+            # half, restoring the body text the recorded hash was computed
+            # from. The keys.md §5(c) carry-forward rule, third application
+            # after links and `against:`. The strip is the inverse of the
+            # slice-2 expansion: it is a faithful legacy reading only of a
+            # composite whose key half belongs to the item its display half
+            # names -- hash_for_format_variants() gates on exactly that,
+            # and a key-half-only edit keeps only the as-written reading
+            # (the text the format's own code hashed).
+            from . import links as links_mod
+
+            span_lines = body_text.splitlines()
+            links_mod._calc_ref_rewrites(
+                span_lines,
+                0,
+                len(span_lines),
+                {},
+                strip_inline_composite=True,
+                strip_display=strip_display,
+            )
+            body_text = "\n".join(span_lines)
         normalized = re.sub(r"\s+", " ", body_text).strip()
         payload["body"] = normalized
 
@@ -2292,15 +2370,34 @@ def _hash_blob(payload: dict[str, object]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
-def calc_hash_for(item: Item) -> str | None:
-    """A hash of just item's ```calc block(s) -- the second, narrower probe
-    docs/design/stale-arithmetic-signal.md needs alongside content_hash, so
-    lifecycle.diff_against can tell "the calc block changed" apart from "the
-    item changed" without storing the block's actual text anywhere.
+def _inline_span_calc_text(span: inline_calc.InlineSpan) -> str:
+    """One triggered span's arithmetic as the calc_hash probe sees it: name,
+    RHS and unit assertion, stored result excluded (docs/design/inline-calc.md
+    section 3 -- a result-only edit must leave this probe fixed). A malformed
+    span has no meaningful name/RHS/unit, so the probe is its raw text with
+    the result portion removed (`inline_calc.resultless_raw`): the raw text
+    verbatim would carry the stored result, and a result-only edit of a
+    malformed span would move the probe (round-13 review); the build reports
+    the span as an error at the line either way."""
+    if span.error:
+        return inline_calc.resultless_raw(span)
+    text = f"{span.name} := {span.rhs}"
+    if span.unit:
+        text += f" | {span.unit}"
+    return text
 
-    None (not a hash of an empty payload) when the item has no calc block at
-    all -- most items -- so lifecycle._items_map can omit the baseline field
-    entirely rather than recording a hash that can never mean anything.
+
+def calc_hash_for(item: Item) -> str | None:
+    """A hash of just item's ```calc block(s) and inline calc spans -- the
+    second, narrower probe docs/design/stale-arithmetic-signal.md needs
+    alongside content_hash, so lifecycle.diff_against can tell "the calc
+    block changed" apart from "the item changed" without storing the block's
+    actual text anywhere.
+
+    None (not a hash of an empty payload) when the item has no calc block and
+    no inline span at all -- most items -- so lifecycle._items_map can omit
+    the baseline field entirely rather than recording a hash that can never
+    mean anything.
 
     Normalized the same way _hash_payload normalizes body text (collapse
     whitespace, strip), so reflowing a calc block's comments or indentation
@@ -2310,11 +2407,25 @@ def calc_hash_for(item: Item) -> str | None:
     results, which is what "the arithmetic" means for this signal. A result
     changing because an upstream value moved, with this item's own block
     untouched, is a different question this function doesn't answer.
+
+    Inline spans enter as name/RHS/unit, in source order with the fences
+    (docs/design/inline-calc.md section 3), so an inline-only item has a
+    calc_hash and a stored-result edit leaves it fixed. An item with no
+    inline spans hashes exactly as it did when the probe was blocks-only,
+    so old baselines do not churn; an item whose old probe predates its own
+    spans no longer matches, and _stale_arithmetic's verdict-change signal
+    stays silent for it -- a false negative, never a false positive.
     """
-    blocks = calc.extract_blocks(item.body)
-    if not blocks:
+    blocks = calc.extract_blocks_with_lines(item.body)
+    spans = inline_calc.triggered_spans(item.body)
+    if not blocks and not spans:
         return None
-    normalized = [re.sub(r"\s+", " ", block).strip() for block in blocks]
+    events: list[tuple[int, str]] = [
+        (offset, block) for block, offset, _block_id in blocks
+    ]
+    events += [(span.line_offset, _inline_span_calc_text(span)) for span in spans]
+    events.sort(key=lambda event: event[0])
+    normalized = [re.sub(r"\s+", " ", text).strip() for _offset, text in events]
     return _hash_blob({"calc_blocks": normalized})
 
 
@@ -2409,14 +2520,19 @@ def _checks_hash_value(by_key: dict[str, Item], project: Project, entries) -> ob
     return reduced
 
 
-def _calc_reference_values(by_key: dict[str, Item], project: Project, item: Item):
-    """Every cross-item calc reference in ``item``'s blocks, in source order,
-    as ``(target text, name, resolved target item or None, resolved Value or
-    None)``. The one place a reference line is resolved against the *evaluated*
-    project, shared by the content hash (`_calc_refs_hash_value`) and the
-    baseline snapshot (`calc_reference_snapshot`) so the two can never disagree
-    about what a reference resolved to. Unresolvable pieces come back ``None``;
-    the build has already reported them at the referring line."""
+def _calc_reference_values(
+    by_key: dict[str, Item], project: Project, item: Item, include_inline: bool = False
+):
+    """Every cross-item calc reference in ``item``'s blocks -- and, with
+    ``include_inline``, its inline calc spans too -- as ``(target text, name,
+    resolved target item or None, resolved Value or None)``, fence lines
+    first in source order, then spans in source order. The one place a
+    reference is resolved against the *evaluated* project, shared by the
+    content hash (`_calc_refs_hash_value`, gated by hash format) and the
+    baseline snapshot (`calc_reference_snapshot`, always current) so the two
+    can never disagree about what a reference resolved to. Unresolvable
+    pieces come back ``None``; the build has already reported them at the
+    referring line."""
     out = []
     for block in calc.extract_blocks(item.body):
         for raw_line in block.splitlines():
@@ -2433,6 +2549,16 @@ def _calc_reference_values(by_key: dict[str, Item], project: Project, item: Item
             if target is not None and not target.external:
                 value = getattr(target, "_env", {}).get(ref.group("name"))
             out.append((ref.group("target"), ref.group("name"), target, value))
+    if include_inline:
+        for span in inline_calc.triggered_spans(item.body):
+            ref = inline_calc.span_cross_ref(span)
+            if ref is None:
+                continue
+            target = resolve_link_target(by_key, project, ref.group("target"))
+            value = None
+            if target is not None and not target.external:
+                value = getattr(target, "_env", {}).get(ref.group("name"))
+            out.append((ref.group("target"), ref.group("name"), target, value))
     return out
 
 
@@ -2442,10 +2568,21 @@ def calc_reference_snapshot(project: Project, item: Item) -> dict[str, str]:
     can say *which* upstream value moved and from what (finding 35 §4). Keyed
     on the target's key (its display id, when keyless), so an upstream rename
     does not look like a moved value; the text is the readable result and
-    bounds, e.g. ``12 V (11.4 V … 12.6 V)``. Empty for an item with none."""
+    bounds, e.g. ``12 V (11.4 V … 12.6 V)``. Empty for an item with none.
+
+    Inline spans enter the snapshot always: snapshots are stamped at the
+    current format, and the current format hashes span references, so a
+    stamped snapshot records exactly the references the stamp's own format
+    hashes. There is no older-format snapshot to gate (round-14 review).
+    """
     by_key = _key_index(project)
     snapshot: dict[str, str] = {}
-    for _target_str, name, target, value in _calc_reference_values(by_key, project, item):
+    for _target_str, name, target, value in _calc_reference_values(
+        # always current-format: reconstruction never calls this, so the
+        # span inputs are always in scope (round-13 NIT: the old
+        # `include_inline=HASH_FORMAT >= 6` was a gate that never closed)
+        by_key, project, item, include_inline=True
+    ):
         if target is None or value is None:
             continue
         text = calc.format_value(value, project.sigfigs)
@@ -2454,12 +2591,19 @@ def calc_reference_snapshot(project: Project, item: Item) -> dict[str, str]:
     return snapshot
 
 
-def _calc_refs_hash_value(by_key: dict[str, Item], project: Project, item: Item):
+def _calc_refs_hash_value(
+    by_key: dict[str, Item], project: Project, item: Item, include_inline: bool = False
+):
     """What an item's cross-item calc references contribute to its content
-    hash (HASH_FORMAT 4, finding 35 §4), or ``None`` when it has none.
+    hash (HASH_FORMAT 4, finding 35 §4), or ``None`` when it has none. With
+    ``include_inline`` (HASH_FORMAT 6, docs/design/inline-calc.md section 3),
+    an inline span's whole-right-hand-side reference counts as one of those
+    references, and its target half is reduced to the same token in the
+    hashed body text.
 
-    Returns ``(body_text, resolved)``. ``resolved`` lists, in source order,
-    each reference's ``[target token, name, value signature]``: the target
+    Returns ``(body_text, resolved)``. ``resolved`` lists, fence lines first
+    then spans (each group in source order), each reference's
+    ``[target token, name, value signature]``: the target
     reduced by `_link_hash_token` (its key -- so renaming the upstream
     *display id* changes nothing) and the value the reference resolved to
     (`calc.value_signature`, full precision and unit, independent of
@@ -2467,14 +2611,18 @@ def _calc_refs_hash_value(by_key: dict[str, Item], project: Project, item: Item)
     item's own text is untouched. ``body_text`` is the body with each
     reference line's target replaced by the same token, so the on-disk
     bare -> `DISPLAY@key` expansion, and a later display-half refresh, are
-    invisible to the hash exactly as they are for link targets.
+    invisible to the hash exactly as they are for link targets. The legacy
+    reconstruction (``include_inline=False``, formats <= 5) does not reduce
+    span targets here at all -- the span's reference is invisible to a
+    legacy hash, and the body-level strip of the expansion lives in
+    `_hash_payload`, where the raw (no-references) body is hashed too.
 
     A reference that does not resolve (missing item, missing name, failed
     or imported target) contributes a ``None`` value; the build already
     reports that as an error at the referring line, this only has to be
     deterministic and distinct from any real value.
     """
-    refs = _calc_reference_values(by_key, project, item)
+    refs = _calc_reference_values(by_key, project, item, include_inline=include_inline)
     if not refs:
         return None
     tokens = {t: _link_hash_token(by_key, project, t) for t, *_ in refs}
@@ -2489,7 +2637,9 @@ def _calc_refs_hash_value(by_key: dict[str, Item], project: Project, item: Item)
     from . import links as links_mod
 
     body_lines = item.body.splitlines()
-    links_mod._calc_ref_rewrites(body_lines, 0, len(body_lines), tokens)
+    links_mod._calc_ref_rewrites(
+        body_lines, 0, len(body_lines), tokens, include_inline=include_inline
+    )
     return "\n".join(body_lines), resolved
 
 
@@ -2653,7 +2803,12 @@ def compute_hashes(project: Project) -> None:
         item.content_hash = _hash_blob(payload_for(item, spec))
 
 
-def hash_payload_builder(project: Project, hash_format: int):
+def hash_payload_builder(
+    project: Project,
+    hash_format: int,
+    strip_inline_composite: bool | None = None,
+    strip_display: dict[str, str] | None = None,
+):
     """A ``(item, spec) -> payload`` closure computing _hash_payload() under
     ``hash_format``'s definition, reused by compute_hashes() (current
     format) and hash_for_format() (any earlier one) so the two can never
@@ -2674,20 +2829,37 @@ def hash_payload_builder(project: Project, hash_format: int):
     Format 5 (editor-image-upload.md §15.6, 2026-09-25): format 4, plus an
     item's referenced images hash as resolved path + content digest
     (_image_inputs_hash_value); an item with none is identical to format 4.
+    Format 6 (docs/design/inline-calc.md section 3, 2026-10-19): format 5,
+    plus an inline calc span's cross-item reference counts as a calc
+    reference (_calc_refs_hash_value with ``include_inline``); an item with
+    no such span is identical to format 5.
+
+    ``strip_inline_composite`` overrides the default reduction of expanded
+    span targets to their display half (see _hash_payload); None derives it
+    from the format -- stripped for every reconstruction the expansion
+    post-dates, live for the current format. hash_for_format_variants()
+    uses the override to offer the as-written legacy reading.
     """
+    if strip_inline_composite is None:
+        strip_inline_composite = hash_format < 6
     if hash_format <= 1:
         return lambda item, spec: _hash_payload(
             item, spec, project,
             link_values=lambda targets: sorted(t.split("@", 1)[0] for t in targets),
             checks_values=_checks_display_only,
+            strip_inline_composite=strip_inline_composite,
+            strip_display=strip_display,
         )
     by_key = _key_index(project)
     checks_values = (
         (lambda entries: _checks_hash_value(by_key, project, entries))
         if hash_format >= 3 else _checks_display_only
     )
+    include_inline = hash_format >= 6
     calc_refs = (
-        (lambda item: _calc_refs_hash_value(by_key, project, item))
+        (lambda item: _calc_refs_hash_value(
+            by_key, project, item, include_inline=include_inline
+        ))
         if hash_format >= 4 else None
     )
     source_inputs = _source_inputs_hash_value if hash_format >= 4 else None
@@ -2705,6 +2877,8 @@ def hash_payload_builder(project: Project, hash_format: int):
         calc_refs=calc_refs,
         source_inputs=source_inputs,
         image_inputs=image_inputs,
+        strip_inline_composite=strip_inline_composite,
+        strip_display=strip_display,
     )
 
 
@@ -2731,13 +2905,175 @@ def hash_for_format(item: Item, project: Project, hash_format: int) -> str:
     Used only by the hash-format migration (lifecycle.migrate_hash_format,
     seal._matches_sealed_hash's carry-forward comparison, and
     keys.plan_surrogate_storage/`refdes keys adopt`, all through
-    keys.hash_in_format, the one shared caller) to decide whether a stored
+    keys.hashes_in_format, which is this value plus the as-written span
+    reading hash_for_format_variants() computes) to decide whether a stored
     old-format hash still matches current content. Never called during an
     ordinary build.
     """
     spec = project.types[item.type]
     payload = hash_payload_builder(project, hash_format)(item, spec)
     return _hash_blob(payload)
+
+
+def _span_composite_targets(item: Item) -> list[tuple[str, str, str]]:
+    """(target, display, key) for every composite cross-item target in
+    this item's triggered inline spans, in source order. Shared by the
+    faithfulness gate and the historical-display variants so they can
+    never disagree about which targets they cover."""
+    from . import inline_calc as inline_calc_mod
+
+    found: list[tuple[str, str, str]] = []
+    for _offset, _start, _end, content in inline_calc_mod.triggered_span_events(
+        item.body.splitlines()
+    ):
+        ref = inline_calc_mod.span_cross_ref(inline_calc_mod.parse_span(0, content))
+        if ref is None:
+            continue
+        display, sep, key = ref.group("target").partition("@")
+        if not sep:
+            continue
+        found.append((ref.group("target"), display, key))
+    return found
+
+
+def _span_composites_are_faithful(item: Item, project: Project) -> bool:
+    """True when every composite cross-item target in this item's triggered
+    inline spans is a form slice-2's expansion (and its rename refresh)
+    legitimately writes: the key half names a live item, and the display
+    half is that item's current id OR one of its declared former ids.
+
+    The format <= 5 strip (see _hash_payload) is the inverse of that
+    expansion, so it is a faithful legacy reading of a composite *only*
+    under this identity. A key-half-only edit (`DEC-001@K2`, the display
+    half untouched -- now pointing at K2's item) strips back to the bare
+    text a pre-edit baseline/seal recorded, and the stripped hash would
+    certify an edited item as "content demonstrably unchanged" (round-7
+    review). Failing this check fails closed: the stripped reading is
+    withdrawn, the as-written reading stays -- which the format's own code
+    hashed verbatim -- so the edit is reported, exactly as it was before
+    the variant set existed. A bare target has no key half to fail on.
+    The former-id half of the display test (round-10 review): an
+    ordinary upstream display-id rename refreshes the composite label
+    (`links._planned_target`), so a *stale* display half naming a former
+    id of the key's owner is the signature of the rename, not an edit --
+    the hashes_in_format variants below offer the stripped readings over
+    those historical halves so pre-rename records keep matching. Build
+    order precondition (round-14 NIT): `project.former_ids` is populated
+    by `validate_former_ids`, which `build()` runs before any caller of
+    this gate (seal verify, lifecycle) -- an unpopulated map only widens
+    the fail-closed withdrawal.
+    """
+    by_key = {i.key: i for i in project.local_items if i.key}
+    for _target, display, key in _span_composite_targets(item):
+        owner = by_key.get(key)
+        if owner is None:
+            return False
+        if display != owner.id and project.former_ids.get(display) != owner.id:
+            return False
+    return True
+
+
+def hash_for_format_variants(item: Item, project: Project, hash_format: int) -> set[str] | None:
+    """Every content hash ``hash_format`` can legitimately assign to this
+    item's current content, or ``None`` for a format this build does not
+    understand.
+
+    The one thing hash_for_format() strips that the format's own code did
+    not always strip: an inline calc span whose cross-item target is a
+    composite (`DEC-001@key.V_in`). Slice 2's expansion writes composites
+    into span targets that authors had written bare, so a format <= 5
+    reconstruction strips them back (the display-half body is what the
+    recorded hash saw). But `calc.CROSS_REF_RE` accepted an author-written
+    composite all along, and the format's own code hashed *that* text
+    verbatim -- resolving it by key exactly as a fence line's composite is
+    resolved. For such a body there are two legitimate readings of "what
+    this format hashes right now": the stripped body (target expanded by
+    slice 2) and the as-written body (target authored as a composite).
+    The stripped reading is offered only under a narrow identity gate --
+    every composite target must be faithful, `DISPLAY@key` naming the
+    item that owns ``key`` (see _span_composites_are_faithful) -- because
+    a key-half-only edit strips back to the pre-edit bare text and the
+    stripped reading would certify the edit as unchanged. The rules this
+    leaves standing:
+
+    - it is a *comparison-side* rule only. The current format is untouched
+      (a set of one: ``item.content_hash``), and no hash is ever *recorded*
+      from a variant -- baselines and seals keep stamping the single
+      hash_for_format()/compute_hashes() value.
+    - an edit to the body text moves the as-written reading, and a
+      faithful composite that stops being faithful (a key-half edit)
+      loses the stripped reading outright -- so every edit is reported
+      changed/uncomparable, as before the variant set existed.
+    - the as-written reading exists only for legacy formats (1 <= f <
+      HASH_FORMAT); it is the identical payload with the span-strip pass
+      disabled and every other format rule (link halves, `against:`,
+      calc refs, source/image inputs) untouched, so it cannot smuggle in
+      another format's definitions.
+
+    A body with no composite span target hashes the same under both
+    readings, so the set has one element there: this is invisible to every
+    migration that predates inline spans.
+    """
+    spec = project.types[item.type]
+    if hash_format == HASH_FORMAT:
+        return {item.content_hash}
+    if not 1 <= hash_format < HASH_FORMAT:
+        return None
+    live = _hash_blob(
+        hash_payload_builder(project, hash_format, strip_inline_composite=False)(item, spec)
+    )
+    if not _span_composites_are_faithful(item, project):
+        return {live}
+    stripped = _hash_blob(hash_payload_builder(project, hash_format)(item, spec))
+    variants = {stripped, live}
+    # Historical display halves (round-10 review): an ordinary upstream
+    # display-id rename refreshes a faithful composite's label, moving the
+    # stripped body off the text a pre-rename record was computed over.
+    # The key owner's declared former ids are legitimate historical
+    # display halves -- offer the stripped readings over every combination
+    # of (current id, former ids) per composite target, so a pre-rename
+    # baseline/seal hash over the old label keeps matching. The
+    # as-written-as-stripped combination is the `stripped` reading above.
+    # A target whose key resolves to no live item fails the gate above,
+    # so deletions never reach this code as a silent stripped pass.
+    by_key = {i.key: i for i in project.local_items if i.key}
+    formers: dict[str, list[str]] = {}
+    for old, current in project.former_ids.items():
+        formers.setdefault(current, []).append(old)
+    options: list[tuple[str, list[str]]] = []
+    authored_display: dict[str, str] = {}
+    for target, display, key in _span_composite_targets(item):
+        if target in authored_display:
+            continue
+        authored_display[target] = display
+        owner = by_key[key]
+        opts = [owner.id] + sorted(formers.get(owner.id, ()))
+        options.append((target, opts))
+    combinations = 1
+    for _target, opts in options:
+        combinations *= len(opts)
+    # The sweep is exhaustive below a small bound and abandoned above it:
+    # each extra display-half option doubles the reconstructions, and a
+    # target with many former ids (plus several composites in one item)
+    # would multiply out the comparison. Dropping the HISTORICAL readings
+    # above the cap is the safe direction: the as-written and current-id
+    # stripped readings stay in the set, so the loss is a false-positive
+    # "modified since sealed" on a pre-rename record (the author reseals
+    # or the record stays uncomparable), never a silent pass -- and the
+    # round-7 gate withdrawal above still fails closed on key-half edits.
+    # (Round-13 review; pinned by
+    # test_former_id_readings_are_offered_up_to_the_cap_and_dropped_above.)
+    if options and combinations <= 16:
+        for combo in itertools.product(*(opts for _target, opts in options)):
+            mapping = dict(zip(authored_display, combo))
+            if mapping == authored_display:
+                continue
+            variants.add(
+                _hash_blob(
+                    hash_payload_builder(project, hash_format, strip_display=mapping)(item, spec)
+                )
+            )
+    return variants
 
 
 def legacy_hash_for(item: Item, project: Project) -> str:

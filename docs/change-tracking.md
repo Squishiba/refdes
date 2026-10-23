@@ -121,12 +121,19 @@ links work the same way.
 ### Hash format versioning
 
 The content hash definition is versioned (`hash_format`, recorded per baseline
-and seal entry; currently **5**). When the hash definition changes (e.g. link
+and seal entry; currently **6**). When the hash definition changes (e.g. link
 targets switching from display-id text to resolved keys, `checks: against:`
 entries being reduced to keys, a cross-item calc reference's resolved value
-joining the hash, or — format 5 — referenced image bytes joining it), a baseline stamped under the old definition
+joining the hash, referenced image bytes joining it (format 5), or — format 6 — the
+cross-item references of *inline calc spans* joining the hash alongside a
+fence's), a baseline
+stamped under the old definition
 would show every item as "changed" purely because the *definition* moved, not
-because content changed.
+because content changed. Not every format-6-adjacent change is a hash change:
+the `source()` values input is format 4's own and counts every call
+the evaluator resolves, so a span's resolvable one has fed it since spans
+landed in slice 1 (the format 5 era); format 6 adds only its discovery
+by `refdes fetch`, which is not a hash input at all.
 
 **Migration is automatic where content is provably unchanged.** When a
 baseline is read (by `refdes audit`, `refdes revision`, `refdes release`,

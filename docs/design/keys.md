@@ -915,16 +915,24 @@ baseline is precisely described. Same rule for seals.
 
 **Format 3 (2026-09-14) generalizes this to "the previous format," not just
 format 1.** A format-2 entry carries forward to 3 by the identical rule:
-compare the stored hash against `keys.hash_in_format(item, project, 2)`
-(the exact format-2 reconstruction, not an approximation); match, carry;
+compare the stored hash against the item's format-2 hashes (the exact
+format-2 reconstruction, not an approximation); match, carry;
 mismatch, leave alone and report uncomparable. One shared helper --
-`keys.hash_in_format` -- answers "what would this item's hash be under
+`keys.hashes_in_format` (membership; `keys.hash_in_format` is its single
+canonical value) -- answers "what would this item's hash be under
 format N" for every caller that needs it (`lifecycle.migrate_hash_format`,
 `seal._matches_sealed_hash`, `keys.plan_surrogate_storage`, and `refdes
 keys adopt` through it), so the comparison can't drift between them. A
-legacy scalar seal with no format marker of its own still tries the newest
-definition first, then each older one in turn (3, then 2, then 1) — same
-posture as before, just one format longer.
+legacy scalar seal with no format marker of its own tries the complete
+range — `HASH_FORMAT` down to 1, newest first, the same range
+`seal._matches_sealed_hash` tries — and a format it matches in migrates
+with the entry. That widening is a behavior change, not a lengthening:
+the pre-adoption inference tried only `(HASH_FORMAT, 2, 1)`, so once the
+format bumped past 5 a format-5 scalar seal of an item whose format-4/5
+payload (fence cross-item references, image bytes) differs from its
+format-2/1 one matched nothing and adoption pinned the record to format 1
+— a record the seal check itself still read clean. The inference may not
+be narrower than the check.
 
 ## 6. Corruption and detection
 
@@ -1059,7 +1067,8 @@ references re-attaches to the new item with `0 errors`, exit 0 -- the only
 trace being `audit`'s `changed 1` line, which the next release erases. Both
 signals are compared because they fail independently: the title is what a
 human reads, the hash is what proves. The hash is compared through
-`keys.hash_in_format`, so the record is read in the format it was stamped in
+`keys.hashes_in_format` (with `keys.hash_in_format` as the value shown in
+the refusal), so the record is read in the format it was stamped in
 and a genuine restore of the *same* item matches -- an item's own key and
 display id are not part of its content hash (§5), so restoring a key onto the
 item it belonged to moves no hash. `--force` overrides this one refusal,

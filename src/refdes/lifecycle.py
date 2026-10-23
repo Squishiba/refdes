@@ -90,8 +90,9 @@ class Baseline:
     # deliberately does not store old field values, to avoid the new
     # machinery general field-level diffing would need. `verdict` (a copy of
     # the item's own `status` value, stored the same way `title` already is)
-    # and `calc_hash` (a hash of the item's ```calc block source, alongside
-    # the existing whole-item `hash`) are a narrow, deliberate exception to
+    # and `calc_hash` (a hash of the item's ```calc block source and inline
+    # calc spans, alongside the existing whole-item `hash`) are a narrow,
+    # deliberate exception to
     # that, not a reversal of it -- see docs/design/stale-arithmetic-signal.md
     # and lifecycle.md §3's own note on this. They exist for exactly one
     # purpose (lifecycle.diff_against's stale_arithmetic list: did the
@@ -332,8 +333,8 @@ def _items_map(project: Project) -> dict[str, dict]:
     that same surrogate and ``id`` preserves the human-facing label.
 
     ``hash_format`` records which content-hash definition produced ``hash``
-    (``build.HASH_FORMAT`` -- currently 5, docs/design/keys.md §5, finding 35
-    and the image-bytes bump) directly
+    (``build.HASH_FORMAT`` -- currently 6, docs/design/keys.md §5, finding 35,
+    the image-bytes bump and the span-references bump) directly
     on every freshly-stamped entry, so a later reader never has to guess.
     Absent means format 1: either the baseline predates keys, or
     ``migrate_hash_format`` left the entry untouched because it could not
@@ -345,7 +346,8 @@ def _items_map(project: Project) -> dict[str, dict]:
     deliberate exception to this module's \"assembly, not new machinery\"
     framing. Both are optional per item: ``verdict`` only for a type with a
     verdict-bearing status field, and ``calc_hash`` only for an item with at
-    least one ``calc`` block. They exist solely to identify the bounded
+    least one ``calc`` block or inline calc span (an inline-only item is
+    stamped). They exist solely to identify the bounded
     verdict-without-arithmetic transition; unlike general field-level
     history, they cannot reconstruct any other prior field value.
     """
@@ -413,19 +415,20 @@ def migrate_hash_format(project: Project, baseline: Baseline, write: bool = True
 
     The rule, for each entry not already at the current format (recorded id
     `item_id`, stored hash `old_hash`, recorded format `old_format`): find
-    the live item still using that id, and recompute what its hash would be
-    *right now* under `old_format`'s definition (keys.hash_in_format). If
-    that recomputed old-format hash matches what was actually stored, the
-    item's content has demonstrably not changed since the baseline was
-    stamped -- so the item's *current* hash (already sitting on
-    item.content_hash from this build) is the correct current-format hash of
-    the baseline's own content, and the entry is safely rewritten in place
-    (`carried`). If it does not match, the item genuinely changed since the
-    stamp, for a reason that has nothing to do with hash formats -- that
-    entry is left exactly as it was and reported as `uncomparable` rather
-    than guessed at. An id with no live item at all (deleted, or renamed
-    with no `former_ids:` recorded) is left alone too: that is the ordinary
-    "removed" case diff_against() already reports, not a migration failure.
+    the live item still using that id, and recompute the hashes its current
+    content has *right now* under `old_format`'s definition
+    (`keys.hashes_in_format`, the shared comparison set). If the stored hash
+    is one of them, the item's content has demonstrably not changed since
+    the baseline was stamped -- so the item's *current* hash (already
+    sitting on item.content_hash from this build) is the correct
+    current-format hash of the baseline's own content, and the entry is
+    safely rewritten in place (`carried`). If it is not, the item genuinely
+    changed since the stamp, for a reason that has nothing to do with hash
+    formats -- that entry is left exactly as it was and reported as
+    `uncomparable` rather than guessed at. An id with no live item at all
+    (deleted, or renamed with no `former_ids:` recorded) is left alone too:
+    that is the ordinary "removed" case diff_against() already reports, not
+    a migration failure.
 
     `write=False` computes the same report without touching the file --
     the `--no-write` posture (docs/design/keys.md §2), threaded through by
@@ -444,8 +447,8 @@ def migrate_hash_format(project: Project, baseline: Baseline, write: bool = True
         item = keys_mod.item_for_baseline_entry(project, record_id, entry)
         if item is None:
             continue  # no live item to recompute against -- an ordinary removal
-        expected = keys_mod.hash_in_format(item, project, recorded_format)
-        if expected is None or expected != entry.get("hash"):
+        expected = keys_mod.hashes_in_format(item, project, recorded_format)
+        if not keys_mod.stored_hash_matches(entry.get("hash"), expected):
             report.uncomparable.append(display_id)
             continue
         entry["hash"] = item.content_hash
@@ -1161,10 +1164,11 @@ def _stale_arithmetic(
     or both fields at stamp time); the live item is gone, or its type no
     longer declares a verdict-bearing `status` field; the verdict itself
     didn't move (the hash changed for some other reason); or the item has no
-    calc block *now* (its calc block was removed, which is itself a change,
-    not staleness -- calc_hash_for returning None is a real "no" here, not
-    a missing-data case, since a present `old["calc_hash"]` already proved
-    the item had a block at baseline time).
+    calc block and no inline span *now* (its arithmetic was removed, which
+    is itself a change, not staleness -- calc_hash_for returning None is a
+    real "no" here, not a missing-data case, since a present
+    ``old["calc_hash"]`` already proved the item had a probe -- fence block
+    and/or inline span -- at baseline time).
     """
     out = []
     for item_id in changed:
@@ -1197,10 +1201,11 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
     `Baseline.items` and docs/design/stale-arithmetic-signal.md), not a
     second field-level diff mechanism.
 
-    Migrates `baseline` from hash_format 1 to 2 first, in place (§5) -- a
-    baseline stamped before keys existed would otherwise show every one of
-    its items as "changed" purely because the hash *definition* moved, which
-    isn't the question this function exists to answer. `write` threads
+    Migrates `baseline` to the current hash format first, in place (§5) --
+    an entry recorded under an older format (pre-keys, which records no
+    format at all, through format 5) would otherwise show as "changed"
+    purely because the hash *definition* moved, which isn't the question
+    this function exists to answer. `write` threads
     through to migrate_hash_format() (`--no-write`, docs/design/keys.md §2);
     defaults True for callers that load a project writably by construction,
     and `cli` threads `not args.no_write` from both `audit` and

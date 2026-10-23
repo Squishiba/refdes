@@ -300,16 +300,19 @@ def item_for_baseline_entry(project: Project, record_id: str, entry: dict) -> It
 
 
 def hash_in_format(item: Item, project: Project, hash_format: int) -> str | None:
-    """item's content hash exactly as hash-format ``hash_format`` would
-    compute it right now, or ``None`` if ``hash_format`` isn't one this
-    build understands.
+    """The canonical *single* reconstruction of item's content hash under
+    ``hash_format`` (docs/design/keys.md §5(c)), or ``None`` if
+    ``hash_format`` isn't one this build understands.
 
-    The one shared reconstruction every hash-format migration site uses --
-    lifecycle.migrate_hash_format, seal._matches_sealed_hash, and
-    plan_surrogate_storage below (which `refdes keys adopt` calls through)
-    -- so "does this stored hash still describe this item's current
-    content" is answered identically everywhere (docs/design/keys.md §5(c)).
-    A single shared helper, not four copies that could drift.
+    Not literally "what hash-format would compute": for an author-written
+    composite inline-calc span target, the reconstruction strips the
+    composite (that reading), while the old code hashed the span text as
+    written too -- which is why the "does this stored hash still describe
+    this item's current content" comparisons do NOT use this alone. They
+    test membership in hashes_in_format() below: this hash plus the
+    as-written span reading legacy formats also assigned. This function
+    remains the value side: the message text key_restore shows, and the
+    payload tests pin.
     """
     from . import build as build_mod
 
@@ -318,6 +321,48 @@ def hash_in_format(item: Item, project: Project, hash_format: int) -> str | None
     if 1 <= hash_format < build_mod.HASH_FORMAT:
         return build_mod.hash_for_format(item, project, hash_format)
     return None
+
+
+def stored_hash_matches(stored: object, accepted: set[str] | None) -> bool:
+    """The membership test the hash-format migration sites use: does the
+    *stored* (record-file, corruption-prone) hash equal one of the hashes
+    ``hashes_in_format`` accepts for this item right now? Every site the
+    migration sweep touches calls this -- key_restore's restore check is
+    the one inline equivalent (same string guard + membership), kept
+    inline beside its own recorded-format parsing.
+
+    The string guard is not decoration. Records come from YAML, and a
+    malformed entry can carry a list where the hash belongs; the
+    equality test these sites ran before the variant set simply returned
+    False for it (entry reported uncomparable, seal reported modified),
+    while ``list in set`` raises TypeError. The guard keeps that stable
+    CLI posture: a non-string stored hash is a plain non-match.
+    """
+    return accepted is not None and isinstance(stored, str) and stored in accepted
+
+
+def hashes_in_format(item: Item, project: Project, hash_format: int) -> set[str] | None:
+    """Every content hash ``hash_format`` legitimately assigns to this item
+    right now -- the set every "does this stored hash still describe this
+    item's current content" comparison tests membership in, and ``None``
+    for a format this build cannot reconstruct.
+
+    One shared set, for the same reason hash_in_format is one shared
+    function: the four migration sites must not drift. The set is a single
+    hash except for an inline calc span whose cross-item target is a
+    composite: formats <= 5 hashed that text as written, slice-2 expansion
+    writes composites into span targets that were authored bare, and only
+    the comparison side can tell "not edited" from "expanded" -- so it
+    accepts the stripped reading only for composites faithful to the
+    expansion (key half belongs to the item the display half names), plus
+    the as-written reading always (the full analysis lives on
+    build.hash_for_format_variants, which computes them). A key-half-only
+    edit fails the faithfulness gate and a body edit moves the as-written
+    reading, so an edited entry is still reported as edited.
+    """
+    from . import build as build_mod
+
+    return build_mod.hash_for_format_variants(item, project, hash_format)
 
 
 def plan_surrogate_storage(
@@ -330,9 +375,12 @@ def plan_surrogate_storage(
     Already key-keyed entries are copied through, making the operation
     idempotent. A display-id-keyed entry moves only when its live item is
     identified and its stored hash still describes that item's current
-    content under the entry's recorded format. Format-1 hashes are then
-    carried to the current format. Anything else remains display-id keyed,
-    is explicitly marked format 1, and is reported as uncomparable.
+    content under the entry's recorded format -- for a legacy scalar seal
+    (no format marker) under any format the item can currently
+    reconstruct, newest first, the range matching seal verification. A
+    matching entry's hash is then carried forward to the current format.
+    Anything else remains display-id keyed, is explicitly marked format 1,
+    and is reported as uncomparable.
     """
     from . import build as build_mod
 
@@ -349,8 +397,8 @@ def plan_surrogate_storage(
             hash_format = int(entry.get("hash_format", 1))
         except (TypeError, ValueError):
             hash_format = -1
-        expected = hash_in_format(item, project, hash_format) if item is not None else None
-        if item is not None and item.key and expected == entry.get("hash"):
+        expected = hashes_in_format(item, project, hash_format) if item is not None else None
+        if item is not None and item.key and stored_hash_matches(entry.get("hash"), expected):
             converted = dict(entry)
             converted.pop("key", None)
             converted["id"] = display_id
@@ -384,19 +432,24 @@ def plan_surrogate_storage(
         matched_format = hash_format
         if item is not None and hash_format == 0:
             # Legacy scalar seal, no format marker of its own -- try the
-            # newest definition first, then each older one (docs/design/
-            # keys.md §5(c)), same "newest wins" posture as everywhere else
-            # a format has to be inferred rather than read off the entry.
-            for candidate in (build_mod.HASH_FORMAT, 2, 1):
-                if recorded_hash == hash_in_format(item, project, candidate):
+            # newest definition first, then every older one (docs/design/
+            # keys.md §5(c)), the complete range 1..HASH_FORMAT that
+            # seal._matches_sealed_hash tries. The inference must not be
+            # narrower than the check: a format the seal check can read
+            # (e.g. format 5 after the bump to 6) must not be rewritten
+            # to format 1 here, or adoption fails the project it just
+            # adopted. "newest wins" stays newest-first.
+            for candidate in range(build_mod.HASH_FORMAT, 0, -1):
+                accepted = hashes_in_format(item, project, candidate)
+                if stored_hash_matches(recorded_hash, accepted):
                     matched_format = candidate
                     break
         expected = (
-            hash_in_format(item, project, matched_format)
-            if item is not None and matched_format in (1, 2, build_mod.HASH_FORMAT)
+            hashes_in_format(item, project, matched_format)
+            if item is not None
             else None
         )
-        if item is not None and item.key and expected == recorded_hash:
+        if item is not None and item.key and stored_hash_matches(recorded_hash, expected):
             converted = dict(entry)
             converted["id"] = record_id
             converted["hash"] = item.content_hash

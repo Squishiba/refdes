@@ -1,12 +1,15 @@
-Status: **Partially landed.** The source form, parser, evaluator, and
+Status: **Implemented.** The source form, parser, evaluator, and
 `check`/`build` diagnostics are implemented (slice 1, #333), as are the honest
 stale-result messages (#341), the grammar fixes (#351), and the §2 release gate
 (#345). The §3 hash, dependency-scan, and `source()` discovery changes
-(HASH_FORMAT 6, slice 2) are in review — PR #347, not merged. The owner decided
-the four open
-questions on 2026-10-17; the decisions are recorded under each question below.
-Later directions are parked in
-[inline-calc-later.md](inline-calc-later.md).
+(HASH_FORMAT 6, slice 2 -- span cross-item references entering the content
+hash, the cross-item and `source()` dependency scans, and the composite-key
+refresh; the `calc_hash` probe extension ships with the slice and is not a
+format-gated payload change) land with this PR. The owner
+decided the four open questions on 2026-10-17, and on 2026-10-19 decided the
+hash-format change despite the baseline/seal risk named in section 3; the
+decisions are recorded under each question below.
+Later directions are parked in [inline-calc-later.md](inline-calc-later.md).
 
 # Inline calc: stored results in item prose
 
@@ -20,6 +23,12 @@ Later directions are parked in
   `src/refdes/calc.py`; an item cannot execute code.
 
 ## Implementation status by slice
+
+*Era marker:* this section was written against the slice-0 (2026-10)
+proposal state. Slices 1 and 2 have since landed, and the text below
+(including section 3) now describes landed behavior: evaluation, the
+trigger grammar, and stored-result verification came with slice 1; span
+discovery in the hash, the dependency scans, and `fetch` with slice 2.
 
 - Probe: in a fresh `refdes init` project holding one `log` item whose body
   is the single-backtick span `` `Vout := 2 V * 2 = 5 V` ``, the original
@@ -36,14 +45,16 @@ Later directions are parked in
   directive. Their block names label renderings, not value scopes. Inline
   spans do not acquire block names.
 - `src/refdes/build.py:_hash_payload`, `calc_hash_for`,
-  `_calc_reference_values`, and `_calc_refs_hash_value` currently inspect body
-  text and/or calc **fences** as described below; none discovers inline
-  assignments. `src/refdes/lifecycle.py:_stale_arithmetic` compares
+  `_calc_reference_values`, and `_calc_refs_hash_value` inspected body
+  text and/or calc **fences** as described below when this design was
+  written; slice 1 added no inline discovery, and slice 2 extended them to
+  inline spans. `src/refdes/lifecycle.py:_stale_arithmetic` compares
   `calc_hash` only for its verdict-change signal, not for stored-result
   verification.
 - `refdes check --help`, `refdes build --help`, `refdes release --help`, and
   `refdes revision --help` confirm the present commands. §1/§2 warning behavior
-  is implemented; the §2 release gate is implemented, and §3 is proposed.
+  is implemented; the §2 release gate is implemented, and §3 landed with
+  slice 2.
   `refdes schema` emits the item JSON Schema and does not include project
   settings such as `release_gate:`. `refdes check` validates `release_gate:`
   (a misspelled subkey is rejected), and `refdes release --help` lists
@@ -172,24 +183,33 @@ the ordinary build error floor. `refdes revision --help` describes the
 revision as unconditional apart from that floor; the revision half defaults
 false.
 
-## 3. Hashes, dependencies, and historical entries (partly landed, partly proposed)
+## 3. Hashes, dependencies, and historical entries (landed with slice 2, this PR)
 
-| Concern | First-slice behavior |
+| Concern | Landed behavior |
 |---|---|
 | Item content hash | **Landed.** The authored span, including stored result, is body text. When the type's body `on_change` mode is `invalidate`, an edit to it changes the item hash under `src/refdes/build.py:_hash_payload`; other modes keep their existing meaning. A result correction is a real source edit, not a hash-neutral rewrite. |
-| `calc_hash` | **Proposed.** Extend `src/refdes/build.py:calc_hash_for` to include inline **name, RHS and unit assertion in source order**, excluding the stored result. An inline-only item then has a `calc_hash`; changing only the result leaves that probe fixed. Preserve today's block-only hash value for an item without inline spans, so old baselines do not churn. `src/refdes/lifecycle.py:_stale_arithmetic` can then use the same verdict-change signal for inline arithmetic. A stale-result warning comes from direct verification, regardless of baseline or verdict. |
-| Cross-item inputs | **Proposed.** An inline RHS may use an existing cross-item value reference under the same restrictions as a fence line. Extend the dependency scan, composite-key refresh, baseline snapshot, and content-hash input collection to those spans. Today the relevant scans cover fences (`src/refdes/build.py:_calc_reference_targets`, `_calc_reference_values`, `run_calcs`); omitting this extension would evaluate the wrong order or miss an upstream change. An upstream value change can move the dependent hash and produce a stale-result warning even when its authored text is untouched. |
-| `source()` inputs | **Proposed.** If used as the whole RHS with `| unit`, extend the `refdes fetch` discovery and source-value hash input collection to inline spans. Keep the existing same-item citation and lockfile rules (`src/refdes/calc.py:_evaluate_source_line`, `src/refdes/citations.py:collect_source_uses`, `src/refdes/build.py:_source_inputs_hash_value`; `docs/math.md`, "Reading a value from a source file"). No new file reader is introduced. |
+| `calc_hash` | **Landed.** `src/refdes/build.py:calc_hash_for` includes inline **name, RHS and unit assertion in source order**, excluding the stored result. An inline-only item then has a `calc_hash`; changing only the result leaves that probe fixed. The block-only hash value is preserved for an item without inline spans, so old baselines do not churn. `src/refdes/lifecycle.py:_stale_arithmetic` uses the same verdict-change signal for inline arithmetic. A stale-result warning comes from direct verification, regardless of baseline or verdict. |
+| Cross-item inputs | **Landed.** An inline RHS may use an existing cross-item value reference under the same restrictions as a fence line. The dependency scan, composite-key refresh, baseline snapshot, and content-hash input collection cover those spans (`src/refdes/build.py:_calc_reference_targets`, `_calc_reference_values`, `run_calcs`). An upstream value change can move the dependent hash and produce a stale-result warning even when its authored text is untouched. One exclusion: for items loaded from YAML list files (`Item.body_line is None`, where a line rewrite of `body:` corrupts the YAML) the expansion pass deliberately leaves the span's target bare on disk (`links.plan_calc_ref_expansion`; pinned by `test_yaml_list_file_span_targets_stay_bare_on_disk`) -- the dependency edge and hash input exist in memory, but a rename does not refresh the span, so an upstream rename breaks the bare target on the next build. Hand-write the target's composite `DISPLAY-ID@key` spelling (it keeps resolving by key across renames; the label goes stale) or edit the span at rename time. |
+| `source()` inputs | **Landed.** Used as the whole RHS with the \| `unit` form, `refdes fetch` discovery and the locked-value hash input cover inline spans (`src/refdes/calc.py:_evaluate_source_line`, `src/refdes/citations.py:collect_source_uses`, `src/refdes/build.py:_source_inputs_hash_value`; `docs/math.md`, "Reading a value from a source file"). No new file reader is introduced. (The source-inputs hash is format 4's own input, counting every `source()` call the evaluator resolves, so a resolvable span call has fed it since slice 1 made spans evaluable -- the format 5 era; slice 2 added its `fetch` pinning -- see the format history in `src/refdes/build.py`.) |
 | Seals and captured history | **Landed.** Verification is read-only for both. A changed stored literal in a build-sealed entry remains subject to the existing seal check (`src/refdes/seal.py:verify`); a history-backed entry keeps the existing capture/edit signal (`src/refdes/history.py`, `src/refdes/build.py:warn_edited_after_captured`). No automatic reseal or recapture is part of this slice. |
 
 The authored span already enters the body hash where body invalidation is on.
-Adding its resolved cross-item or `source()` inputs changes the **item** hash
-definition for affected items and needs a new hash-format version (current
-`HASH_FORMAT` is 5 in `src/refdes/build.py`). Reconstruct old hashes through
-`src/refdes/build.py:hash_payload_builder` and `src/refdes/lifecycle.py` when
-comparing existing baselines and seals. Existing no-inline items should retain
-their old item hash. The `calc_hash` extension is separate: old baselines
-without that probe stay silent in the verdict-change signal
+Its resolved cross-item inputs change the **item** hash definition for
+affected items, which is why `src/refdes/build.py:HASH_FORMAT` is 6. Old
+hashes reconstruct through `src/refdes/build.py:hash_payload_builder` and
+`src/refdes/lifecycle.py` when comparing existing baselines and seals --
+accepting the as-written reading of a composite span target (formats <= 5
+hashed it verbatim) and the stripped reading only while the composite is
+faithful: its key half belongs to the item its display half names, and a
+display half that names nothing live is faithful when it is a former id of
+that owner (`build._span_composites_are_faithful`, reading
+`project.former_ids`) -- so an upstream display-id rename stays comparable:
+the comparison set also tries the stripped reading over the target's
+historical display halves. A key-half-only edit of an expansion-written
+target is reported, never
+carried (`keys.hashes_in_format`). Existing no-inline items retain their
+old item hash. The `calc_hash` extension is separate: old baselines without
+that probe stay silent in the verdict-change signal
 (`src/refdes/lifecycle.py:_stale_arithmetic`).
 
 ## Open questions for this slice (decided by the owner, 2026-10-17)

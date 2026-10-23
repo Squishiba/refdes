@@ -33,6 +33,7 @@ from . import textio
 from .model import Item, Project
 
 if TYPE_CHECKING:
+    from .inline_calc import InlineSpan
     from .revise import FileRewrite
 
 # A structured-link target token, either a bare display id or a composite.
@@ -1042,20 +1043,121 @@ def _report_missing_checks(project: Project, count: int) -> None:
 # ------------------------------------- cross-item calc references (finding 35)
 
 
+def _replace_ref_target(
+    content: str, span: InlineSpan, ref: re.Match[str], new_target: str
+) -> str:
+    """A span's content with the reference's target token replaced by
+    ``new_target``, spliced at the exact positions `CROSS_REF_RE` matched on
+    the span's (comment-stripped) right-hand side. Splicing beats
+    `content.replace(target, ...)`: a span like `v21 := v2.V_in = 1 V` in a
+    project that has an item whose display id *is* `v2` would otherwise
+    rewrite its own name half and leave the real reference bare, while the
+    caller reports it applied."""
+    from . import calc as calc_mod
+
+    code = calc_mod.split_comment(span.rhs)[0]
+    lead = len(code) - len(code.lstrip())
+    pos = content.index(span.rhs)
+    start = pos + lead + ref.start("target")
+    end = pos + lead + ref.end("target")
+    return content[:start] + new_target + content[end:]
+
+
 def _calc_ref_rewrites(
-    lines: list[str], start: int, end: int, replacements: dict[str, str]
+    lines: list[str],
+    start: int,
+    end: int,
+    replacements: dict[str, str],
+    include_inline: bool = False,
+    inline_start: int = 0,
+    strip_inline_composite: bool = False,
+    strip_display: dict[str, str] | None = None,
 ) -> set[str]:
     """Rewrite bare calc-reference targets inside one item's line span, and
     refresh stale composite display halves, in place. Operates only on the
     target half of a `name = TARGET.NAME` line (pipe unit stripped first), so
     ordinary expressions and comments are never touched. Returns the *old
     target strings* actually rewritten -- what the caller attributes back to
-    the item so in-memory state follows only real file changes."""
+    the item so in-memory state follows only real file changes.
+
+    With ``include_inline``, the target half of an inline calc span's
+    cross-item reference (`TARGET.NAME` as the span's whole right-hand side)
+    gets the same treatment: a span sitting in prose outside any fence, its
+    content replaced in place so the author's surrounding text, the stored
+    result and the line count all survive exactly. Fence lines stay the
+    fence loop's; `triggered_span_events` never reports a span inside a
+    fence. The span scan covers `lines[inline_start:end]`, not the whole
+    item slice: a caller slicing from `source_line` (front matter included)
+    must pass the body-bound start, because the fence tracking in
+    `triggered_span_events` assumes fences are self-contained in a body --
+    an unclosed fence in front matter would otherwise hide every body span,
+    and a span in front matter (no span consumer reads front matter) must
+    not be rewritten where the in-memory pass rewrites only `item.body`.
+
+    With ``strip_inline_composite`` (and *not* ``include_inline`` -- the
+    format <= 5 hash reconstruction), an expanded span target is reduced
+    back to its pre-expansion display half (`@key` stripped) instead of the
+    replacement token: a legacy hash never contained the span's reference,
+    so the hashed body text must be byte-identical to the pre-expansion
+    file's -- the format <= 5 hash of an untouched item whose *span* got
+    composite-expanded must not move, exactly as the token reduction makes
+    expansion invisible for fence references. Enabling ``include_inline``
+    for legacy formats is not the fix: the reduction token is the target's
+    key, which a pre-slice-2 hash never contained."""
     from . import calc as calc_mod
 
     applied: set[str] = set()
+    inline_entries: dict[int, list[tuple[int, int, str, str]]] = {}
+    if include_inline or strip_inline_composite:
+        from . import inline_calc as inline_calc_mod
+        for offset, span_start, span_end, content in inline_calc_mod.triggered_span_events(
+            lines[inline_start:end]
+        ):
+            span = inline_calc_mod.parse_span(0, content)
+            ref = inline_calc_mod.span_cross_ref(span)
+            if ref is None:
+                continue
+            target = ref.group("target")
+            if include_inline:
+                new_target = replacements.get(target)
+                if new_target is None:
+                    continue
+            else:
+                if "@" not in target:
+                    continue
+                if strip_display and target in strip_display:
+                    new_target = strip_display[target]
+                else:
+                    new_target = target.partition("@")[0]
+            inline_entries.setdefault(inline_start + offset, []).append(
+                (
+                    span_start,
+                    span_end,
+                    _replace_ref_target(content, span, ref, new_target),
+                    target,
+                )
+            )
     for i in range(start, end):
         raw = lines[i]
+        edits = inline_entries.get(i)
+        if edits:
+            # Right-to-left, so each edit's positions stay valid after the
+            # ones to its right are applied.
+            new_raw = raw
+            for span_start, span_end, new_content, _target in sorted(
+                edits, key=lambda e: e[0], reverse=True
+            ):
+                new_raw = new_raw[:span_start] + new_content + new_raw[span_end:]
+            if new_raw != raw:
+                lines[i] = new_raw
+                applied.update(target for *_rest, target in edits)
+                # The assignment pass below recomputes the whole line from
+                # `raw` (its `code`/`comment` partition); anchoring it on the
+                # span-edited line is what keeps a span rewrite on a line that
+                # is ALSO fence grammar from being written back out -- counting
+                # an edit as applied and then discarding it is exactly what
+                # _replace_ref_target's contract forbids.
+                raw = new_raw
         code, hash_sign, comment = raw.partition("#")
         line = code.rstrip()
         if not line.strip():
@@ -1107,13 +1209,39 @@ def plan_calc_ref_expansion(
     by_key = {item.key: item for item in project.items.values() if item.key}
     expansion_count = 0
 
-    from .build import _calc_reference_targets
+    from .build import (
+        _calc_fence_reference_targets,
+        _calc_reference_targets,
+        _calc_span_reference_targets,
+    )
 
     for item in project.local_items:
+        # A span whose body has no file position (`body_line is None`, e.g.
+        # an item body built from a YAML/list file) can never be rewritten
+        # by the scan below, so it is not counted as an expansion the write
+        # will perform -- see `_calc_span_reference_targets`. A target that
+        # a fenced reference also uses keeps its edge: that rewrite is a
+        # file-line edit the scan does perform.
+        span_only = (
+            _calc_span_reference_targets(item) - _calc_fence_reference_targets(item)
+            if item.body_line is None
+            else set()
+        )
         for target in _calc_reference_targets(item):
+            # `_planned_target` runs BEFORE the span-only skip: it is not
+            # only the rewrite decision, it is where the crossed-reference
+            # refusal-and-warn (docs/design/keys.md §3 case 2) is emitted.
+            # The skip legitimately suppresses only the WRITE -- a list-file
+            # span cannot be rewritten on disk -- so a composite span target
+            # whose key names a different live item must still warn: the
+            # build resolves by key, the page shows that other item, and
+            # only the warning makes the mismatch visible (identical to the
+            # fence-line behaviour).
             new_target = _planned_target(
                 project, by_key, "calc reference", item, target
             )
+            if target in span_only:
+                continue
             if new_target is None:
                 continue
             if "@" not in target:
@@ -1137,10 +1265,12 @@ def plan_calc_ref_expansion(
         lines = source.lines
 
         # Spans are item-to-item, not `_item_spans`: that helper bounds a
-        # markdown item at its first fence (link fields live in front matter),
-        # and calc lines are inside the fence. Bleeding is impossible here --
-        # `_calc_ref_rewrites` only touches lines matching the strict
-        # `name = TARGET.NAME` assignment grammar.
+        # markdown item at its first fence (link fields live in front
+        # matter), and calc lines are inside the fence. Bleeding is
+        # impossible for the fence loop -- it only touches lines matching
+        # the strict `name = TARGET.NAME` assignment grammar -- and the
+        # span scan is bounded to the item's body lines below, the shape
+        # `triggered_span_events` documents (see `_calc_ref_rewrites`).
         file_items = sorted(
             (i for i in project.local_items if i.source_file == rel),
             key=lambda i: i.source_line,
@@ -1154,8 +1284,21 @@ def plan_calc_ref_expansion(
             )
             repl = replacements_by_item.get(id(item))
             if repl:
+                # `source_line` is the front matter's first content line
+                # (parse.py: the opening `---` line, 0-based, plus two); the
+                # span scan starts at the body (`body_line` is the body's
+                # first line, 1-based) -- None means no known position, and
+                # an unbounded scan is worse than a silent no-op for spans,
+                # which every other consumer also skips when the body has no
+                # position.
+                inline_start = (
+                    max(item.body_line - 1, start)
+                    if item.body_line is not None
+                    else end
+                )
                 applied_by_item[id(item)] |= _calc_ref_rewrites(
-                    lines, start, end, repl
+                    lines, start, end, repl, include_inline=True,
+                    inline_start=inline_start,
                 )
 
         after = source.render(lines)
@@ -1213,9 +1356,17 @@ def expand_missing_calc_refs(
             continue
         # Same rewrite over the parsed body, so the build that expanded sees
         # the text the file now holds (line counts are preserved, so every
-        # other item's positions stay valid).
+        # other item's positions stay valid). `include_inline` mirrors the
+        # file path's exclusion: a list-file item (`body_line is None`) got
+        # no span rewrites on disk, so rewriting its span here too would
+        # hand the run a body -- and a probe, and a page -- no later load
+        # of the same bytes reproduces. Bare span targets resolve on the
+        # display id (keys.md §2); only the write-back was skipped.
         body_lines = item.body.splitlines()
-        _calc_ref_rewrites(body_lines, 0, len(body_lines), replacements)
+        _calc_ref_rewrites(
+            body_lines, 0, len(body_lines), replacements,
+            include_inline=item.body_line is not None,
+        )
         item.body = "\n".join(body_lines) + ("\n" if item.body.endswith("\n") else "")
 
     if plan.remaining:

@@ -922,6 +922,43 @@ def test_the_proposal_refuses_a_name_the_item_already_assigns(served):
     assert snapshot_tree(root) == before
 
 
+SPAN_ITEMS = """\
+defaults: { type: decision }
+items:
+  - id: DEC-001
+    citations:
+      - path: analysis/budget.csv
+    body: |
+      The rail budget: `rail_load := 3 V * 4 = 12 V` per the sheet.
+"""
+
+
+def test_an_inline_span_name_is_taken_and_its_unit_is_suggested(tmp_path):
+    # Spans and fences share one item-wide scope (inline-calc.md section 1),
+    # so a name an inline span assigns collides with a proposed source line
+    # exactly as a fence name does -- and the unit the span spells on its
+    # stored result belongs in the panel's unit suggestions.
+    root = make_root(tmp_path, items=SPAN_ITEMS)
+    fetch(root)
+    app = start(root)
+    try:
+        client = Client(app)
+        status, payload = client.api_get(
+            sources_url("DEC-001", "/propose")
+            + "?path=analysis/budget.csv&key=eff&unit=1&name=rail_load"
+        )
+        assert status == 422, payload
+        assert "already assigned in this item" in payload["error"]
+        status, payload = client.api_get(
+            sources_url("DEC-001", "/propose")
+            + "?path=analysis/budget.csv&key=eff&unit=1&name=my_eff"
+        )
+        assert status == 200, payload
+        assert payload["units"] == ["1", "V"]
+    finally:
+        app.stop()
+
+
 def test_the_proposal_refuses_a_row_that_is_not_selectable(tmp_path):
     root = make_root(tmp_path, csv=BROKEN_CSV)
     app = start(root)
@@ -1182,6 +1219,39 @@ def test_a_lockfile_repaired_mid_build_does_not_unpoison_the_memo(tmp_path, monk
         app.stop()
 
 
+SPAN_PIPE_COMMENT_ITEMS = """\
+defaults: { type: decision }
+items:
+  - id: DEC-001
+    citations:
+      - path: analysis/budget.csv
+    body: |
+      Budget: `x := 1 | V # note | b = 1`.
+"""
+
+
+def test_a_span_unit_comment_containing_a_pipe_uses_the_evaluators_unit(tmp_path):
+    # Round-17 review (chunk 4): parse_span's pipe split runs BEFORE comment
+    # stripping, so a comment containing a `|` steals the unit field --
+    # `x := 1 | V # note | b = 1` parses with unit `b`. The evaluator strips
+    # the comment off the whole line FIRST, then splits the unit, so the
+    # unit it evaluates under is `V`. The panel's suggestions must follow
+    # the evaluator, not the field text.
+    root = make_root(tmp_path, items=SPAN_PIPE_COMMENT_ITEMS)
+    fetch(root)
+    app = start(root)
+    try:
+        client = Client(app)
+        status, payload = client.api_get(
+            sources_url("DEC-001", "/propose")
+            + "?path=analysis/budget.csv&key=eff&unit=1&name=my_eff"
+        )
+        assert status == 200, payload
+        assert payload["units"] == ["1", "V"]
+    finally:
+        app.stop()
+
+
 def test_a_readable_empty_lockfile_is_still_ordinary_unpinned(tmp_path):
     # The refusal is for a lockfile that could not be read, not for one that
     # says nothing: a well-formed lockfile with no records is the ordinary
@@ -1197,5 +1267,36 @@ def test_a_readable_empty_lockfile_is_still_ordinary_unpinned(tmp_path):
         status, payload = client.api_get(sources_url("DEC-001"))
         assert status == 200, payload
         assert payload["files"][0]["state"] == "unpinned"
+    finally:
+        app.stop()
+
+
+SPAN_COMMENT_ITEMS = """\
+defaults: { type: decision }
+items:
+  - id: DEC-001
+    citations:
+      - path: analysis/budget.csv
+    body: |
+      Budget: `rail_load := source("analysis/budget.csv", "rail_load") | V # note = 1.85 V`.
+"""
+
+
+def test_a_span_unit_suggestion_never_carries_the_trailing_comment(tmp_path):
+    # parse_span stores the span's unit with a trailing `# comment` intact;
+    # the evaluator strips it (quote-aware split_comment) before interpreting
+    # the unit, so the panel must strip it the same way -- the suggestion is
+    # `V`, never `V # note`.
+    root = make_root(tmp_path, items=SPAN_COMMENT_ITEMS)
+    fetch(root)
+    app = start(root)
+    try:
+        client = Client(app)
+        status, payload = client.api_get(
+            sources_url("DEC-001", "/propose")
+            + "?path=analysis/budget.csv&key=eff&unit=1&name=my_eff"
+        )
+        assert status == 200, payload
+        assert payload["units"] == ["1", "V"]
     finally:
         app.stop()

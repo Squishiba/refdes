@@ -40,7 +40,10 @@ from test_serve_sources import (  # the fixture is the feature's, not one file's
 from refdes import build as build_mod
 from refdes import citations as citations_mod
 from refdes import cli as cli_mod
+from refdes import parse
+from refdes.schema import load_project
 from refdes.serve import edit as edit_mod
+from refdes.serve import sources as sources_mod
 from refdes.write_lock import project_write_lock
 
 EDIT = "/api/item/DEC-001/edit"
@@ -1017,3 +1020,31 @@ def test_a_moved_lockfile_over_a_changed_source_file_is_refused(served, monkeypa
     assert "fetch --update" in payload["reason"], payload
     assert EFF not in item_file.read_text("utf-8")
     assert "eff" not in lock(root)["citations"][CSV_PATH]["values"]
+
+
+def test_body_source_pairs_finds_a_source_span(tmp_path):
+    """Review chunk 3 (F2): direct coverage of the span branch of the
+    accept gate's walk. A `source()` that is a whole triggered span must
+    yield the same pair as the same call inside a fence -- `fetch` pins
+    what `citations.collect_source_uses` sees, and the gate refuses
+    exactly the pins this walk does not see (editor-source-picker.md §4).
+    The fence branch is the control: same fixture, same citation."""
+    root = make_root(tmp_path)
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    item = project.item_by_id("DEC-001")
+
+    fence_body = '```calc\nP = source("analysis/budget.csv", "eff") | W\n```\n'
+    assert sources_mod.body_source_pairs(project, item, fence_body) == {
+        ("analysis/budget.csv", "eff")
+    }
+
+    span_body = '`P := source("analysis/budget.csv", "eff") | W = 2 W`\n'
+    assert sources_mod.body_source_pairs(project, item, span_body) == {
+        ("analysis/budget.csv", "eff")
+    }
+
+    # A path the item does not cite is not a pair (the validator's error,
+    # not the gate's): the span branch authorizes like the fence branch.
+    other_body = '`P := source("analysis/other.csv", "k") | W = 2 W`\n'
+    assert sources_mod.body_source_pairs(project, item, other_body) == set()
