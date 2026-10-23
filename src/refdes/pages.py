@@ -61,6 +61,7 @@ def _read_page(project: Project, path: str, root: str) -> Page | None:
 
     meta: dict = {}
     body = text
+    front_matter_lines = 0
     match = FRONTMATTER_RE.match(text)
     if match:
         try:
@@ -68,8 +69,15 @@ def _read_page(project: Project, path: str, root: str) -> Page | None:
             if isinstance(loaded, dict):
                 meta = loaded
             body = match.group(2)
+            # Lines the front matter occupies in the FILE. `body` is stripped,
+            # so a line number counted inside it is this many lines short of
+            # the file line a reader sees; rendering (blocks.extract_blocks)
+            # adds it back so page-block diagnostics name the real line.
+            front_matter_lines = text.count("\n", 0, match.start(2))
         except yaml.YAMLError as exc:
             project.warn(f"invalid page front-matter: {exc}", file=rel_to_root)
+            # body stays the whole file -- front matter included -- so the
+            # body-relative lines are already the file lines.
 
     rel = os.path.relpath(path, root).replace("\\", "/")
     slug = re.sub(r"\.md$", "", rel).replace("/", "-")
@@ -79,7 +87,7 @@ def _read_page(project: Project, path: str, root: str) -> Page | None:
         heading = H1_RE.search(body)
         title = heading.group(1) if heading else slug.replace("-", " ").title()
 
-    return Page(
+    page = Page(
         slug=slug,
         title=str(title),
         body=body,
@@ -89,6 +97,8 @@ def _read_page(project: Project, path: str, root: str) -> Page | None:
         board=str(meta.get("board") or ""),
         workspace=str(meta.get("workspace") or ""),
     )
+    page.front_matter_lines = front_matter_lines
+    return page
 
 
 def validate_boards(project: Project) -> None:

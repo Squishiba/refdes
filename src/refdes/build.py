@@ -3655,7 +3655,12 @@ def render_pages(project: Project) -> None:
         # means _linkify's own pass over the whole page picks up every ID
         # for free, with the standard hover preview -- see blocks.py's
         # module docstring.
-        source, block_htmls = blocks_mod.extract_blocks(project, page.body, page.source_file)
+        source, block_htmls = blocks_mod.extract_blocks(
+            project,
+            page.body,
+            page.source_file,
+            getattr(page, "front_matter_lines", 0),
+        )
         html = md.render(source)
         for index, block_html in enumerate(block_htmls):
             token = blocks_mod.placeholder(index)
