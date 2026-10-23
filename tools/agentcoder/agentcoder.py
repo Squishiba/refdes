@@ -355,9 +355,13 @@ def check_permits(job):
     ids = {str(i) for i in (job.get("coder_agent"), job.get("designer_agent"),
                             *(job.get("reviewers") or {}).values()) if i}
 
-    def relates(e):  # permit entry keys UNVERIFIED upstream: id-ish fields, prefix-tolerant
+    def relates(e):  # permit entry keys UNVERIFIED upstream: id-ish fields
         vals = {str(e[k]) for k in ("id", "agentId", "agent", "shortId") if e.get(k)}
-        return any(v == i or v.startswith(i) or i.startswith(v) for v in vals for i in ids)
+        # one-way tolerance: the permit id may EXTEND a job id (daemon-suffixed),
+        # or match on a 7+ char short id; never attribute a SHORTER foreign id
+        return any(v == i or v.startswith(i)
+                   or (len(v) >= 7 and len(i) >= 7 and v[:7] == i[:7])
+                   for v in vals for i in ids)
     hit = sorted(str(e.get("id") or e.get("agentId") or e.get("agent") or e)
                  for e in entries if isinstance(e, dict) and relates(e))
     if hit:
@@ -845,9 +849,19 @@ def do_land(job):
         save_job(job)
     if head != job["coder_sha"] and head != job.get("test_landed_sha"):
         return "candidate"  # coder moved: re-gate the new head, land gates only
-    dirty = git(wt, "status", "--porcelain", "--untracked-files=no")
+    dirty = git(wt, "status", "--porcelain", "-z", "--untracked-files=no")
     if dirty:
-        paths = [ln[3:].split(" -> ")[-1] for ln in dirty.splitlines() if ln.strip()]
+        # -z: raw paths (no C-quoting of spaces), NUL-separated; for staged
+        # renames/copies the source path follows as its own record
+        records = [r for r in dirty.split("\0") if r]
+        paths, skip = [], False
+        for rec in records:
+            if skip:
+                skip = False
+                continue
+            paths.append(rec[3:])
+            if rec[:1] in ("R", "C"):
+                skip = True
         if [p for p in paths if p not in job["test_paths"]]:
             raise Escalate("coder worktree has uncommitted/staged changes outside the frozen "
                            f"test paths; refusing to sweep them:\n{tail_text(dirty, 15)}")

@@ -1,7 +1,7 @@
 # agentcoder — a small driver for coder / blind test designer / executor loops
 
 `tools/agentcoder/agentcoder.py` is a **plain driver script** (stdlib only,
-one file; currently 873 non-blank/non-comment lines — ~1000 is a soft
+one file; currently 883 non-blank/non-comment lines — ~1000 is a soft
 sanity ceiling, not enforced by a check) that runs the AgentCoder paper
 loop against Paseo agents:
 
@@ -46,11 +46,16 @@ file, invalid spec) print the JSON on stdout as their entire output; an
 **unparseable** spec file exits `status: "paused"` with rc 1 (the no-jobdir
 list is not exhaustive: a Pause raised by a git call inside
 `validate_spec` exits the same way). Running
-with no arguments prints the usage text (not JSON) and exits 1.
+with no arguments prints the usage text (not JSON) and exits 1 — as do
+`resume`/`status` given no JOBDIR argument (usage text, rc 1; a stray
+`./job.json` is never read). `resume` of a **completed** job prints only
+`{status, reason, pr_number}` as JSON and exits with the recorded status
+(0/2); it never rewrites `report.md`.
 
 The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
-`paseo`); its test suite is skipped on **non-Linux** (the preflight gate needs
-`prlimit`, a Linux tool), and the driver is untested on Windows/macOS.
+`paseo`); its test suite is skipped on **non-Linux** and on Linux where
+`prlimit` is absent (the preflight gate needs
+it, a Linux tool), and the driver is untested on Windows/macOS.
 
 `paseo` is resolved via `AGENTCODER_PASEO` and `gh` via `AGENTCODER_GH`
 (env vars), which is also how the test suite fakes them.
@@ -122,7 +127,9 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
   send` calls (an agent's whole turn) and the `paseo wait` confirmation of
   recorded agents (whose subprocess timeout sits slightly above it). Every
   other blocking call has a fixed timeout: other `paseo`/`gh` calls 60s,
-  `git` 120s, `git push` 300s.
+  `git` (through the driver's `git()` helper) 120s, `git push` 300s —
+  the git calls `validate_spec` itself makes are the exception: they use
+  the 60s `run_guarded` default.
   `test_timeout` (default 120s) bounds each `test_command` run — a test run
   that exceeds it **pauses** the job (the output is never judged, no agent
   is fed it). All four (`agent_timeout`, `test_timeout`, `max_rounds`,
@@ -133,11 +140,15 @@ The driver drives a **Linux Paseo host** (`prlimit`, git worktrees,
 `JOBDIR/job.json` is rewritten atomically (temp + `os.replace`) after **every**
 phase transition and every recorded agent id, and `resume` continues from
 the recorded phase with the recorded ids — for coder, designer **and**
-reviewer (an id saved by a completed turn is adopted on resume, not
-respawned). A recorded live agent is confirmed by `paseo wait <id>
---json`: a status of `error`, timeout or not-found **pauses** the job —
-`paseo wait` exits 0 for all of those, so the exit code is never the
-completion signal, only the JSON status is. Phases are **not all
+reviewer: an id saved by a completed turn is adopted on resume only while
+it is live in `paseo ls`; a recorded id that is gone from `paseo ls` is
+dropped and the role respawned (all three roles follow the same rule), so
+the branch collision described below is a real resume outcome. The
+recorded live agent is confirmed by `paseo wait <id>
+--json`: a status other than idle **pauses** the job; `paseo wait` was
+observed (live) to exit 0 for a not-found id with `Agent not found` in the
+output, so the exit code is never the completion signal, only the JSON
+status is. Phases are **not all
 idempotent**: a crash after a side effect but before the next save
 replays it. Safe to replay: **spawn** (each completed turn records its
 agent id, and only the role with no saved id is re-spawned; a real
@@ -253,8 +264,10 @@ failure.
 Operational anomalies — a command/quota failure, a timeout, a missing
 verdict, an agent in an error state, a pending permission prompt (detected
 via `paseo permit ls` showing the job's agents), a failing `gh pr list` —
-**pause** the job: state saved, precise reason, `resume` continues (after
-re-running the preflight gates). Expected loop outcomes — a scope violation
+**pause** the job: state saved, precise reason, `resume` continues (the
+preflight gates are re-run only until they have
+all passed once: a fully passed preflight is recorded, and later resumes of
+mid-run pauses start directly from the recorded phase). Expected loop outcomes — a scope violation
 repeated after its one-shot revert round,
 `max_rounds` exhausted, dirt at land outside the frozen test paths (a
 coder head that MOVED is not an escalation: it bounces back to candidate
@@ -313,7 +326,9 @@ never raise a `UnicodeDecodeError` out of the driver and strand
   ids are already recorded in job.json are spared (a recorded id means the
   turn completed).
   Remaining
-  gap: a resume re-spawns any role with no recorded agent id, and its
+  gap: a resume re-spawns any role with no recorded agent id — or with a
+  recorded id that no longer appears in `paseo ls` (dead recorded ids are
+  dropped, see the state machine above) — and its
   branch collides with the stopped agent's — that Pause is loud; delete
   the branch or start a fresh jobdir.
 - Candidate rounds are recorded one-per-round: a resume re-runs the round
