@@ -164,8 +164,11 @@ def diag_dict(d: Diagnostic) -> dict:
 # previous head): ONE left-to-right pass over each string, no rewriting of
 # anything the scan did not match. At each position, in this documented
 # precedence: a quoted scalar span (`"`-delimited, escapes honored -- a
-# path with spaces inside it is unambiguously one path), a `file:` URI
-# prefix, a long-path prefix (`\\?\`, `//?/` -> `<outside project>`; the
+# path with spaces inside it is unambiguously one path), a local `file:`
+# URI span (scheme at any casing, 0-3 slashes, optional `localhost`
+# authority -- its prefix is removed with the path; a dotted authority is
+# a web URL and passes through), a long-path prefix (`\\?\`, `//?/` ->
+# `<outside project>`; the
 # scanner does not discover aliases of the root), a drive-absolute span
 # (`C:\...`), an absolute span (`/...` or `\...`). A span is classified by
 # trying the literal root pattern anchored at its start: the root is ONE
@@ -195,8 +198,7 @@ _SCALAR = re.compile(r"\"(?:[^\"\\\n\r]|\\[^\n\r])*\"")
 # `prefix/home/you/proj` untouched), and a drive letter likewise.
 _PATH_START = re.compile(r"(?<![A-Za-z0-9_\-:/\\.])(?=[/\\])")
 _DRIVE_START = re.compile(r"(?<![A-Za-z0-9_\-:/\\.])(?=[A-Za-z]:[\\/])")
-_FILE_PREFIX_CASED = re.compile(r"(?<![A-Za-z0-9_\-])file:")
-_FILE_PREFIX_FOLDED = re.compile(r"(?<![A-Za-z0-9_\-])file:", re.IGNORECASE)
+_FILE_PREFIX = re.compile(r"(?<![A-Za-z0-9_\-])file:", re.IGNORECASE)
 _PIECE = re.compile(r"[^\s:;\"'`\\/]+(?:[\\/][^\s:;\"'`]+)*\.[A-Za-z0-9]+")
 _RUN_END = re.compile(r"[\s`\"'<>]|\Z")
 _SUFFIX = re.compile(r"(:\d+(?::\d+)?)\Z")
@@ -226,7 +228,7 @@ def _scrub_rules(root_cmp: str, fold: bool):
         )
         rules = (
             root_pat,
-            _FILE_PREFIX_FOLDED if fold else _FILE_PREFIX_CASED,
+            _FILE_PREFIX,
             root_cmp.startswith("//?/"),
         )
         _SCRUB_CACHE[key] = rules
@@ -388,30 +390,55 @@ def _scan(text: str, root_cmp: str, fold: bool, rules) -> str:
             continue
         prefix = file_prefix.match(text, i)
         if prefix is not None:
-            # Consume as many of the URI slashes as the path needs: with
-            # `file:///home/...` the root's own leading separator run
-            # claims the third slash, so the LONGEST prefix that lands the
-            # root wins; an outside path is reduced at the `file://`
-            # spelling, where the first slash is unambiguously the path's.
+            # A `file` scheme (any casing) with 0-3 slashes -- and its
+            # `localhost` authority -- is a LOCAL FILE URI: the prefix goes
+            # and the path scrubs like any bare path. The slashes split
+            # between prefix and path by what the path keeps: a posix path
+            # keeps its leading slash (`file:/home`, `file:///home`), a
+            # drive path takes the slashes after it (`file:C:`,
+            # `file://C:/`, `file:///C:/`). An authority that is not
+            # `localhost` (a dotted host) is a web URL: the span passes
+            # through untouched.
             base = prefix.end()
-            consumed_uri = False
-            for slashes in (3, 2):
-                if text[base : base + slashes] == "/" * slashes:
-                    pos = base + slashes
-                    if root_pat is None or root_pat.match(text, pos):
-                        rendered, consumed = _classify(text, pos, root_cmp, root_pat)
-                        if consumed:
-                            out.append(rendered)
-                            i = pos + consumed
-                            consumed_uri = True
-                            break
-            if not consumed_uri and text[base : base + 2] == "//":
-                rendered, consumed = _classify(text, base + 2, root_cmp, root_pat)
-                consumed_uri = bool(consumed)
-                if consumed:
+            slashes = 0
+            while slashes < 3 and text[base + slashes : base + slashes + 1] == "/":
+                slashes += 1
+            candidates: list[int] = []
+            if slashes <= 1:
+                candidates.append(base)
+            elif slashes == 2:
+                authority_end = _run_end(text, base + 2)
+                slash = text.find("/", base + 2)
+                if 0 <= slash < authority_end:
+                    authority_end = slash
+                authority = text[base + 2 : authority_end]
+                if authority.lower() == "localhost":
+                    candidates.append(authority_end)
+                    if text[authority_end : authority_end + 1] == "/":
+                        candidates.append(authority_end + 1)
+                elif "." not in authority:
+                    candidates.append(base + 2)
+            elif root_pat is not None and root_pat.match(text, base + 3):
+                candidates.append(base + 3)
+            else:
+                candidates.append(base + 2)
+            landed = False
+            for pos in candidates:
+                if root_pat is not None and root_pat.match(text, pos):
+                    rendered, consumed = _classify(text, pos, root_cmp, root_pat)
                     out.append(rendered)
-                    i = base + 2 + consumed
-            if consumed_uri:
+                    i = pos + consumed
+                    landed = True
+                    break
+            if not landed:
+                for pos in candidates:
+                    rendered, consumed = _classify(text, pos, root_cmp, root_pat)
+                    if consumed:
+                        out.append(rendered)
+                        i = pos + consumed
+                        landed = True
+                        break
+            if landed:
                 continue
             out.append(text[i:base])
             i = base
@@ -447,8 +474,10 @@ def _relative_paths(value, root: str):
     root keeps its ``:6``/``:6:2`` suffix. The root matches as ONE
     separator-run pattern -- native, forward-slash, and JSON-escaped-doubled
     spellings are one match, spaces in the root are ordinary characters,
-    a drive-letter root matches at any case, a `file://`/`file:///` URI
-    prefix is consumed with the path, and a root ending at a boundary never
+    a drive-letter root matches at any case, a local `file:` URI span
+    (scheme at any casing, 0-3 slashes, optional `localhost` authority)
+    is consumed with the path -- a dotted authority is a web URL and
+    passes through -- and a root ending at a boundary never
     eats a sibling name sharing the root's prefix. A path OUTSIDE the root
     keeps only its bare file name (with any line suffix) -- the file name
     is the part an author can act on, and the directory outside the project

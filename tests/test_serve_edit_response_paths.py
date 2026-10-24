@@ -939,10 +939,24 @@ def test_response_paths_quoted_child_components(component):
 
 @pytest.mark.parametrize(
     "prefix,root",
-    [("file://", P), ("file:///", P), ("file://", DRIVE), ("file:///", DRIVE)],
+    [("file://", P), ("file:///", P), ("file://", DRIVE), ("file:///", DRIVE),
+     ("file:", P), ("file:", DRIVE), ("FILE://", P), ("FILE://", DRIVE)],
 )
 def test_response_paths_file_uri_variants(prefix, root):
     assert api_mod._relative_paths_in_text(prefix + root + "/items/a.md", root) == "items/a.md"
+
+
+@pytest.mark.parametrize(
+    "root",
+    [P, DRIVE],
+    ids=["posix", "drive"],
+)
+def test_response_paths_localhost_authority_is_a_local_file_uri(root):
+    # A `file` scheme with a `localhost` authority is a local file URI
+    # span, never a protected web URL: the prefix and authority go, the
+    # path scrubs like any bare path.
+    text = "file://localhost/" + root.lstrip("/") + "/items/a.md"
+    assert api_mod._relative_paths_in_text(text, root) == "items/a.md"
 
 
 @pytest.mark.parametrize("status", [200, 400, 403, 409, 422])

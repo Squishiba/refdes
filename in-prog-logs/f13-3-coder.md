@@ -122,16 +122,30 @@ re-scanned (this is what fixes quoted-child-* and the HIGH URI case).
 Result: probe CORE FAIL = [] (154 PASS; baseline 9 FAILs all fixed:
 outside-space-quoted/-root, json-root-quote/newline/tab,
 quoted-child-parentheses/brackets/braces, outside-win-space). EXT FAIL 13
-= the pre-declared out-of-scope list (file:/, FILE:// posix, localhost
-authority, %20, long-path aliases, 8.3, dot segments); json-unicode-root
-flipped to PASS as a freebie of the JSON decode. POLICY FAIL = regex,
-switch only (documented grammar, decision 3); key-collision and
-posix-backslash-name PASS. Bugs found while landing: the greedy
-`file:/{2,3}` prefix ate the slash the root's leading separator run
-needs (try 3, fall back to 2); the consumed sentence period must NOT be
-re-emitted (the `.` replacement is the dot); suffix/punctuation travel
-inside the replacement, never back into the scan.
-Full suite green: 4618 passed, 2 skipped. (A basetemp INSIDE the repo
+= the pre-declared out-of-scope list; json-unicode-root flipped to PASS
+as a freebie of the JSON decode. POLICY FAIL = regex, switch only
+(documented grammar, decision 3); key-collision and posix-backslash-name
+PASS. Bugs found while landing: the greedy `file:/{2,3}` prefix ate the
+slash the root's leading separator run needs; the consumed sentence
+period must NOT be re-emitted (the `.` replacement is the dot);
+suffix/punctuation travel inside the replacement, never back into the
+scan. Full suite 4618 passed, 2 skipped. (A basetemp INSIDE the repo
 breaks tests/test_scaffold.py + sealing gitignore tests -- git's
 ignore/rev-parse rules leak into tmp_path projects; run the suite with
 the default basetemp.)
+
+## Round 5 (narrow): file-URI family privacy leak
+
+Five EXT cells left the root verbatim (uri-file:-posix/-drive,
+uri-FILE://-posix, uri-file://localhost-posix/-drive). New rule:
+scheme `file` (any casing) + 0-3 slashes + optional `localhost`
+authority = LOCAL FILE URI span -- prefix consumed with the path; a
+dotted authority is a web URL, untouched. RED-first (6 cells, all
+probe goldens), fix confined to the scan loop's URI branch: slashes
+split by what the path keeps (posix keeps its leading slash, drive
+takes them all), localhost authority consumed with it. Probe after:
+CORE 154/154, EXT FAILs 13 -> 8 (dotdot x3, encoded-uri, unc-case,
+long x2, short-name -- all pre-declared). Root-literal grep of ALL
+probe rows: only root-in-url and root-after-word, both POLICY PASS by
+design (web-URL protection, word-boundary grammar).
+Full suite 4624 passed, 2 skipped.

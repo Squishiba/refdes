@@ -16,8 +16,11 @@
   when a line suffix follows; the root itself — with or without a
   trailing separator — becomes `.`), in every separator spelling —
   including the doubled-backslash spelling the value quoting writes into
-  file bytes and from there into the diff text, and a `file://` or
-  `file:///` URI spelling — and a drive-letter root matches
+   file bytes and from there into the diff text, and a local `file:` URI
+   spelling — any casing of the scheme, 0 to 3 slashes, an optional
+   `localhost` authority, prefix removed together with the path (a
+   dotted authority is a web URL and passes through) — and a
+   drive-letter root matches
    case-insensitively; the root is matched literally, so a root
    containing spaces (`C:\Users\Jane Doe\...`) is no harder to scrub
    than any other. A path outside the project root is reduced to its
