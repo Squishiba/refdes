@@ -7,8 +7,10 @@ never from a file scan.
 
 from __future__ import annotations
 
+import json
 import os
 import posixpath
+import re
 import urllib.parse
 
 from .. import citations as citations_mod
@@ -47,7 +49,7 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
     if path.startswith("/api/item/") and path.endswith("/edit"):
         ref = urllib.parse.unquote(path[len("/api/item/"):-len("/edit")])
         if method == "POST":
-            return _apply_edit(app, ref, body)
+            return _write_outcome(app, _apply_edit(app, ref, body))
         return 405, {"error": "method not allowed"}
     if path == "/api/create/schema" and method in ("GET", "HEAD"):
         return _create_schema(app)
@@ -60,7 +62,7 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
             return _upload_asset(app, query, body)
         return 405, {"error": "method not allowed"}
     if path == "/api/items/create" and method == "POST":
-        return _create_item(app, body)
+        return _write_outcome(app, _create_item(app, body))
     if path.startswith("/api/item/"):
         for suffix, handler in _SOURCE_ROUTES:
             if not path.endswith(suffix):
@@ -143,6 +145,595 @@ def diag_dict(d: Diagnostic) -> dict:
         "line": d.line,
         "code": d.code,
     }
+
+
+# ---------------------------------------------------- root-relative write answers
+#
+# One choke point for both write routes: `handle()` runs the (status, payload)
+# of the edit and create routes through `_write_outcome`, which rewrites
+# every absolute path under the project root in the whole payload to the
+# project-relative spelling the sibling `path` fields already carry. Those
+# fields got `shown()` from the start; the free-text ones -- `message`,
+# `reason`, `describe`, the diff, the diagnostics -- kept the machine path
+# inside sentences built at the service layer (user-sim run 13, section 3.5),
+# and a per-field patch at each site is the rule re-implemented ten times.
+# The walk is payload-wide so a field added next month is covered by the
+# same rule.
+
+# The scanner grammar (round-4 escalation, per the deep analysis of the
+# previous head): ONE left-to-right pass over each string, no rewriting of
+# anything the scan did not match. At each position, in this documented
+# precedence: a quoted scalar span (`"`-delimited, escapes honored -- a
+# path with spaces inside it is unambiguously one path), a local `file:`
+# URI span (scheme at any casing, 0-3 slashes, optional `localhost`
+# authority -- its prefix is removed with the path; a dotted authority is
+# a web URL and passes through), a long-path prefix (`\\?\`, `//?/` ->
+# `<outside project>`; the
+# scanner does not discover aliases of the root), a drive-absolute span
+# (`C:\...`), an absolute span (`/...` or `\...`). A span is classified by
+# trying the literal root pattern anchored at its start: the root is ONE
+# separator-run pattern (the native spelling, the forward-slash one, and
+# the JSON-escaped doubling all match -- there is no spelling list to keep
+# in step), it ends only at a boundary (not a letter/digit/`_`/`-`, not a
+# `.` that starts a name; the sentence-ending `.` IS consumed, so a root
+# ending a sentence keeps ONE period), a drive-letter root matches at any
+# case, and a bare root keeps its `:line[:col]` suffix. Under the root the
+# span renders its remainder AS WRITTEN -- separator normalization lives
+# only inside the matched root, never in the text after it; outside, the
+# whole token reduces to its leaf (`<outside project>` when it has none),
+# crossing a single space only when the next piece is unambiguously
+# path-shaped (contains a separator, ends in a file extension) -- a
+# documented grammar limit, not an intent detector: `/verbose` reads as a
+# path and scrubs as one. Quoted scalars decode (JSON first, a YAML-ish
+# fallback), scrub, and re-encode; content that decodes to itself is
+# re-emitted as the original bytes. Replacement text is never re-scanned,
+# so a scrubbed path is never reclassified.
+_SEPS = r"[\\/]+"
+_TRAILING = ".,;:!?)]}'\"`>"
+_DRIVE_ROOT = re.compile(r"[A-Za-z]:")
+_SCALAR = re.compile(r"\"(?:[^\"\\\n\r]|\\[^\n\r])*\"")
+# Span starts: a `/` or `\` at a boundary (a `/` inside a word, behind a
+# colon+slash, behind a dot, or inside a separator run is not a path
+# start -- this is what keeps `and/or`, `5/6`, `path/to/x`, `http://x/y`,
+# `prefix/home/you/proj` untouched), and a drive letter likewise.
+_PATH_START = re.compile(r"(?<![A-Za-z0-9_\-:/\\.])(?=[/\\])")
+_DRIVE_START = re.compile(r"(?<![A-Za-z0-9_\-:/\\.])(?=[A-Za-z]:[\\/])")
+_FILE_PREFIX = re.compile(r"(?<![A-Za-z0-9_\-])file:", re.IGNORECASE)
+_PIECE = re.compile(r"[^\s:;\"'`\\/]+(?:[\\/][^\s:;\"'`]+)*\.[A-Za-z0-9]+")
+_RUN_END = re.compile(r"[\s`\"'<>]|\Z")
+_SUFFIX = re.compile(r"(:\d+(?::\d+)?)\Z")
+_EXT_END = re.compile(r"\.[A-Za-z0-9]+\Z")
+# A root occurrence preceded by anything OTHER than start, whitespace, a
+# quote, or opening punctuation (a word, `=`, a URL host, a `/`) is not a
+# path span the reader can act on -- the root text is replaced by the
+# marker and the surrounding text survives byte for byte.
+_BOUND_PREV = re.compile(r"[\s\"'`([{<]")
+_PROJECT_ROOT_MARK = "<project root>"
+# The windows-flavored under-root remainder converts WHOLE: every piece
+# up to the span end renders its separators as `/` (the spelling the
+# response's `path` field uses) -- no piece needs a file extension. The
+# one termination is escape notation: a SINGLE separator followed by a
+# word with no file extension that opens with a JSON escape letter ends
+# the path span BEFORE it, so the two characters of a `\n`/`\"`-style
+# escape survive intact (`items\reqs.yaml\then` renders
+# `items/reqs.yaml` and leaves `\then`).
+_WIN_WORD = re.compile(r"[^\\/]+")
+_WIN_STEP = re.compile(r"([\\/]+)([^\\/]+)")
+_WIN_ESCAPES = frozenset('"\\/bfnrtu')
+_EXT_TAIL = re.compile(r"\.[A-Za-z0-9]+\Z")
+
+
+def _scrub_rules(root_cmp: str, fold: bool):
+    """The per-response scanner rules, compiled once and cached: the
+    separator-run root pattern (with the boundary and the consumed
+    sentence period), the `file:` URI prefix, and the root's flavor --
+    Windows-flavored means drive-letter or UNC, derived from the root
+    string alone (so the Windows logic runs on Linux too). No filesystem
+    access happens here: the comparison is lexical, on the root as
+    supplied."""
+    key = (root_cmp.casefold() if fold else root_cmp, fold)
+    rules = _SCRUB_CACHE.get(key)
+    if rules is None:
+        parts = re.split(_SEPS, root_cmp)
+        root_pat = (
+            re.compile(
+                _SEPS.join(re.escape(part) for part in parts)
+                + r"(?:(?P<sw>"
+                + _SEPS
+                + r")(?=[^\s\\/])"
+                + r"|(?:[\\/]+)?(?:\.(?![A-Za-z0-9])"
+                + r"|(?![A-Za-z0-9_\-])(?!\.(?=[A-Za-z0-9]))))",
+                re.IGNORECASE if fold else 0,
+            )
+            if len(root_cmp) > 1
+            else None
+        )
+        rules = (
+            root_pat,
+            _FILE_PREFIX,
+            root_cmp.startswith("//?/"),
+            bool(_DRIVE_ROOT.match(root_cmp)) or root_cmp.startswith("//"),
+        )
+        _SCRUB_CACHE[key] = rules
+    return rules
+
+
+_SCRUB_CACHE: dict = {}
+
+
+def _strip_trailing(text: str) -> tuple[str, str]:
+    stripped = text.rstrip(_TRAILING)
+    return stripped, text[len(stripped):]
+
+
+_DOT_SEG = re.compile(r"(?:^|(?<=[/\\]))\.\.?\Z")
+
+
+def _strip_trailing_keep_dots(text: str) -> tuple[str, str]:
+    """Like _strip_trailing, but a trailing `.`/`..` that forms a complete
+    DOT SEGMENT of the path is kept: it is path syntax, not the sentence's
+    punctuation (and the normalization's `.` IS that period)."""
+    end = len(text)
+    while end > 0 and text[end - 1] in _TRAILING:
+        if _DOT_SEG.search(text, 0, end) is not None:
+            break
+        end -= 1
+    return text[:end], text[end:]
+
+
+def _dot_segments(body: str, windows: bool):
+    """Lexically collapse the `.` and `x/..` segments of an under-root
+    remainder: the normalized spelling (empty string == the root itself),
+    or None when a `..` climbs ABOVE the root -- the whole path then
+    resolves outside the project. A POSIX root keeps backslashes as
+    file-name characters, so only `/` separates there; a Windows
+    remainder splits on both spellings (it renders forward-slash
+    throughout anyway)."""
+    parts = re.split(_SEPS if windows else r"/+", body)
+    stack: "list[str]" = []
+    for part in parts:
+        if not part or part == ".":
+            continue
+        if part == "..":
+            if stack:
+                stack.pop()
+            else:
+                return None
+        else:
+            stack.append(part)
+    return "/".join(stack)
+
+
+def _run_end(text: str, pos: int) -> int:
+    return _RUN_END.search(text, pos).start()
+
+
+def _extend_over_space(text: str, end: int) -> tuple[int, "tuple[int, int] | None"]:
+    """Extend an ended run over AT MOST ONE space when the next piece is
+    unambiguously path-shaped (`_PIECE`: a separator, an extension) --
+    the documented grammar for `read /etc/my conf/secret.md`. Prose that
+    merely contains a separator is not swallowed, and crossing stops at
+    one space: a list of paths (`a.md b.md`) is a list of separate
+    references, not one path with a space in it. Returns the new end and
+    the span of the crossed piece (an outside token's leaf is the last
+    piece: `/opt/my notes.txt` reduces to `notes.txt`, not to the
+    fragment `my notes.txt` before the space)."""
+    cross = None
+    piece = _PIECE.match(text, end + 1)
+    if end < len(text) and text[end] == " " and piece is not None:
+        end = piece.end()
+        cross = piece.span()
+    return end, cross
+
+
+def _leaf(body: str) -> str:
+    norm = re.sub(_SEPS, "/", body).rstrip("/")
+    return norm.rpartition("/")[2] or "<outside project>"
+
+
+def _render_relative(rest: str, pos: int, end: int, root_is_slash: bool,
+                     windows: bool):
+    """Under-root render of a scrubbed span: the remainder with its line
+    suffix riding along, its trailing punctuation re-emitted after it,
+    and the whole run consumed (the suffix and punctuation travel INSIDE
+    the replacement, never back through the scan). A WINDOWS-flavored
+    root renders the WHOLE remainder with forward slashes -- the same
+    spelling the response's `path` field uses, on every platform -- piece
+    by piece, with no extension required anywhere (`items\\sub\\NOEXT`
+    renders `items/sub/NOEXT`); the span ends only at escape notation:
+    a single separator followed by a word with no file extension that
+    opens with a JSON escape letter (`items\\reqs.yaml\\nthen` renders
+    `items/reqs.yaml` and leaves `\\nthen`), and text after the path
+    span is re-emitted as written. A posix root keeps backslashes as
+    file-name characters (the documented POLICY case), so there its
+    remainder stays exactly as written."""
+    def render(body: str, windows: bool) -> str:
+        norm = _dot_segments(body, windows)
+        return _leaf(body) if norm is None else norm
+
+    if root_is_slash:
+        rest = rest.lstrip("/\\")
+        if not rest:
+            return "<outside project>", end - pos
+    if windows:
+        word = _WIN_WORD.match(rest)
+        if word is not None:
+            span_end = word.end()
+            step = _WIN_STEP.match(rest, span_end)
+            while step is not None:
+                seps, piece = step.group(1), step.group(2)
+                base = _strip_trailing(re.sub(r":\d+(?::\d+)?\Z", "", piece))[0]
+                if (
+                    len(seps) == 1
+                    and piece[0] in _WIN_ESCAPES
+                    and not _EXT_TAIL.search(base)
+                ):
+                    break
+                span_end = step.end()
+                step = _WIN_STEP.match(rest, span_end)
+            body, punct = _strip_trailing_keep_dots(rest[:span_end])
+            found = _SUFFIX.search(body)
+            if found:
+                body, punct2 = _strip_trailing_keep_dots(body[: found.start()])
+                return (
+                    (render(body, True) or ".")
+                    + found.group(1)
+                    + punct2
+                    + punct
+                    + rest[span_end:],
+                    end - pos,
+                )
+            tail = rest[span_end:]
+            rendered = render(body, True)
+            return (
+                rendered + punct + tail
+                if rendered or punct or tail
+                else "."
+            ), end - pos
+    body, punct = _strip_trailing_keep_dots(rest)
+    found = _SUFFIX.search(body)
+    if found:
+        body, punct2 = _strip_trailing_keep_dots(body[: found.start()])
+        return (
+            (render(body, windows) or ".") + found.group(1) + punct2 + punct,
+            end - pos,
+        )
+    rendered = render(body, windows)
+    return (
+        rendered + punct
+        if rendered or punct
+        else "."
+    ), end - pos
+
+
+def _classify(text: str, pos: int, root_cmp: str, root_pat, windows: bool):
+    """The span starting at ``pos`` -> (rendered, characters consumed);
+    consumed 0 means the position is not the start of a path span."""
+    if root_pat is not None:
+        match = root_pat.match(text, pos)
+        if match is not None:
+            end = _run_end(text, match.end())
+            if match.group("sw") is not None:
+                if windows:
+                    end, _ = _extend_over_space(text, end)
+                return _render_relative(
+                    text[match.end():end], pos, end, root_cmp == "/", windows
+                )
+            tail = text[match.end():end]
+            found = _SUFFIX.search(tail)
+            if found:
+                return "." + found.group(1), end - pos
+            # The consumed boundary may swallow a sentence-ending `.` --
+            # the replacement `.` IS the sentence's single period.
+            return ".", match.end() - pos
+    end = _run_end(text, pos)
+    if root_cmp == "/":
+        return _render_relative(text[pos:end], pos, end, True, windows)
+    head, _head_punct = _strip_trailing(text[pos:end])
+    if head == "/" and (pos, end) != (0, len(text)):
+        # A `/` standing alone in running text (arithmetic, a table cell)
+        # is prose, not a path -- it passes through. The one exception is
+        # the whole value being exactly `/`, which stays a path below.
+        return "", 0
+    cross = None
+    # The `:line[:col]` suffix and a trailing extension CLOSE the
+    # reference: a token that is already a completed path -- `plan.md`,
+    # `x.md:3` -- does not reach across the space for the next word.
+    token, _punct = _strip_trailing(text[pos:end])
+    found = _SUFFIX.search(token)
+    body, _punct2 = _strip_trailing(token[: found.start()] if found is not None else token)
+    if found is None and not _EXT_END.search(body):
+        end, cross = _extend_over_space(text, pos + len(body))
+    token, punct = _strip_trailing(text[pos:end])
+    found = _SUFFIX.search(token)
+    if found:
+        body, punct2 = _strip_trailing(token[: found.start()])
+        leaf_src = text[cross[0]:cross[1]] if cross is not None else body
+        return _leaf(leaf_src) + found.group(1) + punct2 + punct, end - pos
+    leaf_src = text[cross[0]:cross[1]] if cross is not None else token
+    return _leaf(leaf_src) + punct, end - pos
+
+
+_YAML_ESCAPES = {"\\": "\\", '"': '"', "'": "'", "n": "\n", "r": "\r", "t": "\t"}
+
+
+def _yaml_unescape(raw: str) -> str:
+    out = []
+    i = 0
+    while i < len(raw):
+        c = raw[i]
+        nxt = raw[i + 1 : i + 2]
+        if c == "\\" and nxt in _YAML_ESCAPES:
+            out.append(_YAML_ESCAPES[nxt])
+            i += 2
+        elif c == "\\" and nxt == "x" and i + 4 <= len(raw):
+            try:
+                out.append(chr(int(raw[i + 2 : i + 4], 16)))
+                i += 4
+            except ValueError:
+                out.append(c)
+                i += 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _yaml_escape(text: str) -> str:
+    out = []
+    for c in text:
+        if c == '"':
+            out.append('\\"')
+        elif c == "\\":
+            out.append("\\\\")
+        elif c == "\n":
+            out.append("\\n")
+        elif c == "\r":
+            out.append("\\r")
+        elif c == "\t":
+            out.append("\\t")
+        elif ord(c) < 0x20:
+            out.append("\\x{:02x}".format(ord(c)))
+        else:
+            out.append(c)
+    return "".join(out)
+
+
+def _scrub_scalar(quoted: str, root_cmp: str, fold: bool, rules) -> str:
+    """One quoted scalar: decode it (JSON first, the way the patcher
+    writes values; a YAML-ish fallback for what JSON refuses, including
+    `\\xHH`), scrub the decoded text, re-encode in the same syntax.
+    Unchanged content is re-emitted as the original bytes."""
+    try:
+        decoded = json.loads(quoted)
+        style = "json"
+    except ValueError:
+        decoded = _yaml_unescape(quoted[1:-1])
+        style = "yaml"
+    if not isinstance(decoded, str):
+        return quoted
+    scrubbed = _scan(decoded, root_cmp, fold, rules)
+    if scrubbed == decoded:
+        return quoted
+    if style == "json":
+        return json.dumps(scrubbed, ensure_ascii=False)
+    return '"' + _yaml_escape(scrubbed) + '"'
+
+
+def _scan(text: str, root_cmp: str, fold: bool, rules) -> str:
+    root_pat, file_prefix, long_root, windows = rules
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == '"':
+            span = _SCALAR.match(text, i)
+            if span is not None:
+                out.append(_scrub_scalar(span.group(0), root_cmp, fold, rules))
+                i = span.end()
+                continue
+        if not long_root and (
+            text.startswith("\\\\?\\", i)
+            or (text.startswith("//?/", i) and _PATH_START.match(text, i))
+        ):
+            out.append("<outside project>")
+            i = _run_end(text, i)
+            continue
+        prefix = file_prefix.match(text, i)
+        if prefix is not None:
+            # A `file` scheme (any casing) with 0-3 slashes -- and its
+            # `localhost` authority -- is a LOCAL FILE URI: the prefix goes
+            # and the path scrubs like any bare path. The slashes split
+            # between prefix and path by what the path keeps: a posix path
+            # keeps its leading slash (`file:/home`, `file:///home`), a
+            # drive path takes the slashes after it (`file:C:`,
+            # `file://C:/`, `file:///C:/`). An authority that is not
+            # `localhost` (a dotted host) is a web URL: the span passes
+            # through untouched.
+            base = prefix.end()
+            slashes = 0
+            while slashes < 3 and text[base + slashes : base + slashes + 1] == "/":
+                slashes += 1
+            candidates: list[int] = []
+            if slashes <= 1:
+                candidates.append(base)
+            elif slashes == 2:
+                authority_end = _run_end(text, base + 2)
+                slash = text.find("/", base + 2)
+                if 0 <= slash < authority_end:
+                    authority_end = slash
+                authority = text[base + 2 : authority_end]
+                if authority.lower() == "localhost":
+                    candidates.append(authority_end)
+                    if text[authority_end : authority_end + 1] == "/":
+                        candidates.append(authority_end + 1)
+                elif "." not in authority:
+                    candidates.append(base + 2)
+            elif root_pat is not None and root_pat.match(text, base + 3):
+                candidates.append(base + 3)
+            else:
+                candidates.append(base + 2)
+            landed = False
+            for pos in candidates:
+                if root_pat is not None and root_pat.match(text, pos):
+                    rendered, consumed = _classify(text, pos, root_cmp, root_pat, windows)
+                    out.append(rendered)
+                    i = pos + consumed
+                    landed = True
+                    break
+            if not landed:
+                for pos in candidates:
+                    rendered, consumed = _classify(text, pos, root_cmp, root_pat, windows)
+                    if consumed:
+                        out.append(rendered)
+                        i = pos + consumed
+                        landed = True
+                        break
+            if landed:
+                continue
+            out.append(text[i:base])
+            i = base
+            continue
+        span_at = None
+        if ch == "/" and _PATH_START.match(text, i):
+            span_at = i
+        elif ch == "\\" and _PATH_START.match(text, i):
+            span_at = i
+        elif ch.isascii() and ch.isalpha() and _DRIVE_START.match(text, i):
+            span_at = i
+        if span_at is not None and (i == 0 or _BOUND_PREV.match(text, i - 1)):
+            # The path-span rules (relative rendering, leaf, `.`) only
+            # govern spans the reader can act on: a span preceded by
+            # start, whitespace, a quote, or opening punctuation.
+            rendered, consumed = _classify(text, span_at, root_cmp, root_pat, windows)
+            if consumed:
+                out.append(rendered)
+                i = span_at + consumed
+                continue
+        if root_pat is not None and i > 0 and not _BOUND_PREV.match(text, i - 1):
+            # A root occurrence glued to a word, an `=`, a URL host, or a
+            # `/` is not a path span -- the reader cannot act on it. The
+            # root TEXT becomes the marker; everything else (the URL, the
+            # word, the rest of the path, a `:line` suffix) survives byte
+            # for byte. The root pattern's own boundary check keeps a
+            # longer sibling sharing the root's prefix from matching.
+            match = root_pat.match(text, i)
+            if match is not None:
+                core = match.group(0).rstrip("/\\")
+                if core.endswith("."):
+                    core = core[:-1]
+                if core:
+                    out.append(_PROJECT_ROOT_MARK)
+                    i += len(core)
+                    continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _relative_paths(value, root: str):
+    r"""Every string in a response payload, with the project root rewritten away.
+
+    A path under ``root`` becomes its project-relative spelling. For a
+    posix root the remainder of the path is left exactly as written
+    (``items/REQ-001.md``, ``items\\reqs.yaml``); for a Windows-flavored
+    root (drive-letter or UNC) the WHOLE remainder renders with forward
+    slashes -- ``items/reqs.yaml`` in every input spelling (native
+    backslash, forward-slash, JSON-escaped-doubled) and for every
+    remainder (``items/sub/NOEXT`` included) -- except an escape-notation
+    tail (``\\nthen``) and text after the path span, which are re-emitted
+    as written; ``items/REQ-007.md:6`` when a line suffix follows; the
+    root itself, with or without a trailing separator,
+    becomes ``.``, a root ending a sentence keeps one period, and a bare
+    root keeps its ``:6``/``:6:2`` suffix. Dot segments resolve
+    LEXICALLY: the under-root remainder's ``.`` and ``x/..`` collapse to
+    the normalized relative spelling (``items/../a.md`` renders ``a.md``,
+    ``./a.md`` renders ``a.md``, a trailing ``..`` lands on the root),
+    and a ``..`` that climbs above the root makes the whole path outside
+    -- only the bare file name (with any line suffix) survives. The root matches as ONE
+    separator-run pattern -- native, forward-slash, and JSON-escaped-doubled
+    spellings are one match, spaces in the root are ordinary characters,
+    a drive-letter root matches at any case (a UNC root is NOT folded --
+    it matches as spelled), a local `file:` URI span
+    (scheme at any casing, 0-3 slashes, optional `localhost` authority)
+    is consumed with the path -- a dotted authority is a web URL and
+    passes through -- and a root ending at a boundary never
+    eats a sibling name sharing the root's prefix. The root TEXT survives
+    nowhere in a response: an occurrence of the root with a path boundary
+    in a position no path rule can rewrite -- inside a web URL, glued
+    onto a preceding word (anything other than start, whitespace, a
+    quote, or opening punctuation) -- has the root text replaced with the
+    marker `<project root>` and every other byte left as written. A path OUTSIDE the root
+    keeps only its bare file name (with any line suffix) -- the file name
+    is the part an author can act on, and the directory outside the project
+    is exactly what this response must not disclose; a token with no file
+    name at all becomes ``<outside project>``, a QUOTED path keeps its
+    spaces and reduces whole to its leaf, and an unquoted token crosses
+    AT MOST ONE space, and only when the next piece is path-shaped and
+    the token is not already a completed path -- a trailing extension or
+    a ``:line`` suffix closes the reference, so ``plan.md draft.md`` and
+    ``x.md:3 draft.md`` keep their second word (a documented grammar
+    limit). Quoted scalars decode (JSON, a YAML-ish fallback), scrub, and
+    re-encode ONLY when the scrubbing changed something -- a quoted scalar
+    with no path in it is returned byte-identical, escapes and all; when
+    it DOES contain a rewritten path the whole scalar re-encodes, so
+    other escape sequences in that same string may come back as their
+    plain characters (a documented limit). The surrounding syntax --
+    escapes, URLs, prose -- survives byte for
+     byte. Relative spellings are untouched. Known limits: a root path
+     spelled with a backslash-escaped space (``proj\ demo``) is not
+     recognized as under-root, an isolated ``/`` in running text
+     (arithmetic, a table cell) passes through while a single-segment
+     ``/word`` token (``/verbose``) is still treated as a path, and a
+     project root of ``/`` takes the root branch before that
+     isolated-slash rule. The walk
+     covers the whole
+    payload shape -- dict keys and values, list and tuple elements --
+    because a path is a string anywhere; a key whose scrubbed form collides
+    with one already taken gets a ``#2``/``#3`` suffix, so no record is
+    ever lost."""
+    if isinstance(value, str):
+        return _relative_paths_in_text(value, root)
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            new_key = _relative_paths(key, root)
+            if new_key in out:
+                n = 2
+                while f"{new_key}#{n}" in out:
+                    n += 1
+                new_key = f"{new_key}#{n}"
+            out[new_key] = _relative_paths(item, root)
+        return out
+    if isinstance(value, list):
+        return [_relative_paths(item, root) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_relative_paths(item, root) for item in value)
+    return value
+
+
+def _relative_paths_in_text(text: str, root: str) -> str:
+    if not text:
+        return text
+    root_norm = (root or "").replace("\\", "/")
+    if not (os.path.isabs(root_norm) or _DRIVE_ROOT.match(root_norm)):
+        # On Linux a Windows-shaped root must not go through abspath (it
+        # prefixes cwd and destroys the drive spelling).
+        root_norm = os.path.abspath(root).replace("\\", "/")
+    root_cmp = root_norm.rstrip("/") or "/"
+    fold = bool(_DRIVE_ROOT.match(root_cmp))
+    return _scan(text, root_cmp.casefold() if fold else root_cmp, fold,
+                 _scrub_rules(root_cmp, fold))
+
+
+def _write_outcome(app, result: tuple[int, dict]) -> tuple[int, dict]:
+    """The serialization point of the write routes: every edit/create response
+    leaves `handle()` through here, so the root-relative rule of
+    `_relative_paths` is applied to the whole payload once, at the choke
+    point, for both routes."""
+    status, payload = result
+    return status, _relative_paths(payload, app.state.snapshot.project.root)
 
 
 # ------------------------------------------------------------- edit affordances
