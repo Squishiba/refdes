@@ -14,13 +14,20 @@
   well as bare text; a Windows-flavored root (drive letter, UNC) renders
   its whole remainder with forward slashes — the `path` field's spelling,
   on every platform — case-insensitively, spaces included; a local
-   `file:` URI goes with its prefix. Outside the root only the bare file
-   name survives — the directories outside the project are the leak. Known
-   limits of the path reader: dot-segments, percent-encoding, 8.3 short
-   names, long-path aliases, and escaped-space roots (`proj\ demo`) are
-   not recognized; a root glued in a web URL or behind a preceding word
-   is left as written; path-shaped prose (a regex, a `/verbose` switch)
-   is shortened while an isolated `/` (arithmetic, a table cell) is left
-   alone; text after a path span is re-emitted byte for byte; alike keys
-   get `#2`, `#3` suffixes. Reads, uploads, and the patch contract:
-   unchanged.
+  `file:` URI goes with its prefix. Outside the root only the bare file
+  name survives — the directories outside the project are the leak. The
+  root never survives anywhere in a response: a root glued into a web
+  URL or onto a preceding word — bytes no path rule can rewrite — has
+  its root text replaced with the marker `<project root>`, everything
+  else byte for byte. Known limits of the path reader: dot-segments,
+  percent-encoding, 8.3 short names, long-path aliases, and
+  escaped-space roots (`proj\ demo`) are not recognized; backslashes in
+  the remainder of a POSIX-rooted path are kept as filename characters;
+  outside the root only the final path segment survives (a path ending
+  in a separator yields its last directory name); path-shaped prose (a
+  regex, a `/verbose` switch) is shortened while an isolated `/`
+  (arithmetic, a table cell) is left alone; a token extended over a
+  space crosses at most one space and a `:line` suffix closes the
+  reference; text after a path span is re-emitted byte for byte; alike
+  keys get `#2`, `#3` suffixes. Reads, uploads, and the patch contract:
+  unchanged.

@@ -672,6 +672,94 @@ def test_response_paths_a_lone_slash_value_and_slash_word_tokens_keep_their_ruli
     )
 
 
+_R9 = "/home/you/proj"
+_R9W = "C:\\Users\\x\\proj"
+
+
+@pytest.mark.parametrize(
+    ("text", "root", "expected"),
+    [
+        # glued into a URL / onto a word: the root text becomes the marker,
+        # everything else byte-for-byte (round-9 policy, Jared-decided).
+        (
+            "see https://example.org/home/you/proj/a.md",
+            _R9,
+            "see https://example.org<project root>/a.md",
+        ),
+        (
+            "http://host:8080/home/you/proj/a.md",
+            _R9,
+            "http://host:8080<project root>/a.md",
+        ),
+        (
+            "https://example.org/open?path=/home/you/proj/a.md",
+            _R9,
+            "https://example.org/open?path=<project root>/a.md",
+        ),
+        ("prefix/home/you/proj/a.md", _R9, "prefix<project root>/a.md"),
+        ("path=/home/you/proj:7", _R9, "path=<project root>:7"),
+        (
+            "/home/you/proj/items/a.md https://x.org/home/you/proj/b.md",
+            _R9,
+            "items/a.md https://x.org<project root>/b.md",
+        ),
+        ("word/home/you/proj", _R9, "word<project root>"),
+        ("word/home/you/proj.", _R9, "word<project root>."),
+        (
+            "https://host/C:/Users/x/proj/a.md",
+            _R9W,
+            "https://host/<project root>/a.md",
+        ),
+        # a longer sibling that merely STARTS with the root is not the root
+        ("word/home/you/proj2/a.md", _R9, "word/home/you/proj2/a.md"),
+        ("word/home/you/proj.old", _R9, "word/home/you/proj.old"),
+        # guards: a boundary-preceded root keeps the existing rendering
+        ("see /home/you/proj end", _R9, "see . end"),
+        ("(see /home/you/proj/a.md)", _R9, "(see a.md)"),
+        ('"see /home/you/proj/a.md"', _R9, '"see a.md"'),
+    ],
+)
+def test_response_paths_the_root_never_survives_even_glued_or_in_a_url(
+    text, root, expected
+):
+    assert api_mod._relative_paths_in_text(text, root) == expected
+
+
+def test_response_paths_a_json_escaped_url_root_becomes_the_marker():
+    root = "C:\\Users\\x\\proj"
+    text = json.dumps(f"see https://x.org{root}/a.md")
+    assert (
+        api_mod._relative_paths_in_text(text, root)
+        == json.dumps("see https://x.org<project root>/a.md")
+    )
+
+
+def test_a_url_root_in_the_file_text_leaves_no_root_in_the_409(tmp_path):
+    """Round-9 policy end to end: an author pastes a URL that CONTAINS the
+    project root into a requirement's text. On the conflict the file text
+    ships in `current_text` and `diff` -- the URL survives byte-for-byte
+    except the root text, which is the `<project root>` marker; no string
+    in the payload carries the root."""
+    client, root = keyless_client(tmp_path)
+    _status, view = client.get("/api/item/REQ-001")
+    status, payload = save(
+        client,
+        "REQ-001",
+        field="text",
+        value=f"see https://example.org{root}/a.md",
+        revision=view["edit"]["file_revision"],
+    )
+    assert status == 200, payload
+
+    status, payload, _stale = _stale_save(
+        client, root, "REQ-001", field="text", value="Rewritten."
+    )
+    assert status == 409, payload
+    assert_no_root(payload, root, "conflict 409 with a root URL in the file text")
+    assert str(root) not in json.dumps(payload, ensure_ascii=False)
+    assert "<project root>" in payload["current_text"], payload["current_text"]
+
+
 def test_the_root_as_a_prefix_of_a_longer_directory_name_is_not_matched():
     assert (
         api_mod._relative_paths_in_text("see /home/you/project/items/a.md", "/home/you/proj")
@@ -1141,22 +1229,32 @@ def test_response_paths_urls_and_relative_text_are_never_paths():
     for text in [
         "items/a.md:6 and/or 5/6 path/to/x",
         "https://example.org/a/b?q=yes",
-        "https://example.org" + P + "/a.md",
-        "prefix" + P + "/a.md",
     ]:
         assert api_mod._relative_paths_in_text(text, P) == text
+    # Round-9 policy: a root glued into a URL or onto a word is no longer
+    # left as written -- it becomes `<project root>`, pinned in the
+    # never-survives matrix above (this carve-out is retired).
 
 
 def test_response_paths_documented_ambiguity_limits():
     # The S12 boundary, pinned as chosen grammar: a bare token that reads
     # as a path is scrubbed as one (a switch is a path; there is no intent
     # detector), a POSIX filename containing a backslash under the root
-    # keeps its spelling, and an unquoted outside token crosses a space
-    # only when the next piece is path-shaped.
+    # keeps its spelling, and an unquoted outside token crosses AT MOST
+    # ONE space, and only when the token is not already a completed path
+    # (a trailing extension, or a `:line` suffix, closes the reference --
+    # the following words are prose, not path pieces).
     assert api_mod._relative_paths_in_text("pattern /a+/g", P) == "pattern g"
     assert api_mod._relative_paths_in_text("use /verbose", P) == "use verbose"
     assert api_mod._relative_paths_in_text(P + "/a\\b.md", P) == "a\\b.md"
     assert api_mod._relative_paths_in_text("read /etc/my config", P) == "read my config"
+    assert api_mod._relative_paths_in_text(
+        "see /home/other/plan.md draft.md for details", P
+    ) == "see plan.md draft.md for details"
+    assert api_mod._relative_paths_in_text(
+        "at /home/other/x.md:3 draft.md next", P
+    ) == "at x.md:3 draft.md next"
+    assert api_mod._relative_paths_in_text("a /home/other/b.md c.md", P) == "a b.md c.md"
 
 
 def test_response_paths_conflict_preserves_quoted_source(tmp_path):

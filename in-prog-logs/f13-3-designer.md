@@ -16,7 +16,8 @@ project-relative spelling at one choke-point helper). No product code.
     author-pasted path in a requirement's `text`);
   - created 200: `message` embeds the destination ("created: ... in {abs}");
   - invalid 422 (enum gate) and refused 422: clean on base -> controls.
-- `tests/test_serve_edit_response_paths.py`: 12 tests, thread-free
+- `tests/test_serve_edit_response_paths.py`: the parametrized suite,
+  thread-free
   `api.handle` drive copied from test_serve_edit_keyless_handle.py. Covers:
   applied/409/422-invalid/refused/created no-root walks, relative spelling
   with line suffix (`at items/reqs.yaml:7`, md shape too), exact
@@ -25,19 +26,19 @@ project-relative spelling at one choke-point helper). No product code.
   three projects asserting native/separator-flipped/lowercase spellings
   absent, plus controls (payload keys, `path` field, gate wording,
   diagnostics dict, revision, handle).
-- `tests/f13-3.cases.json`: node ids -> expected_on_base (8 fail / 4 pass),
+- `tests/f13-3.cases.json`: node ids -> expected_on_base,
   ids cross-checked against `pytest --collect-only` -- delivered on the
   frozen-test branch (the PR body's frozen test SHA), not in the PR diff.
 
 ## Verification
 
-- On base: 8 failed / 4 passed, exactly matching the manifest.
+- On base: the failures and the passes match the manifest exactly.
 - Both required suites stay green untouched: test_serve_edit_http.py +
-  test_serve_edit_retired_ids.py = 48 passed; combined run of all three
+  test_serve_edit_retired_ids.py; a combined run of all three
   files shows no cross-file interference.
 - Satisfiability: a throwaway pytest plugin (`.scratch/f13-3/`, not
   committed product code) wraps `api.handle` with the contract's
-  relativization at the choke point; all 12 tests pass under it — the
+  relativization at the choke point; every test passes under it — the
   assertions match the contract's spelling and are not over-tight.
 
 ## Findings / notes for the implementer
@@ -51,9 +52,13 @@ project-relative spelling at one choke-point helper). No product code.
 
 Status: finished. Tests committed; no product code touched.
 
-Amended by the implementer (rounds 4 and 6, PR review): the
-"remainder left exactly as written" expectation was superseded by the
-spec S3 forward-slash rule -- a Windows-flavored root renders its whole
-under-root remainder with forward slashes on every platform -- and the
-tests pinning the old as-written rendering were updated as a spec
-change, not a test weakening. The test file now holds 205 cases.
+Amended by the implementer (rounds 4, 6 and 8 revised expectations, PR
+review): the "remainder left exactly as written" expectation was
+superseded by the spec S3 forward-slash rule -- a Windows-flavored root
+renders its whole under-root remainder with forward slashes on every
+platform -- and the tests pinning the old as-written rendering were
+updated as a spec change, not a test weakening; round 8 superseded the
+"rooted at / for now" expectation. The later rounds changed the policy
+for the root inside URLs: a root glued in a web URL or onto a preceding
+word no longer survives as written -- its root text becomes the marker
+`<project root>`.

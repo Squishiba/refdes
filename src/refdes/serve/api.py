@@ -202,6 +202,13 @@ _FILE_PREFIX = re.compile(r"(?<![A-Za-z0-9_\-])file:", re.IGNORECASE)
 _PIECE = re.compile(r"[^\s:;\"'`\\/]+(?:[\\/][^\s:;\"'`]+)*\.[A-Za-z0-9]+")
 _RUN_END = re.compile(r"[\s`\"'<>]|\Z")
 _SUFFIX = re.compile(r"(:\d+(?::\d+)?)\Z")
+_EXT_END = re.compile(r"\.[A-Za-z0-9]+\Z")
+# A root occurrence preceded by anything OTHER than start, whitespace, a
+# quote, or opening punctuation (a word, `=`, a URL host, a `/`) is not a
+# path span the reader can act on -- the root text is replaced by the
+# marker and the surrounding text survives byte for byte.
+_BOUND_PREV = re.compile(r"[\s\"'`([{<]")
+_PROJECT_ROOT_MARK = "<project root>"
 # The windows-flavored under-root remainder converts WHOLE: every piece
 # up to the span end renders its separators as `/` (the spelling the
 # response's `path` field uses) -- no piece needs a file extension. The
@@ -264,19 +271,20 @@ def _run_end(text: str, pos: int) -> int:
 
 
 def _extend_over_space(text: str, end: int) -> tuple[int, "tuple[int, int] | None"]:
-    """Extend an ended run over a single space when the next piece is
+    """Extend an ended run over AT MOST ONE space when the next piece is
     unambiguously path-shaped (`_PIECE`: a separator, an extension) --
     the documented grammar for `read /etc/my conf/secret.md`. Prose that
-    merely contains a separator is not swallowed. Returns the new end and
-    the span of the LAST crossed piece (an outside token's leaf is the
-    last piece: `/opt/my notes.txt` reduces to `notes.txt`, not to the
+    merely contains a separator is not swallowed, and crossing stops at
+    one space: a list of paths (`a.md b.md`) is a list of separate
+    references, not one path with a space in it. Returns the new end and
+    the span of the crossed piece (an outside token's leaf is the last
+    piece: `/opt/my notes.txt` reduces to `notes.txt`, not to the
     fragment `my notes.txt` before the space)."""
     cross = None
     piece = _PIECE.match(text, end + 1)
-    while end < len(text) and text[end] == " " and piece is not None:
+    if end < len(text) and text[end] == " " and piece is not None:
         end = piece.end()
         cross = piece.span()
-        piece = _PIECE.match(text, end + 1)
     return end, cross
 
 
@@ -371,7 +379,15 @@ def _classify(text: str, pos: int, root_cmp: str, root_pat, windows: bool):
         # is prose, not a path -- it passes through. The one exception is
         # the whole value being exactly `/`, which stays a path below.
         return "", 0
-    end, cross = _extend_over_space(text, end)
+    cross = None
+    # The `:line[:col]` suffix and a trailing extension CLOSE the
+    # reference: a token that is already a completed path -- `plan.md`,
+    # `x.md:3` -- does not reach across the space for the next word.
+    token, _punct = _strip_trailing(text[pos:end])
+    found = _SUFFIX.search(token)
+    body, _punct2 = _strip_trailing(token[: found.start()] if found is not None else token)
+    if found is None and not _EXT_END.search(body):
+        end, cross = _extend_over_space(text, pos + len(body))
     token, punct = _strip_trailing(text[pos:end])
     found = _SUFFIX.search(token)
     if found:
@@ -530,12 +546,31 @@ def _scan(text: str, root_cmp: str, fold: bool, rules) -> str:
             span_at = i
         elif ch.isascii() and ch.isalpha() and _DRIVE_START.match(text, i):
             span_at = i
-        if span_at is not None:
+        if span_at is not None and (i == 0 or _BOUND_PREV.match(text, i - 1)):
+            # The path-span rules (relative rendering, leaf, `.`) only
+            # govern spans the reader can act on: a span preceded by
+            # start, whitespace, a quote, or opening punctuation.
             rendered, consumed = _classify(text, span_at, root_cmp, root_pat, windows)
             if consumed:
                 out.append(rendered)
                 i = span_at + consumed
                 continue
+        if root_pat is not None and i > 0 and not _BOUND_PREV.match(text, i - 1):
+            # A root occurrence glued to a word, an `=`, a URL host, or a
+            # `/` is not a path span -- the reader cannot act on it. The
+            # root TEXT becomes the marker; everything else (the URL, the
+            # word, the rest of the path, a `:line` suffix) survives byte
+            # for byte. The root pattern's own boundary check keeps a
+            # longer sibling sharing the root's prefix from matching.
+            match = root_pat.match(text, i)
+            if match is not None:
+                core = match.group(0).rstrip("/\\")
+                if core.endswith("."):
+                    core = core[:-1]
+                if core:
+                    out.append(_PROJECT_ROOT_MARK)
+                    i += len(core)
+                    continue
         out.append(ch)
         i += 1
     return "".join(out)
@@ -558,25 +593,36 @@ def _relative_paths(value, root: str):
     root keeps its ``:6``/``:6:2`` suffix. The root matches as ONE
     separator-run pattern -- native, forward-slash, and JSON-escaped-doubled
     spellings are one match, spaces in the root are ordinary characters,
-    a drive-letter root matches at any case, a local `file:` URI span
+    a drive-letter root matches at any case (a UNC root is NOT folded --
+    it matches as spelled), a local `file:` URI span
     (scheme at any casing, 0-3 slashes, optional `localhost` authority)
     is consumed with the path -- a dotted authority is a web URL and
     passes through -- and a root ending at a boundary never
-    eats a sibling name sharing the root's prefix. A path OUTSIDE the root
+    eats a sibling name sharing the root's prefix. The root TEXT survives
+    nowhere in a response: an occurrence of the root with a path boundary
+    in a position no path rule can rewrite -- inside a web URL, glued
+    onto a preceding word (anything other than start, whitespace, a
+    quote, or opening punctuation) -- has the root text replaced with the
+    marker `<project root>` and every other byte left as written. A path OUTSIDE the root
     keeps only its bare file name (with any line suffix) -- the file name
     is the part an author can act on, and the directory outside the project
     is exactly what this response must not disclose; a token with no file
     name at all becomes ``<outside project>``, a QUOTED path keeps its
-    spaces and reduces whole to its leaf, and an unquoted token crosses a
-    space only when the next piece is path-shaped (a documented grammar
+    spaces and reduces whole to its leaf, and an unquoted token crosses
+    AT MOST ONE space, and only when the next piece is path-shaped and
+    the token is not already a completed path -- a trailing extension or
+    a ``:line`` suffix closes the reference, so ``plan.md draft.md`` and
+    ``x.md:3 draft.md`` keep their second word (a documented grammar
     limit). Quoted scalars decode (JSON, a YAML-ish fallback), scrub, and
     re-encode, so an escaped root with a quote/newline/tab in it scrubs
     and the surrounding syntax -- escapes, URLs, prose -- survives byte for
      byte. Relative spellings are untouched. Known limits: a root path
      spelled with a backslash-escaped space (``proj\ demo``) is not
-     recognized as under-root, and an isolated ``/`` in running text
+     recognized as under-root, an isolated ``/`` in running text
      (arithmetic, a table cell) passes through while a single-segment
-     ``/word`` token (``/verbose``) is still treated as a path. The walk
+     ``/word`` token (``/verbose``) is still treated as a path, and a
+     project root of ``/`` takes the root branch before that
+     isolated-slash rule. The walk
      covers the whole
     payload shape -- dict keys and values, list and tuple elements --
     because a path is a string anywhere; a key whose scrubbed form collides
