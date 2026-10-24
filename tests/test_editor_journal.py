@@ -1133,9 +1133,11 @@ def test_recover_clears_a_plain_file_squatting_on_the_journal_path(tmp_path):
 
 def test_recover_clears_a_dangling_symlink_at_the_journal_path(tmp_path):
     """Same wedge via a dangling symlink: recover removes the LINK
-    itself -- never following it -- and reports it, and the gate reports
-    the project as pending exactly as begin refuses it (the link exists
-    at the journal location even though its target does not)."""
+    itself -- never following it -- and reports it. The gate reports the
+    project as pending and begin refuses it the same way: the link
+    exists at the journal location even though its target does not, so
+    begin points at recover (JournalPending), not at a location
+    escape."""
     ej = _ej()
     root = _project(tmp_path)
     journal = _journal(tmp_path)
@@ -1143,6 +1145,8 @@ def test_recover_clears_a_dangling_symlink_at_the_journal_path(tmp_path):
     _symlink("nowhere", str(journal))
     with pytest.raises(ej.JournalPending):
         ej.refuse_if_pending(root)
+    with pytest.raises(ej.JournalPending):
+        ej.begin(root, _entries(ej))
     assert ej.recover(root) == [ej.JOURNAL_DIR]
     assert not os.path.lexists(journal)
     assert not (tmp_path / "nowhere").exists(), "the link was never followed"
@@ -1424,7 +1428,7 @@ def test_recover_disarms_the_journal_before_the_gc_replays(tmp_path, monkeypatch
     def interrupt(path, *args, **kwargs):
         if os.path.realpath(path) == os.path.realpath(str(journal)) and not failed:
             failed.append(True)
-            (journal / "orig" / "0.bin").unlink()
+            _backup_files(tmp_path)[0].unlink()
             raise OSError("injected cleanup interruption")
         return real_rmtree(path, *args, **kwargs)
 
@@ -1556,7 +1560,7 @@ def test_recover_refuses_a_backup_that_is_a_symlink(tmp_path):
     outside.write_bytes(b"old")
     ej.begin(root, [ej.Entry("a", b"old", b"new")])
     _write(tmp_path, "a", b"new")
-    backup = _journal(tmp_path) / "orig" / "0.bin"
+    backup = _backup_files(tmp_path)[0]
     backup.unlink()
     _symlink(str(outside), str(backup))
     with pytest.raises(ej.JournalCorrupt) as excinfo:
@@ -1576,15 +1580,16 @@ def test_recover_refuses_a_manifest_that_is_a_symlink(tmp_path):
     ej.begin(root, [ej.Entry("a", b"old", b"new")])
     _write(tmp_path, "a", b"new")
     manifest = _journal(tmp_path) / MANIFEST_NAME
-    outside.write_bytes(manifest.read_bytes())
+    manifest_bytes = manifest.read_bytes()
+    outside.write_bytes(manifest_bytes)
     manifest.unlink()
     _symlink(str(outside), str(manifest))
     with pytest.raises(ej.JournalCorrupt):
         ej.recover(root)
     assert _read(tmp_path, "a") == b"new"
-    assert outside.read_bytes() == (
-        tmp_path.parent / f"{tmp_path.name}-manifest"
-    ).read_bytes()
+    assert outside.read_bytes() == manifest_bytes, (
+        "the link's target keeps the manifest's bytes: untouched, not written through"
+    )
     assert _journal(tmp_path).is_dir()
 
 
@@ -1596,7 +1601,7 @@ def test_recover_names_the_entry_when_a_backup_cannot_be_read(tmp_path, monkeypa
     root = _project(tmp_path)
     ej.begin(root, [ej.Entry(P1, OLD1, NEW1)])
     _write(tmp_path, P1, NEW1)
-    backup = str(_journal(tmp_path) / "orig" / "0.bin")
+    backup = str(_backup_files(tmp_path)[0])
     real_open = open
 
     def deny(file, *args, **kwargs):
@@ -1709,3 +1714,135 @@ def test_recover_fsyncs_created_intermediate_directories(tmp_path, monkeypatch):
     assert leaf in fsynced
     assert str(tmp_path / "a") in fsynced
     assert fsynced.index(leaf) < fsynced.index(str(tmp_path / "a"))
+
+
+# --------------------------- review round 9: symlinked-directory fsync,
+# the orig/ directory's identity, a journal symlink to a directory
+
+
+def test_recover_fsyncs_the_real_directory_behind_a_symlinked_parent(
+    tmp_path, monkeypatch
+):
+    """A journaled path restored THROUGH an in-project symlinked
+    directory (linkdir -> realdir): the restored bytes land in realdir,
+    so the durability barrier must fsync realdir. A chain node
+    classified "symlink" and skipped as "not a directory" leaves the
+    entry's real directory unsynced: fsyncing the link's parent
+    persists the link, not the file inside the real directory."""
+    ej = _ej()
+    root = str(tmp_path)
+    realdir = tmp_path / "realdir"
+    realdir.mkdir()
+    (realdir / "a").write_bytes(b"old")
+    _symlink("realdir", str(tmp_path / "linkdir"))
+    ej.begin(root, [ej.Entry("linkdir/a", b"old", b"new")])
+    _write(tmp_path, "linkdir/a", b"new")
+    fsynced: list[str] = []
+    real_fsync = ej._fsync_dir
+
+    def record(path):
+        fsynced.append(os.path.realpath(path))
+        return real_fsync(path)
+
+    monkeypatch.setattr(ej, "_fsync_dir", record)
+    assert ej.recover(root) == ["linkdir/a"]
+    assert (realdir / "a").read_bytes() == b"old"
+    assert str(realdir) in fsynced, (
+        "the directory the restored bytes live in must be fsynced, even "
+        "when the journaled path reaches it through a symlink"
+    )
+
+
+def test_recover_propagates_a_chain_fsync_inspection_error(tmp_path, monkeypatch):
+    """An I/O error inspecting a chain node is not "not a directory":
+    a barrier that cannot see the directory it must fsync cannot
+    promise durability. The error propagates -- and the journal, not
+    yet taken down, stays for the retry."""
+    ej = _ej()
+    root = _project(tmp_path)
+    ej.begin(root, _entries(ej))
+    _apply_save(tmp_path, _entries(ej))
+    blocked = str(tmp_path / "src")
+    real_classify = ej._classify
+
+    def flaky(path):
+        if str(path) == blocked:
+            return "error:injected inspection failure"
+        return real_classify(path)
+
+    monkeypatch.setattr(ej, "_classify", flaky)
+    with pytest.raises(OSError):
+        ej.recover(root)
+    assert _journal(tmp_path).is_dir(), "the journal survives for a retry"
+    assert _read(tmp_path, P1) == OLD1, "the restored bytes are on disk"
+
+
+def test_recover_refuses_a_symlinked_orig_directory(tmp_path):
+    """The leaf backup is lstat'ed, its containing directory is not:
+    orig/ -> a directory OUTSIDE the root makes recovery read backup
+    data the journal never wrote, from a directory the journal does not
+    own. The orig/ directory itself must be a real directory; the
+    refusal names it and nothing is restored."""
+    ej = _ej()
+    root = str(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-origdir"
+    outside.mkdir()
+    ej.begin(root, [ej.Entry("a", b"old", b"new")])
+    _write(tmp_path, "a", b"new")
+    journal = _journal(tmp_path)
+    orig = journal / "orig"
+    real = journal / "orig-real"
+    orig.rename(real)
+    real.rename(outside / "orig")
+    _symlink(str(outside / "orig"), str(orig))
+    with pytest.raises(ej.JournalCorrupt) as excinfo:
+        ej.recover(root)
+    assert "orig" in str(excinfo.value)
+    assert _read(tmp_path, "a") == b"new", "nothing is restored"
+    assert _journal(tmp_path).is_dir()
+    assert sorted(p.read_bytes() for p in _backup_files(tmp_path)) == [b"old"]
+
+
+def test_recover_clears_a_journal_symlink_to_a_directory(tmp_path):
+    """A symlink AT the journal path whose target is a DIRECTORY wedges
+    the project under a refusal regime: pending says "unknown", begin
+    refuses, recover refuses to follow -- forever. The link ITSELF is
+    the squatter (the parent is confined, checked first): recover
+    removes the LINK, never following it, exactly as it removes
+    file/dangling-link squatters, and the target directory and its
+    contents are untouched."""
+    ej = _ej()
+    root = str(tmp_path)
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "keep").write_bytes(b"keep")
+    journal = _journal(tmp_path)
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    _symlink("target", str(journal))
+    assert ej.pending(root) == "unknown"
+    with pytest.raises(ej.JournalPending):
+        ej.begin(root, _entries(ej))
+    assert ej.recover(root) == [ej.JOURNAL_DIR]
+    assert not os.path.lexists(journal)
+    assert target.is_dir()
+    assert (target / "keep").read_bytes() == b"keep"
+    ej.begin(root, _entries(ej))  # the project works again
+
+
+def test_begin_refuses_a_journal_symlink_under_an_escaping_refdes(tmp_path):
+    """Confinement keeps its shape next to the pending refusal: a
+    symlink at the journal path UNDER a `.refdes` that resolves outside
+    the root is refused as a location escape (ValueError), not reported
+    as a pending journal."""
+    ej = _ej()
+    root = str(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-esc9"
+    outside.mkdir()
+    (tmp_path / "realdir").mkdir()
+    _symlink(str(outside), str(tmp_path / ".refdes"))
+    (outside / "editor-transaction").symlink_to(
+        str(tmp_path / "realdir"), target_is_directory=True
+    )
+    with pytest.raises(ValueError):
+        ej.begin(root, [ej.Entry("a", b"old", b"new")])
+    assert (tmp_path / "realdir").is_dir()

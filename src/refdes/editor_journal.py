@@ -42,9 +42,12 @@ Documented limits: checks run before writes, so a *different* process
 swapping a path component between a check and the write it guards is
 outside the threat model (the caller serializes writers); ``begin``
 publishes the journal before its final fsync and withdraws it when that
-fsync fails. Windows device-name and trailing-dot/space rules are
-enforced on every platform, but nothing here is Windows-native tested:
-the Windows behavior is a reading of the rules, not a verified one.
+fsync fails, and a hard kill in the staging phase can leave a
+``.editor-transaction-*`` sibling of the journal behind -- inert (not a
+journal, invisible to pending/recover), and nothing cleans it. Windows
+device-name and trailing-dot/space rules are enforced on every
+platform, but nothing here is Windows-native tested: the Windows
+behavior is a reading of the rules, not a verified one.
 
 Standalone by design: stdlib only, no refdes imports, so the future
 wiring in ``serve/edit.py`` and ``cli.py`` is the only integration point.
@@ -405,12 +408,21 @@ def _read_bytes_strict(path: str) -> bytes:
 
 
 def _read_orig(journal: str, index: int, path: str) -> bytes:
-    """The stored original for one entry: a REGULAR file of the journal
-    (never a symlink to be read through, never a special file), read, or
-    a ``JournalCorrupt`` naming the entry path it belongs to. The
-    journal's bytes are the recovery data; anything the journal did not
-    write as a regular file is not recovery data."""
-    backup = os.path.join(journal, _ORIG_DIR_NAME, f"{index}.bin")
+    """The stored original for one entry: a REGULAR file inside a REAL
+    directory of the journal (never a symlink to be read through, never
+    a special file, and ``orig/`` itself judged too -- a symlinked
+    ``orig/`` reads recovery data out of a directory the journal does
+    not own), read, or a ``JournalCorrupt`` naming what it refuses.
+    The journal's bytes are the recovery data; anything the journal did
+    not write as a regular file is not recovery data."""
+    orig_dir = os.path.join(journal, _ORIG_DIR_NAME)
+    dir_kind = _classify(orig_dir)
+    if dir_kind != "directory":
+        raise JournalCorrupt(
+            f"the journal's backup directory {orig_dir} is not a real "
+            f"directory ({dir_kind}); refusing to read recovery data through it"
+        )
+    backup = os.path.join(orig_dir, f"{index}.bin")
     kind = _classify(backup)
     if kind == "missing":
         raise JournalCorrupt(f"journal is missing the stored original for {path!r}")
@@ -554,11 +566,22 @@ def begin(project_root: str, entries: Sequence[Entry]) -> str:
     a failed begin leaves nothing behind.
     """
     _validate_entries(project_root, entries)
+    journal = _journal_path(project_root)
+    if os.path.islink(journal):
+        # A symlink AT the journal path: begin never follows it. When
+        # its parent resolves inside the root it is a squatter recover
+        # removes -- report it as the pending journal it blocks saves
+        # as, not as a location escape. Under a `.refdes` that resolves
+        # outside the root it is exactly that: refused.
+        if _journal_parent_escapes_root(project_root):
+            raise ValueError(
+                "the journal location (.refdes) resolves outside the project root"
+            )
+        raise JournalPending(pending(project_root) or "unknown")
     if _journal_escapes_root(project_root):
         raise ValueError(
             "the journal location (.refdes) resolves outside the project root"
         )
-    journal = _journal_path(project_root)
     if os.path.lexists(journal):
         raise JournalPending(pending(project_root) or "unknown")
 
@@ -703,10 +726,15 @@ def _fsync_directory_chain(path: str, root_real: str, synced: set[str]) -> None:
     leaf first, each directory at most once per run (one ``synced`` set
     for the whole run). The walk stops at the first directory already
     synced: its own chain walk synced its ancestors. A chain node that
-    is not a directory on disk (the entry's directory was never
-    created: no live state, nothing to make durable) is counted as
-    processed and not fsynced -- the fsync of a missing directory is an
-    ENOENT, not durability.
+    is a symlink is fsynced through the link (``os.open`` follows it to
+    the real directory -- the directory a restored file's bytes
+    actually live in; the link's own parent is in the chain, so the
+    link's existence is durable too) and counted as processed. A node
+    that is neither a directory nor a symlink (never created: no live
+    state, nothing to make durable; a special file: not openable as a
+    directory) is counted as processed and not fsynced. An I/O error
+    classifying a node PROPAGATES: a barrier that cannot see the
+    directory it must fsync cannot promise durability.
     """
     chain: list[str] = []
     current = path
@@ -722,7 +750,10 @@ def _fsync_directory_chain(path: str, root_real: str, synced: set[str]) -> None:
         current = parent
     for directory in chain:
         synced.add(directory)
-        if _classify(directory) == "directory":
+        kind = _classify(directory)
+        if kind.startswith("error:"):
+            raise OSError(f"cannot inspect directory {directory} for fsync: {kind[6:]}")
+        if kind in ("directory", "symlink"):
             _fsync_dir(directory)
 
 
@@ -770,10 +801,11 @@ def recover(project_root: str) -> list[str]:
     included -- before the journal is taken down (DISARM, barrier, GC).
     Restored files get the process's default permissions: the journal
     stores bytes and their hashes, not modes -- bytes are the contract.
-    A non-directory squatter on the journal path (file, symlink) is
-    removed as the squatter it is, when its parent resolves inside the
-    root, and reported. Leaves the journal in place on any failure, so
-    running it again is safe.
+    A squatter on the journal path (file, symlink -- to a directory
+    included, dangling link included) is removed as the squatter it is,
+    THE LINK ITSELF and never its target, when its parent resolves
+    inside the root, and reported. Leaves the journal in place on any
+    failure, so running it again is safe.
     """
     journal = _journal_path(project_root)
     # Confinement BEFORE anything that mutates, and it resolves the
@@ -785,23 +817,19 @@ def recover(project_root: str) -> list[str]:
             "the journal location (.refdes) resolves outside the project "
             "root; refusing to restore through the symlink"
         )
-    if os.path.lexists(journal) and not os.path.isdir(journal):
-        # A non-directory squatter (plain file, symlink -- a dangling one
-        # included) wedges the project: pending() reports "unknown" and
-        # begin refuses, pointing at recover, so recover must clear it.
-        # The link/file ITSELF is removed, never followed, and the parent
-        # is confined (checked above), so nothing outside the root is
-        # touched even when the squatter is a symlink pointing out.
+    if os.path.lexists(journal) and (os.path.islink(journal) or not os.path.isdir(journal)):
+        # A squatter on the journal path (plain file, dangling symlink,
+        # symlink to a directory) wedges the project: pending() reports
+        # "unknown", begin refuses, and a refusal regime here is
+        # permanent -- so recover must clear it. The link/file ITSELF is
+        # removed, never followed, and the parent is confined (checked
+        # above), so nothing outside the root is touched even when the
+        # squatter is a symlink pointing out: os.remove acts on the
+        # final component, never its target chain.
         journal_real = _journal_path(os.path.realpath(project_root))
         os.remove(journal_real)
         _fsync_dir(os.path.dirname(journal_real))
         return [JOURNAL_DIR]
-    if os.path.islink(journal):
-        # A symlink AT the journal path whose target is a directory:
-        # following it is exactly what confinement forbids.
-        raise JournalCorrupt(
-            f"the journal path {journal} is a symlink; refusing to follow it"
-        )
     if not os.path.isdir(journal):
         return []
     manifest = _read_manifest_raw(journal)

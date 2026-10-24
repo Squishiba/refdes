@@ -54,32 +54,32 @@ path rules → `test_begin_rejects_paths_containing_nul_bytes`,
 `test_recover_refuses_malformed_entry_hashes` (3 ids),
 `test_recover_refuses_a_hash_for_a_file_that_never_existed`.
 
-## Rounds (fix commit -> what landed)
+## Rounds (round number -> what landed)
 
-- R1 `98cb7ae`: complete() manifest-first + raises, journal-parent
+- Round 1: complete() manifest-first + raises, journal-parent
   fsyncs everywhere, real fsync errors propagate. 53 tests.
-- R2 `1ae59d8`: unreadable manifest → JournalCorrupt; `_escapes_root`
+- Round 2: unreadable manifest → JournalCorrupt; `_escapes_root`
   for entry paths; begin fsyncs orig/. 58 / full 4468+2s.
-- R3 `27a610f`: recover fsyncs restored parents before the journal
+- Round 3: recover fsyncs restored parents before the journal
   rmtree; complete clears inert debris; strict paths at begin + parser;
   pending "unknown" for journal-path squatters; live-is-directory
   refusal; duplicate manifest paths refused. One round-1 test rewritten
   (allowed). 69 / 4479+2s.
-- R4 `853e519`: `_journal_escapes_root` confinement (begin ValueError,
+- Round 4: `_journal_escapes_root` confinement (begin ValueError,
   recover JournalCorrupt, complete OSError, pending "unknown"); lexists
   for dangling-symlink restores. 71 / 4481+2s.
-- R5 `9009139`: recover clears non-directory squatters (reports
+- Round 5: recover clears non-directory squatters (reports
   [JOURNAL_DIR]); pending/begin lexists; PermissionError swallowed by
   `_fsync_dir` on Windows only; mode contract documented. 74 / 4484+2s.
-- R6 `e4044b3`: confinement BEFORE recover's squatter delete
+- Round 6: confinement BEFORE recover's squatter delete
   (`_journal_parent_escapes_root`); `_NO_MANIFEST` sentinel (parsed
   non-object = corruption, journal kept); begin late-fsync withdrawal;
   journal-internal path refusal; leaf→root fsync chain. 85 / 4495+2s.
 
-## Round 7 (of e4044b3) — phase model + 14 probe findings
+## Round 7 (on round 6's head) — phase model + 14 probe findings
 
 Deep analysis `.scratch/analysis/deep-analysis-pr367.md` + 23 probes
-(baseline on e4044b3: 8 PASS / 15 FAIL). Structure written into the
+(baseline on round 6's head: 8 PASS / 15 FAIL). Structure written into the
 module first (docstring phase model, shared `_disarm_and_gc`, shared
 `_classify`, shared `_namespace_problems`), then one RED test per
 finding (30 new, all confirmed RED first):
@@ -116,10 +116,34 @@ final fsync; withdrawal covers it). Windows name rules are enforced on
 every platform but nothing here is Windows-native tested — the Windows
 behavior is a reading of the rules, not a verified one.
 
+## Round 8 — designer log wording
+
+The designer log claimed 45 functional tests; the frozen set is 44
+functional + stdlib control (collect-only verified); one line fixed.
+
+## Round 9 — durability through symlinked parents; journal-symlink un-wedge
+
+- Chain fsync (RED first): chain nodes classified "symlink" get fsynced
+  through the link (`os.open` follows to the real directory the
+  restored bytes live in; the link's parent is already in the chain);
+  an "error:" classification propagates as OSError.
+- `_read_orig` classifies `orig/` itself: a symlinked/missing backup
+  directory is JournalCorrupt naming it (the leaf lstat never sees the
+  directory behind the link).
+- A journal-path symlink to a directory no longer wedges: recover's
+  squatter branch covers it (the LINK is removed, never followed,
+  target untouched); begin reports a confined journal-path symlink
+  (dangling included) as JournalPending, not as a location escape.
+- Tests: the vacuous manifest-bytes comparison captures the bytes
+  before and compares to them; hard-coded `orig/0.bin` replaced by
+  the structural helper.
+- Docs: hard-kill staging debris (`.editor-transaction-*` siblings)
+  documented as a limit; changelog fragment starts with `- `; no
+  commit SHAs cited in logs.
+
 ## Verification
 
-Probes on this head: PASS P01-P13 and P15-P23; FAIL P14 only (the
-documented limit). Targeted 115 passed; full suite 4525 passed /
-2 skipped; ruff clean on both files (default + `--select E501,I`).
-Frozen designer tests (47) unchanged all rounds; one round-1 test
-rewritten in round 3 (explicitly allowed).
+Probes on this head: PASS P01-P13 and P15-P28 (P24-P28 new this round);
+FAIL P14 only (the documented limit). Targeted 120; full suite 4530 / 2
+skipped; ruff clean (default + `--select E501,I`). Frozen tests (47)
+unchanged all rounds; one round-1 test rewritten in round 3 (allowed).
