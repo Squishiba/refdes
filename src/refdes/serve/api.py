@@ -202,13 +202,22 @@ _FILE_PREFIX = re.compile(r"(?<![A-Za-z0-9_\-])file:", re.IGNORECASE)
 _PIECE = re.compile(r"[^\s:;\"'`\\/]+(?:[\\/][^\s:;\"'`]+)*\.[A-Za-z0-9]+")
 _RUN_END = re.compile(r"[\s`\"'<>]|\Z")
 _SUFFIX = re.compile(r"(:\d+(?::\d+)?)\Z")
+_SUFFIX_HEAD = re.compile(r":\d+(?::\d+)?")
+# A windows-flavored remainder is a path span as long as its last piece
+# is path-shaped (ends in a file extension): `items\reqs.yaml\then`
+# renders `items/reqs.yaml` and leaves `\then` -- the two characters of
+# a `\n`/`\"`-style escape are a word boundary, not a separator.
+_WIN_SPAN = re.compile(r"(?:[^\\/\s]+[\\/]+)*[^\\/\s]*[^\s\\/]\.[A-Za-z0-9]+")
 
 
 def _scrub_rules(root_cmp: str, fold: bool):
     """The per-response scanner rules, compiled once and cached: the
     separator-run root pattern (with the boundary and the consumed
-    sentence period), and the `file:` URI prefix. No filesystem access
-    happens here: the comparison is lexical, on the root as supplied."""
+    sentence period), the `file:` URI prefix, and the root's flavor --
+    Windows-flavored means drive-letter or UNC, derived from the root
+    string alone (so the Windows logic runs on Linux too). No filesystem
+    access happens here: the comparison is lexical, on the root as
+    supplied."""
     key = (root_cmp.casefold() if fold else root_cmp, fold)
     rules = _SCRUB_CACHE.get(key)
     if rules is None:
@@ -230,6 +239,7 @@ def _scrub_rules(root_cmp: str, fold: bool):
             root_pat,
             _FILE_PREFIX,
             root_cmp.startswith("//?/"),
+            bool(_DRIVE_ROOT.match(root_cmp)) or root_cmp.startswith("//"),
         )
         _SCRUB_CACHE[key] = rules
     return rules
@@ -252,15 +262,36 @@ def _leaf(body: str) -> str:
     return norm.rpartition("/")[2] or "<outside project>"
 
 
-def _render_relative(rest: str, pos: int, end: int, root_is_slash: bool):
-    """Under-root render of a scrubbed span: the remainder AS WRITTEN with
-    its line suffix riding along, its trailing punctuation re-emitted
-    after it, and the whole run consumed (the suffix and punctuation
-    travel INSIDE the replacement, never back through the scan)."""
+def _render_relative(rest: str, pos: int, end: int, root_is_slash: bool,
+                     windows: bool):
+    """Under-root render of a scrubbed span: the remainder with its line
+    suffix riding along, its trailing punctuation re-emitted after it,
+    and the whole run consumed (the suffix and punctuation travel INSIDE
+    the replacement, never back through the scan). A WINDOWS-flavored
+    root renders the remainder with forward slashes -- the same spelling
+    the response's `path` field uses, on every platform -- up to the
+    first escape-like tail: a separator run followed by a word with no
+    file extension ends the path span BEFORE it, so the two characters
+    of a `\\n`/`\\"` escape survive intact (`items\\reqs.yaml\\nthen`
+    renders `items/reqs.yaml` and leaves `\\nthen`); text after the path
+    span is re-emitted as written. A posix root keeps backslashes as
+    file-name characters (the documented POLICY case), so there its
+    remainder stays exactly as written."""
     if root_is_slash:
         rest = rest.lstrip("/\\")
         if not rest:
             return "<outside project>", end - pos
+    if windows:
+        span = _WIN_SPAN.match(rest)
+        if span is not None:
+            body = re.sub(_SEPS, "/", span.group(0))
+            tail = rest[span.end():]
+            found = _SUFFIX_HEAD.match(tail)
+            suffix = ""
+            if found is not None:
+                suffix = found.group(0)
+                tail = tail[found.end():]
+            return body + suffix + tail, end - pos
     body, punct = _strip_trailing(rest)
     found = _SUFFIX.search(body)
     if found:
@@ -269,7 +300,7 @@ def _render_relative(rest: str, pos: int, end: int, root_is_slash: bool):
     return body + punct, end - pos
 
 
-def _classify(text: str, pos: int, root_cmp: str, root_pat):
+def _classify(text: str, pos: int, root_cmp: str, root_pat, windows: bool):
     """The span starting at ``pos`` -> (rendered, characters consumed);
     consumed 0 means the position is not the start of a path span."""
     if root_pat is not None:
@@ -278,7 +309,7 @@ def _classify(text: str, pos: int, root_cmp: str, root_pat):
             end = _run_end(text, match.end())
             if match.group("sw") is not None:
                 return _render_relative(
-                    text[match.end():end], pos, end, root_cmp == "/"
+                    text[match.end():end], pos, end, root_cmp == "/", windows
                 )
             tail = text[match.end():end]
             found = _SUFFIX.search(tail)
@@ -289,7 +320,7 @@ def _classify(text: str, pos: int, root_cmp: str, root_pat):
             return ".", match.end() - pos
     end = _run_end(text, pos)
     if root_cmp == "/":
-        return _render_relative(text[pos:end], pos, end, True)
+        return _render_relative(text[pos:end], pos, end, True, windows)
     piece = _PIECE.match(text, end + 1)
     while end < len(text) and text[end] == " " and piece is not None:
         end = end + 1 + piece.end()
@@ -369,7 +400,7 @@ def _scrub_scalar(quoted: str, root_cmp: str, fold: bool, rules) -> str:
 
 
 def _scan(text: str, root_cmp: str, fold: bool, rules) -> str:
-    root_pat, file_prefix, long_root = rules
+    root_pat, file_prefix, long_root, windows = rules
     out = []
     i = 0
     n = len(text)
@@ -425,14 +456,14 @@ def _scan(text: str, root_cmp: str, fold: bool, rules) -> str:
             landed = False
             for pos in candidates:
                 if root_pat is not None and root_pat.match(text, pos):
-                    rendered, consumed = _classify(text, pos, root_cmp, root_pat)
+                    rendered, consumed = _classify(text, pos, root_cmp, root_pat, windows)
                     out.append(rendered)
                     i = pos + consumed
                     landed = True
                     break
             if not landed:
                 for pos in candidates:
-                    rendered, consumed = _classify(text, pos, root_cmp, root_pat)
+                    rendered, consumed = _classify(text, pos, root_cmp, root_pat, windows)
                     if consumed:
                         out.append(rendered)
                         i = pos + consumed
@@ -451,7 +482,7 @@ def _scan(text: str, root_cmp: str, fold: bool, rules) -> str:
         elif ch.isascii() and ch.isalpha() and _DRIVE_START.match(text, i):
             span_at = i
         if span_at is not None:
-            rendered, consumed = _classify(text, span_at, root_cmp, root_pat)
+            rendered, consumed = _classify(text, span_at, root_cmp, root_pat, windows)
             if consumed:
                 out.append(rendered)
                 i = span_at + consumed

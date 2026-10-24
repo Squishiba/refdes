@@ -16,29 +16,33 @@
   when a line suffix follows; the root itself — with or without a
   trailing separator — becomes `.`), in every separator spelling —
   including the doubled-backslash spelling the value quoting writes into
-   file bytes and from there into the diff text, and a local `file:` URI
-   spelling — any casing of the scheme, 0 to 3 slashes, an optional
-   `localhost` authority, prefix removed together with the path (a
-   dotted authority is a web URL and passes through) — and a
-   drive-letter root matches
-   case-insensitively; the root is matched literally, so a root
-   containing spaces (`C:\Users\Jane Doe\...`) is no harder to scrub
-   than any other. A path outside the project root is reduced to its
-   bare file name — the leaf is the part an author can act on, the
-   directories outside the project are the leak. The rewrite is a
-   single scan of each string — quoted spans (a file's text quoted
-   into a conflict message, source lines quoted into a diff) are
-   decoded, scrubbed inside, and re-emitted with their quoting syntax
-   kept, so an outside path with spaces inside quotes is reduced
-   whole; a bare outside path containing spaces is reduced whole when
-   the following words look like path components, and a bare token
-   that does not is shortened to its last word — a documented limit
-   shared with prose like `pattern /a+/g`, which reads as a path. A
-   root that ends a sentence keeps its one period. Relative spellings
-   and non-path text pass through unchanged: the rewrite consumes a
-   path and its joining separator and never touches the text after
-   it, so URLs keep every slash and a pasted absolute path is
-   reduced, not re-emitted with its slashes collapsed; two payload
-   keys that scrub to the same string are distinguished with `#2`,
-   `#3` suffixes; reads, uploads and the patch contract are
-   unchanged.
+  file bytes and from there into the diff text (under a Windows-flavored
+  root — a drive letter or a UNC share — the remainder of the path
+  renders with forward slashes, the same spelling the `path` field
+  uses, on every platform; escaped text after the path, like a `\n` at
+  its end, stays as written), and a local `file:` URI spelling — any
+  casing of the scheme, 0 to 3 slashes, an optional `localhost`
+  authority, prefix removed together with the path (a dotted authority
+  is a web URL and passes through) — and a drive-letter root matches
+  case-insensitively; the root is matched literally, so a root
+  containing spaces (`C:\Users\Jane Doe\...`) is no harder to scrub
+  than any other. A path outside the project root is reduced to its
+  bare file name — the leaf is the part an author can act on, the
+  directories outside the project are the leak. The rewrite is a single
+  scan of each string — quoted spans (a file's text quoted into a
+  conflict message, source lines quoted into a diff) are decoded,
+  scrubbed inside, and re-emitted with their quoting syntax kept, so an
+  outside path with spaces inside quotes is reduced whole; a bare
+  outside path containing spaces is reduced whole when the following
+  words look like path components, and a bare token that does not is
+  shortened to its last word — a documented limit shared with prose
+  like `pattern /a+/g`, which reads as a path. A root that ends a
+  sentence keeps its one period. Relative spellings and non-path text
+  pass through unchanged: the rewrite consumes a path and its joining
+  separator and touches nothing after the path span (the one thing it
+  rewrites inside the span is the separators of a Windows-flavored
+  root's remainder), so URLs keep every slash and a pasted absolute
+  path is reduced, not re-emitted with its slashes collapsed; two
+  payload keys that scrub to the same string are distinguished with
+  `#2`, `#3` suffixes; reads, uploads and the patch contract are
+  unchanged.

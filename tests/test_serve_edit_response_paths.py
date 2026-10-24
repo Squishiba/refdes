@@ -456,14 +456,16 @@ def test_the_helper_relativeizes_the_json_escaped_windows_spelling():
 def test_the_helper_relativeizes_the_escaped_spelling_with_doubled_continuation():
     # The Windows CI shape on any platform: the root is native-backslash,
     # the value JSON-escaped on the way into the file. The first pass
-    # consumes the root and the separator run that follows it and leaves
-    # the continuation exactly as written -- escaped text stays escaped
-    # (round-4 design: nothing after the root is rewritten, so a `\\` in
-    # the continuation is no one's business to collapse).
+    # consumes the root and the separator run that follows it; the
+    # continuation renders as the forward-slash spelling (round-6 rule:
+    # a Windows-flavored root's remainder renders like the response's
+    # `path` field, on every platform -- the doubled-backslash JSON
+    # notation in the input is a rendering of the same separators, not
+    # a second path).
     root = "C:\\Users\\x\\proj"
     escaped = json.dumps(f"conflict: {root}\\items\\reqs.yaml changed")
     got = api_mod._relative_paths_in_text(escaped, root)
-    assert got == '"conflict: items\\\\reqs.yaml changed"', got
+    assert got == '"conflict: items/reqs.yaml changed"', got
     assert "C:" not in got, got
 
 
@@ -551,18 +553,20 @@ def test_the_helper_relativeizes_a_posix_root_with_spaces():
 
 
 def test_the_helper_relativeizes_a_windows_root_with_spaces():
-    # The continuation is left exactly as written (round-4 design): the
-    # backslashes after the root stay the file's own bytes.
+    # The remainder of a Windows-flavored root renders with forward
+    # slashes (round-6 rule) -- the backslashes after the root are the
+    # root's own separators extended into the remainder, the same path
+    # the response's `path` field spells with '/'.
     root = "C:\\Users\\Jane Doe\\proj"
     assert (
         api_mod._relative_paths_in_text(
             "at C:\\Users\\Jane Doe\\proj\\items\\a.md:3 now", root
         )
-        == "at items\\a.md:3 now"
+        == "at items/a.md:3 now"
     )
     assert (
         api_mod._relative_paths_in_text("at c:\\users\\jane doe\\PROJ\\items\\a.md now", root)
-        == "at items\\a.md now"
+        == "at items/a.md now"
     )
 
 
@@ -648,8 +652,8 @@ def test_the_helper_matches_the_windows_root_at_any_casing():
     )
     assert (
         api_mod._relative_paths_in_text("see C:/USERS/JANE DOE/PROJ\\items\\x.yaml", root)
-        == "see items\\x.yaml"
-    )  # continuation as written (round-4 design)
+        == "see items/x.yaml"
+    )  # mixed separators fold to the forward-slash spelling (round-6 rule)
     escaped = json.dumps("see c:\\users\\jane doe\\proj/items/x.yaml:2")
     assert api_mod._relative_paths_in_text(escaped, root) == '"see items/x.yaml:2"'
 
@@ -957,6 +961,91 @@ def test_response_paths_localhost_authority_is_a_local_file_uri(root):
     # path scrubs like any bare path.
     text = "file://localhost/" + root.lstrip("/") + "/items/a.md"
     assert api_mod._relative_paths_in_text(text, root) == "items/a.md"
+
+
+WIN = "C:\\Users\\x\\proj"
+WINUNC = "\\\\server\\share\\proj"
+
+
+@pytest.mark.parametrize(
+    "text,root,expected",
+    [
+        # The four Windows CI failures (run 40054224590), as Linux-run
+        # shapes: a Windows-FLAVORED root (drive letter / UNC in the root
+        # string) must render the under-root remainder with forward
+        # slashes, as the service's `path` field does on every platform.
+        (
+            "yaml-item REQ-001: set_field status at C:\\Users\\x\\proj\\items\\reqs.yaml:7 [238:246]",
+            WIN,
+            "yaml-item REQ-001: set_field status at items/reqs.yaml:7 [238:246]",
+        ),
+        (
+            "conflict: C:\\Users\\x\\proj\\items\\reqs.yaml changed since this edit",
+            WIN,
+            "conflict: items/reqs.yaml changed since this edit",
+        ),
+        (
+            "created: REQ-011 (requirement) in C:\\Users\\x\\proj\\items\\reqs.yaml",
+            WIN,
+            "created: REQ-011 (requirement) in items/reqs.yaml",
+        ),
+        (
+            "See C:\\Users\\x\\proj\\items\\reqs.yaml\\nthen \"quoted\" "
+            "and https://example.org/a//b then C:\\Users\\x\\proj\\secret\\x.md:4",
+            WIN,
+            "See items/reqs.yaml\\nthen \"quoted\" and https://example.org/a//b "
+            "then secret/x.md:4",
+        ),
+        # the rest of the windows-flavored matrix
+        ("at C:\\Users\\x\\proj\\items\\reqs.yaml:7:2", WIN, "at items/reqs.yaml:7:2"),
+        # A YAML-domain scalar with single backslashes: the YAML decoder
+        # owns the escapes and legitimately reads `\r` out of `\reqs` as
+        # a carriage return BEFORE the scan sees the text, so the span
+        # ends at the name. The root is still scrubbed -- the safety
+        # property holds; the rendering degrades to what the decoder
+        # left. JSON is the payload's actual domain (cells above).
+        ('"C:\\Users\\x\\proj\\items\\reqs.yaml"', WIN, '"items\\reqs.yaml"'),
+        # JSON-doubled: what a Windows path looks like inside a JSON string
+        ('"C:\\\\Users\\\\x\\\\proj\\\\items\\\\reqs.yaml"', WIN, '"items/reqs.yaml"'),
+        # escape-adjacent, in the JSON payload shape the CI responses
+        # actually carry: a real newline / quote follows the path, and
+        # the re-encode re-escapes them into the two-character notation
+        ("C:\\Users\\x\\proj\\items\\reqs.yaml\nthen x", WIN, "items/reqs.yaml\nthen x"),
+        ('C:\\Users\\x\\proj\\items\\reqs.yaml" end', WIN, 'items/reqs.yaml" end'),
+        # mixed separators inside one path
+        ("at C:\\Users/x\\proj\\items\\reqs.yaml", WIN, "at items/reqs.yaml"),
+        # UNC root, native separators
+        ("at \\\\server\\share\\proj\\items\\a.md", WINUNC, "at items/a.md"),
+        # trailing sentence period
+        ("at C:\\Users\\x\\proj\\items\\reqs.yaml.", WIN, "at items/reqs.yaml."),
+        # drive-letter case folding, native separators
+        ("at c:\\users\\x\\proj\\items\\a.md", WIN, "at items/a.md"),
+    ],
+    ids=[
+        "applied-suffix",
+        "conflict",
+        "created",
+        "quoted-source-escape",
+        "line-col",
+        "quoted",
+        "json-doubled",
+        "escape-n",
+        "escape-quote",
+        "mixed-separators",
+        "unc",
+        "sentence-period",
+        "fold",
+    ],
+)
+def test_response_paths_windows_root_renders_forward_slashes(text, root, expected):
+    assert api_mod._relative_paths_in_text(text, root) == expected
+
+
+def test_response_paths_posix_root_keeps_backslashes_as_name_characters():
+    # A posix root is the POLICY documented case: a backslash inside a
+    # posix file name is a name character, not a separator, so the
+    # remainder stays as written.
+    assert api_mod._relative_paths_in_text(P + "/items/a\\b.md", P) == "items/a\\b.md"
 
 
 @pytest.mark.parametrize("status", [200, 400, 403, 409, 422])
