@@ -1,0 +1,9 @@
+{
+  "id": "refdes-worker-permissions",
+  "name": "refdes worker permissions",
+  "description": "Auto-approves OpenCode workers' external_directory requests only when the agent is dispatched by an allowlisted parent (or titled 'Review PR ') and every request pattern is absolute, has no '..', uses no glob metacharacter beyond a single final '*' (patterns with other metacharacters are never approved), sits inside one of the three allowlisted roots, and - for '<dir>/*' - has no direct child symlink escaping the roots; everything else stays pending.",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.11.2"
+  }
+}

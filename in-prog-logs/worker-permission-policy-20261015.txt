@@ -1,0 +1,148 @@
+CURRENT STATE (2026-10-19): round 5 is the latest round below; it supersedes all earlier test counts and notes.
+Task: reduce repeated external_directory approval prompts from Sol's Qwen
+refdes fix workers (PROGRESS.md row "Automatic review of Sol Qwen
+external-directory permissions"). Branch fix/worker-permission-policy-20261015,
+worktree-only. Finished: plugin + tests + docs committed, PR open. NOT
+deployed, NOT merged.
+
+Progress:
+
+1. Verified the config route is unsafe, per instruction:
+   - Installed opencode 1.18.32; docs (opencode.ai/docs/permissions) confirm
+     `external_directory` gates every tool touching external paths
+     (read/edit/glob/grep/bash) and `edit` deny constrains only the file
+     tools -- NOT bash redirections, `sed -i`, Python writes. A project
+     `opencode.json` rule that allows the shared PROGRESS.md directory scope
+     therefore grants bash write access to the main checkout. REJECTED;
+     repo opencode.json left untouched (its existing rm/tmp denies stay).
+   - Reproduced the worker pain with a controlled probe (`opencode run
+     --pure --dir <worktree> -m opencode-go/claude-haiku-5-5`): reading
+     /home/jorb/work/refdes/src/refdes/model.py emitted
+     `permission requested: external_directory (...); auto-rejecting`
+     (headless auto-reject; in the TUI/Paseo this is the blocking prompt).
+     Bash `wc -l .../PROGRESS.md` runs under the current config only because
+     bash "*" is already allow -- confirming read/write cannot be split by
+     config for bash. Probe logs: .scratch/permprobe/.
+
+2. Implemented tools/paseo-worker-permissions/ (server-only Paseo plugin,
+   scaffolded via `paseo plugin init`, SDK @getpaseo/plugin 0.11.2 pinned to
+   daemon 0.11.2):
+   - shared/classifier.ts: pure fail-closed classifier. Gates: agent
+     provider "opencode", request provider "opencode", parentAgentId ==
+     Sol dispatcher d86b9967-5a0c-41e5-8635-fca6170fdeaa, kind "tool", name
+     "external_directory". Allow only (a) metadata filepath/file/path string
+     (incl. nested input) EXACTLY /home/jorb/work/refdes/.scratch/PROGRESS.md
+     (globs rejected), or (b) command text (input.command / metadata
+     command|cmd|shellCommand, incl. nested) matching a character allowlist
+     that excludes all shell metachars/quotes/globs/newlines, program exactly
+     cat|head|rg, per-program flag allowlists (rg --pre/-f/--config/
+     --hostname-bin rejected), every path argument under
+     /home/jorb/work/refdes/in-prog-logs/ (root ok) or the exact progress
+     file, no ".." segments, rg requires pattern+explicit path. Everything
+     else pending; nothing auto-denied.
+   - index.server.ts: server.on("agent.permission_requested") per the
+     documented hook API (paseo.sh/docs/plugins/reference.md); answers with
+     paseo.agents.ref(id).respondToPermission({requestId, behavior: "allow"})
+     on allow; human wins races (failure logged).
+   - Payload sufficiency: verified in the RUNNING daemon 0.11.2
+     (@getpaseo/server providers/opencode-agent.js) that permission.asked
+     maps to request {name: <permission>, kind: "tool", input: {patterns,
+     metadata, tool, command}} -- OpenCode raw metadata (carries the file
+     tool's filepath) and parsed command text reach the hook; hook agent
+     carries parentAgentId (documented PluginHookAgent). Classifier fails
+     closed if a payload ever lacks these.
+   - README.md: policy table, test list, exact install/reload/logs/remove
+     commands, known limits. NOT installed on any daemon; global
+     opencode.json and Claude's /home/jorb/work/paseo-pr-review-plugin
+     untouched.
+
+3. Verification: `npm run typecheck` (tsc --noEmit) clean; `npm test`
+   17/17 pass (positives: exact-file read/edit incl. nested metadata,
+   cat/head/rg evidence incl. numeric flags, -e pattern, progress file as
+   rg path arg, nested command; negatives: null/foreign parent, other
+   providers/permissions/kinds, missing metadata, non-progress filepaths,
+   glob filepath, redirection/pipe/chain/$()/backtick/newline/&, quotes,
+   bash -c/env wrappers, exec flags, --help, head -n -5, out-of-root paths,
+   ".." traversal, no-path invocations).
+
+Difficulties: one real grammar bug caught by tests (rg -e PATTERN path:
+all positionals are paths when pattern came from -e) -- fixed; Node 22
+native TS type-stripping runs the node--test files directly (no loader
+needed). Shared PROGRESS.md row edit was denied by policy (orchestrator
+owns it) -- row text supplied in the final report instead.
+
+Limits reported: hard-coded Sol parent id (one-line edit if it rotates);
+no read/write split is expressible in opencode.json for bash, so config was
+NOT the vehicle; plugin install is a human act (pluginsEnabled switch,
+Settings -> Plugins).
+
+FIX ROUND (2026-10-18, security review of this PR):
+The review found the classifier decided on metadata (exact filepath,
+command text) while ignoring request.input.patterns -- the scope actually
+released on allow. A metadata filepath equal to the exact PROGRESS.md file
+could approve a wildcard directory request (.scratch/*); safe command text
+same. Fixed by making the scope the whole policy:
+
+- classifier.ts rewritten: gates = provider/kind/name, identity
+  (parentAgentId in file-backed allowlist, or title starts "Review PR " --
+  title verified present on hook agent payload, daemon
+  plugins/lifecycle/index.js), and scope: patterns must be a non-empty
+  string array, every entry absolute, no ".." segment, inside one of three
+  roots (this project's worktrees 16msma8v, the checkout, venv-refdes) at a
+  segment boundary. ALL patterns must pass; fail-closed on everything else.
+  Metadata cases retired: root allowlist subsumes the progress-file case;
+  command text is no longer an approval key (case 2 kept only as "patterns
+  pass"), so fewer approved shapes (exactly one).
+- Parents from ~/.paseo/plugin-settings/refdes-worker-permissions/parents.json
+  (README documents; env REFDES_WORKER_PERMISSIONS_PARENTS_FILE / PASEO_HOME
+  overrides; absent/malformed = empty list = nothing approved). Claude
+  f3993852... primary, Sol d86b9967... backup; parents.example.json ships.
+- Adapter re-verified in the INSTALLED daemon (opencode-agent.js,
+  appendOpenCodePermissionAsked): input = {patterns, metadata, tool,
+  command}; patterns is the granted scope, omitted when empty.
+- Tests first: new suite red on old head (7 failures incl. the
+  .scratch/*-with-progress-metadata headline), 16/16 green + typecheck on
+  Node 22.6+ (node --test TS stripping; engines field added).
+- README rewritten (policy table, config, why-scope, limits); install steps
+  unchanged, marked human act.
+
+Status: done, pushed to the branch, NOT merged, NOT installed.
+
+REVIEW ROUND 2 (2026-10-18, chunk-2 lows, all in tools/paseo-worker-permissions):
+- paseo-plugin.json description rewritten to the real contract (scope gate
+  + parents allowlist + reviewer title); matched README wording.
+- classifier.ts patternScope now uses the passed policy.roots (was
+  hard-coded defaults); "strictly inside" comment fixed to "at or inside";
+  new test flips decisions both ways under custom roots.
+- Removed unused test helpers (decide, pending).
+- 17/17 node --test + tsc --noEmit clean (Node 22). PR body test count
+  updated 16/16 -> 17/17. Pushed; not merged, not installed.
+
+REVIEW ROUND 3 (2026-10-18): later rounds supersede the older test counts
+and the Sol-id note above (parents now come from parents.json). Security:
+patternScope rejects glob metacharacters other than * (probes
+"[.][.]/etc/passwd", "{..,x}/y" were lexical-gate escapes); symlinks are
+resolved via an injectable PathResolver (index.server.ts: realpathSync),
+resolved prefix must stay inside realpath'd roots, resolver failure ->
+pending. engines >=22.18.0 (flag-free TS stripping), zod dep dropped,
+lock regenerated, *.test.ts excluded from files. README: worktrees-root
+and title-prefix design stated plainly, anchor fixed, race limit added.
+20/20 node --test + tsc clean. Pushed; not merged, not installed.
+
+REVIEW ROUND 3b (2026-10-18): probe review found backslash and $ passing
+the metacharacter rejection; added \ $ " ' ; to the rejected set (round-3
+probe list plus these), with per-character loop assertions and the
+"..\/etc" / "a\b" / "$HOME/x" probes. 20/20 node --test, tsc clean.
+Pushed; not merged, not installed.
+
+ROUND 5 (2026-10-18/19, closing the chunk-3 P1 in code):
+wildcards narrowed to a final '*' segment only (**, mid-path *, a*b ->
+pending); for <dir>/* the classifier asks the resolver
+childSymlinkEscapes(dir, roots) - the fs one lists dir (readdir+lstat,
+>5000 -> too-many -> pending), realpath's each symlink child, and
+reports an escape when a target leaves the roots; missing dir -> clear,
+any other fs error -> pending. Identity default cannot answer wildcards
+(pending); index.server.ts passes fs-resolver.ts. Docs/plugin.json/
+README updated to the new truth; round-4 'wildcards may match symlinked
+children' sentences removed. 25/25 node --test (incl. a real-fs probe
+with a temp dir + real link -> /etc under ./.scratch/) + tsc clean.
