@@ -117,7 +117,7 @@ the suffix riding; outside reduces the whole token (plus path-shaped
 space-joined pieces) to its leaf, `<outside project>` with none. Quoted
 scalars decode (JSON, YAML-fallback incl. `\xHH`), scrub, re-encode;
 unchanged content re-emits the original bytes. Replacements are never
-re-scanned (this is what fixes quoted-child-* and the HIGH URI case).
+re-scanned (fixes quoted-child-* and the HIGH URI case).
 
 Result: probe CORE FAIL = [] (154 PASS; baseline 9 FAILs all fixed:
 outside-space-quoted/-root, json-root-quote/newline/tab,
