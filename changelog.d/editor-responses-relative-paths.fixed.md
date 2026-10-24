@@ -14,12 +14,13 @@
   well as bare text; a Windows-flavored root (drive letter, UNC) renders
   its whole remainder with forward slashes — the `path` field's spelling,
   on every platform — case-insensitively, spaces included; a local
-  `file:` URI goes with its prefix. A path outside the root is reduced to
-  its bare file name: the leaf is the part an author can act on, the
-  directories outside the project are the leak. Known limits of the path
-  reader: dot-segments, percent-encoding, 8.3 short names, and long-path
-  aliases are not recognized; a root glued inside a web URL or behind a
-  preceding word is left as written; path-shaped prose (a regex, a
-  `/verbose` switch) is shortened like a path; text after a path span is
-  re-emitted byte for byte; keys that scrub alike get `#2`, `#3` suffixes.
-  Reads, uploads, and the patch contract: unchanged.
+   `file:` URI goes with its prefix. Outside the root only the bare file
+   name survives — the directories outside the project are the leak. Known
+   limits of the path reader: dot-segments, percent-encoding, 8.3 short
+   names, long-path aliases, and escaped-space roots (`proj\ demo`) are
+   not recognized; a root glued in a web URL or behind a preceding word
+   is left as written; path-shaped prose (a regex, a `/verbose` switch)
+   is shortened while an isolated `/` (arithmetic, a table cell) is left
+   alone; text after a path span is re-emitted byte for byte; alike keys
+   get `#2`, `#3` suffixes. Reads, uploads, and the patch contract:
+   unchanged.

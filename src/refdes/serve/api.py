@@ -365,6 +365,12 @@ def _classify(text: str, pos: int, root_cmp: str, root_pat, windows: bool):
     end = _run_end(text, pos)
     if root_cmp == "/":
         return _render_relative(text[pos:end], pos, end, True, windows)
+    head, _head_punct = _strip_trailing(text[pos:end])
+    if head == "/" and (pos, end) != (0, len(text)):
+        # A `/` standing alone in running text (arithmetic, a table cell)
+        # is prose, not a path -- it passes through. The one exception is
+        # the whole value being exactly `/`, which stays a path below.
+        return "", 0
     end, cross = _extend_over_space(text, end)
     token, punct = _strip_trailing(text[pos:end])
     found = _SUFFIX.search(token)
@@ -536,7 +542,7 @@ def _scan(text: str, root_cmp: str, fold: bool, rules) -> str:
 
 
 def _relative_paths(value, root: str):
-    """Every string in a response payload, with the project root rewritten away.
+    r"""Every string in a response payload, with the project root rewritten away.
 
     A path under ``root`` becomes its project-relative spelling. For a
     posix root the remainder of the path is left exactly as written
@@ -566,7 +572,12 @@ def _relative_paths(value, root: str):
     limit). Quoted scalars decode (JSON, a YAML-ish fallback), scrub, and
     re-encode, so an escaped root with a quote/newline/tab in it scrubs
     and the surrounding syntax -- escapes, URLs, prose -- survives byte for
-    byte. Relative spellings are untouched. The walk covers the whole
+     byte. Relative spellings are untouched. Known limits: a root path
+     spelled with a backslash-escaped space (``proj\ demo``) is not
+     recognized as under-root, and an isolated ``/`` in running text
+     (arithmetic, a table cell) passes through while a single-segment
+     ``/word`` token (``/verbose``) is still treated as a path. The walk
+     covers the whole
     payload shape -- dict keys and values, list and tuple elements --
     because a path is a string anywhere; a key whose scrubbed form collides
     with one already taken gets a ``#2``/``#3`` suffix, so no record is

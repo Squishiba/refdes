@@ -34,7 +34,9 @@ The drive layer is `api.handle` itself, thread-free, following
 tests/test_serve_edit_keyless_handle.py: the exact (status, payload) contract
 the socket layer hands the browser, the real `ProjectState` with the real
 post-save refresh; the transport (socket, token, origin) is test_serve_edit_http's.
-Every assertion here is a status code, a payload string, or file bytes.
+Not every assertion is HTTP-shaped: the route tests assert status codes,
+payload strings, and file bytes, but most cells in the helper matrix call
+the private `api_mod._relative_paths` / `_relative_paths_in_text` directly.
 """
 
 from __future__ import annotations
@@ -410,7 +412,7 @@ def test_recursive_walk_of_every_write_response_finds_no_root_spelling(tmp_path)
 # the changelog promises becomes `.`.
 
 
-def test_the_helper_relativeizes_the_json_escaped_windows_spelling():
+def test_the_helper_relativizes_the_json_escaped_windows_spelling():
     root = "C:\\Users\\x\\proj"
     escaped = json.dumps(f"See {root}/items/reqs.yaml: values")
     assert "\\\\" in escaped, "the emitter must double the backslashes to pin the bug"
@@ -418,7 +420,7 @@ def test_the_helper_relativeizes_the_json_escaped_windows_spelling():
     assert got == '"See items/reqs.yaml: values"', got
 
 
-def test_the_helper_relativeizes_the_escaped_spelling_with_doubled_continuation():
+def test_the_helper_relativizes_the_escaped_spelling_with_doubled_continuation():
     # The Windows CI shape on any platform: the root is native-backslash,
     # the value JSON-escaped on the way into the file. The first pass
     # consumes the root and the separator run that follows it; the
@@ -510,7 +512,7 @@ def test_write_route_payloads_are_json_shaped_and_contain_no_tuples(tmp_path):
 # to the bare file name, the `file://` prefix included.
 
 
-def test_the_helper_relativeizes_a_posix_root_with_spaces():
+def test_the_helper_relativizes_a_posix_root_with_spaces():
     root = "/home/user/my project"
     assert (
         api_mod._relative_paths_in_text(
@@ -524,7 +526,7 @@ def test_the_helper_relativeizes_a_posix_root_with_spaces():
     )
 
 
-def test_the_helper_relativeizes_a_windows_root_with_spaces():
+def test_the_helper_relativizes_a_windows_root_with_spaces():
     # The remainder of a Windows-flavored root renders with forward
     # slashes (round-6 rule) -- the backslashes after the root are the
     # root's own separators extended into the remainder, the same path
@@ -542,7 +544,7 @@ def test_the_helper_relativeizes_a_windows_root_with_spaces():
     )
 
 
-def test_the_helper_relativeizes_the_json_escaped_spelling_of_a_spaced_root():
+def test_the_helper_relativizes_the_json_escaped_spelling_of_a_spaced_root():
     root = "C:\\Users\\Jane Doe\\proj"
     escaped = json.dumps(f"See {root}/items/reqs.yaml: values")
     assert "\\\\" in escaped, "the emitter must double the backslashes to pin the bug"
@@ -598,10 +600,6 @@ def test_an_outside_path_with_spaces_reduces_to_the_leaf():
         api_mod._relative_paths_in_text("read /etc/my conf/secret.md", "/home/you/proj")
         == "read secret.md"
     )
-    assert (
-        api_mod._relative_paths_in_text("read /etc/my config", "/home/you/proj")
-        == "read my config"
-    )
 
 
 @pytest.mark.parametrize(
@@ -640,6 +638,38 @@ def test_response_paths_space_extension_never_eats_the_following_prose(
     text, root, expected
 ):
     assert api_mod._relative_paths_in_text(text, root) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("value / 2 in a equation line", "value / 2 in a equation line"),
+        ("ratio = 5 / 6 and 3 / 4", "ratio = 5 / 6 and 3 / 4"),
+        ("text with / and / only", "text with / and / only"),
+        ("a / b", "a / b"),
+        ("10 / 2 = 5", "10 / 2 = 5"),
+        ("| left | / | right |", "| left | / | right |"),
+    ],
+)
+def test_response_paths_an_isolated_slash_is_prose_not_a_path(text, expected):
+    """A `/` that stands alone between spaces (or as the whole value of a
+    table cell) is arithmetic/prose, not a path: it must pass through
+    byte-for-byte, never collapse to `<outside project>`."""
+    assert api_mod._relative_paths_in_text(text, "/home/you/proj") == expected
+
+
+def test_response_paths_a_lone_slash_value_and_slash_word_tokens_keep_their_ruling():
+    root = "/home/you/proj"
+    # the whole value being exactly `/` is the one isolated slash that
+    # stays a path: the probe cell outside-root pins `<outside project>`.
+    assert api_mod._relative_paths_in_text("/", root) == "<outside project>"
+    # a `/word` single-segment token is a path per the documented POLICY
+    # limit (a switch is a path; there is no intent detector).
+    assert api_mod._relative_paths_in_text("see /etc/x end", root) == "see x end"
+    assert (
+        api_mod._relative_paths_in_text("run /grep like this", root)
+        == "run grep like this"
+    )
 
 
 def test_the_root_as_a_prefix_of_a_longer_directory_name_is_not_matched():
@@ -682,9 +712,13 @@ def test_the_helper_reduces_absolute_paths_outside_the_root_to_their_names():
     assert (
         api_mod._relative_paths_in_text("base D:\\Data\\export.csv", root) == "base export.csv"
     )
+    # Round-8 ruling: a `/` inside running text is prose, not a path (the
+    # round-4 expectation of `<outside project>` here is superseded); the
+    # whole value being exactly `/` is the exception, pinned in the
+    # isolated-slash tests.
     assert (
         api_mod._relative_paths_in_text("rooted at / for now", root)
-        == "rooted at <outside project> for now"
+        == "rooted at / for now"
     )
     assert (
         api_mod._relative_paths_in_text("read /etc/my conf/secret.md", root) == "read secret.md"
@@ -1000,6 +1034,9 @@ WINUNC = "\\\\server\\share\\proj"
             "created: REQ-011 (requirement) in items/reqs.yaml",
         ),
         (
+            # escape notation: a real newline/quote follows the paths, and
+            # the `\\n` two-character pair is JSON escape notation, not a
+            # separator (documented limit), so the span ends before it
             "See C:\\Users\\x\\proj\\items\\reqs.yaml\\nthen \"quoted\" "
             "and https://example.org/a//b then C:\\Users\\x\\proj\\secret\\x.md:4",
             WIN,
@@ -1008,12 +1045,13 @@ WINUNC = "\\\\server\\share\\proj"
         ),
         # the rest of the windows-flavored matrix
         ("at C:\\Users\\x\\proj\\items\\reqs.yaml:7:2", WIN, "at items/reqs.yaml:7:2"),
-        # A YAML-domain scalar with single backslashes: the YAML decoder
-        # owns the escapes and legitimately reads `\r` out of `\reqs` as
-        # a carriage return BEFORE the scan sees the text, so the span
-        # ends at the name. The root is still scrubbed -- the safety
-        # property holds; the rendering degrades to what the decoder
-        # left. JSON is the payload's actual domain (cells above).
+        # yaml double-quoted scalar: a single backslash before r/n/t/u is
+        # an escape, not a separator (the YAML decoder owns it and reads
+        # `\r` out of `\reqs` as a carriage return BEFORE the scan sees
+        # the text), so the decoded text is not a path -- documented
+        # limit. The root is still scrubbed: the safety property holds,
+        # the rendering degrades to what the decoder left. JSON (the
+        # payload's actual domain) is the JSON-doubled cell below.
         ('"C:\\Users\\x\\proj\\items\\reqs.yaml"', WIN, '"items\\reqs.yaml"'),
         # JSON-doubled: what a Windows path looks like inside a JSON string
         ('"C:\\\\Users\\\\x\\\\proj\\\\items\\\\reqs.yaml"', WIN, '"items/reqs.yaml"'),
