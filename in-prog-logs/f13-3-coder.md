@@ -94,9 +94,8 @@ stop adding regex alternatives; replace the two passes with ONE span
 scanner; every CORE cell must PASS.
 
 Decisions (fixed, not to be re-litigated): scope = CORE cells (EXT cells
-stay documented gaps: `file:/` single-slash, `FILE://` on posix roots,
-`file://localhost` authority, `%20`/long-path aliases, 8.3 names, symlink
-realpath -- no filesystem access at all); a bare outside token extends
+stay documented gaps: `%20`/long-path aliases, 8.3 names, dot segments,
+symlink realpath -- no filesystem access at all); a bare outside token extends
 over ONE space only when the next piece is unambiguously path-shaped
 (contains a separator, no colon, ends in a file extension), spaces are
 fully honored inside the exact known root and inside quoted scalars;
