@@ -39,35 +39,18 @@ Every assertion here is a status code, a payload string, or file bytes.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from itertools import product
 from types import SimpleNamespace
-from urllib.parse import quote
 
 import pytest
 
 from serve_support import make_project, snapshot_tree
 
 from refdes.serve import api as api_mod
-from refdes.serve import state as state_mod
 
-
-class Api:
-    """A thread-free drive of the API routes: the real `ProjectState`, the
-    real `api.handle`, the same (status, payload) the socket layer returns."""
-
-    def __init__(self, root, read_only: bool = False):
-        self.state = state_mod.ProjectState(str(root / "refdes-project.yaml"))
-        self.state.load()
-        self.read_only = read_only
-
-    def get(self, path: str):
-        return api_mod.handle(self, "GET", path, {}, None)
-
-    def post(self, path: str, payload):
-        return api_mod.handle(self, "POST", path, {}, payload)
+from test_serve_edit_keyless_handle import Api, reqs_file, save, sha256
 
 
 def keyless_client(tmp_path):
@@ -76,24 +59,6 @@ def keyless_client(tmp_path):
     the run) are described against, and it keeps every project independent."""
     make_project(tmp_path, mint_keys=False)
     return Api(tmp_path), tmp_path
-
-
-def sha256(path) -> str:
-    with open(path, "rb") as fh:
-        return hashlib.sha256(fh.read()).hexdigest()
-
-
-def reqs_file(root) -> str:
-    return str(root / "items" / "reqs.yaml")
-
-
-def save(client, ref, *, field="status", value="draft", revision):
-    """`POST /api/item/<ref>/edit`, the handle URL-encoded the way
-    editor.js encodes it; the route unquotes."""
-    return client.post(
-        f"/api/item/{quote(ref, safe='')}/edit",
-        {"op": "set_field", "field": field, "value": value, "expected_revision": revision},
-    )
 
 
 # ------------------------------------------------------------- the walk
@@ -496,11 +461,18 @@ def test_write_route_payloads_are_json_shaped_and_contain_no_tuples(tmp_path):
     serializability, which a tuple survives as a list."""
     client, root = keyless_client(tmp_path)
     _status, view = client.get("/api/item/REQ-001")
-    payloads = [save(client, "REQ-001", revision=view["edit"]["file_revision"])[1]]
-    payloads.append(
-        client.post("/api/items/create", {"type": "requirement", "fields": {"text": "P."}})[1]
+    status, payload = save(
+        client, "REQ-001", revision=view["edit"]["file_revision"]
     )
-    assert_no_root(payloads[0], root, "applied 200 (json-shape guard scenario)")
+    assert status == 200, payload
+    payloads = [payload]
+    status, payload = client.post(
+        "/api/items/create", {"type": "requirement", "fields": {"text": "P."}}
+    )
+    assert status == 200, payload
+    payloads.append(payload)
+    for index, payload in enumerate(payloads):
+        assert_no_root(payload, root, f"json-shape guard scenario, payload {index}")
 
     def walk(value):
         assert not isinstance(value, tuple), f"tuple-shaped payload value: {value!r}"
@@ -630,6 +602,44 @@ def test_an_outside_path_with_spaces_reduces_to_the_leaf():
         api_mod._relative_paths_in_text("read /etc/my config", "/home/you/proj")
         == "read my config"
     )
+
+
+@pytest.mark.parametrize(
+    "text,root,expected",
+    [
+        # Round-7 (MEDIUM): the space-extension loop advanced by
+        # `end + 1 + piece.end()`, but `piece.end()` is ABSOLUTE in the
+        # text -- the run overshot, ate the following prose, and rendered
+        # a leaf computed from the eaten run.
+        (
+            "compare /opt/my notes.txt against /var/log/syslog",
+            "/home/you/proj",
+            "compare notes.txt against syslog",
+        ),
+        ("read /opt/a b.txt c/d then stop", "/home/you/proj", "read b.txt c/d then stop"),
+        # the same shapes inside a quoted scalar (the payload domain)
+        (
+            json.dumps("compare /opt/my notes.txt against /var/log/syslog"),
+            "/home/you/proj",
+            '"compare notes.txt against syslog"',
+        ),
+        (
+            json.dumps("read /opt/a b.txt c/d then stop"),
+            "/home/you/proj",
+            '"read b.txt c/d then stop"',
+        ),
+        # guards: the extension stops at a word that is not path-shaped,
+        # so ordinary prose after the path survives untouched
+        ("read /opt/a b then stop", "/home/you/proj", "read a b then stop"),
+        ("see /var/db/exports etc done", "/home/you/proj", "see exports etc done"),
+    ],
+    ids=["outside-two-paths", "outside-piece", "quoted-two-paths", "quoted-piece",
+         "prose-stops", "no-extension-stops"],
+)
+def test_response_paths_space_extension_never_eats_the_following_prose(
+    text, root, expected
+):
+    assert api_mod._relative_paths_in_text(text, root) == expected
 
 
 def test_the_root_as_a_prefix_of_a_longer_directory_name_is_not_matched():
@@ -1020,6 +1030,13 @@ WINUNC = "\\\\server\\share\\proj"
         ("at C:\\Users\\x\\proj\\items\\reqs.yaml.", WIN, "at items/reqs.yaml."),
         # drive-letter case folding, native separators
         ("at c:\\users\\x\\proj\\items\\a.md", WIN, "at items/a.md"),
+        # Round-7: the WHOLE under-root remainder renders with forward
+        # slashes -- no piece needs a file extension, and the span may
+        # cross a space exactly like the unquoted-token rule does.
+        ("at C:\\Users\\x\\proj\\items\\sub\\NOEXT", WIN, "at items/sub/NOEXT"),
+        ("at C:\\Users\\x\\proj\\items\\Makefile", WIN, "at items/Makefile"),
+        ("at C:\\Users\\x\\proj\\items\\v1.2\\README", WIN, "at items/v1.2/README"),
+        ("at C:\\Users\\x\\proj\\my docs\\file.md", WIN, "at my docs/file.md"),
     ],
     ids=[
         "applied-suffix",
@@ -1035,6 +1052,10 @@ WINUNC = "\\\\server\\share\\proj"
         "unc",
         "sentence-period",
         "fold",
+        "no-extension-dir",
+        "no-extension-leaf",
+        "dotted-directory",
+        "spaced-name",
     ],
 )
 def test_response_paths_windows_root_renders_forward_slashes(text, root, expected):

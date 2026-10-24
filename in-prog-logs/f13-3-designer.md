@@ -50,3 +50,10 @@ project-relative spelling at one choke-point helper). No product code.
   the return of `_apply_edit`/`_create_item` satisfies every test.
 
 Status: finished. Tests committed; no product code touched.
+
+Amended by the implementer (rounds 4 and 6, PR review): the
+"remainder left exactly as written" expectation was superseded by the
+spec S3 forward-slash rule -- a Windows-flavored root renders its whole
+under-root remainder with forward slashes on every platform -- and the
+tests pinning the old as-written rendering were updated as a spec
+change, not a test weakening. The test file now holds 205 cases.

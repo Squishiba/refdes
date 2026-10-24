@@ -202,12 +202,18 @@ _FILE_PREFIX = re.compile(r"(?<![A-Za-z0-9_\-])file:", re.IGNORECASE)
 _PIECE = re.compile(r"[^\s:;\"'`\\/]+(?:[\\/][^\s:;\"'`]+)*\.[A-Za-z0-9]+")
 _RUN_END = re.compile(r"[\s`\"'<>]|\Z")
 _SUFFIX = re.compile(r"(:\d+(?::\d+)?)\Z")
-_SUFFIX_HEAD = re.compile(r":\d+(?::\d+)?")
-# A windows-flavored remainder is a path span as long as its last piece
-# is path-shaped (ends in a file extension): `items\reqs.yaml\then`
-# renders `items/reqs.yaml` and leaves `\then` -- the two characters of
-# a `\n`/`\"`-style escape are a word boundary, not a separator.
-_WIN_SPAN = re.compile(r"(?:[^\\/\s]+[\\/]+)*[^\\/\s]*[^\s\\/]\.[A-Za-z0-9]+")
+# The windows-flavored under-root remainder converts WHOLE: every piece
+# up to the span end renders its separators as `/` (the spelling the
+# response's `path` field uses) -- no piece needs a file extension. The
+# one termination is escape notation: a SINGLE separator followed by a
+# word with no file extension that opens with a JSON escape letter ends
+# the path span BEFORE it, so the two characters of a `\n`/`\"`-style
+# escape survive intact (`items\reqs.yaml\then` renders
+# `items/reqs.yaml` and leaves `\then`).
+_WIN_WORD = re.compile(r"[^\\/]+")
+_WIN_STEP = re.compile(r"([\\/]+)([^\\/]+)")
+_WIN_ESCAPES = frozenset('"\\/bfnrtu')
+_EXT_TAIL = re.compile(r"\.[A-Za-z0-9]+\Z")
 
 
 def _scrub_rules(root_cmp: str, fold: bool):
@@ -257,6 +263,23 @@ def _run_end(text: str, pos: int) -> int:
     return _RUN_END.search(text, pos).start()
 
 
+def _extend_over_space(text: str, end: int) -> tuple[int, "tuple[int, int] | None"]:
+    """Extend an ended run over a single space when the next piece is
+    unambiguously path-shaped (`_PIECE`: a separator, an extension) --
+    the documented grammar for `read /etc/my conf/secret.md`. Prose that
+    merely contains a separator is not swallowed. Returns the new end and
+    the span of the LAST crossed piece (an outside token's leaf is the
+    last piece: `/opt/my notes.txt` reduces to `notes.txt`, not to the
+    fragment `my notes.txt` before the space)."""
+    cross = None
+    piece = _PIECE.match(text, end + 1)
+    while end < len(text) and text[end] == " " and piece is not None:
+        end = piece.end()
+        cross = piece.span()
+        piece = _PIECE.match(text, end + 1)
+    return end, cross
+
+
 def _leaf(body: str) -> str:
     norm = re.sub(_SEPS, "/", body).rstrip("/")
     return norm.rpartition("/")[2] or "<outside project>"
@@ -268,12 +291,13 @@ def _render_relative(rest: str, pos: int, end: int, root_is_slash: bool,
     suffix riding along, its trailing punctuation re-emitted after it,
     and the whole run consumed (the suffix and punctuation travel INSIDE
     the replacement, never back through the scan). A WINDOWS-flavored
-    root renders the remainder with forward slashes -- the same spelling
-    the response's `path` field uses, on every platform -- up to the
-    first escape-like tail: a separator run followed by a word with no
-    file extension ends the path span BEFORE it, so the two characters
-    of a `\\n`/`\\"` escape survive intact (`items\\reqs.yaml\\nthen`
-    renders `items/reqs.yaml` and leaves `\\nthen`); text after the path
+    root renders the WHOLE remainder with forward slashes -- the same
+    spelling the response's `path` field uses, on every platform -- piece
+    by piece, with no extension required anywhere (`items\\sub\\NOEXT`
+    renders `items/sub/NOEXT`); the span ends only at escape notation:
+    a single separator followed by a word with no file extension that
+    opens with a JSON escape letter (`items\\reqs.yaml\\nthen` renders
+    `items/reqs.yaml` and leaves `\\nthen`), and text after the path
     span is re-emitted as written. A posix root keeps backslashes as
     file-name characters (the documented POLICY case), so there its
     remainder stays exactly as written."""
@@ -282,16 +306,34 @@ def _render_relative(rest: str, pos: int, end: int, root_is_slash: bool,
         if not rest:
             return "<outside project>", end - pos
     if windows:
-        span = _WIN_SPAN.match(rest)
-        if span is not None:
-            body = re.sub(_SEPS, "/", span.group(0))
-            tail = rest[span.end():]
-            found = _SUFFIX_HEAD.match(tail)
-            suffix = ""
-            if found is not None:
-                suffix = found.group(0)
-                tail = tail[found.end():]
-            return body + suffix + tail, end - pos
+        word = _WIN_WORD.match(rest)
+        if word is not None:
+            span_end = word.end()
+            step = _WIN_STEP.match(rest, span_end)
+            while step is not None:
+                seps, piece = step.group(1), step.group(2)
+                base = _strip_trailing(re.sub(r":\d+(?::\d+)?\Z", "", piece))[0]
+                if (
+                    len(seps) == 1
+                    and piece[0] in _WIN_ESCAPES
+                    and not _EXT_TAIL.search(base)
+                ):
+                    break
+                span_end = step.end()
+                step = _WIN_STEP.match(rest, span_end)
+            body, punct = _strip_trailing(rest[:span_end])
+            found = _SUFFIX.search(body)
+            if found:
+                body, punct2 = _strip_trailing(body[: found.start()])
+                return (
+                    (re.sub(_SEPS, "/", body) or ".")
+                    + found.group(1)
+                    + punct2
+                    + punct
+                    + rest[span_end:],
+                    end - pos,
+                )
+            return re.sub(_SEPS, "/", body) + punct + rest[span_end:], end - pos
     body, punct = _strip_trailing(rest)
     found = _SUFFIX.search(body)
     if found:
@@ -308,6 +350,8 @@ def _classify(text: str, pos: int, root_cmp: str, root_pat, windows: bool):
         if match is not None:
             end = _run_end(text, match.end())
             if match.group("sw") is not None:
+                if windows:
+                    end, _ = _extend_over_space(text, end)
                 return _render_relative(
                     text[match.end():end], pos, end, root_cmp == "/", windows
                 )
@@ -321,16 +365,15 @@ def _classify(text: str, pos: int, root_cmp: str, root_pat, windows: bool):
     end = _run_end(text, pos)
     if root_cmp == "/":
         return _render_relative(text[pos:end], pos, end, True, windows)
-    piece = _PIECE.match(text, end + 1)
-    while end < len(text) and text[end] == " " and piece is not None:
-        end = end + 1 + piece.end()
-        piece = _PIECE.match(text, end + 1)
+    end, cross = _extend_over_space(text, end)
     token, punct = _strip_trailing(text[pos:end])
     found = _SUFFIX.search(token)
     if found:
-        token, punct2 = _strip_trailing(token[: found.start()])
-        return _leaf(token) + found.group(1) + punct2 + punct, end - pos
-    return _leaf(token) + punct, end - pos
+        body, punct2 = _strip_trailing(token[: found.start()])
+        leaf_src = text[cross[0]:cross[1]] if cross is not None else body
+        return _leaf(leaf_src) + found.group(1) + punct2 + punct, end - pos
+    leaf_src = text[cross[0]:cross[1]] if cross is not None else token
+    return _leaf(leaf_src) + punct, end - pos
 
 
 _YAML_ESCAPES = {"\\": "\\", '"': '"', "'": "'", "n": "\n", "r": "\r", "t": "\t"}
@@ -495,12 +538,16 @@ def _scan(text: str, root_cmp: str, fold: bool, rules) -> str:
 def _relative_paths(value, root: str):
     """Every string in a response payload, with the project root rewritten away.
 
-    A path under ``root`` becomes its project-relative spelling with the
-    root's own separators normalized to `/` and the remainder of the path
-    left exactly as written (``items/REQ-001.md``, ``items\\reqs.yaml``
-    for the doubled-backslash spelling the patcher's `json.dumps` quoting
-    writes into file bytes, and ``items/REQ-007.md:6`` when a line suffix
-    follows); the root itself, with or without a trailing separator,
+    A path under ``root`` becomes its project-relative spelling. For a
+    posix root the remainder of the path is left exactly as written
+    (``items/REQ-001.md``, ``items\\reqs.yaml``); for a Windows-flavored
+    root (drive-letter or UNC) the WHOLE remainder renders with forward
+    slashes -- ``items/reqs.yaml`` in every input spelling (native
+    backslash, forward-slash, JSON-escaped-doubled) and for every
+    remainder (``items/sub/NOEXT`` included) -- except an escape-notation
+    tail (``\\nthen``) and text after the path span, which are re-emitted
+    as written; ``items/REQ-007.md:6`` when a line suffix follows; the
+    root itself, with or without a trailing separator,
     becomes ``.``, a root ending a sentence keeps one period, and a bare
     root keeps its ``:6``/``:6:2`` suffix. The root matches as ONE
     separator-run pattern -- native, forward-slash, and JSON-escaped-doubled
