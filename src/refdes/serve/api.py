@@ -266,6 +266,44 @@ def _strip_trailing(text: str) -> tuple[str, str]:
     return stripped, text[len(stripped):]
 
 
+_DOT_SEG = re.compile(r"(?:^|(?<=[/\\]))\.\.?\Z")
+
+
+def _strip_trailing_keep_dots(text: str) -> tuple[str, str]:
+    """Like _strip_trailing, but a trailing `.`/`..` that forms a complete
+    DOT SEGMENT of the path is kept: it is path syntax, not the sentence's
+    punctuation (and the normalization's `.` IS that period)."""
+    end = len(text)
+    while end > 0 and text[end - 1] in _TRAILING:
+        if _DOT_SEG.search(text, 0, end) is not None:
+            break
+        end -= 1
+    return text[:end], text[end:]
+
+
+def _dot_segments(body: str, windows: bool):
+    """Lexically collapse the `.` and `x/..` segments of an under-root
+    remainder: the normalized spelling (empty string == the root itself),
+    or None when a `..` climbs ABOVE the root -- the whole path then
+    resolves outside the project. A POSIX root keeps backslashes as
+    file-name characters, so only `/` separates there; a Windows
+    remainder splits on both spellings (it renders forward-slash
+    throughout anyway)."""
+    parts = re.split(_SEPS if windows else r"/+", body)
+    stack: "list[str]" = []
+    for part in parts:
+        if not part or part == ".":
+            continue
+        if part == "..":
+            if stack:
+                stack.pop()
+            else:
+                return None
+        else:
+            stack.append(part)
+    return "/".join(stack)
+
+
 def _run_end(text: str, pos: int) -> int:
     return _RUN_END.search(text, pos).start()
 
@@ -309,6 +347,10 @@ def _render_relative(rest: str, pos: int, end: int, root_is_slash: bool,
     span is re-emitted as written. A posix root keeps backslashes as
     file-name characters (the documented POLICY case), so there its
     remainder stays exactly as written."""
+    def render(body: str, windows: bool) -> str:
+        norm = _dot_segments(body, windows)
+        return _leaf(body) if norm is None else norm
+
     if root_is_slash:
         rest = rest.lstrip("/\\")
         if not rest:
@@ -329,25 +371,39 @@ def _render_relative(rest: str, pos: int, end: int, root_is_slash: bool,
                     break
                 span_end = step.end()
                 step = _WIN_STEP.match(rest, span_end)
-            body, punct = _strip_trailing(rest[:span_end])
+            body, punct = _strip_trailing_keep_dots(rest[:span_end])
             found = _SUFFIX.search(body)
             if found:
-                body, punct2 = _strip_trailing(body[: found.start()])
+                body, punct2 = _strip_trailing_keep_dots(body[: found.start()])
                 return (
-                    (re.sub(_SEPS, "/", body) or ".")
+                    (render(body, True) or ".")
                     + found.group(1)
                     + punct2
                     + punct
                     + rest[span_end:],
                     end - pos,
                 )
-            return re.sub(_SEPS, "/", body) + punct + rest[span_end:], end - pos
-    body, punct = _strip_trailing(rest)
+            tail = rest[span_end:]
+            rendered = render(body, True)
+            return (
+                rendered + punct + tail
+                if rendered or punct or tail
+                else "."
+            ), end - pos
+    body, punct = _strip_trailing_keep_dots(rest)
     found = _SUFFIX.search(body)
     if found:
-        body, punct2 = _strip_trailing(body[: found.start()])
-        return (body or ".") + found.group(1) + punct2 + punct, end - pos
-    return body + punct, end - pos
+        body, punct2 = _strip_trailing_keep_dots(body[: found.start()])
+        return (
+            (render(body, windows) or ".") + found.group(1) + punct2 + punct,
+            end - pos,
+        )
+    rendered = render(body, windows)
+    return (
+        rendered + punct
+        if rendered or punct
+        else "."
+    ), end - pos
 
 
 def _classify(text: str, pos: int, root_cmp: str, root_pat, windows: bool):
@@ -590,7 +646,12 @@ def _relative_paths(value, root: str):
     as written; ``items/REQ-007.md:6`` when a line suffix follows; the
     root itself, with or without a trailing separator,
     becomes ``.``, a root ending a sentence keeps one period, and a bare
-    root keeps its ``:6``/``:6:2`` suffix. The root matches as ONE
+    root keeps its ``:6``/``:6:2`` suffix. Dot segments resolve
+    LEXICALLY: the under-root remainder's ``.`` and ``x/..`` collapse to
+    the normalized relative spelling (``items/../a.md`` renders ``a.md``,
+    ``./a.md`` renders ``a.md``, a trailing ``..`` lands on the root),
+    and a ``..`` that climbs above the root makes the whole path outside
+    -- only the bare file name (with any line suffix) survives. The root matches as ONE
     separator-run pattern -- native, forward-slash, and JSON-escaped-doubled
     spellings are one match, spaces in the root are ordinary characters,
     a drive-letter root matches at any case (a UNC root is NOT folded --
@@ -614,8 +675,12 @@ def _relative_paths(value, root: str):
     a ``:line`` suffix closes the reference, so ``plan.md draft.md`` and
     ``x.md:3 draft.md`` keep their second word (a documented grammar
     limit). Quoted scalars decode (JSON, a YAML-ish fallback), scrub, and
-    re-encode, so an escaped root with a quote/newline/tab in it scrubs
-    and the surrounding syntax -- escapes, URLs, prose -- survives byte for
+    re-encode ONLY when the scrubbing changed something -- a quoted scalar
+    with no path in it is returned byte-identical, escapes and all; when
+    it DOES contain a rewritten path the whole scalar re-encodes, so
+    other escape sequences in that same string may come back as their
+    plain characters (a documented limit). The surrounding syntax --
+    escapes, URLs, prose -- survives byte for
      byte. Relative spellings are untouched. Known limits: a root path
      spelled with a backslash-escaped space (``proj\ demo``) is not
      recognized as under-root, an isolated ``/`` in running text

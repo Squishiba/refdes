@@ -760,6 +760,53 @@ def test_a_url_root_in_the_file_text_leaves_no_root_in_the_409(tmp_path):
     assert "<project root>" in payload["current_text"], payload["current_text"]
 
 
+@pytest.mark.parametrize(
+    ("text", "root", "expected"),
+    [
+        # A '..' that climbs ABOVE the root makes the whole path outside:
+        # the leaf (and any line suffix) is all that survives.
+        ("/home/you/proj/../private/secret.md", _R9, "secret.md"),
+        ("/home/you/proj/a/../../b", _R9, "b"),
+        ("/home/you/proj/..", _R9, ".."),
+        ("/home/you/proj/../private/secret.md:6:2", _R9, "secret.md:6:2"),
+        ("see /home/you/proj/../private/secret.md", _R9, "see secret.md"),
+        ('"see /home/you/proj/../private/secret.md"', _R9, '"see secret.md"'),
+        ("C:\\Users\\x\\proj\\..\\private\\secret.md", _R9W, "secret.md"),
+        # A normalization that stays under the root renders the NORMALIZED
+        # relative spelling; a trailing '..' landing on the root renders `.`.
+        ("/home/you/proj/items/../a.md", _R9, "a.md"),
+        ("/home/you/proj/./a.md", _R9, "a.md"),
+        ("/home/you/proj/items/..", _R9, "."),
+        ("C:\\Users\\x\\proj\\items\\..\\a.md", _R9W, "a.md"),
+        ("C:/Users/x/proj/./a.md:7", _R9W, "a.md:7"),
+        # guards: a dot-free remainder is untouched, and a backslash in a
+        # POSIX-rooted remainder is a file-name character, not a separator.
+        ("/home/you/proj/items/a.md:6", _R9, "items/a.md:6"),
+        ("/home/you/proj/a\\b.md", _R9, "a\\b.md"),
+    ],
+)
+def test_response_paths_dot_segments_resolve_lexically(text, root, expected):
+    assert api_mod._relative_paths_in_text(text, root) == expected
+
+
+def test_response_paths_a_quoted_scalar_without_a_path_is_returned_untouched():
+    # The scalar is decoded and re-encoded ONLY when its scrubbed form
+    # differs; a scalar with no path is byte-identical, escapes and all.
+    for quoted in [
+        '"line1\\nline2"',
+        '"tab\\there"',
+        '"see \\u0041 bytes"',
+        '"a\\x41b"',
+    ]:
+        assert api_mod._relative_paths_in_text(quoted, P) == quoted
+    # The documented limit: once a path in a quoted scalar IS rewritten,
+    # the whole scalar re-encodes -- exotic escapes become plain characters.
+    assert (
+        api_mod._relative_paths_in_text(f'"see {P}/a.md \\u0041"', P)
+        == '"see a.md A"'
+    )
+
+
 def test_the_root_as_a_prefix_of_a_longer_directory_name_is_not_matched():
     assert (
         api_mod._relative_paths_in_text("see /home/you/project/items/a.md", "/home/you/proj")

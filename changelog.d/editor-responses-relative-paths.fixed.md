@@ -13,13 +13,18 @@
   root becomes `.`), in every separator spelling, inside quoted spans as
   well as bare text; a Windows-flavored root (drive letter, UNC) renders
   its whole remainder with forward slashes — the `path` field's spelling,
-  on every platform — case-insensitively, spaces included; a local
+  on every platform — case-insensitively for drive-letter roots (a UNC
+  root is not case-folded), spaces included; a local
   `file:` URI goes with its prefix. Outside the root only the bare file
   name survives — the directories outside the project are the leak. The
   root never survives anywhere in a response: a root glued into a web
   URL or onto a preceding word — bytes no path rule can rewrite — has
   its root text replaced with the marker `<project root>`, everything
-  else byte for byte. Known limits of the path reader: dot-segments,
+  else byte for byte. Dot segments are resolved lexically: an under-root
+  remainder's `.` and `x/..` collapse to the normalized relative
+  spelling, and a `..` that climbs out of the project makes the whole
+  path outside — only the bare file name (and line suffix) survives.
+  Known limits of the path reader:
   percent-encoding, 8.3 short names, long-path aliases, and
   escaped-space roots (`proj\ demo`) are not recognized; backslashes in
   the remainder of a POSIX-rooted path are kept as filename characters;
@@ -28,6 +33,8 @@
   regex, a `/verbose` switch) is shortened while an isolated `/`
   (arithmetic, a table cell) is left alone; a token extended over a
   space crosses at most one space and a `:line` suffix closes the
-  reference; text after a path span is re-emitted byte for byte; alike
+  reference; inside a quoted string that contains a path, other escape
+  sequences in that same string may be rewritten to their plain
+  characters; text after a path span is re-emitted byte for byte; alike
   keys get `#2`, `#3` suffixes. Reads, uploads, and the patch contract:
   unchanged.

@@ -67,8 +67,7 @@ not a regression.)
 - Round 5 (file-URI family leak): scheme `file` (any casing) + 0-3 slashes
   + optional `localhost` authority = LOCAL FILE URI span, prefix consumed
   with the path; dotted authority = web URL, untouched. Probe goldens
-  RED->green; root-literal grep of all probe rows then left only
-  root-in-url / root-after-word as POLICY-by-design survivors.
+  RED->green.
 - Round 6 (windows CI red): a Windows-FLAVORED root (drive/UNC, flavor
   derived from the root string so it is Linux-testable) renders the
   under-root remainder with forward slashes; the span ends before an escape
@@ -117,7 +116,25 @@ on the UN-extended token first -- a trailing extension or a `:line` suffix
 closes the reference, so `plan.md` / `x.md:3` do not reach across the space.
 RED cells for both reproductions plus `a b.md c.md`-style cases; the
 existing space-extension cells (round 4/7) stay green. Documented limits
-(docstring + changelog): backslashes in a POSIX-rooted remainder are kept as
-filename characters; outside the root only the final path segment survives;
-UNC roots are NOT case-folded (drive-letter roots are); a root of `/` takes
-the root branch before the isolated-slash rule.
+(docstring + changelog): POSIX-rooted remainders keep backslashes as name
+characters; outside the root only the final segment survives; UNC roots are
+not case-folded; a `/` root takes the root branch before the isolated-slash
+rule.
+
+## Round 10 (final scoped round): dot segments + docs
+
+## Round 10 (final scoped round): dot segments + docs
+
+Dot segments (reviewer P2): the under-root remainder normalizes LEXICALLY
+(`_dot_segments`): `.` and `x/..` collapse, a trailing `..` lands on the
+root (renders `.`), a `..` climbing ABOVE the root makes the whole path
+outside -- leaf + `:line` suffix only. POSIX splits on `/` only, windows
+on both; `_strip_trailing_keep_dots` keeps dot SEGMENTS out of the
+sentence-period strip. RED matrix first (climb-out, `a/../../b`, trailing
+`..`, quoted spans, windows root, `:6:2`, guards). The probe's dot cells
+already held the rule's goldens -- flipped by the fix, the analysis copy
+unchanged; probe CORE all pass, drift vs round 9 exactly those cells,
+remaining EXT fails are pre-declared gaps, no root literal in any row.
+Quoted scalars: no-change returns original bytes (pinned), rewrite
+re-encodes (documented limit). Changelog: case-insensitivity scoped to
+drive-letter roots (UNC not folded); dot behavior documented; suite green.
