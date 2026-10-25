@@ -227,6 +227,35 @@ def validate_spec(spec):
         if key in spec and spec[key] is not None \
                 and (not isinstance(spec[key], str) or not spec[key].strip()):
             problems.append(f"{key} must be a non-empty string, got {spec[key]!r}")
+    ws_spec = spec.get("workspaces")
+    if ws_spec is not None:
+        ids = {}
+        if not isinstance(ws_spec, dict):
+            problems.append("workspaces must be an object mapping coder/designer/reviewer "
+                            f"to workspace ids, got {ws_spec!r}")
+        else:
+            unknown = sorted(str(k) for k in ws_spec if k not in ("coder", "designer", "reviewer"))
+            if unknown:
+                problems.append(f"workspaces has unknown role(s): {unknown}; "
+                                "allowed roles: coder, designer, reviewer")
+            shape_ok = True
+            for role_id, ws_id in ws_spec.items():
+                if not isinstance(ws_id, str) or not ws_id.strip():
+                    problems.append(f"workspaces.{role_id} must be a non-empty workspace id "
+                                    f"string, got {ws_id!r}")
+                    shape_ok = False
+                else:
+                    ids[str(role_id)] = ws_id
+            if ids.get("coder") and ids.get("coder") == ids.get("designer"):
+                problems.append("workspaces.coder and workspaces.designer must be two "
+                                "different workspace ids: the designer must stay blind to "
+                                "the coder's tree")
+            if shape_ok and ids:
+                live_ws = {str(w.get("workspaceId")) for w in workspace_ls()}
+                missing = sorted({v for v in ids.values() if v not in live_ws})
+                if missing:
+                    problems.append("workspaces ids are not active workspaces "
+                                    f"(paseo workspace ls): {missing}")
     return problems
 
 
@@ -236,6 +265,16 @@ def paseo_ls():
         raise Pause(f"cannot list agents (paseo ls -g): {tail_text(err, 5) or rc}")
     data = json_of(out, "paseo ls output")
     return data.get("agents", []) if isinstance(data, dict) else data
+
+
+def workspace_ls():
+    # real `paseo workspace ls --json` entries (verified live): workspaceId/
+    # project/name/isolation/cwd; lists ACTIVE workspaces (archived are gone)
+    rc, out, err = run_guarded(["paseo", "workspace", "ls", "--json"])
+    if rc != 0:
+        raise Pause(f"cannot list workspaces (paseo workspace ls): {tail_text(err, 5) or rc}")
+    data = json_of(out, "paseo workspace ls output")
+    return data.get("workspaces", []) if isinstance(data, dict) else data
 
 
 def preflight(job):
@@ -339,6 +378,13 @@ def agent_cwd(job, agent_id):
     raise Pause(f"agent {agent_id} reports no worktree path (cwd) in paseo ls output")
 
 
+def workspace_cwd(job, ws_id):
+    for w in workspace_ls():
+        if w.get("workspaceId") == ws_id and w.get("cwd"):
+            return os.path.expanduser(w["cwd"])  # real cwd can start with ~
+    raise Pause(f"workspace {ws_id} is not an active workspace (paseo workspace ls)")
+
+
 def check_permits(job):
     rc, out, err = run_guarded(["paseo", "permit", "ls", "--json"])
     if rc != 0:
@@ -401,16 +447,60 @@ def send_to(job, agent_key, message):
     check_permits(job)
 
 
+def prepare_tree(job, cwd, branch, base, role):
+    # a reused workspace must start the role's turn on a CLEAN tree at the right
+    # commit: dirty means an agent died mid-edit -- Pause, the driver never
+    # guesses what uncommitted work is; clean means git decides the reset
+    dirty = git(cwd, "status", "--porcelain", "--untracked-files=no")
+    if dirty:
+        raise Pause(f"{role} workspace tree {cwd} is dirty: refusing to reset "
+                    f"uncommitted work (commit it, revert it, or clean it): "
+                    f"{tail_text(dirty, 10)}")
+    git(cwd, "checkout", "-B", branch, base)
+
+
+def ensure_workspace(job, role, base, branch):
+    # at most ONE workspace per role per job: the role's first spawn creates it
+    # (`paseo workspace create`, recorded in job.json as <role>_workspace);
+    # every later spawn of that role -- respawn after a dead agent, the next
+    # review round, a resume -- reuses it via `paseo run --workspace` and NEVER
+    # passes --new-workspace. A spec `workspaces: {role: id}` points a role at
+    # an EXISTING workspace: used as given, never created, same tree reset.
+    ws = job.get(f"{role}_workspace")
+    if ws:
+        prepare_tree(job, workspace_cwd(job, ws), branch, base, role)
+        return ws
+    ws = (job["spec"].get("workspaces") or {}).get(role)
+    if ws:
+        prepare_tree(job, workspace_cwd(job, ws), branch, base, role)  # live existence check
+        job[f"{role}_workspace"] = ws
+        save_job(job)
+        return ws
+    rc, out, err = run_guarded(
+        ["paseo", "workspace", "create", "--isolation", "worktree", "--mode", "branch-off",
+         "--new-branch", branch, "--base", base,
+         "--title", f"AgentCoder {job['task_id']} {role}", "--json"],
+        cwd=job["spec"]["repo"])
+    if rc != 0:
+        raise Pause(f"cannot create the {role} workspace: {tail_text(err, 5) or rc}")
+    ws = json_of(out, "workspace create output").get("workspaceId")
+    if not ws:
+        raise Pause(f"workspace create returned no workspaceId: {tail_text(out, 3)}")
+    job[f"{role}_workspace"] = ws
+    save_job(job)
+    return ws
+
+
 def spawn_agent(job, role, model, base, prompt):
-    argv = ["paseo", "run", "--new-workspace", "worktree", "--worktree-mode", "branch-off",
-            "--new-branch", branch_name(job, role), "--base", base, "--provider", model,
+    key = "reviewer" if role.startswith("review") else role
+    ws = ensure_workspace(job, key, base, branch_name(job, role))
+    argv = ["paseo", "run", "--workspace", ws, "--provider", model,
             "--title", f"AgentCoder {job['task_id']} {role}", "--json", prompt]
     try:
         rc, out, err = run_guarded(argv, cwd=job["spec"]["repo"],
                                    timeout=int(job["spec"].get("agent_timeout", 1800)))
     except Pause as exc:
         raise Pause(f"{role} spawn: {exc}")
-    key = "reviewer" if role.startswith("review") else role
     record_turn(job, key, rc, out, err)
     return job[f"{key}_cwd"]
 
@@ -467,13 +557,16 @@ def do_spawn(job):
     need = [r for r in ("coder", "designer") if not job.get(f"{r}_agent")]
     if need:
         prompts = {"coder": coder_prompt(job), "designer": designer_prompt(job)}
+        # workspaces first (sequential creation is fine), agents in parallel after:
+        # a role that already has one reuses it, so a respawn never piles up worktrees
+        ws_for = {role: ensure_workspace(job, role, job["base_sha"], branch_name(job, role))
+                  for role in need}
         procs = {}
         for role in need:
             model = spec.get(f"{role}_model") or DEFAULT_MODEL
-            argv = resolve(["paseo", "run", "--new-workspace", "worktree", "--worktree-mode",
-                            "branch-off", "--new-branch", branch_name(job, role),
-                            "--base", job["base_sha"], "--provider", model, "--title",
-                            f"AgentCoder {job['task_id']} {role}", "--json", prompts[role]])
+            argv = resolve(["paseo", "run", "--workspace", ws_for[role], "--provider", model,
+                            "--title", f"AgentCoder {job['task_id']} {role}",
+                            "--json", prompts[role]])
             try:
                 procs[role] = subprocess.Popen(argv, cwd=spec["repo"], stdout=subprocess.PIPE,
                                                stderr=subprocess.PIPE, text=True,
