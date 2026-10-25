@@ -135,6 +135,9 @@ FLAGS = {  # flags the REAL CLI accepts, verified from `paseo <cmd> --help`
              "--format", "-q", "--no-headers", "--no-color"},
     "ls": {"-a", "--all", "-g", "--global", "--label", "--thinking", "--json", "--host",
            "--home", "-o", "--format", "-q", "--no-headers", "--no-color"},
+    "workspace": {"--isolation", "--path", "--project", "--title", "--mode", "--worktree-slug",
+                  "--new-branch", "--base", "--branch", "--pr-number", "--forge", "--json",
+                  "--host", "--home", "-o", "--format", "-q", "--no-headers", "--no-color"},
 }
 if cmd in FLAGS:
     for a in ARGS[1:]:
@@ -202,6 +205,16 @@ elif cmd == "run":
         files = S.get(role + "_files")
         if files:
             write_commit(ws, files, "fake %s work" % role)
+    elif flag("--workspace"):  # the reuse path: run INSIDE an existing workspace
+        wsid = flag("--workspace")
+        wrec = state.get("workspaces", {}).get(wsid)
+        if wrec is None:
+            sys.exit("fake paseo: no workspace " + wsid)
+        ws = wrec["cwd"]
+        print("Using workspace %s" % wsid)  # real CLI prints this line BEFORE the json
+        files = S.get(role + "_files")
+        if files:
+            write_commit(ws, files, "fake %s work" % role)
     state["seq"] += 1
     aid = "a%d" % state["seq"]
     state["agents"][aid] = {"role": role, "ws": ws, "sends": 0,
@@ -239,6 +252,33 @@ elif cmd == "stop":
         rec["status"] = "closed"
         save()
     print(json.dumps({"status": "closed"}))
+elif cmd == "workspace":
+    sub = ARGS[1]
+    WSS = state.setdefault("workspaces", {})
+    if sub == "ls":
+        print(json.dumps([{"workspaceId": k, "project": "fake", "name": v.get("name", ""),
+                           "isolation": v.get("isolation", "worktree"), "cwd": v["cwd"]}
+                          for k, v in WSS.items()]))
+    elif sub == "create":
+        branch = flag("--new-branch")
+        wsid = "wks_%d" % state.get("wsseq", 0)  # own counter: agent ids keep their seq
+        state["wsseq"] = state.get("wsseq", 0) + 1
+        ws = os.path.join(S["wtroot"], branch.replace("/", "-"))
+        if not os.path.isdir(ws):
+            os.makedirs(S["wtroot"], exist_ok=True)
+            git("worktree", "add", "-B", branch, ws, flag("--base"))
+        WSS[wsid] = {"cwd": ws, "branch": branch, "name": flag("--title", ""),
+                     "isolation": "worktree"}
+        save()
+        print(json.dumps({"workspaceId": wsid, "project": "fake",
+                          "name": flag("--title", ""), "isolation": "worktree",
+                          "cwd": ws}))
+    elif sub == "archive":
+        WSS.pop(ARGS[2], None)
+        save()
+        print(json.dumps({"workspaceId": ARGS[2], "status": "archived"}))
+    else:
+        sys.exit("fake paseo: workspace sub " + sub)
 else:
     sys.exit("fake paseo: unknown " + cmd)
 '''

@@ -1,7 +1,7 @@
 # agentcoder — a small driver for coder / blind test designer / executor loops
 
 `tools/agentcoder/agentcoder.py` is a **plain driver script** (stdlib only,
-one file; currently 883 non-blank/non-comment lines — ~1000 is a soft
+one file; currently 955 non-blank/non-comment lines — ~1000 is a soft
 sanity ceiling, not enforced by a check) that runs the AgentCoder paper
 loop against Paseo agents:
 
@@ -78,7 +78,8 @@ it, a Linux tool), and the driver is untested on Windows/macOS.
   "designer_model": "opencode/qwenlocal/Qwen3.8-Flash-Next",
   "test_reviewer_model": null,
   "qwen_cap": 8,
-  "reserve": 1
+  "reserve": 1,
+  "workspaces": {"coder": "wks_...", "designer": "wks_...", "reviewer": "wks_..."}
 }
 ```
 
@@ -88,6 +89,13 @@ it, a Linux tool), and the driver is untested on Windows/macOS.
 - `base` is resolved to a SHA at its **first resolution** (in preflight) and
   pinned in `job.json`; later resumes never re-resolve the ref, so a base
   branch that moves while the job is paused cannot drift the job.
+- `workspaces` (optional) maps roles — `coder`, `designer`, `reviewer` — to
+  **existing active workspace ids** (see "Workspaces" below). Validation
+  rejects unknown role keys, ids that are not active workspaces per
+  `paseo workspace ls --json`, and coder/designer sharing one id (the
+  designer must stay blind to the coder's tree). A role with no id gets its
+  workspace **created** at first spawn — the driver never asks Paseo for a
+  new workspace per agent.
 - `contract_file` is read **once** in preflight and its text is pinned in
   `job.json` (undecodable bytes replaced, NULs stripped — the text rides
   argv in every spawn prompt); prompts and `report.md` use the pinned
@@ -143,7 +151,7 @@ the recorded phase with the recorded ids — for coder, designer **and**
 reviewer: an id saved by a completed turn is adopted on resume only while
 it is live in `paseo ls`; a recorded id that is gone from `paseo ls` is
 dropped and the role respawned (all three roles follow the same rule), so
-the branch collision described below is a real resume outcome. The
+re-spawn onto the role's reused workspace is a real resume outcome. The
 recorded live agent is confirmed by `paseo wait <id>
 --json`: a status other than idle **pauses** the job; `paseo wait` was
 observed (live) to exit 0 for a not-found id with `Agent not found` in the
@@ -152,9 +160,9 @@ status is. Phases are **not all
 idempotent**: a crash after a side effect but before the next save
 replays it. Safe to replay: **spawn** (each completed turn records its
 agent id, and only the role with no saved id is re-spawned; a real
-re-spawn collides with the already-checked-out branch and pauses for a
-human, it never forks — that collision path is offline-tested only, see
-"Not verified live" below) and **land** (an existing PR for the branch is
+re-spawn reuses the role's recorded workspace and resets its branch onto
+the base with `git checkout -B` — a dirty tree **pauses** for a human
+rather than silently resetting uncommitted work) and **land** (an existing PR for the branch is
 adopted, never forked). What can repeat: a **feedback send** to a
 designer/coder whose turn ended during the crash window — agents are
 re-prompted with the same text, which a human reviewing the PR can see.
@@ -164,10 +172,12 @@ The driver never claims to have deduplicated a send it did not record.
 spawn ──► test_review ──► execute ──► candidate ──► land ──► report ──► done
 ```
 
-1. **spawn** — two worktrees at the base SHA, created **in parallel** via
-   `paseo run --new-workspace worktree --worktree-mode branch-off
-   --new-branch ac/<task>/{coder,designer} --base <sha> ...` (each blocking
-   call is that agent's whole turn). At the end of the phase every recorded
+1. **spawn** — one workspace **per role** (see "Workspaces" below): coder
+   and designer each get a worktree workspace at the base SHA (the spec's
+   `workspaces` id for that role, or one the driver creates), then both
+   agents launch **in parallel** via `paseo run --workspace <id> ...`
+   (each blocking call is that agent's whole turn). The driver never
+   spawns with `--new-workspace`. At the end of the phase every recorded
    live agent is confirmed with `paseo wait <id> --json` — a status of
    anything but `idle` **pauses** (the rc is 0 for all of them, so only
    the JSON status decides). The designer is told: tests only under
@@ -178,8 +188,10 @@ spawn ──► test_review ──► execute ──► candidate ──► land
    `"fail"` (new behavior) plus a one-line requirement. The coder is told:
    implement the contract, touch only `allowed_code_paths`, do **not** write
    the acceptance tests.
- 2. **test_review** (optional) — one reviewer agent per round on an
-     `ac/<task>/review-r<n>-<sha6>` branch created at the frozen test SHA,
+  2. **test_review** (optional) — one reviewer agent per round, all rounds
+      sharing **one** reviewer workspace; each round's agent starts on the
+      `ac/<task>/review-r<n>-<sha6>` branch of that workspace, reset to the
+      frozen test SHA,
      with a checklist; the driver parses its final
     `VERDICT: APPROVE|CHANGES REQUESTED` line. Findings are `paseo send`-ed to
     the designer (blocking); at most `max_rounds`, then escalate. The gate is
@@ -278,6 +290,32 @@ driver never guesses and has no stale-SHA detection of its own: coder heads
 are re-read from git each round, while the base SHA is pinned at its first
 resolution.
 
+## Workspaces
+
+Every agent the driver spawns runs in a workspace via
+`paseo run --workspace <id>` — the driver **never** passes
+`--new-workspace`, so the job creates at most **one workspace per role**
+(`coder_workspace`, `designer_workspace`, `reviewer_workspace` in
+`job.json`), not one per agent. Respawn after a pause, feedback rounds,
+and review round N all reuse the role's workspace; an early version that
+spawned with `--new-workspace` per agent is what left one real pilot with
+130+ abandoned workspaces.
+
+- Creation is lazy and ordered: the first agent of a role takes the id
+  already recorded in `job.json`, else the spec's `workspaces` id for that
+  role, else the driver creates one — `paseo workspace create --isolation
+  worktree --mode branch-off --new-branch ac/<task>/<role> --base <sha>
+  --json` — and records the returned `workspaceId` before launching.
+- Before every spawn the workspace's tree is reset to a clean checkout of
+  the branch that agent needs (`git checkout -B <branch> <sha>`; the
+  reviewer's SHA is the frozen test SHA). A **dirty** tree **pauses** the
+  job — the driver refuses to reset uncommitted work; commit, revert, or
+  clean it, then `resume`.
+- The driver never archives and never deletes a workspace. After the PR
+  lands (or the job dies for good), the **human** cleans up:
+  `paseo workspace archive <id>` for the job's one to three workspace ids
+  (they are in `job.json`).
+
 ## Verified against the real CLI
 
 The two real pilot tasks (ids `chk-attr-003c`, the CHK-ATTR-003 fix, which
@@ -289,8 +327,16 @@ XML), the candidate round, `land` + real `gh pr create`, one feedback
 `send` + `resume` (the `edit-03` scope round), and `resume` after
 a permission pause. Every live-verified statement in this README comes
 from those two runs plus the author's direct observations of `paseo ls`
-and `paseo wait` output. **Not verified live** (offline-tested against the
-fake only, incl. the re-spawn branch collision): the remaining feedback
+and `paseo wait` output, plus (for the workspace model) direct probe runs
+against the live CLI: `workspace create --isolation worktree --mode
+branch-off --json` (returns `workspaceId`/`cwd`, no `id` key), `run
+--workspace <id> --json` landing the agent in that workspace's recorded
+`cwd` with its plain `Using workspace <id>` banner preceding the JSON
+(two runs on one id, no new workspace in `workspace ls`), and
+`workspace archive` (returns `status: "archived"`, drops out of
+`workspace ls`); the probe workspace was archived afterwards. **Not
+verified live** (offline-tested against the
+fake only, incl. the dirty-tree respawn pause): the remaining feedback
 `send` loops (test-review changes,
 executor
 feedback, scope-feedback rounds, candidate-red feedback), the `test_review`
@@ -330,9 +376,11 @@ never raise a `UnicodeDecodeError` out of the driver and strand
   Remaining
   gap: a resume re-spawns any role with no recorded agent id — or with a
   recorded id that no longer appears in `paseo ls` (dead recorded ids are
-  dropped, see the state machine above) — and its
-  branch collides with the stopped agent's — that Pause is loud; delete
-  the branch or start a fresh jobdir.
+  dropped, see the state machine above). With workspace reuse the branch
+  collision is gone (the re-spawn's `git checkout -B` resets the branch
+  onto the base, and a dirty tree pauses first), but that same reset
+  discards a stopped agent's committed work on the role branch — start a
+  fresh jobdir if that turn's output must be kept.
 - Candidate rounds are recorded one-per-round: a resume re-runs the round
   and replaces its entry in `candidate_results` instead of appending a
   duplicate.
