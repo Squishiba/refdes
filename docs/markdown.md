@@ -79,8 +79,11 @@ scans every body into one project-wide list you can read with
 
 The grammar is closed and strict:
 
-- one marker per line, a closed `<!--navi: … -->` comment; the text is
-  single-line and may not contain `-->`;
+- each marker is a closed `<!--navi: … -->` comment confined to one line
+  (it never spans lines); the text is single-line and may not contain
+  `-->` -- the first `-->` closes the marker, so two closed markers on one
+  line are two Navis at the same line. One marker per line is the
+  convention the tooling assumes you write; it is not enforced;
 - a marker may carry its own 11-character key
   (`<!--navi:k7f3q2x8d0m Model worst-case copper temperature.-->`); keys
   are minted by the tool in a later slice, so hand-write none of them

@@ -74,6 +74,17 @@ def test_scan_keyless_marker():
     assert found[0].line_offset == 1
 
 
+def test_scan_two_markers_on_one_line():
+    # The design's "One line, always" rule (§4) binds each marker to one
+    # line (CRLF safety, exact line reporting, panel row a sentence); it
+    # does not bind a line to one marker. The first `-->` closes the first
+    # marker, and a second closed marker on the same line is its own Navi.
+    found, bad = navis.scan_body("<!--navi: first--><!--navi: second-->")
+    assert bad == []
+    assert [(n.text, n.line_offset) for n in found] == [("first", 0), ("second", 0)]
+    assert navis.strip_markers("<!--navi: first--><!--navi: second--> tail") == " tail"
+
+
 def test_scan_keyed_marker():
     found, bad = navis.scan_body("<!--navi:k7f3q2x8d0m Model worst-case copper temperature.-->")
     assert bad == []

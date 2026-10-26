@@ -111,3 +111,18 @@ build.py:1798-1804 cite shift. Diff scope verified file-by-file; targeted
 49 green, diff gate PASS, full suite 4937 passed / 2 skipped; pushed
 --force-with-lease (head 8ce86b3), PR body updated, disposition comment
 posted.
+
+## Review round 2 (head 75f0c0d, 1307f94a: one P3)
+
+Docs/markdown.md said "one marker per line"; the scan yields one Navi per
+marker (adjacent markers on a line are two Navis). Design §4 says "One
+line, always" -- that binds a marker to a line (CRLF safety, exact line
+reporting), it does not bind a line to one marker, and §4's closed-family
+grammar closes each marker at the first `-->`; the scan matching the
+grammar is right, the doc over-constrained. Fixed the doc to state the
+accepted grammar (two closed markers on one line are two Navis at the
+same line; one-per-line is convention, not enforcement), added
+test_scan_two_markers_on_one_line pinning scan + strip of the adjacent
+case, and appended a twin-marker line to the differential fixture's
+marker project (gate PASS: both Navis in the payload at line 13, both
+marker lines consumed from the page; plain project byte-identical).
