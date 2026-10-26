@@ -36,11 +36,16 @@ stale by design) plus `docs/design/*.md` Status lines against `main`
     (field refs, citation ids, escaping, board contracts/includes,
     tree, theme, extends, calc cross-refs ×3, calc blocks ×3, docs
     examples, standard docs complete, image search).
-- Design-doc Status lines: all 22 `docs/design/*.md` files checked.
-  2 mismatches (report §3); the rest verified by re-running the cited
-  commits (`dc0c138/0459f64/8085da2/ecb85bb`, the picker/upload slice
-  shas, `da2e44b/0f38619/3c24a63`, `4b34238`, `59d2915/197bc7c/1d796a7/
-  8226b79/bda7ab5`) and the cited code paths.
+- Design-doc Status lines: the 23 design docs named in report §3's list
+  plus `backlog.md` (24 of the 27 `.md` files in `docs/design/`) checked
+  in the first pass; 2 mismatches (report §3). The first pass's "all 22
+  files checked" phrasing was overstated. `lifecycle.md`,
+  `stale-arithmetic-signal.md` and `standard-library.md` were **not**
+  audited then; they were audited in the review round and are consistent
+  (report §3's coverage note). The rest were verified by re-running the
+  cited commits (`dc0c138/0459f64/8085da2/ecb85bb`, the picker/upload
+  slice shas, `da2e44b/0f38619/3c24a63`, `4b34238`, `59d2915/197bc7c/
+  1d796a7/8226b79/bda7ab5`) and the cited code paths.
 
 ## Judgement calls
 
@@ -86,10 +91,36 @@ commit on this branch:
 - Counts fixed: 49 distinct backlog shas (not 48), all ancestors; the
   295-test batch command is now named verbatim in report §0.
 - Docs-only findings → no code changes → no new tests. CI on this
-  branch: all checks green incl. windows-latest (`gh pr checks 378`).
+  branch: all checks green incl. windows-latest — **re-verified after
+  the run completed**; the 0ac87fe commit message claimed green from a
+  check taken while the run was still queued, which was not an
+  observation of a finished run.
+
+## Review round 2 (review 7c736e96)
+
+All findings accepted, citation-only fixes (verdicts unchanged):
+
+- Row 21: extends landed in `ab55e27` ("extends: single-level type
+  inheritance engine"); `1cf3e88` is finding 13's `{{index}}` tag filter
+  and was cited by mistake.
+- Row 7: requirement-half `governed_by` landed in `50cf460` (bound-side
+  suppression `7018af0`); `491283e` is finding 9's `refdes ls`.
+- Row 6: the first pass cited finding 12's body-handling lines
+  (`parse.py:58,62`, `authoring.md:35`). Real evidence for finding 6:
+  `Item.inherited_fields`/`defaults_line` (`model.py:640-641`), wired
+  `parse.py:1253-1254`, `:1940`, named in the error path `build.py:283`.
+- Row 11: the test range now names the four `test_lint_own_tags_*`
+  functions (`tests/test_parse.py:300,308,325,333`) instead of a block
+  ending before them.
+- Completeness claim narrowed: 24 of the 27 `docs/design/*.md` files
+  audited in the first pass; `lifecycle.md`, `stale-arithmetic-signal.md`,
+  `standard-library.md` audited in this round, consistent (report §3
+  coverage note).
+- CI figures qualified: 4888/2 is the ubuntu-latest job; windows-latest
+  is 4677 passed, 213 skipped.
 
 ## State
 
 Finished. Report + this log committed on `docs/backlog-audit-20261026`,
 pushed, docs-only PR opened (not merged); review-round fixes pushed on
-top (see above).
+top (see the two review-round sections above).

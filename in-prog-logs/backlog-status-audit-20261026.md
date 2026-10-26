@@ -29,7 +29,13 @@ tests/test_docs_examples.py tests/test_standard_docs_complete.py
 tests/test_image_search.py -q` → 295 passed (re-run at `78c8954`); the
 rows' other named tests (`test_style_tokens.py`, `test_tree_scoped.py`,
 `test_vocabulary_page.py`, …) pass in separate runs. The full suite
-(4888 passed, 2 skipped) is CI's result on this branch, not a local claim.
+(4888 passed, 2 skipped) is CI's result on this branch, not a local
+claim — and specifically the `ubuntu-latest` job's: `windows-latest`
+(4677 passed, 213 skipped — platform skips), so the 4888/2 figure
+is not the whole matrix. Coverage of `docs/design/*.md`: 27 `.md` files
+at `78c8954`; 24 audited in the first pass (the 23 named in §3 plus
+`backlog.md` in §1), the remaining 3 audited in the review round — see
+§3's coverage note.
 
 ## 1. Findings
 
@@ -40,12 +46,12 @@ rows' other named tests (`test_style_tokens.py`, `test_tree_scoped.py`,
 | 3 | `text:`/`title:` unification (done-differently) | DONE | `50cf460` ancestor; `revise.py:449` `check_body_merge_conflicts` (body-merge check replaces rename); v3 `migration.yaml:26` runs it | (nothing) |
 | 4 | Explain note/source/rationale/body | DONE | `dd203e3` ancestor; `docs/authoring.md:335` "### `source`, `note`, `rationale`, `body`" | (nothing) |
 | 5 | `build --dry-run` | DONE | `c85deda` ancestor; `cli.py:563` `seal_write=not (args.dry_run or args.no_write)`; write-gated draft banner `base.html.j2:50` + `render.py:1124` | (nothing) |
-| 6 | `defaults:` leak onto `type:`-overridden items | DONE | `10b7263` ancestor; `parse.py:58,62` `RESERVED = {"id","type","body","former_ids","key"}` + the rewritten comment; `authoring.md:35` "Bodies in list files" | (nothing) |
-| 7 | Requirement compliance verb; component→bound | DONE | `491283e` ancestor (requirement half, `governed_by`); v3 `base.yaml:121-147` `claims` set = `satisfies: [requirement, bound]` + `constrained_by: [bound]`, included by component (`base.yaml:258`) and log (`:303`); component `checks:` field `base.yaml:257` | (nothing) |
+| 6 | `defaults:` leak onto `type:`-overridden items | DONE | `10b7263` ancestor ("parse/build: track defaults: provenance, name it in the error"); provenance fields `model.py:640-641` (`Item.inherited_fields`, `defaults_line`), wired at the parse merge sites `parse.py:1253-1254` + `:1940`; named in the error path `build.py:283` (`fname in item.inherited_fields and item.defaults_line is not None`) | (nothing) |
+| 7 | Requirement compliance verb; component→bound | DONE | `50cf460` ancestor ("standard: ship hardware@3 — governed_by … finding 7 + field unification"); bound-side suppression `7018af0` ("links: {verb: null} un-declares an inherited link; bound suppresses governed_by"); v3 `base.yaml:121-147` `claims` set = `satisfies: [requirement, bound]` + `constrained_by: [bound]`, included by component (`base.yaml:258`) and log (`:303`); component `checks:` field `base.yaml:257` | (nothing) |
 | 8 | Id completion narrowed by file | DONE | `1044c96` ancestor; `editors/vscode/extension.js:681` completion `filterText` includes `sourceFile`/`board` | (nothing) |
 | 9 | CLI list/browse | DONE | `491283e` ancestor; `cmd_ls` `cli.py:871`; run `refdes ls --help`: free-text query (id/title/tags) + `--type/--board/--workspace/--file/--tag/--keys` | (nothing) |
 | 10 | Next-free-number completion | DONE | `c743328` ancestor; `render.py:798` `payload["next_ids"]` in items.json; ledger visibility: `cmd_audit` `cli.py:1728`, `ids.py:158` `high_water` | (nothing; the finding itself called the ledger report informational) |
-| 11 | Untagged-item lint → own-tags lint | DONE | `a1bcdf0` ancestor; `build.py:785` `lint_own_tags`; setting `lint_own_tags` (`schema.py:85` key list, `:278-281` validation, `:347`, wired `:1116`); tests in `tests/test_parse.py` (the finding-11 block at `:244-300`) and `tests/test_project_settings.py` | (nothing) |
+| 11 | Untagged-item lint → own-tags lint | DONE | `a1bcdf0` ancestor; `build.py:785` `lint_own_tags`; setting `lint_own_tags` (`schema.py:85` key list, `:278-281` validation, `:347`, wired `:1116`); tests in `tests/test_parse.py` (the finding-11 block: `:244` comment, four `test_lint_own_tags_*` tests at `:300,308,325,333`) and `tests/test_project_settings.py` | (nothing) |
 | 12 | `body:`-in-list-files rationale | DONE | `8e33c08` ancestor; `authoring.md:35-39` (the real tradeoff: prose per entry, not file count); `parse.py:58` comment rewritten | (nothing) |
 | 13 | `{{index}}` `tag=` filter | DONE | `1cf3e88` ancestor; `blocks.py:919` index `BlockSpec` `optional=("board","tag","subtypes")` (`tag` present; `subtypes` added later) | (nothing) |
 | 14 | Grouping/collection type | DONE | `1330dee` ancestor; v3 `base.yaml:269-274` `group` type, `prefix: GRP`, `coverable: false`; `changelog.d/hardware-v3-group-type.added.md` | (nothing) |
@@ -55,7 +61,7 @@ rows' other named tests (`test_style_tokens.py`, `test_tree_scoped.py`,
 | 18 | Calc lexer `%` / SI-prefixed Ω | DONE | `3a2fced` ancestor; `calc.py:467-468` `_SEGMENT` continuation class `[A-Za-z0-9_Ωµμ°]*`, `_UNIT_RUN` includes `%`; run probe: `evaluate("100 V * 5 %")` → `500.0 percent*volt`, `"10 kΩ + 5 kΩ"` → `15.0 kiloohm`, `"2 MΩ"`, `"90 °C"`, `"1 µF * 1000"` all evaluate | (nothing) |
 | 19 | `[[ID#field]]` + citation identity | DONE | `build.py:69` `EXPLICIT_REF_RE` fragment group incl. `#field`; `CitationSpec` (`model.py:411`) with its `id` field (`:446`); `item.html.j2:128,205` `id="field-…"`/`id="cite-…"` anchors; **run**: `tests/test_field_refs.py`, `tests/test_citation_ids.py` pass (within the 295-test batch named in section 0) | (nothing) |
 | 20 | Generated per-type examples in docs | DONE | `docs-site/gen_examples.py`; `docs.yml:40` `gen_examples.py --check` gate; **run**: `tests/test_docs_examples.py` passes | (nothing) |
-| 21 | `extends:` single-level inheritance | DONE | `1cf3e88` ancestor; `standards.py:646` `_resolve_extends`, `:696` `_apply_parent` (wired at `:90`, validation `:266-275`, null-suppression kept `:617-624`); v3 `base.yaml:210` `extends: requirement`; `configcheck.py:75,419` `coverage.group_inherited` (default true — the §11 overturn, "coverage grouping is the default for every project"); **run**: `tests/test_extends.py` passes | (nothing; status line's "on ao/refdes-113" branch name is stale — commits are on main) |
+| 21 | `extends:` single-level inheritance | DONE | `ab55e27` ancestor ("feat(schema): extends: single-level type inheritance engine"; `1cf3e88` is finding 13's `{{index}}` tag filter, cited here by mistake in the first pass); `standards.py:646` `_resolve_extends`, `:696` `_apply_parent` (wired at `:90`, validation `:266-275`, null-suppression kept `:617-624`); v3 `base.yaml:210` `extends: requirement`; `configcheck.py:75,419` `coverage.group_inherited` (default true — the §11 overturn, "coverage grouping is the default for every project"); **run**: `tests/test_extends.py` passes | (nothing; status line's "on ao/refdes-113" branch name is stale — commits are on main) |
 | 22 | Widen `satisfies` to `[requirement, bound]` | DONE | v3 `base.yaml:141-147` `claims` set `satisfies: [requirement, bound]` + `constrained_by: [bound]`, included by component (`:258`) and log (`:303`) — the decision half now rides on `log` post-4a | (nothing) |
 | 23 | `page:` in citation hrefs; PDF-outline `section:` | DONE | `CitationSpec.section`; `citations.py:657` `resolve_sections`; `item.html.j2:214,216,220` `#page={{ cpage }}` hrefs (guarded); Part 2 refusal: `citations.py:740-773` (`_hash_only_without_count`, "pinned hash-only, with no kept copy") | (nothing) |
 | 24 | Per-(item, board) coverage via `conforms_to:` | DONE | `model.py:266` `conforms_to`, `schema.py:1033`; `build.py:1171` `validate_conforms_to`, `:1321` `compute_board_coverage`; `coverage.html.j2:74-78` "Conforming contracts"; **run**: `tests/test_board_contracts.py` passes | (nothing) |
@@ -117,6 +123,14 @@ on ten owner questions.
 
 ## 3. `docs/design/*.md` status lines that disagree with main
 
+**Coverage:** `docs/design/` has 27 `.md` files at `78c8954`. The first
+pass audited 24 of them: the 23 design docs named in this section (the
+two mismatches + the "checked and consistent" list + the two withdrawals)
+plus `backlog.md` (audited as the finding set in section 1). It did **not**
+audit `lifecycle.md`, `stale-arithmetic-signal.md` or
+`standard-library.md` — see the coverage note at the end of this section.
+The first pass's "all 22" count was overstated; this is the exact scope.
+
 1. **`docs/design/living-notes.md:1`** — "Status: Decided -- ready to plan
    implementation". The plan exists and landed:
    `living-notes-plan.md:1` "Implemented (H1–H8; optional H9 not landed)",
@@ -167,7 +181,25 @@ quoted before/after block, not a live claim), `form-ingestion.md` (no code:
 accurate: no W5b route in `serve/api.py`), `threads.md:17`,
 `item-search-hover.md` + `seal-marker-identity.md` (first-pass mismatches
 withdrawn — see the note above section 3's consistent list),
+`lifecycle.md` (header `:28` "Implemented, shipped in v0.4.0 (released
+2026-08-18 …)"; `[0.4.0]` exists in `CHANGELOG.md`),
+`stale-arithmetic-signal.md` (header `:3` "Implemented (`b537edd`,
+2026-08-28)"; `b537edd` is an ancestor; `lifecycle._stale_arithmetic` is
+live at `lifecycle.py:1149`), `standard-library.md` (header `:25`
+"Implemented, shipped in v0.4.0 (2026-08-18 …)"; `[0.4.0]` in
+`CHANGELOG.md`; `standards.py` exists) — these three were **not** audited
+in the first pass (see the coverage note in §3), and are consistent.
 `backlog.md` itself (all 39 status lines audited in section 1).
+
+**Coverage note (added in the review round).** `docs/design/` holds 27
+`.md` files at `78c8954` (`git ls-tree --name-only 78c8954 docs/design/`).
+The first pass audited the Status/header lines of the 23 design docs named
+in this section's list (excluding these three) plus `backlog.md`'s own 39
+status lines — 24 files in all. It did **not** audit `lifecycle.md`,
+`stale-arithmetic-signal.md`, `standard-library.md`; all three were audited
+in the review round and are consistent (evidence above). The first pass's
+"all 22" count and any implied "every file" completeness claim were
+overstated and are corrected here.
 
 ## 4. Not verified (and why)
 
@@ -179,6 +211,9 @@ withdrawn — see the note above section 3's consistent list),
 - **Finding 20, live site rendering** — `gen_examples.py --check` is the
   gate (verified in `docs.yml`); the deployed pages' rendered content was
   not fetched.
+- **The three `docs/design/*.md` files not audited in the first pass** —
+  `lifecycle.md`, `stale-arithmetic-signal.md`, `standard-library.md`
+  (see §3's coverage note). Audited in the review round and consistent.
 - **`gh` auth scope** — the two `gh api` calls above are the only network
   checks; the workflow run list (`gh run list`) was not queried.
 - **Findings 16/17 as hardware@2 artifacts** — verified as *absent* in v3
