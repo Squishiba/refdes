@@ -311,7 +311,7 @@ def list_entries(path: Path) -> list[SourceEntry]: ...
 
 `list_entries` is an optional method on the `SourceReader` protocol
 (`sources.py:60-68`); `sources.list_entries()` dispatches through the same
-`reader_for()` registry (`sources.py:233-243`) and raises
+`reader_for()` registry and raises
 `SourceExtractionError` when the reader does not implement it, so a future
 reader that cannot enumerate is an error, not a silent empty list.
 
@@ -383,7 +383,7 @@ re-authorizes the path it is given rather than trusting that it came from the
 list.
 
 **Only a file with a registered reader.** Dispatch is `reader_for()` by
-extension (`sources.py:233-243`): for keyed files that means `.csv` and
+extension: for keyed files that means `.csv` and
 `.xlsx`. A cited `.py` or extensionless file is reported as "no source reader
 for this file type" — the reader's own error, verbatim — and is not opened.
 There is no fallback to a text parse, which is the registry's existing
@@ -451,9 +451,10 @@ a picked value exactly as they do to a typed sentence — no second editor state
   exactly what this bullet framed — `list_entries` for it, i.e. the picker
   listing. **Landed 2026-10-26**: `XlsxReader.list_entries` lists the
   workbook's defined names (workbook-scope bare, sheet-scope qualified as
-  `extract()` spells them, hidden sheets included and marked, refusals listed
-  and marked through the same `_xlsx_destination` helper `extract()` uses),
-  behind the §4/§5 contract and the §6 caps; `tests/test_sources_xlsx_list.py`
+  `extract()` spells them, hidden sheets included and marked; destination-class
+  refusals run through the same `_xlsx_destination` helper `extract()` uses,
+  and the cell reads through its `parse_decimal`, so a marked row is a row
+  `fetch` refuses), behind the §4/§5 contract and the §6 caps; `tests/test_sources_xlsx_list.py`
   proves the selectable⇔`extract()`-accepts pairing, `test_serve_sources_xlsx.py`
   the panel reads and the `calc-sources.md` §11 Q2 `fetch --update` gate.
 - **PDF datasheet values.** Deferred at drafting, and explicitly the *reason*

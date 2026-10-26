@@ -220,6 +220,57 @@ def test_the_proposal_composes_a_line_for_a_picked_xlsx_key(tmp_path):
         app.stop()
 
 
+def test_propose_reaches_the_selectable_row_when_a_key_collides(tmp_path):
+    # A scripted workbook can carry a workbook-scope name containing '!' that
+    # collides with a real sheet-scoped key's qualified spelling (Excel's UI
+    # cannot create it; openpyxl can). The listing shows both rows: the
+    # crafted one marked, the real one selectable. The proposal read resolves
+    # the key -- it must resolve it as `extract()` does, to the real row, and
+    # not refuse on the crafted row it happens to meet first.
+    root = make_root(tmp_path, items=(
+        "defaults: { type: decision }\n"
+        "items:\n"
+        "  - id: DEC-004\n"
+        "    citations:\n"
+        "      - path: analysis/bang.xlsx\n"
+        "    body: |\n"
+        "      ```calc\n"
+        "      Q = 1 | 1\n"
+        "      ```\n"
+    ))
+    bang = root / "analysis" / "bang.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Sheet1"
+    sheet["B2"] = 1.0
+    sheet["C2"] = 99.0
+    workbook.defined_names.add(DefinedName("Sheet1!local", attr_text="'Sheet1'!$B$2"))
+    sheet.defined_names.add(DefinedName("local", attr_text="'Sheet1'!$C$2"))
+    workbook.save(bang)
+    workbook.close()
+    app = start(root)
+    try:
+        client = Client(app)
+        status, payload = client.api_get(
+            sources_url("DEC-004", "/entries") + "?path=analysis/bang.xlsx"
+        )
+        assert status == 200, payload
+        crafted, decoy = payload["entries"]
+        assert crafted["key"] == decoy["key"] == "Sheet1!local"
+        assert not crafted["selectable"] and decoy["selectable"]
+        status, proposal = client.api_get(
+            sources_url("DEC-004", "/propose")
+            + "?path=analysis/bang.xlsx&key=Sheet1%21local&unit=W"
+        )
+        assert status == 200, proposal  # refused: the crafted row answered first
+        assert proposal["entry"]["value"] == "99"
+        assert proposal["line"] == (
+            'sheet1_local = source("analysis/bang.xlsx", "Sheet1!local") | W'
+        )
+    finally:
+        app.stop()
+
+
 # -------------------------------------------- the §11 Q2 acceptance gate, e2e
 
 

@@ -895,7 +895,16 @@ def propose_payload(
     canon = _authorise(project, item, path)
     reader = _reader(canon)
     listing = _listing(project, canon, reader.name)
-    entry = next((e for e in listing["entries"] if e["key"] == key), None)
+    # First match answers for every keyed reader today -- a CSV listing makes
+    # every copy of a duplicated key unselectable, so any match is the right
+    # refusal. The xlsx listing's crafted-key collision (a workbook-scope name
+    # carrying '!' spelled the way a real sheet-scoped key is) can put a
+    # marked row before the selectable one, and answering it would refuse a
+    # key `extract()` accepts and hide the value the panel just showed. A
+    # selectable row for the key wins; the marked match answers the refusal
+    # when there is none.
+    matches = [e for e in listing["entries"] if e["key"] == key]
+    entry = next((e for e in matches if not e["problem"]), matches[0] if matches else None)
     if entry is None:
         if listing["problems"]:
             raise SourceRefusal("; ".join(listing["problems"]))

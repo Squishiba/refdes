@@ -71,10 +71,11 @@ the case is now a cited `.py` (no reader), asserting "no source reader".
   item -> `refdes fetch --update` pins 1.85 -> cell drift -> plain fetch
   keeps the pin -> `fetch --update` accepts 2.3, sha256 changes, workbook
   bytes unchanged by the listing/proposal.
-- Scripted run: .scratch/xlsx-picker-probe/run.sh (run dirs run/..run5
-  alongside), isolated project, real `refdes fetch --update` CLI; final
-  run printed GATE PASSED (first pin 1.85, drift keeps, --update -> 2.3,
-  bytes 4844 -> 4845 only from the openpyxl edit).
+- Scripted run: .scratch/xlsx-picker-probe/run.sh (author's worktree only;
+  `.scratch/` is gitignored, so the in-repo e2e gate test is the shippable
+  proof), isolated project, real `refdes fetch --update` CLI; the run
+  printed GATE PASSED (first pin 1.85, drift keeps, --update -> 2.3, bytes
+  4844 -> 4845 only from the openpyxl edit).
 
 ## Docs / changelog
 
@@ -88,13 +89,13 @@ the case is now a cited `.py` (no reader), asserting "no source reader".
 
 ## Verification
 
-- tests/test_sources_xlsx_list.py 11 passed;
-  tests/test_serve_sources_xlsx.py 7 passed.
+- tests/test_sources_xlsx_list.py 12 passed;
+  tests/test_serve_sources_xlsx.py 8 passed.
 - Neighbours: test_sources_xlsx.py, test_sources_list.py,
   test_serve_sources.py, test_serve_pdf_sources.py,
   test_serve_sources_accept.py, test_sources_pdf.py, test_sources_csv.py,
   test_citations.py, test_fetch_size_warning.py, test_calc_sources.py
-  (subset runs green; full suite: 4906 passed, 2 skipped).
+  (subset runs green; full suite at final head: 4908 passed, 2 skipped).
 - ruff: `ruff check` on the four new/touched test files clean.
   src/refdes/sources.py: 11 ISC004, of which 9 pre-exist at HEAD; the two
   new ones are the same implicit-concatenation-in-collection style the file
@@ -103,7 +104,7 @@ the case is now a cited `.py` (no reader), asserting "no source reader".
 - openpyxl 3.1.5 present; skip-on-missing behavior kept (importorskip in
   tests; install-hint message path shared with extract via `_xlsx_module`).
 
-## Review round (fd23a83: 1 CHANGES REQUESTED, 1 APPROVE)
+## Review round 1 (1 CHANGES REQUESTED, 1 APPROVE)
 
 Accepted 4 findings (chunk-2 review): a workbook-scope defined name
 containing '!' was listed selectable -- the key grammar reads the first '!'
@@ -119,7 +120,20 @@ a bare key, the picker just never offers bare spellings; reworded);
 Rejected 1: "merged-range claim untested" -- the fixture merges D4:E5
 (tests/test_sources_xlsx_list.py:38), the top-left raw/value pair is
 asserted at :129 and the inside cell's "is blank" refusal at :149, both
-inside the pairing loop's coverage. CI at fd23a83: all three checks pass
-(ubuntu, py3.13, windows).
+inside the pairing loop's coverage. CI was all-pass (ubuntu, py3.13,
+windows).
+
+## Review round 2 (2 CHANGES REQUESTED)
+
+Accepted all: the proposal read resolved the FIRST listing row for a key,
+so a crafted workbook-scope `!` name listed ahead of the real sheet-scoped
+row made the selectable row unproposable (`propose_payload` now prefers a
+selectable match, marked match answers the refusal; RED at
+tests/test_serve_sources_xlsx.py:265). Design-doc fixes: the dead
+`sources.py:233-243` line refs dropped (both occurrences), §8 attribution
+narrowed to destination-class refusals + `parse_decimal`. Log fixes:
+own-commit sha dropped, stale counts refreshed, and the scripted gate
+cited here lives in `.scratch/` (gitignored, author's worktree only --
+the in-repo e2e gate test is the shippable proof).
 
 Finished: yes.
