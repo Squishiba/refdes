@@ -48,6 +48,13 @@ opt exact full agent IDs into cooperative auto-allow, and
 descriptions are agent-controlled text, so this opt-in is cooperative trust,
 not containment. Outside/risky evidence such as outside-workspace paths,
 `curl`, `git push`, or `rm` is still denied.
+Wait responses with status `permission` trigger another permit check and wait.
+They have a separate default budget of 100 prompts per job and a 900-second
+no-progress timer (`queue.max_permission_prompts` and
+`queue.permission_no_progress_seconds` configure those limits); they do not use
+the nudge budget. Empty or `-` permit descriptions are no evidence, so they
+park by default. Owned-agent trust may allow them, but file-change prompts
+contain no path and this remains cooperative trust, not containment.
 
 Queue state stores `owned_agents` as an object keyed by full agent ID. The
 supervised driver writes each returned ID before later job journaling, and the

@@ -92,20 +92,11 @@ adapters remain unverified, so unattended-release readiness is not claimed.
 - The orchestrator's round-4 supervised pilot ran and exposed the early
   permission-status run response. This worker did not rerun that live pilot
   after the fix; killed-supervisor-during-turn replay also remains unrun.
-- Exact missing evidence to capture: non-idle/timeout `paseo wait --json`; a
-  transient provider error in `logs`/inspect output; a turn-limit signature;
-  repeated loop-signature logs/artifact state; and a garbled final run/report
-  payload. These remain parked rather than inferred.
-- Transient provider signature extraction, idle-artifact/turn-limit detection,
-  streamed loop signature sampling, and garbled run/verdict parsing are not
-  wired to live Paseo outputs because no corresponding payload/log fixtures were
-  supplied. Their transition policies are bounded and tested; unverified live
-  signals park rather than trigger a retry.
-- The captured permit row cannot prove containment. Auto-allow is therefore
-  off by default and available only as explicit cooperative trust in an exact
-  full agent ID; no structured request classifier can prove this row in-scope.
-- Multi-process supervisor-kill fencing during a child run, plus full batch
-  generation semantics, remain outside this single-job slice implementation.
+- Still unverified live: timeout/non-idle wait, transient provider errors,
+  turn-limit/loop signatures, and garbled finish payloads; they park with
+  evidence. Multi-process supervisor-kill fencing and batch generation remain
+  outside this single-job slice. Permit descriptions still cannot prove
+  containment; owned-agent auto-allow is cooperative trust.
 
 ## Review rounds
 
@@ -140,3 +131,17 @@ regression run completed; unresolved live/schema gates are listed above.
   snapshot overwriting the write-ahead ID; a regression now confirms it stays
   present through terminal parking. Captured-but-unverified live signal list
   remains as above; the round-5 crash path is verified offline, not live.
+
+## Round 6 permission wait correction
+
+- `.scratch/live-fixtures5/` captured `wait --json` status `permission` and an
+  owned `CodexFileChange` row with description `-`. Tests were RED on the old
+  code: wait parked on the status, empty descriptions could not use trust, and
+  sequential prompts had no separate bound.
+- Permission waits now recheck permits and wait again. A per-job default cap
+  of 100 prompts and 900-second no-progress timer are independent of nudges;
+  idle clears the timer. Empty/`-` descriptions are no evidence, park with raw
+  evidence by default, and can be allowed only with owned trust after risky and
+  outside checks. File-change permits contain no path; trust remains cooperative.
+- Queue suite: 39 passed, including permission-loop happy/runaway paths and
+  classifier/retry mutations. No daemon or GitHub command was run.

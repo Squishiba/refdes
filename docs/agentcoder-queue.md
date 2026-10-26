@@ -26,6 +26,9 @@ the `workspaces` spec field or create one from the captured workspace response,
 and retain role trees across recovery. Publication
 is disabled unless the spec sets `publish: true`. `queue.max_nudges` defaults to
 2 (maximum 10), and `queue.job_wall_timeout` defaults to 14,400 seconds. The
+permission path has its own `queue.max_permission_prompts` budget (default 100,
+maximum 1,000 per job) and `queue.permission_no_progress_seconds` timer
+(default 900 seconds, maximum 86,400); it does not consume continuation nudges.
 recovery policy applies bounded outage backoff, a 120-second transient-error
 grace, a shared continuation budget, a 600-second no-progress window, one
 replacement per identified role, one verdict repair, and explicit park behavior
@@ -46,7 +49,11 @@ allowed after a fresh listing confirms the exact request disappeared. Permit
 descriptions are agent-controlled text, so this opt-in is cooperative trust,
 not containment or proof of the requested effect. Outside/risky evidence always
 wins over trust. Text naming outside-workspace paths, `../`, `/tmp`, `~/`,
-`curl`, `git push`, or `rm` is denied; unknown/unmatched evidence parks.
+`curl`, `git push`, or `rm` is denied; unknown/unmatched evidence parks. A
+`wait --json` response with status `permission` runs the permit check and waits
+again. Empty or `-` descriptions contain no evidence: they park without trust
+and can be allowed for an owned trusted agent, but file-change permits contain
+no path, so this is cooperative trust rather than path containment.
 
 `queue stop JOBDIR` persists deliberate stop intent before sending exact owned
 IDs to `paseo stop`, then confirms inactivity from a fresh captured listing.

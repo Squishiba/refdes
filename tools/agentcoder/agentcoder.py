@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -659,25 +660,46 @@ def wait_for_agent(job, role):
     # rc=0 proves NOTHING: real `paseo wait` exits 0 printing status "error"
     # ("Agent not found") as readily as "idle" -- the JSON status is the signal
     if job.get("queue_supervised"):
-        check_permits(job)
-    tmo = int(job["spec"].get("agent_timeout", 1800))
-    rc, out, err = run_guarded(["paseo", "wait", job[f"{role}_agent"], "--json",
-                                "--timeout", str(tmo)], timeout=tmo + 30)  # outlive the CLI
-    data = last_json_of(out, f"{role} wait result")
-    if job.get("queue_supervised"):
-        if rc != 0:
-            raise Pause(f"unverified paseo wait exit rc={rc}: {tail_text(out + err, 10)}")
         if str(Path(__file__).resolve().parent) not in sys.path:
             sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from queue_mode import validate_wait_result
-        valid, reason = validate_wait_result(data, job[f"{role}_agent"])
-        if not valid:
-            raise Pause(reason)
+        from queue_mode import (QueueError, clear_permission_wait, load_state,
+                                permission_limits,
+                                record_permission_prompt, validate_wait_result)
+        maximum, no_progress_seconds = permission_limits(job["spec"])
+        check_permits(job)
+    tmo = int(job["spec"].get("agent_timeout", 1800))
+    while True:
+        wait_timeout = tmo
+        if job.get("queue_supervised"):
+            started = load_state(job["jobdir"]).get("permission_started_at")
+            if started is not None:
+                remaining = no_progress_seconds - (time.time() - float(started))
+                if remaining <= 0:
+                    raise Pause("permission sequence exceeded its no-progress timer")
+                wait_timeout = min(tmo, max(1, int(remaining)))
+        rc, out, err = run_guarded(["paseo", "wait", job[f"{role}_agent"], "--json",
+                                    "--timeout", str(wait_timeout)], timeout=wait_timeout + 5)
+        data = last_json_of(out, f"{role} wait result")
+        if job.get("queue_supervised"):
+            if rc != 0:
+                raise Pause(f"unverified paseo wait exit rc={rc}: {tail_text(out + err, 10)}")
+            valid, reason = validate_wait_result(data, job[f"{role}_agent"])
+            if not valid:
+                raise Pause(reason)
+            if data["status"] == "permission":
+                try:
+                    record_permission_prompt(job["jobdir"], maximum, no_progress_seconds)
+                except QueueError as exc:
+                    raise Pause(str(exc))
+                check_permits(job)
+                continue
+            clear_permission_wait(job["jobdir"])
+            return
+        if data.get("status") != "idle":
+            aid = job[f"{role}_agent"]
+            raise Pause(f"{role} agent {aid} is not idle: paseo wait reports "
+                        f"{data.get('status')!r} {tail_text(str(data.get('message', '')), 3)}")
         return
-    if data.get("status") != "idle":
-        aid = job[f"{role}_agent"]
-        raise Pause(f"{role} agent {aid} is not idle: paseo wait reports "
-                    f"{data.get('status')!r} {tail_text(str(data.get('message', '')), 3)}")
 
 
 def live_ids():

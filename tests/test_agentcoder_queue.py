@@ -206,6 +206,95 @@ def test_owned_agent_trust_allows_captured_in_workspace_write(tmp_path):
     assert calls[0][:4] == ["permit", "allow", listing[0]["id"], row[0]["id"]]
 
 
+def test_no_evidence_file_change_permit_requires_owned_trust(tmp_path):
+    jobdir = tmp_path / "job"
+    create_state(jobdir)
+    listing = fixture("ls-g-permission.json")
+    row = fixture("permit-no-description.json")
+    row["agentId"] = listing[0]["id"]
+    row["agentShortId"] = listing[0]["shortId"]
+    calls = []
+    parked, reason = queue.process_permits(
+        jobdir, [listing[0]["id"]], listing, [row],
+        lambda argv: (calls.append(argv) or fake_result(out="[]")))
+    assert parked == "PARK" and "unclassifiable" in reason and calls == []
+    decision = queue.load_state(jobdir)["permit_decisions"][-1]
+    assert decision["raw"] and '"description": "-"' in decision["raw"]
+    empty = dict(row, description="")
+    allowed, _ = queue.process_permits(
+        jobdir, [listing[0]["id"]], listing, [empty],
+        lambda argv: (calls.append(argv) or fake_result(out="[]")),
+        trust_owned_agents=True)
+    assert allowed == "CLEAR"
+    assert calls[0][:4] == ["permit", "allow", listing[0]["id"], row["id"]]
+    risky = dict(row, name="CodexBash curl", description="-")
+    denied, _ = queue.process_permits(
+        jobdir, [listing[0]["id"]], listing, [risky],
+        lambda argv: (calls.append(argv) or fake_result(out="[]")),
+        trust_owned_agents=True)
+    assert denied == "PARK" and calls[-2][1] == "deny"
+
+
+def test_sequential_permission_waits_have_separate_bounded_budget(tmp_path, monkeypatch):
+    driver_spec = importlib.util.spec_from_file_location(
+        "agentcoder_permission_wait_loop", ROOT / "tools" / "agentcoder" / "agentcoder.py")
+    driver = importlib.util.module_from_spec(driver_spec)
+    driver_spec.loader.exec_module(driver)
+    create_state(tmp_path)
+    prompt = fixture("wait-permission.json")
+    idle = dict(fixture("wait-idle.json"), agentId=prompt["agentId"])
+    responses = [prompt, prompt, prompt, prompt, idle]
+    permits = []
+
+    def guarded(argv, **_kwargs):
+        assert argv[1] == "wait"
+        return 0, json.dumps(responses.pop(0)), ""
+
+    monkeypatch.setattr(driver, "run_guarded", guarded)
+    monkeypatch.setattr(driver, "check_permits", lambda _job: permits.append("check"))
+    job = {"queue_supervised": True, "jobdir": str(tmp_path),
+           "coder_agent": prompt["agentId"], "spec": {"agent_timeout": 30,
+               "queue": {"max_permission_prompts": 5}}}
+    driver.wait_for_agent(job, "coder")
+    state = queue.load_state(tmp_path)
+    assert len(permits) == 5 and not responses
+    assert state["permission_prompts"] == 4 and state["permission_started_at"] is None
+    assert state["nudges"] == 0
+
+
+def test_permission_wait_runaway_budget_and_no_progress_timer(tmp_path, monkeypatch):
+    driver_spec = importlib.util.spec_from_file_location(
+        "agentcoder_permission_runaway", ROOT / "tools" / "agentcoder" / "agentcoder.py")
+    driver = importlib.util.module_from_spec(driver_spec)
+    driver_spec.loader.exec_module(driver)
+    create_state(tmp_path)
+    prompt = fixture("wait-permission.json")
+    calls = []
+    monkeypatch.setattr(driver, "run_guarded", lambda *_args, **_kwargs:
+                        (calls.append("wait") or (0, json.dumps(prompt), "")))
+    monkeypatch.setattr(driver, "check_permits", lambda _job: None)
+    job = {"queue_supervised": True, "jobdir": str(tmp_path),
+           "coder_agent": prompt["agentId"], "spec": {"agent_timeout": 30,
+               "queue": {"max_permission_prompts": 2}}}
+    try:
+        driver.wait_for_agent(job, "coder")
+    except driver.Pause as exc:
+        assert "permission prompt budget" in str(exc)
+    else:
+        raise AssertionError("runaway permission sequence must park")
+    assert calls == ["wait"] * 3 and queue.load_state(tmp_path)["nudges"] == 0
+
+    state = {"permission_prompts": 0, "permission_started_at": None}
+    queue.note_permission_prompt(state, 3, 5, now=10)
+    queue.note_permission_prompt(state, 3, 5, now=14)
+    try:
+        queue.note_permission_prompt(state, 3, 5, now=16)
+    except queue.QueueError as exc:
+        assert "no-progress timer" in str(exc)
+    else:
+        raise AssertionError("permission chain must stop at its no-progress deadline")
+
+
 def test_owned_trust_still_denies_outside_and_risky_descriptions():
     rows = [
         dict(fixture("permit-owned-write.json")[0],
@@ -364,6 +453,7 @@ def test_captured_daemon_payload_validators():
     assert queue.validate_send_result(fixture("send-completed.json"),
                                       "agent-live-completed")[0]
     assert queue.validate_wait_result(fixture("wait-idle.json"), "agent-live-running")[0]
+    assert queue.validate_wait_result(fixture("wait-permission.json"), "agent-permission-001")[0]
     assert queue.validate_stop_result(fixture("stop-running.json"), "agent-live-running")[0]
     assert queue.validate_stop_result(fixture("stop-idle.json"), "agent-live-running")[0]
     permit = fixture("permit-pending.json")[0]

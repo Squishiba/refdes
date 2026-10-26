@@ -1,0 +1,5 @@
+{
+  "agentId": "agent-permission-001",
+  "message": "Agent is waiting for permission: tool",
+  "status": "permission"
+}

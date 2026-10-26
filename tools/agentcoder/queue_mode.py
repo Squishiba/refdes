@@ -21,6 +21,8 @@ BACKOFF_SECONDS = (15, 30, 60, 120, 300)
 MAX_INCIDENT_RETRIES = 5
 MAX_JOB_RETRIES = 10
 MAX_NUDGES = 2
+MAX_PERMISSION_PROMPTS = 100
+MAX_PERMISSION_CHAIN_SECONDS = 900
 MAX_ACTIVE_SECONDS = 14400
 TRANSIENT_GRACE_SECONDS = 120
 LOOP_WINDOW_SECONDS = 600
@@ -116,6 +118,14 @@ def load_state(jobdir):
             and "agents" in state["maintenance"] \
             and not isinstance(state["maintenance"]["agents"], dict):
         raise QueueError("invalid queue state schema: maintenance.agents must be an object keyed by ID")
+    if "permission_prompts" in state and (isinstance(state["permission_prompts"], bool)
+            or not isinstance(state["permission_prompts"], int)
+            or state["permission_prompts"] < 0):
+        raise QueueError("invalid queue state schema: permission_prompts must be a non-negative integer")
+    if "permission_started_at" in state and state["permission_started_at"] is not None \
+            and (isinstance(state["permission_started_at"], bool)
+                 or not isinstance(state["permission_started_at"], (int, float))):
+        raise QueueError("invalid queue state schema: permission_started_at must be a number or null")
     return state
 
 
@@ -373,16 +383,66 @@ def reconcile_owned_agents(owned_ids, listing):
 
 
 def validate_wait_result(payload, expected_agent_id):
-    """Accept only the captured idle envelope for the exact full agent ID."""
+    """Accept captured idle and permission envelopes for the exact full ID."""
     if not isinstance(payload, dict) or set(payload) != {"agentId", "status", "message"}:
         return False, "unverified paseo wait payload shape: " + bounded_raw(payload)
     if payload.get("agentId") != expected_agent_id:
         return False, "paseo wait agentId does not match exact owned ID: " + bounded_raw(payload)
     if not isinstance(payload.get("message"), str):
         return False, "paseo wait message is not text: " + bounded_raw(payload)
-    if payload.get("status") != "idle":
-        return False, "paseo wait status is not the captured idle state: " + bounded_raw(payload)
-    return True, "captured idle response"
+    if payload.get("status") not in {"idle", "permission"}:
+        return False, "paseo wait status is not a captured idle/permission state: " \
+            + bounded_raw(payload)
+    return True, "captured " + payload["status"] + " wait response"
+
+
+def permission_limits(spec):
+    policy = spec.get("queue", {})
+    if not isinstance(policy, dict):
+        raise QueueError("queue must be a JSON object")
+    maximum = policy.get("max_permission_prompts", MAX_PERMISSION_PROMPTS)
+    seconds = policy.get("permission_no_progress_seconds", MAX_PERMISSION_CHAIN_SECONDS)
+    if isinstance(maximum, bool) or not isinstance(maximum, int) \
+            or not 1 <= maximum <= 1000:
+        raise QueueError("queue.max_permission_prompts must be an integer from 1 through 1000")
+    if isinstance(seconds, bool) or not isinstance(seconds, int) or not 1 <= seconds <= 86400:
+        raise QueueError("queue.permission_no_progress_seconds must be an integer from 1 through 86400")
+    return maximum, seconds
+
+
+def note_permission_prompt(state, maximum=MAX_PERMISSION_PROMPTS,
+                           no_progress_seconds=MAX_PERMISSION_CHAIN_SECONDS, now=None):
+    """Record one permission wait without consuming the stall/nudge budget."""
+    now = time.time() if now is None else now
+    count = int(state.get("permission_prompts", 0)) + 1
+    started = state.get("permission_started_at")
+    if started is None:
+        started = now
+    state.update(permission_prompts=count, permission_started_at=started)
+    if count > maximum:
+        raise QueueError(f"permission prompt budget exhausted ({maximum} per job)")
+    if now - float(started) >= no_progress_seconds:
+        raise QueueError("permission sequence exceeded its no-progress timer")
+    return count
+
+
+def record_permission_prompt(jobdir, maximum, no_progress_seconds):
+    with locked(Path(jobdir) / "job.lock"):
+        state = load_state(jobdir)
+        try:
+            count = note_permission_prompt(state, maximum, no_progress_seconds)
+        except QueueError:
+            atomic_json(Path(jobdir) / "state.json", state)
+            raise
+        atomic_json(Path(jobdir) / "state.json", state)
+        return count
+
+
+def clear_permission_wait(jobdir):
+    with locked(Path(jobdir) / "job.lock"):
+        state = load_state(jobdir)
+        state["permission_started_at"] = None
+        atomic_json(Path(jobdir) / "state.json", state)
 
 
 def validate_run_result(payload, expected_agent_id=None):
@@ -427,10 +487,12 @@ def classify_permit_record(row):
     digest = hashlib.sha256(bounded_raw(row, 65536).encode()).hexdigest()
     if not isinstance(row, dict):
         return "UNKNOWN", "permit is not an object", digest
-    required = ("agentShortId", "agentId", "id", "name", "description")
-    if any(not isinstance(row.get(k), str) or not row[k] for k in required):
+    required = ("agentShortId", "agentId", "id", "name")
+    captured = set(required) | {"description"}
+    if any(not isinstance(row.get(k), str) or not row[k] for k in required) \
+            or not isinstance(row.get("description"), str):
         return "UNKNOWN", "permit schema is incomplete", digest
-    if set(row) != set(required):
+    if set(row) != captured:
         return "UNKNOWN", "permit has uncaptured fields", digest
     name, description = row["name"], row["description"]
     outside = re.search(r"/tmp|~/|\.\./|/(?:etc|home|root|var|usr)/|"
@@ -440,6 +502,8 @@ def classify_permit_record(row):
         return "DENY", "request targets an outside directory", digest
     if REFERENCE_RISKY.search(name + "\n" + description):
         return "DENY", "request matches the risky-operation policy", digest
+    if not description.strip() or description.strip() == "-":
+        return "UNKNOWN", "permit description contains no evidence", digest
     if REFERENCE_SAFE.search(description):
         return "UNKNOWN", "safe-scope prose lacks structured tool input and cwd", digest
     return "UNKNOWN", "request effect cannot be proven from name and description", digest
