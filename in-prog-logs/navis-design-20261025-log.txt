@@ -44,5 +44,13 @@ Difficulties
   bar.css 11-15 -> 41-42); all citations in the doc re-checked against the
   files, doc cites current code.
 
+Review round (PR #377, cross-model review 3bcb46d): one P3 finding — the
+marker-option table claimed "Invisible in every standard Markdown renderer",
+contradicting the doc's own probe (html:False escapes comments to visible
+text); the table row now states the renderer-specific behavior and frames the
+consuming pass as the design's own inertness requirement. All findings
+accepted; nothing rejected. CI at 1d01356: ubuntu, py3.13, windows all pass
+(gh pr checks 377). Docs-only change, so no test applies.
+
 Status: finished. Doc committed on docs/navis-design-20261025, docs-only PR
 opened; not merged. Line count of this log: see final reply.
