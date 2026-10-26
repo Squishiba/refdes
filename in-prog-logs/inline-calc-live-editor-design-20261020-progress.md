@@ -69,9 +69,66 @@ line cites against it; rephrased "no route accepts body text" (the edit
 route does — what is missing is a route that *evaluates* unsaved text).
 Design proposal and owner-choice questions unchanged.
 
+## Review round 2 (2026-10-26): owner decisions + baseline refresh
+
+Task (Jared's answers, 2026-10-25): record the decisions in the
+deliverable, replace §6's open questions with them, fold each into the
+affected sections, and bring the baseline to current main. Docs-only;
+the PR stays held.
+
+- Rebased the branch onto origin/main (78c8954) — conflict-free (the
+  branch touches only its two in-prog-logs files); pushed
+  `--force-with-lease`; confirmed 1d6d325 is an ancestor.
+- Re-verified every §1 fact and file:line cite against current main.
+  Shifts from #347+: inline_calc.py `contains_trigger` :89→:91,
+  `code_spans` :122→:210, `parse_span` :224→:306,
+  `triggered_spans` :417→:519, `compare_stored` :478→:597;
+  build.py `_run_inline_span` :1651→:1683, `_run_item_calcs`
+  :1719→:1752, `run_calcs` :1913→:1937, `_make_calc_resolver`
+  :1538→:1588, `_make_source_resolver` :1603→:1644 (signature is
+  5-arg on main — the §3.4 call shape in the design was the branch's
+  6-arg form and is fixed); api.py `handle` :41→:44, `_find_item`
+  :92, `edit_state` :759, `_source_propose` :946. Unchanged after
+  spot-check: calc.py, server.py, state.py, loader.py, security.py,
+  preview.py, editor.js, drafts.js, api.js, item.js, tests. Moved
+  cites fixed: serve/edit.py overlay judge :470→:500,
+  performance.md :44-51→:44-52, inline-calc.md D1/D2/D3 :9-16→:16-23,
+  item.js pickers :176-191→:176-190, app.js →81,93-104,107-121,128,
+  drafts.js dropAppliedOp :310-326.
+- §1 "Branch dependencies" section rewritten as "Landed since the
+  first draft": #347 `ba6d153` (code_span_ranges :124, F12-5 retired
+  — build.py:1622-1627, HASH_FORMAT 6 at :2260), #345 `c3073c6`
+  (release gate `release_gate.inline_calc_results`), #367 `3c9035b`
+  (`editor_journal.py`, library-only, no importer — grep-verified),
+  #372 `27c4fda` (path scrubbing at the `handle()` choke-point).
+- §6 is now "Decisions (Jared, 2026-10-25)": (1) auto-fill + Fill,
+  toggleable — panel-header checkbox persisted in localStorage
+  (rationale for per-user-over-project in §3.5), default ON
+  (one-line flip), Fill idempotent, off loses no diagnostic;
+  (2) 400 ms + blur flush (§3.1) with guard/caret interactions
+  specified (§3.6); (3) panel under the textarea, recorded; (4)
+  fields ARE inputs — request `fields` bag + preview-pass
+  `fields=None` + unknown-key forward compat (§3.2/§3.3/§3.4,
+  items B1/B3), grammar explicitly out of scope.
+- Verified for the new §6.5 open question (field-reference grammar,
+  the one thing now needed from Jared): calc pass reads only
+  `item.body` (build.py:1785/1797/1840-1844); content-hash payload =
+  invalidate-mode fields (build.py:2296-2303; model.py:23-26/:181/
+  :688-694) + body; `calc_hash_for` is body-arithmetic-only (:2390);
+  draft field shape `drafts.js:21`/`:236-241`; scalar rule
+  api.py:1100-1102; `_apply_edit` known-keys posture :1087-1116.
+  §3.8 gained the journal verdict: #367 unwired library, live layer
+  writes no files → save/undo assumptions unchanged.
+- Slices: A adds fields-inertness + `fields`-bag HTTP + unknown-key
+  tests; B's checklist grows (6)-(10) for toggle persistence/off,
+  idempotent Fill, blur flush/caret, blur-fill undo. Work table B3
+  ~60, F2 ~200 lines. §7 probe note flags the F12-5 record as
+  historical.
+
 ## Status
 
-Finished: design + this log committed; docs-only PR opened; review round
-1 fixes pushed; not merged (no self-review, merge hold until Jared
-chooses the auto-fill vs Fill-only behavior). No product code touched,
-no tests run (nothing functional changed).
+Round 2 done: decisions recorded, baseline current, citations
+re-verified; pushed and PR #350 commented. Still held: the §6.5
+field-reference grammar is the one open question left for Jared, and
+implementation slices stay unstarted by design. No product code
+touched, no tests run (docs-only).
