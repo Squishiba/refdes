@@ -639,6 +639,8 @@ def authorize_resume(jobdir, listing=None):
     state = read_json(jobdir / "state.json")
     if state.get("status") not in {"parked", "paused"}:
         return False, "job is not parked or paused"
+    if state.get("outcome") == "acceptance checks complete; publication disabled for this job":
+        return False, "publication after a completed no-publish run requires a new explicit job"
     job_path = jobdir / "job.json"
     if not job_path.exists():
         return False, "legacy job record is missing"

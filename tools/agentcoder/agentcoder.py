@@ -464,6 +464,9 @@ def record_turn(job, role, rc, out, err):
     if rc != 0:
         raise Pause(f"{role} agent turn failed (rc={rc}, quota/usage?): {tail_text(err, 5)}")
     data = last_json_of(out, f"{role} run result")  # real run --json: running doc, then final
+    if job.get("queue_supervised"):
+        raise Pause("paseo run result payload was not captured in the supplied live fixtures; "
+                    f"operation must be reconciled before adoption: {tail_text(out, 20)}")
     status = data.get("status")
     if status == "permission":
         raise Pause(f"{role} agent is waiting on a permission prompt; approve/deny it with "

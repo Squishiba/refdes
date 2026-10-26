@@ -33,9 +33,13 @@ IDs to `paseo stop`, then confirms inactivity from a fresh captured listing.
 `queue resume JOBDIR` requires explicit authorization and fresh reconciliation.
 Uncertain run/send operations remain durable and are not replayed.
 
-The real-daemon worker pilot is still required before unattended use. The
-orchestrator supplied global-list, workspace-list, and idle-wait fixtures; the
-permit listing was empty, and its pending-row keys came from the orchestrator's
-capture note. Run/send/stop response, logs/inspect, workspace-create, and
-non-idle wait payloads remain unverified. The daemon reported
-`DAEMON_NOT_RUNNING` when queried locally, and no local live worker was started.
+The supplied live fixtures do not include `paseo run --json` output. For that
+reason, supervised mode retains the run output and parks before interpreting a
+new turn result; it cannot safely adopt a just-created agent from that response
+yet. A previously saved owned full ID can be reconciled and adopted from the
+captured global listing fields. Workspace creation is likewise unavailable
+until its response shape is captured.
+
+The real-daemon worker pilot is still required before unattended use. Run/send/
+stop responses, logs/inspect output, workspace-create response, and non-idle
+wait payloads remain unverified. No live worker was started in this work.

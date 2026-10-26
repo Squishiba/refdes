@@ -26,6 +26,13 @@ adapters remain unverified, so unattended-release readiness is not claimed.
   auto-allowed. Foreign exact IDs remain untouched.
 - No Paseo or GitHub commands were run in this continuation, per the user's
   instruction. The orchestrator owns the live pilot and PR.
+- `paseo run --json` output was not among the supplied captures. To avoid
+  guessing its schema, supervised mode now retains that output and parks before
+  interpreting/adopting the new turn. Saved owned full IDs can still reconcile
+  on resume. Workspace creation is also unavailable until its output is
+  captured. This means a fresh supervised launch cannot complete its first
+  role turn yet; the pilot must supply a run-result fixture before that gate can
+  be implemented.
 
 ## Implemented
 
@@ -75,6 +82,10 @@ adapters remain unverified, so unattended-release readiness is not claimed.
 
 - Real live pilot, including actual run/send/stop/workspace-create payloads and
   a killed-supervisor-during-turn replay, is delegated to the orchestrator.
+- Fresh supervised launches currently park after retaining `paseo run` output,
+  because that response schema is unknown. The exact captured shapes that remain
+  unverified are run/send/stop responses, logs/inspect output, workspace-create
+  response, and non-idle wait payloads.
 - Transient provider signature extraction, idle-artifact/turn-limit detection,
   streamed loop signature sampling, and garbled run/verdict parsing are not
   wired to live Paseo outputs because no corresponding payload/log fixtures were
