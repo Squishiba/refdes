@@ -2155,6 +2155,10 @@ def cmd_recover(args) -> int:
             "the journal (.refdes/editor-transaction/) and every file it "
             "journaled -- there is no read-only recovery",
         )
+    journal_dir = os.path.join(root, editor_journal.JOURNAL_DIR)
+    inert_journal = os.path.isdir(journal_dir) and not os.path.isfile(
+        os.path.join(journal_dir, "manifest.json")
+    )
     try:
         restored = editor_journal.recover(root)
     except editor_journal.JournalCorrupt as exc:
@@ -2166,10 +2170,24 @@ def cmd_recover(args) -> int:
             file=sys.stderr,
         )
         return 2
+    if transaction_id == "unknown" and inert_journal:
+        # The inert shape: begin renames the journal in AFTER publishing
+        # its manifest, so a directory without one recorded no transaction
+        # and touched no live file. Say what was removed, not a recovery
+        # of a transaction named "unknown".
+        print(
+            "removed the journal directory left by a save that died before it "
+            "recorded anything: the journal is cleared; the project can be "
+            "loaded again"
+        )
+        return 0
     print(f"recovered editor transaction {transaction_id}")
     if restored:
         for rel in restored:
-            print(f"  restored {rel}")
+            if rel == editor_journal.JOURNAL_DIR:
+                print(f"  removed the squatter on the journal path: {rel}")
+            else:
+                print(f"  restored {rel}")
     else:
         print(
             "  the live files already matched the journal: nothing was "
@@ -3758,6 +3776,13 @@ def main(argv: list[str] | None = None) -> int:
 
         config = args.config or find_config()
         with project_write_lock(os.path.dirname(os.path.abspath(config))):
+            # The gate ran before the lock: a journal armed in that
+            # window is refused here, before this command loads --
+            # and before its own write section finds it as a
+            # JournalPending mid-save.
+            refused = _refuse_pending_journal(args)
+            if refused is not None:
+                return refused
             return args.func(args)
     except SchemaError as exc:
         print(f"configuration error: {exc}", file=sys.stderr)

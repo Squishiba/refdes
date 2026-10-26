@@ -36,6 +36,7 @@ from refdes import editor_journal
 from refdes.serve import edit as edit_mod
 
 CRASH = "simulated crash: killed between the syscall and the return"
+JOURNAL_REPLACEMENT = b"journal replacement, never landed\n"
 
 
 def config_of(root):
@@ -59,9 +60,7 @@ def content_tree(root):
 def journal_the_project(root, *rels: str) -> str:
     """Arm a journal the way a save does, entries against the live bytes."""
     entries = [
-        editor_journal.Entry(
-            rel, (root / rel).read_bytes(), b"journal replacement, never landed\n"
-        )
+        editor_journal.Entry(rel, (root / rel).read_bytes(), JOURNAL_REPLACEMENT)
         for rel in (rels or ("items/reqs.yaml",))
     ]
     return editor_journal.begin(str(root), entries)
@@ -178,6 +177,57 @@ def test_crash_after_replacement_before_clearing_recovers_old_state(
     assert editor_journal.pending(str(tmp_path)) is None
 
 
+def test_a_replaced_file_write_failure_clears_the_journal(tmp_path, monkeypatch):
+    """The write's REAL failure branch (a returned failure string, the
+    shape `os.replace` failure takes through `_atomic_replace`): the
+    journal describes a write that landed nowhere, so the refusal clears
+    it -- a survival would gate the project on a transaction that needs
+    no recovery."""
+    make_project(tmp_path)
+    client = Api(tmp_path)
+    _status, view = client.get("/api/item/REQ-001")
+    before = (tmp_path / "items" / "reqs.yaml").read_bytes()
+    monkeypatch.setattr(
+        edit_mod, "_atomic_replace", lambda *args, **kwargs: "simulated write failure"
+    )
+
+    status, payload = save(client, "REQ-001", revision=view["edit"]["file_revision"])
+    assert status == 422, payload
+    assert payload["kind"] == "refused"
+    assert "simulated write failure" in payload["reason"]
+    assert (tmp_path / "items" / "reqs.yaml").read_bytes() == before
+    assert editor_journal.pending(str(tmp_path)) is None
+
+
+def test_a_hard_kill_after_journaling_leaves_the_journal_for_recover(
+    tmp_path, monkeypatch
+):
+    """The kill shape the design names: the process dies between arming
+    the journal and the replacement (an uncatchable signal, not a
+    handled `OSError`). The journal survives with the save's originals,
+    and `refdes recover` yields the complete old state."""
+
+    class Killed(BaseException):
+        pass
+
+    make_project(tmp_path)
+    client = Api(tmp_path)
+    _status, view = client.get("/api/item/REQ-001")
+    before = (tmp_path / "items" / "reqs.yaml").read_bytes()
+
+    def crash(*args, **kwargs):
+        raise Killed(CRASH)
+
+    monkeypatch.setattr(edit_mod, "_atomic_replace", crash)
+    with pytest.raises(Killed):
+        save(client, "REQ-001", revision=view["edit"]["file_revision"])
+    assert editor_journal.pending(str(tmp_path)) is not None
+
+    assert run_cli(tmp_path, "recover") == 0
+    assert (tmp_path / "items" / "reqs.yaml").read_bytes() == before
+    assert editor_journal.pending(str(tmp_path)) is None
+
+
 def test_crash_between_the_pair_lands_the_old_item_state(tmp_path, monkeypatch):
     """The accept save's two replaces (lockfile, then item): a kill between
     them is the design's named scenario -- journal visible, recover restores
@@ -206,9 +256,10 @@ def test_crash_between_the_pair_lands_the_old_item_state(tmp_path, monkeypatch):
     assert editor_journal.pending(str(root)) is None
 
 
-def test_crash_after_create_before_the_ledger_recovers_old_state(
-    tmp_path, monkeypatch
-):
+def test_create_reserve_failure_rolls_back_and_clears_the_journal(tmp_path, monkeypatch):
+    """The create's own rollback branch: the ledger write fails, the file
+    rolls back, the journal (a record of a write that no longer exists)
+    goes with it, and nothing half-created survives."""
     make_project(tmp_path)
     client = Api(tmp_path)
     before = (tmp_path / "items" / "reqs.yaml").read_bytes()
@@ -222,10 +273,142 @@ def test_crash_after_create_before_the_ledger_recovers_old_state(
         "/api/items/create", {"type": "requirement", "fields": {"text": "Half-created."}}
     )
     assert status == 422, payload
-    if editor_journal.pending(str(tmp_path)) is not None:
-        assert run_cli(tmp_path, "recover") == 0
-        assert (tmp_path / "items" / "reqs.yaml").read_bytes() == before
+    assert editor_journal.pending(str(tmp_path)) is None
+    assert (tmp_path / "items" / "reqs.yaml").read_bytes() == before
     assert "Half-created." not in (tmp_path / "items" / "reqs.yaml").read_text()
+
+
+def test_create_with_a_failing_rollback_leaves_the_journal_for_recover(
+    tmp_path, monkeypatch
+):
+    """The unconditional recovery story: the create's bytes are on disk,
+    the ledger write fails, AND the rollback cannot undo the file. The
+    journal must survive -- it is the only record of the old bytes -- the
+    refusal must name `refdes recover`, and recover must yield the
+    complete old state."""
+    make_project(tmp_path)
+    client = Api(tmp_path)
+    before = (tmp_path / "items" / "reqs.yaml").read_bytes()
+
+    def boom(*args, **kwargs):
+        raise OSError(CRASH)
+
+    monkeypatch.setattr(edit_mod.ids, "reserve_id", boom)
+    monkeypatch.setattr(edit_mod, "_rollback", lambda path, original: False)
+
+    status, payload = client.post(
+        "/api/items/create", {"type": "requirement", "fields": {"text": "Half-created."}}
+    )
+    assert status == 422, payload
+    assert payload["kind"] == "refused"
+    assert "refdes recover" in payload["reason"], payload
+    assert editor_journal.pending(str(tmp_path)) is not None, (
+        "the create cleared the journal over a file it could not roll back"
+    )
+
+    assert run_cli(tmp_path, "recover") == 0
+    assert (tmp_path / "items" / "reqs.yaml").read_bytes() == before
+    assert "Half-created." not in (tmp_path / "items" / "reqs.yaml").read_text()
+    assert editor_journal.pending(str(tmp_path)) is None
+
+
+def test_new_file_create_crash_leaves_a_journal_that_recovers_the_removal(
+    tmp_path, monkeypatch
+):
+    """The `original=None` journal entry (new file, `_atomic_create`): the
+    kill after the journal lands leaves the entry naming a file that did
+    not exist before, and recover's job is to remove it. Here the create
+    died before the file appeared, so recovery is the inert pass -- it
+    must still clear the journal, not choke on the absent file."""
+    make_project(tmp_path)
+    client = Api(tmp_path)
+    target = tmp_path / "items" / "new-requirements.md"
+
+    def crash(*args, **kwargs):
+        raise OSError(CRASH)
+
+    monkeypatch.setattr(edit_mod, "_atomic_create", crash)
+    status, payload = client.post(
+        "/api/items/create",
+        {
+            "type": "requirement",
+            "fields": {"text": "New file."},
+            "destination": "items/new-requirements.md",
+        },
+    )
+    assert status == 422, payload
+    assert not target.exists()
+    assert editor_journal.pending(str(tmp_path)) is not None, (
+        "the create's write was not journaled"
+    )
+    manifest = json.loads(
+        (tmp_path / ".refdes" / "editor-transaction" / "manifest.json").read_text()
+    )
+    entry = manifest["entries"][0]
+    assert entry["path"] == "items/new-requirements.md"
+    assert entry["existed"] is False
+
+    assert run_cli(tmp_path, "recover") == 0
+    assert not target.exists()
+    assert editor_journal.pending(str(tmp_path)) is None
+
+
+def test_created_file_stands_after_a_hard_kill_and_recover_removes_it(
+    tmp_path, monkeypatch
+):
+    """The half-apply of a create, recovered: the new file is on disk, the
+    journal recorded it as not-existing-before, and `refdes recover`
+    removes it -- the project returns to the complete pre-create state."""
+
+    class Killed(BaseException):
+        pass
+
+    make_project(tmp_path)
+    client = Api(tmp_path)
+    target = tmp_path / "items" / "new-requirements.md"
+
+    def crash(*args, **kwargs):
+        raise Killed(CRASH)
+
+    monkeypatch.setattr(edit_mod.ids, "reserve_id", crash)
+    with pytest.raises(Killed):
+        client.post(
+            "/api/items/create",
+            {
+                "type": "requirement",
+                "fields": {"text": "Half-created."},
+                "destination": "items/new-requirements.md",
+            },
+        )
+    assert target.exists(), "the create's file is not on disk: the shape is wrong"
+    assert editor_journal.pending(str(tmp_path)) is not None
+
+    assert run_cli(tmp_path, "recover") == 0
+    assert not target.exists()
+    assert editor_journal.pending(str(tmp_path)) is None
+
+
+def test_created_save_warns_and_keeps_the_journal_when_complete_fails(
+    tmp_path, monkeypatch
+):
+    """`Created.journal_warning`: the create landed, the journal could not
+    be cleared, and the response must say so -- the project is now gated
+    and `refdes recover` (which deletes the created file; the id stays
+    reserved) is the way out."""
+    make_project(tmp_path)
+    client = Api(tmp_path)
+
+    def boom(*args, **kwargs):
+        raise OSError(CRASH)
+
+    monkeypatch.setattr(editor_journal, "complete", boom)
+    status, payload = client.post(
+        "/api/items/create", {"type": "requirement", "fields": {"text": "Journalled."}}
+    )
+    assert status == 200, payload
+    assert payload["kind"] == "created"
+    assert "refdes recover" in payload["message"], payload
+    assert editor_journal.pending(str(tmp_path)) is not None
 
 
 # ------------------------------------------------------- refusal to load
@@ -256,6 +439,7 @@ def test_save_refused_while_journal_present(tmp_path):
         ["ls"],
         ["id"],
         ["audit"],
+        ["fetch"],
         ["schema", "--json"],
         ["rename", "mapping.yaml"],
     ],
@@ -275,8 +459,10 @@ def test_project_loading_commands_refuse_while_journal_present(tmp_path, argv, c
 
 def test_commands_without_a_project_are_unaffected(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
-    assert cli_mod.main(["schema", "--json"]) == 2  # today: no project found
+    cli_mod.main(["schema", "--json"])
     captured = capsys.readouterr()
+    # the gate adds no refusal of its own: with no project there is no
+    # journal to check, and the command's own error speaks
     assert "refdes recover" not in captured.err
 
 
@@ -312,14 +498,71 @@ def test_recover_restores_every_journaled_entry(tmp_path, capsys):
     original = reqs.read_bytes()
     journal_the_project(tmp_path, "items/reqs.yaml")
     # the journal armed, simulate the half-apply it guards against: the
-    # replacement landed on disk, the journal never cleared
-    reqs.write_bytes(b"rewritten by a save that died\n")
+    # recorded replacement landed on disk, the journal never cleared
+    reqs.write_bytes(JOURNAL_REPLACEMENT)
 
     assert run_cli(tmp_path, "recover") == 0
     captured = capsys.readouterr()
     assert reqs.read_bytes() == original
-    assert "items/reqs.yaml" in captured.out
+    assert "recovered editor transaction" in captured.out
+    assert "restored items/reqs.yaml" in captured.out
     assert editor_journal.pending(str(tmp_path)) is None
+
+
+def test_recover_refuses_an_unreadable_manifest_and_keeps_the_journal(tmp_path, capsys):
+    """The manifest is published atomically, last: bytes that do not parse
+    are damage, not a mid-begin crash, and the journal is the only
+    rollback copy. `recover` must refuse with 2, touch nothing, keep the
+    evidence, and leave the gate refusing."""
+    make_project(tmp_path)
+    journal_the_project(tmp_path)
+    manifest = tmp_path / ".refdes" / "editor-transaction" / "manifest.json"
+    manifest.write_bytes(b"\x00\x01not json at all")
+    reqs = tmp_path / "items" / "reqs.yaml"
+    reqs.write_bytes(JOURNAL_REPLACEMENT)  # the half-apply it used to describe
+
+    assert run_cli(tmp_path, "recover") == 2
+    captured = capsys.readouterr()
+    assert "recover refused" in captured.err
+    assert reqs.read_bytes() == JOURNAL_REPLACEMENT, "recovery touched the live file"
+    assert manifest.read_bytes() == b"\x00\x01not json at all", "the evidence was deleted"
+    assert editor_journal.pending(str(tmp_path)) == "unknown", "the gate must keep refusing"
+
+
+def test_recover_refuses_a_live_file_the_transaction_does_not_describe(tmp_path, capsys):
+    """The documented replacement check, through the CLI: a live file
+    matching neither recorded hash changed outside the transaction, and
+    restoring over it is data loss. Refuse, change nothing, keep the
+    journal -- the gate keeps every command out until a human decides."""
+    make_project(tmp_path)
+    journal_the_project(tmp_path, "items/reqs.yaml")
+    reqs = tmp_path / "items" / "reqs.yaml"
+    outside = b"written by a writer outside the transaction\n"
+    reqs.write_bytes(outside)
+
+    assert run_cli(tmp_path, "recover") == 2
+    captured = capsys.readouterr()
+    assert "recover refused" in captured.err
+    assert "items/reqs.yaml" in captured.err
+    assert reqs.read_bytes() == outside
+    assert editor_journal.pending(str(tmp_path)) is not None
+
+def test_recover_clears_a_journal_directory_that_recorded_nothing(tmp_path, capsys):
+    """The inert shape: begin renames the journal in AFTER writing its
+    manifest, so a directory with no manifest is a crash before any live
+    file was touched. Clear it, and report it honestly -- not as the
+    recovery of a transaction named 'unknown'."""
+    make_project(tmp_path)
+    journal = tmp_path / ".refdes" / "editor-transaction"
+    journal.mkdir(parents=True)
+    before = content_tree(tmp_path)
+
+    assert run_cli(tmp_path, "recover") == 0
+    captured = capsys.readouterr()
+    assert "journal is cleared" in captured.out
+    assert "unknown" not in captured.out
+    assert not journal.exists()
+    assert content_tree(tmp_path) == before
 
 
 def test_recover_refuses_a_corrupt_journal_and_keeps_it(tmp_path, capsys):
@@ -383,7 +626,10 @@ def test_readonly_serve_save_never_creates_a_journal(tmp_path):
     assert not (tmp_path / ".refdes" / "editor-transaction").exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="POSIX permissions, and chmod does not deny writes to root",
+)
 def test_save_refused_when_the_journal_directory_is_unwritable(tmp_path):
     make_project(tmp_path)
     client = Api(tmp_path)
@@ -436,7 +682,11 @@ def test_journal_refusal_response_has_no_absolute_root(tmp_path):
 def test_crlf_bytes_survive_the_journal_and_recover(tmp_path, monkeypatch):
     make_project(tmp_path)
     notes = tmp_path / "items" / "notes.md"
-    notes.write_bytes(notes.read_bytes().replace(b"\n", b"\r\n"))
+    # normalize first: the fixture's write_text already emits \r\n on
+    # Windows, and doubling them breaks the item's front-matter parsing
+    notes.write_bytes(
+        notes.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+    )
     client = Api(tmp_path)
     _status, view = client.get("/api/item/REQ-010")
     original = notes.read_bytes()

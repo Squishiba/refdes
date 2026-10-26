@@ -9,7 +9,11 @@ message naming `refdes recover`, which restores every journaled file to the
 bytes recorded before the save touched it (deleting files the save created),
 verifies each rolled-back replacement against the manifest's sha256, and
 clears the journal. A corrupt manifest is refused with exit 2 and kept as
-found; `recover` on a clean project exits 0 and writes nothing, and under
+found, as is a live file matching neither recorded hash or missing from
+disk -- recover changes nothing when the live state is one the
+transaction does not describe; a journal directory with no manifest at
+all recorded no transaction and is cleared with exit 0; `recover` on a
+clean project exits 0 and writes nothing, and under
 `--no-write` a pending journal is a refusal (there is no read-only
 recovery). Journal scope is the item files: the accept pair's
 `.refdes/citations.yaml` pin and a create's `.refdes/ids.yaml` reservation

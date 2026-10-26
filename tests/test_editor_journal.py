@@ -507,15 +507,21 @@ def test_recover_is_idempotent(tmp_path):
     assert not (tmp_path / P3).exists()
 
 
-def test_recover_creates_missing_parent_directories(tmp_path):
+def test_recover_refuses_a_live_file_missing_where_the_replacement_belongs(tmp_path):
+    """A journaled file that is simply gone is not the replacement: its
+    absence is a state the transaction does not describe, and restoring
+    the original into it writes over an unexplained deletion. Recover
+    refuses, creates nothing, and keeps the journal."""
     ej = _ej()
     root = str(tmp_path)
     _write(tmp_path, "deep/a/b/f.txt", b"DEEP-OLD")
     ej.begin(root, [ej.Entry("deep/a/b/f.txt", b"DEEP-OLD", b"DEEP-NEW")])
-    shutil.rmtree(tmp_path / "deep")  # directory vanished in the crash
-    restored = ej.recover(root)
-    assert restored == ["deep/a/b/f.txt"]
-    assert _read(tmp_path, "deep/a/b/f.txt") == b"DEEP-OLD"
+    (tmp_path / "deep/a/b/f.txt").unlink()  # replacement landed, file vanished after
+    with pytest.raises(ej.JournalCorrupt) as exc:
+        ej.recover(root)
+    assert "deep/a/b/f.txt" in str(exc.value)
+    assert not (tmp_path / "deep/a/b/f.txt").exists(), "refusal must not restore the file"
+    assert _journal(tmp_path).is_dir()
 
 
 def test_recover_unchanged_files_not_reported_and_journal_removed(tmp_path):
@@ -621,18 +627,50 @@ def test_recover_missing_manifest_removes_journal_returns_empty(tmp_path):
     assert _read(tmp_path, "other.txt") == b"OTHER"
 
 
-def test_recover_unparseable_manifest_removes_journal_returns_empty(tmp_path):
+def test_recover_unparseable_manifest_is_journal_corrupt(tmp_path):
+    """begin publishes manifest.json atomically, LAST, from a staging
+    directory it renames in as one unit: a visible journal whose manifest
+    does not parse is damage, not a crash inside begin (that shape leaves
+    the manifest ABSENT, and that stays inert). Recover refuses, touches
+    nothing, keeps the journal -- deleting it here would discard the only
+    rollback copy while replacement bytes are live."""
     ej = _ej()
     root = _project(tmp_path)
     entries = _entries(ej)
     ej.begin(root, entries)
     _apply_save(tmp_path, entries)
-    (_journal(tmp_path) / MANIFEST_NAME).write_bytes(b"\x00\x01garbage{{")
-    assert ej.recover(root) == []
-    assert not _journal(tmp_path).exists()
-    # live files untouched: a crashed begin can never have replaced them
+    manifest = _journal(tmp_path) / MANIFEST_NAME
+    manifest.write_bytes(b"\x00\x01garbage{{")
+    with pytest.raises(ej.JournalCorrupt) as exc:
+        ej.recover(root)
+    assert MANIFEST_NAME in str(exc.value)
+    assert manifest.read_bytes() == b"\x00\x01garbage{{", "the evidence is kept"
+    assert _journal(tmp_path).is_dir(), "the journal (and its backups) survive"
+    # live files untouched
     assert _read(tmp_path, P1) == NEW1
     assert _read(tmp_path, P2) == NEW2
+    assert ej.pending(root) == "unknown", "the gate keeps refusing"
+
+
+def test_recover_refuses_a_live_file_that_matches_neither_hash(tmp_path):
+    """The documented replacement check, enforced: live bytes matching
+    neither the recorded replacement nor the recorded original mean
+    something wrote outside the transaction. Recover refuses naming the
+    path, changes NOTHING (not even the entries that would have
+    restored), and keeps the journal."""
+    ej = _ej()
+    root = _project(tmp_path)
+    entries = _entries(ej)
+    ej.begin(root, entries)
+    _apply_save(tmp_path, entries)
+    _write(tmp_path, P1, b"written by a writer outside the transaction\n")
+    with pytest.raises(ej.JournalCorrupt) as exc:
+        ej.recover(root)
+    assert P1 in str(exc.value)
+    assert _read(tmp_path, P1) == b"written by a writer outside the transaction\n"
+    assert _read(tmp_path, P2) == NEW2, "refusal touches nothing: P2 stays as the save left it"
+    assert (tmp_path / P3).exists(), "and restores nothing: the created file stands"
+    assert _journal(tmp_path).is_dir()
 
 
 def test_recover_unsafe_manifest_path_journalcorrupt(tmp_path):
@@ -1705,14 +1743,15 @@ def test_recover_refuses_a_manifest_path_in_the_control_namespace(tmp_path):
     assert (_journal(tmp_path) / MANIFEST_NAME).is_file()
 
 
-def test_recover_fsyncs_created_intermediate_directories(tmp_path, monkeypatch):
-    """The restore's makedirs creates every missing directory from the
-    root down (a/b for a/b/c.txt); fsyncing only the leaf parent leaves
-    the leaf directory itself undurable in its parent. Every directory
-    from the leaf up to the root gets a guarded fsync, leaf first."""
+def test_recover_fsyncs_the_parent_chain_of_every_restored_file(tmp_path, monkeypatch):
+    """The durability barrier after a restore: every directory from the
+    restored file's leaf parent up to the root gets a guarded fsync, leaf
+    first -- fsyncing only the leaf leaves the leaf directory undurable in
+    its parent."""
     ej = _ej()
     root = str(tmp_path)
-    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    (tmp_path / "a" / "b" / "c.txt").write_bytes(b"NEW")
     ej.begin(root, [ej.Entry("a/b/c.txt", b"OLD", b"NEW")])
     fsynced: list[str] = []
     monkeypatch.setattr(ej, "_fsync_dir", lambda path: fsynced.append(path))

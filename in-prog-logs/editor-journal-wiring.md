@@ -60,3 +60,28 @@ refusal, whose OSError text names the control directory before scrubbing).
 
 Finished: wired, gated, recoverable, documented (cli-reference recover
 section, design-doc status, changelog fragment).
+
+## Review round (PR #381, reviews cd1478d + a828d8e)
+
+CI: windows-latest failed on ONE real test,
+test_crlf_bytes_survive_the_journal_and_recover: the fixture's
+`replace(b"\n", b"\r\n")` doubles the fixture's Windows-written CRLF
+(write_text translates on write), and `---\r\r\n` does not parse as
+front-matter. Fixture now normalizes before converting. The 19F+5E in the
+review transcript are the reviewer's local symlink-permission artifacts,
+not CI (ubuntu 2/2 green, windows log: 1 failed, 4703 passed).
+
+RED lines recorded for the review fixes (each failed on 42a92ec before
+the implementation pass):
+- tests/test_editor_journal.py::test_recover_refuses_a_live_file_missing_where_the_replacement_belongs -- DID NOT RAISE JournalCorrupt
+- tests/test_editor_journal.py::test_recover_unparseable_manifest_is_journal_corrupt -- DID NOT RAISE
+- tests/test_editor_journal.py::test_recover_refuses_a_live_file_that_matches_neither_hash -- DID NOT RAISE
+- test_editor_journal_wiring.py::test_recover_refuses_an_unreadable_manifest_and_keeps_the_journal -- rc 0, journal cleared, half-apply left live
+- test_editor_journal_wiring.py::test_recover_refuses_a_live_file_the_transaction_does_not_describe -- rc 0, silently overwrote the outside writer
+- test_editor_journal_wiring.py::test_recover_clears_a_journal_directory_that_recorded_nothing -- printed "recovered editor transaction unknown"
+New pins that were already green on 42a92ec (reviewer's coverage gaps,
+verified as real coverage, not behavior changes): hard-kill shape
+(BaseException), real replace-failure-string journal clearing, create
+rollback-failure journal survival (the old conditional create test is
+gone), new-file (original=None) journal entry + recover-removes-created,
+Created.journal_warning, fetch in the gate parametrization.

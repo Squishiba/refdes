@@ -1215,7 +1215,13 @@ the journal is cleared; the project can be loaded again
 A project with no journal exits `0` and writes nothing ("nothing to
 recover"). `--no-write` with a journal pending exits `2` (there is no
 read-only recovery). A journal whose manifest is corrupt is refused with
-exit `2` and kept exactly as found.
+exit `2` and kept exactly as found, and so is a journal whose live file
+matches neither recorded hash, or has gone missing from disk: recover
+changes nothing when the live state is one the transaction does not
+describe. A journal directory with no manifest at all recorded no
+transaction — the journal is published in one unit with its manifest, and
+`recover` removes the directory with exit `0` ("removed the journal
+directory left by a save that died before it recorded anything").
 
 Journal scope is the item files. The two `.refdes/` control files a save
 can also write — `.refdes/citations.yaml` (an accept's pin) and

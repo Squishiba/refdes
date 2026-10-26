@@ -447,15 +447,18 @@ def _read_orig(journal: str, index: int, path: str) -> bytes:
 
 def _read_manifest_raw(journal: str) -> object:
     """The parsed manifest (any JSON value); ``_NO_MANIFEST`` when it is
-    missing or unparseable.
+    MISSING.
 
-    Missing/unparseable is the inert state: begin() writes manifest.json
-    last, so a journal without one is a crash before any live file was
-    touched, and recover removes it. An UNREADABLE manifest is the
-    opposite -- it says nothing about whether begin() completed -- so it
-    raises JournalCorrupt naming the path: deleting the journal there
-    would discard the only rollback copy while replacement bytes are
-    live. (UnicodeDecodeError is a ValueError; JSONDecodeError too.)
+    Missing is the inert state: begin() writes manifest.json last, from
+    a staging directory it renames in as one unit, so a visible journal
+    without one is a crash before any live file was touched, and recover
+    removes it. An UNPARSEABLE manifest is the opposite: a complete file
+    published atomically cannot truncate, so bytes that do not parse are
+    damage -- like an UNREADABLE manifest it says nothing about whether
+    begin() completed, and deleting the journal there would discard the
+    only rollback copy while replacement bytes are live. Both raise
+    JournalCorrupt naming the path. (UnicodeDecodeError is a ValueError;
+    JSONDecodeError too.)
     """
     manifest_path = os.path.join(journal, _MANIFEST_NAME)
     kind = _classify(manifest_path)
@@ -475,8 +478,13 @@ def _read_manifest_raw(journal: str) -> object:
         ) from exc
     try:
         return json.loads(data)
-    except ValueError:
-        return _NO_MANIFEST
+    except ValueError as exc:
+        raise JournalCorrupt(
+            f"journal manifest at {manifest_path} is not valid JSON ({exc}); "
+            "begin() publishes it atomically and complete() deletes it "
+            "first, so a visible journal whose manifest does not parse is "
+            "damage, not a crash inside begin: refusing to clear it"
+        ) from exc
 
 
 def _manifest_entries(manifest: object, project_root: str) -> tuple[str, list[dict]]:
@@ -790,12 +798,18 @@ def recover(project_root: str) -> list[str]:
     twice through a symlink alias, names an ancestor of another
     journaled path, lands inside ``.refdes``, names the journal
     directory itself, resolves outside the root, stores a manifest that
-    is a symlink/special file, parses to a non-object value, records a
-    malformed hash, or contradicts itself (a hash for a file that never
+    is a symlink/special file, cannot be read, does not parse (begin
+    publishes it atomically, last: that shape is damage, not a crash
+    inside begin), parses to a non-object value, records a malformed
+    hash, or contradicts itself (a hash for a file that never
     existed); and, before touching anything, when a stored original is
     missing, unreadable, not a regular file, does not match its recorded
-    hash, or when a journaled path is a directory or a special file on
-    disk. Confinement runs before anything is mutated. The live parents
+    hash, when a journaled path is a directory or a special file on
+    disk, when a journaled file's live bytes match neither the recorded
+    replacement hash nor (for a file that existed) the recorded original
+    hash, or when a journaled file is missing on disk while the manifest
+    records that it existed. Confinement runs before anything is
+    mutated. The live parents
     of every journaled path are fsynced leaf-up to the root -- after the
     last write, and on every pass, a retry that restores nothing
     included -- before the journal is taken down (DISARM, barrier, GC).
@@ -862,6 +876,44 @@ def recover(project_root: str) -> list[str]:
             )
         if kind.startswith("error:"):
             raise OSError(f"cannot inspect journal path {entry['path']!r}: {kind[6:]}")
+
+    # Verify the live state against the recorded hashes BEFORE restoring
+    # anything: a live file matching neither hash (or missing where the
+    # journal records a replacement) changed outside the transaction, and
+    # restoring the original over it is the overwrite the docs promise to
+    # refuse. A symlink is not hashed (reading follows it; the restore
+    # swaps the link itself, never the target) and stays the shape the
+    # restore pass below already governs.
+    for entry in entries:
+        live = _live_path(project_root, entry["path"])
+        kind = _classify(live)
+        if kind == "missing":
+            if entry["existed"]:
+                raise JournalCorrupt(
+                    f"the live file {entry['path']!r} is missing: the journal "
+                    "records a replacement that is not on disk, and "
+                    "restoring the original into unexplained absence is the "
+                    "overwrite recover must refuse"
+                )
+            continue
+        if kind != "file":
+            continue
+        try:
+            live_sha = _sha256(_read_bytes_strict(live))
+        except OSError as exc:
+            raise JournalCorrupt(
+                f"the live file {entry['path']!r} cannot be read ({exc}): "
+                "recover cannot verify it against the journal"
+            ) from exc
+        if live_sha == entry["replacement_sha256"]:
+            continue
+        if entry["existed"] and live_sha == entry["original_sha256"]:
+            continue  # the replacement never landed: restore is a no-op
+        raise JournalCorrupt(
+            f"the live file {entry['path']!r} matches neither the recorded "
+            "replacement nor the recorded original: it changed outside the "
+            "transaction, so recover refuses to overwrite it (journal kept)"
+        )
 
     originals: dict[int, bytes] = {}
     for index, entry in enumerate(entries):
