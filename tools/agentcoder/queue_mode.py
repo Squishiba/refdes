@@ -382,18 +382,31 @@ def reconcile_owned_agents(owned_ids, listing):
     return result, uncertain
 
 
-def validate_wait_result(payload, expected_agent_id):
-    """Accept captured idle and permission envelopes for the exact full ID."""
-    if not isinstance(payload, dict) or set(payload) != {"agentId", "status", "message"}:
-        return False, "unverified paseo wait payload shape: " + bounded_raw(payload)
-    if payload.get("agentId") != expected_agent_id:
-        return False, "paseo wait agentId does not match exact owned ID: " + bounded_raw(payload)
-    if not isinstance(payload.get("message"), str):
-        return False, "paseo wait message is not text: " + bounded_raw(payload)
-    if payload.get("status") not in {"idle", "permission"}:
-        return False, "paseo wait status is not a captured idle/permission state: " \
+def classify_agent_response(payload, expected_agent_id=None, fields=None,
+                            required_nonempty=()):
+    """Classify a captured blocking Paseo response using one status vocabulary."""
+    if not isinstance(payload, dict) or (fields is not None and set(payload) != fields):
+        return "unknown", "unverified Paseo response shape: " + bounded_raw(payload)
+    if not all(isinstance(value, str) for value in payload.values()):
+        return "unknown", "Paseo response fields must be text: " + bounded_raw(payload)
+    if any(not payload.get(key) for key in required_nonempty):
+        return "unknown", "Paseo response has an empty required field: " + bounded_raw(payload)
+    if expected_agent_id is not None and payload.get("agentId") != expected_agent_id:
+        return "unknown", "Paseo response agentId does not match exact owned ID: " \
             + bounded_raw(payload)
-    return True, "captured " + payload["status"] + " wait response"
+    status = payload.get("status")
+    if status not in {"completed", "idle", "permission", "running"}:
+        return "unknown", "unrecognized Paseo response status: " + bounded_raw(payload)
+    return status, "captured Paseo " + status + " response"
+
+
+def validate_wait_result(payload, expected_agent_id):
+    """Accept captured in-flight and idle wait envelopes for the exact full ID."""
+    status, reason = classify_agent_response(
+        payload, expected_agent_id, {"agentId", "status", "message"}, {"agentId"})
+    if status in {"idle", "permission", "running"}:
+        return True, reason
+    return False, reason
 
 
 def permission_limits(spec):
@@ -447,26 +460,18 @@ def clear_permission_wait(jobdir):
 
 def validate_run_result(payload, expected_agent_id=None):
     fields = {"agentId", "status", "provider", "cwd", "title"}
-    if not isinstance(payload, dict) or set(payload) != fields:
-        return False, "unverified paseo run payload shape: " + bounded_raw(payload)
-    if not all(isinstance(payload.get(k), str) and payload[k]
-               for k in fields):
-        return False, "paseo run payload has missing/non-text fields: " + bounded_raw(payload)
-    if payload["status"] not in {"completed", "running", "permission"}:
-        return False, "unverified paseo run status: " + bounded_raw(payload)
-    if expected_agent_id and payload["agentId"] != expected_agent_id:
-        return False, "paseo run agentId does not match exact ID: " + bounded_raw(payload)
-    return True, "captured run response"
+    status, reason = classify_agent_response(payload, expected_agent_id, fields, fields)
+    if status in {"completed", "running", "permission"}:
+        return True, reason
+    return False, reason
 
 
 def validate_send_result(payload, expected_agent_id):
-    fields = {"agentId", "status", "message"}
-    if not isinstance(payload, dict) or set(payload) != fields:
-        return False, "unverified paseo send payload shape: " + bounded_raw(payload)
-    if payload.get("agentId") != expected_agent_id or payload.get("status") != "completed" \
-            or not isinstance(payload.get("message"), str):
-        return False, "paseo send result does not confirm exact completed agent: " + bounded_raw(payload)
-    return True, "captured completed send response"
+    status, reason = classify_agent_response(
+        payload, expected_agent_id, {"agentId", "status", "message"}, {"agentId"})
+    if status in {"completed", "running", "permission"}:
+        return True, reason
+    return False, reason
 
 
 def validate_stop_result(payload, requested_agent_id):

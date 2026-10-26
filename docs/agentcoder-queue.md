@@ -54,6 +54,10 @@ wins over trust. Text naming outside-workspace paths, `../`, `/tmp`, `~/`,
 again. Empty or `-` descriptions contain no evidence: they park without trust
 and can be allowed for an owned trusted agent, but file-change permits contain
 no path, so this is cooperative trust rather than path containment.
+Run, send, and wait use one response classifier for `completed`, `idle`,
+`permission`, `running`, and `unknown`. Permission results from accepted runs or
+sends enter the same permit-check-and-wait path; an accepted send is never
+replayed. Unknown or command-incompatible statuses park.
 
 `queue stop JOBDIR` persists deliberate stop intent before sending exact owned
 IDs to `paseo stop`, then confirms inactivity from a fresh captured listing.

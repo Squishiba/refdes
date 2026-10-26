@@ -1,0 +1,5 @@
+{
+  "agentId": "agent-live-running",
+  "message": "Agent is waiting for permission",
+  "status": "permission"
+}

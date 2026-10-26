@@ -532,19 +532,24 @@ def send_to(job, agent_key, message):
     if queue_op:
         try:
             data = json_of(out, "send result")
-            from queue_mode import validate_send_result
-            valid, reason = validate_send_result(data, agent_id)
+            from queue_mode import classify_agent_response
+            response_status, reason = classify_agent_response(
+                data, agent_id, {"agentId", "status", "message"}, {"agentId"})
         except Pause as exc:
             finish_operation(job["jobdir"], queue_op, "uncertain",
                              {"rc": rc, "stdout": tail_text(out, 30),
                               "stderr": tail_text(err, 10), "reason": exc.reason})
             raise Pause(f"send acceptance is unverified for {agent_key}; operation {queue_op}: "
                         f"{exc.reason}")
-        if rc != 0 or not valid:
+        if rc != 0 or response_status not in {"completed", "permission", "running"}:
             finish_operation(job["jobdir"], queue_op, "uncertain",
                              {"rc": rc, "stdout": tail_text(out, 30),
                               "stderr": tail_text(err, 10), "reason": reason})
             raise Pause(f"send acceptance is unverified for {agent_key}; operation {queue_op}: {reason}")
+        if response_status in {"permission", "running"}:
+            finish_operation(job["jobdir"], queue_op, "adopted", data, agent_id=agent_id)
+            wait_for_agent(job, agent_key.removesuffix("_agent"), initial_status=response_status)
+            return
         finish_operation(job["jobdir"], queue_op, "completed", data, agent_id=agent_id)
         check_permits(job)
         return
@@ -645,7 +650,7 @@ def spawn_agent(job, role, model, base, prompt):
                               "reason": str(exc)})
         raise
     if job.get("queue_supervised") and job.get(f"{key}_run_status") in {"permission", "running"}:
-        wait_for_agent(job, key)  # it checks owned permits before waiting for the idle envelope
+        wait_for_agent(job, key, initial_status=job[f"{key}_run_status"])
     return job[f"{key}_cwd"]
 
 
@@ -656,21 +661,31 @@ def _kill_all(procs):
         proc.wait()
 
 
-def wait_for_agent(job, role):
+def wait_for_agent(job, role, initial_status=None):
     # rc=0 proves NOTHING: real `paseo wait` exits 0 printing status "error"
     # ("Agent not found") as readily as "idle" -- the JSON status is the signal
     if job.get("queue_supervised"):
         if str(Path(__file__).resolve().parent) not in sys.path:
             sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from queue_mode import (QueueError, clear_permission_wait, load_state,
-                                permission_limits,
-                                record_permission_prompt, validate_wait_result)
+        from queue_mode import (QueueError, classify_agent_response,
+                                clear_permission_wait, load_state, permission_limits,
+                                record_permission_prompt)
         maximum, no_progress_seconds = permission_limits(job["spec"])
+        if initial_status == "permission":
+            try:
+                record_permission_prompt(job["jobdir"], maximum, no_progress_seconds)
+            except QueueError as exc:
+                raise Pause(str(exc))
         check_permits(job)
     tmo = int(job["spec"].get("agent_timeout", 1800))
+    deadline = time.monotonic() + tmo
     while True:
         wait_timeout = tmo
         if job.get("queue_supervised"):
+            remaining_agent_time = deadline - time.monotonic()
+            if remaining_agent_time <= 0:
+                raise Pause("agent wait exceeded its total timeout")
+            wait_timeout = min(wait_timeout, max(1, int(remaining_agent_time)))
             started = load_state(job["jobdir"]).get("permission_started_at")
             if started is not None:
                 remaining = no_progress_seconds - (time.time() - float(started))
@@ -683,15 +698,18 @@ def wait_for_agent(job, role):
         if job.get("queue_supervised"):
             if rc != 0:
                 raise Pause(f"unverified paseo wait exit rc={rc}: {tail_text(out + err, 10)}")
-            valid, reason = validate_wait_result(data, job[f"{role}_agent"])
-            if not valid:
+            response_status, reason = classify_agent_response(
+                data, job[f"{role}_agent"], {"agentId", "status", "message"}, {"agentId"})
+            if response_status not in {"idle", "permission", "running"}:
                 raise Pause(reason)
-            if data["status"] == "permission":
+            if response_status == "permission":
                 try:
                     record_permission_prompt(job["jobdir"], maximum, no_progress_seconds)
                 except QueueError as exc:
                     raise Pause(str(exc))
                 check_permits(job)
+                continue
+            if response_status == "running":
                 continue
             clear_permission_wait(job["jobdir"])
             return

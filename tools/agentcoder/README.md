@@ -55,6 +55,9 @@ no-progress timer (`queue.max_permission_prompts` and
 the nudge budget. Empty or `-` permit descriptions are no evidence, so they
 park by default. Owned-agent trust may allow them, but file-change prompts
 contain no path and this remains cooperative trust, not containment.
+Run, send, and wait share a response classifier for completed, idle, permission,
+running, and unknown outcomes. A permission response after an accepted send is
+handled and followed by wait; the message is never sent again.
 
 Queue state stores `owned_agents` as an object keyed by full agent ID. The
 supervised driver writes each returned ID before later job journaling, and the

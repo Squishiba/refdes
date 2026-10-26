@@ -105,43 +105,33 @@ regression run completed; unresolved live/schema gates are listed above.
 
 ## Round 5 state-shape crash correction
 
-- The supplied `.scratch/live-fixtures4/` traceback showed `supervise` creating
-  `owned_agents: []` while `note_agent` indexed it by full ID. A regression now
-  drives the real `supervise` initializer and first supervised `record_turn`;
-  its old-code RED failed at `queue_mode.py:431` with the reported list-index
-  `TypeError` (loader and write-ahead assertions were also RED before fixes).
-- State shape is documented in `docs/agentcoder-queue.md`: ID-keyed objects
-  for owned agents, operations, replacements, and maintenance agent rows;
-  arrays for attempts, outbox, permit decisions, and hook results. `load_state`
-  validates each collection and raises `QueueError` with the offending key.
-- `record_turn` writes the exact returned ID before cwd lookup/job save. After
-  the child returns, supervision reloads state before adding attempt metadata,
-  preserving concurrent write-ahead ownership. Reconciliation, resume, and
-  deliberate stop include IDs present in queue state as well as `job.json`.
-- Unexpected supervisor exceptions and child exceptions now produce parked
-  events with short class/message outcomes. Their full traceback is retained
-  in the corresponding attempt's `stderr.txt`; exception recovery also carries
-  any exact IDs found in `job.json` into the terminal queue state.
-- Round-5 RED first run: three new tests failed (initializer/note_agent
-  `TypeError`, missing schema loader, and missing write-ahead record). Green
-  queue suite: 36 passed, including classifier and retry-bound mutations.
-  Existing tool/workspace/land-push suites: 129 passed. `py_compile` and
-  `git diff --check` passed. No daemon or GitHub command was run.
-- Review update: the first green pass caught the supervisor's stale post-child
-  snapshot overwriting the write-ahead ID; a regression now confirms it stays
-  present through terminal parking. Captured-but-unverified live signal list
-  remains as above; the round-5 crash path is verified offline, not live.
+- `.scratch/live-fixtures4/` exposed `owned_agents: []` vs ID-keyed writes.
+  Tests first went RED at `queue_mode.py:431`; schema-loader and write-ahead
+  checks were also RED. State shape is documented and validated; IDs are saved
+  before cwd/job journaling and survive the supervisor's post-child merge.
+- Unexpected exceptions park with a short outcome and full retained traceback.
+  Resume/stop reconcile state-owned IDs as well as `job.json`. Round 5 passed
+  36 queue and 129 legacy tests; review caught/fixed a stale snapshot overwriting
+  write-ahead ownership.
 
 ## Round 6 permission wait correction
 
-- `.scratch/live-fixtures5/` captured `wait --json` status `permission` and an
-  owned `CodexFileChange` row with description `-`. Tests were RED on the old
-  code: wait parked on the status, empty descriptions could not use trust, and
-  sequential prompts had no separate bound.
-- Permission waits now recheck permits and wait again. A per-job default cap
-  of 100 prompts and 900-second no-progress timer are independent of nudges;
-  idle clears the timer. Empty/`-` descriptions are no evidence, park with raw
-  evidence by default, and can be allowed only with owned trust after risky and
-  outside checks. File-change permits contain no path; trust remains cooperative.
-- Queue suite: 39 passed, including permission-loop happy/runaway paths and
-  classifier/retry mutations. No daemon or GitHub command was run.
+- `.scratch/live-fixtures5/` captured wait `permission` and `CodexFileChange`
+  with description `-`; tests first went RED for wait handling, empty evidence,
+  and unbounded sequential prompts. Separate defaults are 100 prompts and 900
+  seconds, independent of nudges. Empty evidence parks unless owned trust is
+  enabled after risky/outside checks; file-change trust cannot prove paths.
+- Round 6 passed 39 queue tests, including happy/runaway loops and mutations.
+  No daemon or GitHub command was run.
+
+## Round 7 send permission correction
+
+- `.scratch/live-fixtures6/` shows accepted send can return `permission`.
+  Run/send/wait now share a completed/idle/permission/running/unknown classifier
+  and the same permission-check-then-wait path. Send operations are adopted and
+  waited on; they are never replayed.
+- Audit: stop has no agent-status field and requires exact stop response plus
+  fresh inventory; permit allow/deny uses return code plus fresh permit listing.
+- Tests first went RED for missing classification and send parked unverified.
+  Queue suite: 41 passed; legacy suite: 129 passed. No pilot rerun, daemon, or
+  GitHub command was run.

@@ -337,6 +337,72 @@ def test_permission_run_records_agent_then_processes_and_waits(tmp_path, monkeyp
     assert operation["status"] == "adopted"
 
 
+def test_run_send_wait_share_permission_response_classification():
+    cases = [
+        (fixture("run-completed.json"), None,
+         {"agentId", "status", "provider", "cwd", "title"}),
+        (fixture("wait-idle.json"), "agent-live-running",
+         {"agentId", "status", "message"}),
+        (fixture("run-permission.json"), None,
+         {"agentId", "status", "provider", "cwd", "title"}),
+        (fixture("send-permission.json"), "agent-live-running",
+         {"agentId", "status", "message"}),
+        (fixture("run-running.json"), None,
+         {"agentId", "status", "provider", "cwd", "title"}),
+        (fixture("wait-permission.json"), "agent-permission-001",
+         {"agentId", "status", "message"}),
+    ]
+    assert [queue.classify_agent_response(payload, aid, fields)[0]
+            for payload, aid, fields in cases] == [
+                "completed", "idle", "permission", "permission", "running", "permission"]
+    unknown = dict(fixture("send-permission.json"), status="mystery")
+    assert queue.classify_agent_response(
+        unknown, "agent-live-running", {"agentId", "status", "message"})[0] == "unknown"
+
+
+def test_send_permission_is_accepted_once_then_waits_for_idle(tmp_path, monkeypatch):
+    driver_spec = importlib.util.spec_from_file_location(
+        "agentcoder_send_permission_fixture", ROOT / "tools" / "agentcoder" / "agentcoder.py")
+    driver = importlib.util.module_from_spec(driver_spec)
+    driver_spec.loader.exec_module(driver)
+    create_state(tmp_path)
+    listing = fixture("ls-g-permission.json")
+    send_permission = dict(fixture("send-permission.json"), agentId=listing[0]["id"])
+    wait_idle = dict(fixture("wait-idle.json"), agentId=send_permission["agentId"])
+    row = dict(fixture("permit-no-description.json"), agentId=listing[0]["id"],
+               agentShortId=listing[0]["shortId"])
+    calls, events, responses = [], [], [send_permission, wait_idle]
+
+    def guarded(argv, **_kwargs):
+        calls.append(argv)
+        if argv[1] == "send":
+            events.append("send")
+        elif argv[1] == "wait":
+            events.append("wait")
+        return 0, json.dumps(responses.pop(0)), ""
+
+    def permit_check(_job):
+        decision, _ = queue.process_permits(
+            tmp_path, [listing[0]["id"]], listing, [row],
+            lambda argv: (events.append("allow" if argv[1] == "allow" else "permit-list")
+                          or fake_result(out="[]")),
+            trust_owned_agents=True)
+        assert decision == "CLEAR"
+
+    monkeypatch.setattr(driver, "run_guarded", guarded)
+    monkeypatch.setattr(driver, "check_permits", permit_check)
+    job = {"queue_supervised": True, "jobdir": str(tmp_path), "task_id": "send-permission",
+           "coder_agent": send_permission["agentId"], "spec": {"agent_timeout": 30,
+               "queue": {"trust_owned_agents": True}}}
+    driver.send_to(job, "coder_agent", "continue working")
+    assert sum(argv and argv[0:2] == ["paseo", "send"] for argv in calls) == 1
+    assert calls[0][:2] == ["paseo", "send"]
+    assert calls[-1][0:2] == ["paseo", "wait"]
+    assert events == ["send", "allow", "permit-list", "wait"]
+    operation = next(iter(queue.load_state(tmp_path)["operations"].values()))
+    assert operation["status"] == "adopted" and operation["agent_id"] == send_permission["agentId"]
+
+
 def test_supervise_initial_state_records_first_spawn_and_parks_crash(tmp_path, monkeypatch):
     """Exercise supervise's actual initializer before the first supervised turn."""
     driver_spec = importlib.util.spec_from_file_location(
