@@ -43,7 +43,6 @@ COMMENT_CLOSE = "-->"
 # report, not text to absorb (the closed-family posture, build.py:66-68).
 _KEY_SHAPED_RE = re.compile(r"^(\S{11})(?:[ \t]+(.*)|\Z)", re.DOTALL)
 _ALPHABET = frozenset(keys_mod.ALPHABET)
-_WSP = " \t"
 
 
 def _scan_line(
@@ -222,9 +221,10 @@ def marker_line(item: Item, line_offset: int) -> int:
 
 def scan(project: Project) -> list[Diagnostic]:
     """Populate `item.navis` for every local item and return the
-    malformed-marker warnings (which the build pass reports through
-    `project.warn` at the marker's line). Read-only: nothing here writes,
-    mints, or touches `item.body` (§7.3's hard invariant starts here).
+    malformed-marker warnings, which the build pass appends to
+    `project.diagnostics` at the marker's line. Read-only: nothing here
+    writes, mints, or touches `item.body` (§7.3's hard invariant starts
+    here).
     """
     diagnostics: list[Diagnostic] = []
     for item in project.local_items:

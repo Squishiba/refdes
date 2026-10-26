@@ -2937,9 +2937,11 @@ def cmd_navis(args) -> int:
     second implementation" rule, the `cmd_thread` precedent).
 
     Slice 1 mints no keys and archives nothing (design §13), so `show`'s
-    selector is the `ls` ordinal number or a marker's full 11-character key
-    (the key only exists once a later slice writes it), and `all` is the
-    active list with a stated note. Exit posture is the read-only
+    selector is a marker's full 11-character key (matched first -- every
+    digit is in the key alphabet, so an all-digit key must not be read as
+    an ordinal) or the `ls` ordinal number (the key only exists once a
+    later slice writes it), and `all` is the active list with a stated
+    note. Exit posture is the read-only
     neighbours': a clean run is 0 -- including a project with no Navis at
     all -- and a selector that names nothing is a naming error, exit 2,
     like `thread <unknown-ref>`.
@@ -2959,13 +2961,14 @@ def cmd_navis(args) -> int:
     rows = navis_mod.projection(project)
 
     if args.navis_command == "show":
-        row = None
-        if args.navi.isdigit():
+        # Key before ordinal: every digit is in the key alphabet, so an
+        # 11-character all-digit string is legal key grammar and a full-key
+        # selector must not be read as an out-of-range ordinal number.
+        row = next((r for r in rows if r["key"] == args.navi), None)
+        if row is None and args.navi.isdigit():
             index = int(args.navi) - 1
             if 0 <= index < len(rows):
                 row = rows[index]
-        else:
-            row = next((r for r in rows if r["key"] == args.navi), None)
         if row is None:
             print(
                 f"no Navi {args.navi!r}: `refdes navis ls` numbers them "
@@ -2978,7 +2981,9 @@ def cmd_navis(args) -> int:
         print(f"Navi: {row['text']}")
         print(f"  key: {key_note}")
         print(f"  source: {src['item']} ({src['file']}:{src['line']})")
-        return 0
+        # Like ls/all and `thread <ref>`: the answer prints even when an
+        # items file failed to parse, and the command exits 1.
+        return 1 if load_errors else 0
 
     verb = args.navis_command
     if not rows:

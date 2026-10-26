@@ -116,6 +116,33 @@ def test_navis_show_unknown_exits_2(tmp_path, capsys):
     assert "no Navi" in capsys.readouterr().err
 
 
+def test_navis_show_by_all_digit_key(tmp_path, capsys):
+    # The key alphabet includes every digit, so an 11-character all-digit
+    # key is legal grammar; a full-key selector must resolve as a key, not
+    # be read as an out-of-range ordinal.
+    files = {
+        "note-a.md": (
+            "---\nid: NOTE-001\ntype: note\ntitle: Power\n---\n"
+            "intro\n<!--navi:12345678901 Model worst-case copper temperature.-->\n"
+        ),
+    }
+    config = _setup(tmp_path, files)
+    assert _run(config, "--no-write", "navis", "show", "12345678901") == 0
+    out = capsys.readouterr().out
+    assert "Model worst-case copper temperature." in out
+    assert "12345678901" in out
+
+
+def test_navis_show_exits_1_when_items_file_fails_to_parse(tmp_path, capsys):
+    config = _setup(tmp_path, TWO_MARKERS)
+    broken = tmp_path / "items" / "broken.md"
+    broken.write_text("---\nid: NOTE-999\ntype: [note\n---\nbody\n", encoding="utf-8")
+    assert _run(config, "--no-write", "navis", "show", "1") == 1
+    captured = capsys.readouterr()
+    assert "Model worst-case copper temperature." in captured.out
+    assert "broken.md" in captured.err
+
+
 def test_navis_show_names_keyless_markers(tmp_path, capsys):
     config = _setup(tmp_path, TWO_MARKERS)
     assert _run(config, "--no-write", "navis", "show", "2") == 0

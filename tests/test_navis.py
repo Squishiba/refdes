@@ -291,7 +291,11 @@ def test_valid_markers_add_no_diagnostics(tmp_path):
 def test_scan_changes_no_hash(tmp_path, monkeypatch):
     """The scan itself must not enter any hash: body bytes are the hash
     input (build._hash_payload), the scan must not mutate `Item.body`, and
-    a build with the scan step disabled produces byte-identical hashes."""
+    a build whose very first build runs with the scan step stubbed produces
+    byte-identical hashes. The stub goes in *before* the first build: a
+    build never resets `Item.navis`, so stubbing a project that was already
+    scanned compares a scanned item's (stale) populated navis against
+    nothing and pins nothing."""
     files = {
         "note.md": _md(
             "NOTE-001", "note", "Power",
@@ -302,15 +306,25 @@ def test_scan_changes_no_hash(tmp_path, monkeypatch):
     }
 
     def hashes(root, *, scanned: bool):
-        project = _project(root, files)
         if not scanned:
             monkeypatch.setattr(navis, "scan", lambda _project: [])
-        # Re-run the pipeline with the step stubbed out: hashes recompute.
-        build_mod.build(project, seal_write=False)
+        project = _project(root, files)
         return {i.id: i.content_hash for i in project.local_items}
 
     (tmp_path / "with").mkdir()
     (tmp_path / "without").mkdir()
+    (tmp_path / "probe").mkdir()
+    # Direct pin (the scan runs after compute_hashes, so the on/off build
+    # comparison below is insensitive to the payload *reading* navis at its
+    # current position -- this catches that regression at the payload):
+    # nothing the scan produces is hash input, on an item whose navis ARE
+    # populated. Runs first: monkeypatch is in force for the rest of the
+    # test, so the probe project must be built before the scan is stubbed.
+    probe = _project(tmp_path / "probe", files)
+    assert any(item.navis for item in probe.local_items)
+    builder = build_mod.hash_payload_builder(probe, build_mod.HASH_FORMAT)
+    for item in probe.local_items:
+        assert "navis" not in builder(item, probe.types[item.type])
     with_scan = hashes(tmp_path / "with", scanned=True)
     without = hashes(tmp_path / "without", scanned=False)
     assert with_scan == without

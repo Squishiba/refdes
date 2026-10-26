@@ -56,3 +56,47 @@ line, plus a marker-free twin):
   body_line-is-None precedent).
 - ruff scoped to touched files: clean (repo-wide baseline has ~99
   pre-existing findings, untouched).
+
+## Review round (PR #382, head 8a1b835)
+
+Four reviews: 00c8317 (docs chunk, CHANGES REQUESTED), 992a913 (build/cli/
+model, CHANGES REQUESTED), 7c53fb1 (navis.py/tests, CHANGES REQUESTED),
+800855c (render, APPROVE). `gh pr checks 382`: all green.
+
+Fixed:
+- cli.py cmd_navis: show resolves a full 11-char key before reading the
+  selector as an ordinal (all-digit keys are legal grammar); show now
+  returns 1 on load errors (matches ls/all, `thread`, and the
+  cli-reference claim). RED first: two new tests in test_navis_cli.py
+  (all-digit key; show with a broken items file) -> green.
+- tests/test_navis.py test_scan_changes_no_hash was vacuous (build never
+  resets Item.navis, so stubbing scan on an already-scanned project
+  compared navis-populated against navis-populated). Stub goes in before
+  the first build now; added a direct payload pin (the builder's dict has
+  no "navis" key on an item whose navis ARE populated) because the scan
+  runs after compute_hashes, so the on/off build comparison alone is
+  insensitive to a payload regression. Proof harness in
+  .scratch/pr382-review-fixes/verify_scan_hash_test2.py: unpoisoned
+  passes, poisoned _hash_payload trips the pin. The probe project builds
+  before the monkeypatch is in force.
+- navis.py: deleted dead _WSP; scan() docstring said project.warn, build
+  appends to project.diagnostics.
+- cli-reference.md: usage banner gained navis; show row documents
+  key-first selectors. The exit-1-on-parse-failure claim is now true for
+  all three verbs (code fixed, not docs weakened).
+- markdown.md: malformed markers' bytes are consumed from the page (the
+  text disappears until the warning's fix is applied); index payload
+  "carries it" grammar; line-based indented-code rule noted (a marker
+  indented under a list item is inert -- write markers at column 0).
+- design doc: Status line was stale ("Nothing is implemented") -- now
+  names slice 1 implemented, slices 2-4 not; build.py/cli.py/render.py
+  line cites re-verified and shifted to head (the +1 import shifts and
+  the navis insertions).
+
+Rejected (PR comment): design doc placement (in-prog-logs, deliberate --
+the design commits ride here; docs/design/ move is a docs-only follow-up
+like #377/#379 territory); NBSP-after-key reads keyless (visible in ls,
+design grammar says key + space, inline_calc precedent); duplicate
+delivery with merged #377 (informational, now moot -- rebased onto main);
+list-continuation inertness as code (design-adopted region rules,
+inline_calc parity; documented in markdown.md instead).

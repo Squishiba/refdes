@@ -75,7 +75,7 @@ prefix, written by hand inside an item's body. The published page consumes
 it — the marker's bytes never appear in the rendered HTML — while the tool
 scans every body into one project-wide list you can read with
 [`refdes navis ls`](cli-reference.md#refdes-navis-ls-all-show), and the
-`index` payload carries under its top-level `navis` key.
+`index` payload carries it under its top-level `navis` key.
 
 The grammar is closed and strict:
 
@@ -87,9 +87,14 @@ The grammar is closed and strict:
   today;
 - a marker inside a fenced code block, an indented code block, an inline
   code span, or an open HTML comment is inert — it is literal text there,
-  rendered as-is and not scanned;
+  rendered as-is and not scanned. The indented-code rule is line-based,
+  like the inline-calc scan it shares: a marker indented under a list
+  item (a lazy continuation) counts as indented code and is inert —
+  write markers at column 0;
 - a malformed marker (no text, a key-shaped head outside the key alphabet)
-  is a warning naming the fix, never quietly swallowed.
+  is a warning naming the fix, never quietly swallowed. Its bytes are
+  still consumed from the published page, so the text inside it disappears
+  until the fix the warning names is applied.
 
 The comment form is the point: any standard Markdown renderer already
 hides the marker, and it cannot trigger an inline calc span under it.
