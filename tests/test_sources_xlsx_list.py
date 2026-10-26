@@ -156,6 +156,31 @@ def test_xlsx_listing_marks_every_refusal_unselectable_without_hiding_it(workboo
         assert entry.value == "" if not entry.selectable else entry.value
 
 
+def test_xlsx_listing_marks_a_workbook_scope_name_containing_the_separator(tmp_path):
+    # openpyxl's API lets a scripted workbook carry a workbook-scope name
+    # Excel's UI refuses to create: one containing '!'. The key grammar reads
+    # the first '!' as the sheet separator, so NO key addresses that name --
+    # a selectable row for it would show a value `fetch` can never pin, and
+    # when the crafted name collides with a real sheet-scoped key's qualified
+    # spelling (as here), the author picks 1 and fetch pins 99. The same
+    # defense the listing runs on '!'-titled sheets and external refs.
+    path = tmp_path / "bang.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Sheet1"
+    sheet["B2"] = 1.0
+    sheet["C2"] = 99.0
+    workbook.defined_names.add(DefinedName("Sheet1!local", attr_text="'Sheet1'!$B$2"))
+    sheet.defined_names.add(DefinedName("local", attr_text="'Sheet1'!$C$2"))
+    workbook.save(path)
+    workbook.close()
+    crafted, decoy = _list(path).entries
+    assert crafted.key == decoy.key == "Sheet1!local"
+    assert not crafted.selectable and "!" in crafted.problem
+    assert (decoy.selectable, decoy.value) == (True, "99")
+    assert _extract(path, "Sheet1!local")["Sheet1!local"].text == "99"
+
+
 def test_xlsx_listing_names_rows_with_the_label_it_is_given(tmp_path, workbook):
     listing = _list(workbook, label="analysis/budget.xlsx")
     blob = json.dumps([e.problem for e in listing.entries])

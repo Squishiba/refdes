@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 import yaml
 from serve_support import Client, snapshot_tree
-from test_serve_sources import make_root, sources_url, start
+from test_serve_sources import make_root, sources_url, start, strings
 
 from refdes import cli as cli_mod
 
@@ -135,7 +135,7 @@ def test_the_entries_endpoint_lists_defined_names_with_qualified_keys(tmp_path):
         assert status == 200
         assert [e["key"] for e in filtered["entries"]] == ["Hidden!local"]
         # No absolute server path leaves the process, in any string.
-        for value in _strings(payload):
+        for value in strings(payload):
             assert str(root) not in value
     finally:
         app.stop()
@@ -282,14 +282,3 @@ def test_a_picked_xlsx_key_fetches_and_fetch_update_is_the_acceptance_gate(
     updated = lock(root)["citations"]["analysis/budget.xlsx"]
     assert updated["values"] == {"power": {"reader": "xlsx", "value": "2.3"}}
     assert updated["sha256"] != record["sha256"]
-
-
-def _strings(payload):
-    if isinstance(payload, str):
-        yield payload
-    elif isinstance(payload, dict):
-        for value in payload.values():
-            yield from _strings(value)
-    elif isinstance(payload, list):
-        for value in payload:
-            yield from _strings(value)

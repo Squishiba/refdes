@@ -599,10 +599,10 @@ def _xlsx_destination(workbook, defined) -> tuple[str, int, int, str]:
 
 
 def _xlsx_defined_names(workbook):
-    """`(key, defined)` for every defined name, in scope order: workbook-scope
-    names first (key: the bare name), then each sheet's in workbook order
-    (key: `Title!name` -- the qualified spelling `extract()`'s grammar
-    requires).
+    """`(key, defined, sheet_title)` for every defined name, in scope order:
+    workbook-scope names first (key: the bare name, title None), then each
+    sheet's in workbook order (key: `Title!name`, title `Title` -- the
+    qualified spelling `extract()`'s grammar requires).
 
     A sheet-scoped name is listed only qualified, never bare: the bare
     spelling resolves only when exactly one sheet has that name, which is a
@@ -758,12 +758,27 @@ class XlsxReader:
                     truncated = True
                     break
                 prefix = f"{name}: key {key!r}: "
+                if sheet_scope is None and "!" in key:
+                    # A workbook-scope name carrying the separator itself is
+                    # openpyxl-reachable and Excel-UI-unnameable, and no key
+                    # addresses it: the grammar reads the first '!' as the
+                    # sheet separator, and the qualified lookup searches only
+                    # the sheet's own names. Offered as a value, it would be
+                    # the row whose number fetch can never pin.
+                    entries.append(SourceEntry(
+                        key, defined.attr_text, "", 0, (),
+                        prefix + "the defined name itself contains '!', which "
+                        "the qualified key grammar reads as a sheet separator, "
+                        "so no key can name it -- rename the name",
+                    ))
+                    continue
                 if sheet_scope is not None and "!" in sheet_scope:
                     entries.append(SourceEntry(
                         key, defined.attr_text, "", 0, (),
                         prefix + "the sheet name contains '!', which the "
-                        "qualified key grammar splits on, so no key can name "
-                        "this name -- rename the sheet",
+                        "qualified key grammar splits on; the picker offers "
+                        "qualified keys only, so this name cannot be picked "
+                        "-- rename the sheet",
                     ))
                     continue
                 sheet, row, col, problem = _xlsx_destination(workbook, defined)

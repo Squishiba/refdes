@@ -103,4 +103,23 @@ the case is now a cited `.py` (no reader), asserting "no source reader".
 - openpyxl 3.1.5 present; skip-on-missing behavior kept (importorskip in
   tests; install-hint message path shared with extract via `_xlsx_module`).
 
+## Review round (fd23a83: 1 CHANGES REQUESTED, 1 APPROVE)
+
+Accepted 4 findings (chunk-2 review): a workbook-scope defined name
+containing '!' was listed selectable -- the key grammar reads the first '!'
+as the sheet separator, so no key addresses it, and when the crafted name
+collides with a sheet-scoped key's qualified spelling the picker shows a
+value fetch can never pin (pairing invariant, the dangerous direction;
+RED recorded at tests/test_sources_xlsx_list.py:179, fixed by a guard in
+list_entries mirroring the '!'-sheet-title guard); `_xlsx_defined_names`
+docstring misstated its yield; the '!'-sheet-title message overclaimed
+("no key can name this name" -- extract's unqualified fallback can resolve
+a bare key, the picker just never offers bare spellings; reworded);
+`_strings` duplicated `strings` in test_serve_sources.py (imported now).
+Rejected 1: "merged-range claim untested" -- the fixture merges D4:E5
+(tests/test_sources_xlsx_list.py:38), the top-left raw/value pair is
+asserted at :129 and the inside cell's "is blank" refusal at :149, both
+inside the pairing loop's coverage. CI at fd23a83: all three checks pass
+(ubuntu, py3.13, windows).
+
 Finished: yes.
