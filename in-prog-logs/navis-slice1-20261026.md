@@ -115,3 +115,10 @@ span warning; blockquote-only-line drop. docs/cli-reference.md: ASCII
 ordinals, document-order row. Log itself trimmed per the same review
 (no commit shas, rounds condensed, no stale pass counts -- CI is the
 record).
+
+## Round 5: rebase onto origin/main (#381 landed)
+
+Branch rebased onto origin/main; sole conflict docs/cli-reference.md usage
+banner, resolved keeping both sides (main's `recover`, branch's
+`navis`). Diff scope re-verified (slice-1 files only); full suite green
+post-rebase.
