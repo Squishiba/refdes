@@ -162,7 +162,9 @@ changes for this design):**
   only — the stored result excluded), the dependency scans, and the
   content hash (`HASH_FORMAT = 6`, `build.py:2260`); see §6.5 for the
   hash consequences of the fields decision.
-- **PR #345 (`c3073c6`, release gate):** `release_gate.inline_calc_results`
+- **PR #345 (`c3073c6`, release gate):** the gate's
+  `inline_calc_results` rule (`src/refdes/lifecycle.py:825`, registered
+  :908; `release_gate:` is the `refdes-project.yaml` config section)
   fails a release on stale inline-calc results. The live panel's stale
   row reuses `compare_stored`'s exact message (§3.3), so "panel clean"
   keeps predicting "gate green" — no design change, one more consumer
@@ -300,7 +302,10 @@ Response 200:
       "message": ""                 // the R12 diagnostic text verbatim;
                                     // "" when status == "ok"
     }
-  ]
+  ],
+  "truncated": true                 // the 200-span guard below fired;
+                                    // the key is omitted entirely when
+                                    // nothing was cut (no `false`)
 }
 ```
 
@@ -316,9 +321,13 @@ Response 200:
   slot; auto-fill and Fill are then unavailable for that span.
 - `"revision"` lets the browser discard responses computed against an old
   model (§3.6).
-- Guard: server evaluates at most the first 200 triggered spans of the
-  body and appends `{"truncated": true}`; per-span cost is ~0.13 ms (§7),
-  so a request is bounded tens of ms regardless.
+- Guard: the server evaluates at most the first 200 triggered spans of
+  the body, in source order, and **omits the rest**; the response then
+  carries top-level `"truncated": true` (the schema key above, sibling
+  of `spans` — omitted, not `false`, when nothing was cut). A truncated
+  response is rendered with one panel footer line ("showing the first
+  200 spans"); the §3.6 supersede guards apply to it unchanged. Per-span
+  cost is ~0.13 ms (§7), so a request is bounded tens of ms regardless.
 
 ### 3.4 Backend: the narrow preview pass (new, small)
 
@@ -379,7 +388,7 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
   Zero triggered spans → panel hidden. Panel is presentation only
   (`textContent` everywhere — no HTML injection).
 - **Auto-fill (default ON — owner-confirmed 2026-10-25, §6.1), gated by
-  a user toggle (next bullet)**: for each span with `status` ok/stale
+  a user toggle (next bullet)**: for each span with `status == "stale"`
   and a result range, when
   `computed != <current stored text in textarea>`, set
   `selectionStart/End` over the result range and
@@ -392,6 +401,18 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
   call `area._refdesCommit()` once — the draft, dirty flag, sessionStorage
   mirror, revision gate, and conflict screen all behave exactly as for
   typed text (`editor.js:96-101`'s comment is the contract).
+- **Why the gate is `stale` and not `computed != stored` (review
+  96ae35f, finding 1)**: the checker *accepts* within-window literals —
+  `compare_stored` returns `None` when the stored nominal is inside its
+  rounding window (`inline_calc.py:597`, window logic :555-594).
+  Verified 2026-10-26 (`.scratch/inline-calc-window/probe_window.py`,
+  from this tree): `` `Vout := 2.218 V * 2 = 4.4 V` `` is status **ok**
+  with computed `4.436 V` — a `computed != stored` rule spanning ok
+  spans would rewrite a literal the checker accepts, on every pause,
+  under the default, which is exactly the silent rewrite D1 forbids
+  (`docs/design/inline-calc.md:16-23`: check/build "neither silently
+  rewrites it"). `ok` rows are display-only; Fill appears on stale rows
+  only, which the checker's own verdict makes the safe scope.
 - **The toggle (§6.1 — auto-fill and Fill coexist, and the user picks
   auto-fill):** a checkbox in the panel header ("update results while I
   type"), persisted in `localStorage` under `refdes.live-calc.autofill`.
@@ -516,7 +537,7 @@ fill is the same single `insertText` edit (§3.8).
 | B2 | result-slot range from the parse (`parse_span` returns content-relative cut column; `triggered_spans` unchanged) | `src/refdes/inline_calc.py` | ~15 lines (`code_span_ranges` is in main, :124 — dependency retired) |
 | B3 | `POST /api/item/<ref>/calc` route + guards + `fields` bag validation (shape only; §6.5 owns semantics) | `src/refdes/serve/api.py` | ~60 lines |
 | F1 | `{signal}` support in `api()` | `src/refdes/serve/static/api.js` | ~3 lines |
-| F2 | `live-calc.js`: debounce + blur flush, abort, supersede, panel, auto-fill + user toggle (localStorage, default ON) + idempotent Fill, execCommand fallback | new static module | ~200 lines |
+| F2 | `live-calc.js`: debounce + blur flush, abort, supersede, panel (incl. truncated footer), auto-fill on stale rows only + user toggle (localStorage, default ON) + idempotent Fill, execCommand fallback | new static module | ~200 lines |
 | F3 | wiring: construct/teardown in `createEditor`, panel mount, save-in-flight flag | `src/refdes/serve/static/editor.js`, `item.js` | ~25 lines |
 | D1 | docs pass (below) | `docs/design/inline-calc-later.md` status, `docs/design/browser-editor.md` §"Editing and previewing bodies" pointer, `docs/math.md` editor sentence, `changelog.d/*.added.md` | — |
 
@@ -581,8 +602,11 @@ saves (orthogonal: the live layer writes no files, §3.8).
    mid-debounce → request fires immediately and fills apply; blur with
    the caret parked mid-result → that span keeps being skipped and its
    Fill row stays offered (§3.6); (9) Ctrl+Z undoes a blur-applied fill
-   as one native step; (10) Firefox + Chromium both pass (1)-(5) and
-   (7)-(9).
+   as one native step; (10) Firefox + Chromium both pass (1)-(5),
+   (7)-(9) and (11); (11) an ok-within-window literal
+   (`Vout := 2.218 V * 2 = 4.4 V`, computed `4.436 V`, §3.5's probe):
+   the row renders, **the body bytes never change** under auto-fill ON
+   (the stale-gate regression pin).
 - Acceptance: checklist green; save/conflict flow tests
   (`test_serve_edit_http*`) untouched; no draft-schema change.
 
@@ -603,7 +627,13 @@ saves (orthogonal: the live layer writes no files, §3.8).
 The first draft's four open questions are answered; each answer is
 folded into the section it changes, and the section list is the
 follow-up map. The answers open exactly **one new question** (§6.5) —
-the grammar half of decision 4.
+the grammar half of decision 4. **Provenance (review 96ae35f,
+finding 2):** the four answers were given by the owner in session on
+2026-10-25 as replies to the first review round's open questions;
+this section, mirrored in the PR's round-2 comment, is the **first
+tree record** of them — no pre-existing doc carries them. If a
+record outside this branch is preferred, transcribe §6.1-§6.4 into
+`docs/design/inline-calc.md` as owner decisions.
 
 1. **Auto-fill on typing AND the manual Fill button, toggleable.**
    Folded into §3.5: the toggle is a checkbox in the panel header,
@@ -612,9 +642,12 @@ the grammar half of decision 4.
    spells out (interaction preference, not project fact; no per-user
    identity in the serve stack). Default **ON** = this design's
    original recommendation (the parked direction,
-   inline-calc-later.md:23-26); flipping the default is a one-line
-   constant in `live-calc.js`. Fill keeps working with auto-fill on
-   and is idempotent (shared apply path, stored-text equality check).
+    inline-calc-later.md:23-26); flipping the default is a one-line
+   constant in `live-calc.js`. Auto-fill fires on `stale` rows only,
+   not on every `computed != stored` difference (the checker accepts
+   within-window literals; §3.5's gate bullet, a review-round-3 fix).
+   Fill keeps working with auto-fill on and is idempotent (shared
+   apply path, stored-text equality check).
    Turning auto-fill off never loses a diagnostic — the panel is
    presentation-only and independent of the toggle. Slice B grows the
    toggle (item F2) and its tests (§5 slice B, checklist (6)-(7)).
@@ -664,8 +697,9 @@ Verified starting points (main @ 78c8954, read 2026-10-26):
   result changing because an upstream value moved, with this item's
   own block untouched" as a question the probe deliberately does not
   answer.
-- The **release gate** (`release_gate.inline_calc_results`, #345
-  `c3073c6`) fails a release on any stale stored result.
+- The **release gate** (the `inline_calc_results` rule,
+  `lifecycle.py:825`/registered :908, #345 `c3073c6`) fails a release on
+  any stale stored result.
 
 Sub-questions:
 
@@ -727,6 +761,18 @@ Scratch project: `.scratch/inline-calc-live-20261020/probe/` (2 items;
 a cross-item span; `SRC-001` defines `V_in = 5.1 V` in a fence). CLI run
 from the worktree (`PYTHONPATH=src python -m refdes.cli`, d620ab5):
 
+**Reproducibility (review 96ae35f, finding 4):** the scratch dirs named
+here are gitignored and not part of the PR — §7 is a record, not a
+reproducer. A review pass on 2026-10-26 re-ran the behavioural claims
+against the current tree and reproduced: the half-typed "stored result
+missing" error, the unclosed-span silence, the stale-case fill
+round-trip, and the within-window case that pins §3.5's stale gate
+(`.scratch/inline-calc-window/probe_window.py` in this checkout:
+`Vout := 2.218 V * 2 = 4.4 V` → status ok, computed `4.436 V`). The
+**timings** (~130 µs/span, 0.011 s overlay floor) were measured on the
+2026-10-20 machine and are indicative; §3.4's scaling argument leans on
+the committed `docs/performance.md:44-52` table, not on them.
+
 1. `refdes check` reports, at `items/items.yaml`:
    `WARNING … inline calc Vbad: stored result says 5 V, now computes 4 V`;
    `ERROR … inline calc Vhalf := 3 V *: stored result missing; write '= <quantity>'`;
@@ -747,7 +793,9 @@ from the worktree (`PYTHONPATH=src python -m refdes.cli`, d620ab5):
    - **fill round-trip**: replacing the stored literal with
      `format_value(value, sigfigs)` makes `compare_stored` return `None` —
      auto-fill's output passes the next evaluation and the CLI check
-     (this is what makes §3.5's auto-fill stable, not oscillating);
+     (this is what makes §3.5's auto-fill stable, not oscillating;
+     the probe covers the **stale** case — ok-within-window literals
+     are by design never rewritten, hence the §3.5 gate);
     - `load_readonly` warm floor 0.011 s on this toy project (the
       `docs/performance.md:44-52` table is the scale reference).
 

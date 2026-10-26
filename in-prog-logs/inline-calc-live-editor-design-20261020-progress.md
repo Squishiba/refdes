@@ -79,56 +79,71 @@ the PR stays held.
 - Rebased the branch onto origin/main (78c8954) — conflict-free (the
   branch touches only its two in-prog-logs files); pushed
   `--force-with-lease`; confirmed 1d6d325 is an ancestor.
-- Re-verified every §1 fact and file:line cite against current main.
-  Shifts from #347+: inline_calc.py `contains_trigger` :89→:91,
-  `code_spans` :122→:210, `parse_span` :224→:306,
-  `triggered_spans` :417→:519, `compare_stored` :478→:597;
-  build.py `_run_inline_span` :1651→:1683, `_run_item_calcs`
-  :1719→:1752, `run_calcs` :1913→:1937, `_make_calc_resolver`
-  :1538→:1588, `_make_source_resolver` :1603→:1644 (signature is
-  5-arg on main — the §3.4 call shape in the design was the branch's
-  6-arg form and is fixed); api.py `handle` :41→:44, `_find_item`
-  :92, `edit_state` :759, `_source_propose` :946. Unchanged after
-  spot-check: calc.py, server.py, state.py, loader.py, security.py,
-  preview.py, editor.js, drafts.js, api.js, item.js, tests. Moved
-  cites fixed: serve/edit.py overlay judge :470→:500,
-  performance.md :44-51→:44-52, inline-calc.md D1/D2/D3 :9-16→:16-23,
-  item.js pickers :176-191→:176-190, app.js →81,93-104,107-121,128,
-  drafts.js dropAppliedOp :310-326.
+- Re-verified every §1 fact and every file:line cite against current
+  main (line-number shifts from #347+ across inline_calc.py/build.py/
+  api.py; §3.4's resolver call shape fixed to main's 5-arg
+  `_make_source_resolver`; moved cites fixed in serve/edit.py,
+  performance.md, inline-calc.md, item.js, app.js, drafts.js). The
+  round-3 reviewer independently re-verified this list — all matched.
 - §1 "Branch dependencies" section rewritten as "Landed since the
   first draft": #347 `ba6d153` (code_span_ranges :124, F12-5 retired
   — build.py:1622-1627, HASH_FORMAT 6 at :2260), #345 `c3073c6`
   (release gate `release_gate.inline_calc_results`), #367 `3c9035b`
   (`editor_journal.py`, library-only, no importer — grep-verified),
   #372 `27c4fda` (path scrubbing at the `handle()` choke-point).
-- §6 is now "Decisions (Jared, 2026-10-25)": (1) auto-fill + Fill,
-  toggleable — panel-header checkbox persisted in localStorage
-  (rationale for per-user-over-project in §3.5), default ON
-  (one-line flip), Fill idempotent, off loses no diagnostic;
-  (2) 400 ms + blur flush (§3.1) with guard/caret interactions
-  specified (§3.6); (3) panel under the textarea, recorded; (4)
-  fields ARE inputs — request `fields` bag + preview-pass
-  `fields=None` + unknown-key forward compat (§3.2/§3.3/§3.4,
-  items B1/B3), grammar explicitly out of scope.
-- Verified for the new §6.5 open question (field-reference grammar,
-  the one thing now needed from Jared): calc pass reads only
-  `item.body` (build.py:1785/1797/1840-1844); content-hash payload =
-  invalidate-mode fields (build.py:2296-2303; model.py:23-26/:181/
-  :688-694) + body; `calc_hash_for` is body-arithmetic-only (:2390);
-  draft field shape `drafts.js:21`/`:236-241`; scalar rule
-  api.py:1100-1102; `_apply_edit` known-keys posture :1087-1116.
-  §3.8 gained the journal verdict: #367 unwired library, live layer
-  writes no files → save/undo assumptions unchanged.
-- Slices: A adds fields-inertness + `fields`-bag HTTP + unknown-key
-  tests; B's checklist grows (6)-(10) for toggle persistence/off,
-  idempotent Fill, blur flush/caret, blur-fill undo. Work table B3
-  ~60, F2 ~200 lines. §7 probe note flags the F12-5 record as
-  historical.
+- §6 became "Decisions (Jared, 2026-10-25)": (1) auto-fill + Fill
+  behind a localStorage toggle, default ON, Fill idempotent, off loses
+  no diagnostic; (2) 400 ms + blur flush (§3.1/§3.6); (3) panel under
+  the textarea; (4) fields ARE inputs — request `fields` bag +
+  preview-pass `fields=None` + unknown-key forward compat (§3.2-§3.4),
+  grammar out of scope. New §6.5 open question (the field-reference
+  grammar) grounded in verified facts: calc reads only `item.body`;
+  content hash = invalidate-mode fields + body; `calc_hash_for` is
+  body-arithmetic-only; draft field shape + scalar rule cited. §3.8
+  journal verdict: #367 unwired → live-layer assumptions unchanged.
+- Slices: A adds fields-inertness + `fields`-bag + unknown-key tests;
+  B's checklist grew (6)-(10); work table B3 ~60, F2 ~200 lines; §7
+  flags the F12-5 probe record as historical.
+
+## Review round 3 (2026-10-26): CHANGES REQUESTED fixes
+
+Reviews: 96ae35f (CHANGES REQUESTED, design doc) + 13c70b5 (approve;
+ran the full suite on head: 4888 passed / 2 skipped; CI green incl.
+Windows — `gh pr checks 350` confirms, nothing to fix there).
+
+- **F1 (high, agreed — design defect, probe-confirmed):** §3.5 keyed
+  auto-fill on `computed != stored` across ok+stale spans, but
+  `compare_stored` *accepts* within-window literals (:597, window
+  :555-594) — probe `.scratch/inline-calc-window/probe_window.py`:
+  `Vout := 2.218 V * 2 = 4.4 V` is status ok with computed `4.436 V`,
+  so auto-fill would rewrite checker-accepted text on every pause
+  under default ON. Fixed: auto-fill gates on `status == "stale"`
+  (gate bullet in §3.5, §6.1 note, F2 row); checklist (11) added as
+  the byte-identical regression pin (design doc = the test plan here;
+  no code in this PR to test first). §7 fill round-trip annotated as
+  stale-case-only.
+- **F2 (agreed):** §6 gained a provenance paragraph — the four answers
+  were given in session 2026-10-25; §6 + the round-2 PR comment are
+  the first tree record; transcription into inline-calc.md offered.
+- **F3 (agreed):** `truncated` is now a schema key (sibling of
+  `spans`, omitted when nothing cut); guard bullet specifies source
+  order, omission of the excess, and the panel footer line.
+- **F4 (agreed, one sub-finding rejected):** release-gate cites fixed
+  to `lifecycle.py:825`/registered :908 (`release_gate:` is the
+  project-config section, not a module). §7 reproducibility paragraph:
+  behaviour claims re-runnable from the tree, timings indicative.
+  Rejected: "slice C names `docs/math.md`/`changelog.d/` without
+  checking" — both exist (verified by `ls`), so slice C is accurate.
+- **F5 (agreed):** PR body reconciled (grammar #351 landed, §6
+  decisions status, :44-52). `gh pr edit` aborts on the
+  projects-classic GraphQL deprecation; `gh api PATCH …/issues/350`
+  works.
+- 13c70b5: no findings on the progress log; nothing to change.
 
 ## Status
 
-Round 2 done: decisions recorded, baseline current, citations
-re-verified; pushed and PR #350 commented. Still held: the §6.5
-field-reference grammar is the one open question left for Jared, and
-implementation slices stay unstarted by design. No product code
-touched, no tests run (docs-only).
+Round 3 done: F1-F5 fixed in the deliverable, PR body reconciled;
+pushed. Still held: §6.5 field-reference grammar is the one open
+question for Jared; slices unstarted by design. No product code
+touched, no tests run (docs-only; reviewer 13c70b5 ran the full suite
+on head green).
