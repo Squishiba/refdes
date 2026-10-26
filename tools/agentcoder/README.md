@@ -36,7 +36,8 @@ The first opt-in supervised entry point stores locked state and retained
 attempt transcripts in `JOBDIR`; terminal state is committed with an event
 before the process exits. `queue wait` reads durable events before waiting and
 rechecks at most once per second. See [the supervised mode guide](../../docs/agentcoder-queue.md)
-for current limits and the pending supervised end-to-end gate. Existing `run`, `resume`,
+for current limits. The orchestrator reports six supervised pilots passed; this
+slice worker did not start a live worker. Existing `run`, `resume`,
 and `status` behavior remains the default. Supervised jobs can reuse explicit
 role workspaces or create them from the captured Paseo response. `publish`
 defaults to false and must be explicitly true for trusted-driver push/PR
@@ -57,7 +58,9 @@ park by default. Owned-agent trust may allow them, but file-change prompts
 contain no path and this remains cooperative trust, not containment.
 Run, send, and wait share a response classifier for completed, idle, permission,
 running, and unknown outcomes. A permission response after an accepted send is
-handled and followed by wait; the message is never sent again.
+handled and followed by wait. Accepted sends are keyed to the current job phase
+and recovered from durable operation state without repeating the send; uncertain
+acceptance parks for reconciliation.
 
 Queue state stores `owned_agents` as an object keyed by full agent ID. The
 supervised driver writes each returned ID before later job journaling, and the

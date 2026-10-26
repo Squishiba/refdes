@@ -588,6 +588,114 @@ def test_owned_trust_still_denies_outside_and_risky_descriptions():
         assert decision == "DENY"
 
 
+def test_permit_classifier_uses_job_roots_and_cross_platform_absolute_paths(tmp_path):
+    repo = "C:\\Users\\Example\\work\\repo"
+    row = permit_row("CodexFileChange", "Write C:\\Users\\AnotherUser\\secrets\\x.py")
+    assert queue.classify_permit_record(row, trusted_roots=[repo])[0] == "DENY"
+    in_repo = permit_row("CodexFileChange", "Write C:\\Users\\Example\\work\\repo\\pkg\\x.py")
+    assert queue.classify_permit_record(in_repo, trusted_roots=[repo])[0] == "UNKNOWN"
+
+
+def test_supervisor_migrates_missing_attempts_collection(tmp_path, monkeypatch, capsys):
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps({"task_id": "legacy", "publish": False}), encoding="utf-8")
+    jobdir = tmp_path / "job"
+    state = create_state(jobdir)
+    state.pop("attempts")
+    state["spec_path"] = str(spec_path)
+    queue.atomic_json(jobdir / "state.json", state)
+
+    def child(*_args, **_kwargs):
+        return fake_result(rc=2, out="human needed")
+
+    monkeypatch.setattr(queue.subprocess, "run", child)
+    assert queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py",
+                           sleep_fn=lambda _seconds: None) == 2
+    saved = queue.load_state(jobdir)
+    assert len(saved["attempts"]) == 1 and saved["status"] == "parked"
+    assert "KeyError" not in capsys.readouterr().out
+
+
+def test_queue_stop_missing_job_fails_without_creating_anything(tmp_path, capsys):
+    jobdir = tmp_path / "missing-job"
+    assert queue.cli(["queue", "stop", str(jobdir)], ROOT / "tools/agentcoder/agentcoder.py") == 2
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "error" and "does not exist" in output["reason"]
+    assert not jobdir.exists()
+
+
+def test_supervise_terminal_resume_reemits_terminal_event(tmp_path, capsys):
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps({"task_id": "queue-test"}), encoding="utf-8")
+    jobdir = tmp_path / "job"
+    state = create_state(jobdir)
+    event = queue.save_terminal(jobdir, state, "parked", "already done")
+    assert queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py") == 2
+    emitted = json.loads(capsys.readouterr().out)
+    assert emitted["event_id"] == event["event_id"] and emitted["status"] == "parked"
+
+
+def test_supervised_send_and_wait_use_shared_queue_validators(tmp_path, monkeypatch):
+    driver = load_driver("agentcoder_shared_queue_response_validators")
+    monkeypatch.setitem(sys.modules, "queue_mode", queue)
+    create_state(tmp_path)
+    called = {"send": 0, "wait": 0}
+    original_send = queue.validate_send_result
+    original_wait = queue.validate_wait_result
+
+    def send_validator(*args, **kwargs):
+        called["send"] += 1
+        return original_send(*args, **kwargs)
+
+    def wait_validator(*args, **kwargs):
+        called["wait"] += 1
+        return original_wait(*args, **kwargs)
+
+    monkeypatch.setattr(queue, "validate_send_result", send_validator)
+    monkeypatch.setattr(queue, "validate_wait_result", wait_validator)
+    responses = [fixture("send-permission.json"), fixture("wait-idle.json")]
+
+    def guarded(argv, **_kwargs):
+        return 0, json.dumps(responses.pop(0)), ""
+
+    monkeypatch.setattr(driver, "run_guarded", guarded)
+    monkeypatch.setattr(driver, "check_permits", lambda _job: None)
+    job = {"queue_supervised": True, "jobdir": str(tmp_path),
+           "coder_agent": "agent-live-running", "spec": {"agent_timeout": 30}}
+    driver.send_to(job, "coder_agent", "continue")
+    assert called == {"send": 1, "wait": 1}
+
+
+def test_completed_send_is_not_replayed_when_same_phase_resumes(tmp_path, monkeypatch):
+    driver = load_driver("agentcoder_completed_send_resume")
+    monkeypatch.setitem(sys.modules, "queue_mode", queue)
+    create_state(tmp_path)
+    sends = []
+
+    def guarded(argv, **_kwargs):
+        sends.append(argv)
+        return 0, json.dumps(fixture("send-completed.json")), ""
+
+    monkeypatch.setattr(driver, "run_guarded", guarded)
+    monkeypatch.setattr(driver, "check_permits", lambda _job: None)
+    job = {"queue_supervised": True, "jobdir": str(tmp_path),
+           "coder_agent": "agent-live-completed", "phase": "coder",
+           "spec": {"agent_timeout": 30}}
+    driver.send_to(job, "coder_agent", "same phase instruction")
+    driver.send_to(job, "coder_agent", "same phase instruction")
+    assert len(sends) == 1
+
+
+def test_task_qualified_wait_reads_single_job_layout_and_tolerates_registration(tmp_path):
+    state = create_state(tmp_path, task_id="single-task")
+    queue.save_terminal(tmp_path, state, "parked", "needs human")
+    event, code = queue.wait_for_event(tmp_path, task_id="single-task", after="0", timeout=0)
+    assert event["task_id"] == "single-task" and code == 2
+    missing, code = queue.wait_for_event(tmp_path / "not-registered", task_id="later",
+                                         after="0", timeout=0)
+    assert missing["status"] == "timeout" and code == 124
+
+
 def test_permission_run_records_agent_then_processes_and_waits(tmp_path, monkeypatch):
     driver_spec = importlib.util.spec_from_file_location(
         "agentcoder_permission_run_fixture", ROOT / "tools" / "agentcoder" / "agentcoder.py")

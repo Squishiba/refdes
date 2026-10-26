@@ -5,7 +5,9 @@ state is cooperative same-user state, not a security boundary.
 """
 import hashlib
 import json
+import ntpath
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -41,14 +43,8 @@ REFERENCE_RISKY = re.compile(
     r"(?<!direction )merge(?! diffs?)|force|sudo|chmod|chown|curl|wget|ssh|"
     r"install|reset|checkout\s+main|kill|systemctl)\b|\brm\s|"
     r"\bbranch\s+-D\b|"
-    r"/tmp|~/|\.paseo|\.ssh|\.config|/etc/|"
-    r"/home/jorb/work/(paseo-pr-review-plugin|refdes)(?!-dev)\b", re.I)
-REFERENCE_SAFE = re.compile(
-    r"\.scratch|\bscratch probes?\b|\bindependent [a-z ]*probes?\b|"
-    r"(re)?runn?ing[a-z ,-]* probes?|requested foreground checks|existing probes|"
-    r"isolated fixture|(edit|write|update|fix)[a-z ]* the report|"
-    r"untracked REVIEW-[A-Z]+\.md|untracked probes|read-only probes|own worktree|"
-    r"review artifacts|foreground (tests|test)", re.I)
+    r"/tmp(?:/|\b)|~/|\.paseo|\.ssh(?:/|\b)|\.config(?:/|\b)|/etc(?:/|\b)", re.I)
+ABSOLUTE_PATH = re.compile(r"(?<![\w])(?:[A-Za-z]:[\\/][^\s\"'<>|]+|/(?:[^\s\"'<>|]+))")
 
 CAPTURED_STATUSES = {"running", "idle", "closed", "permission"}
 CAPTURED_AGENT_FIELDS = {"id", "shortId", "name", "provider", "thinking", "status",
@@ -452,13 +448,12 @@ def classify_agent_response(payload, expected_agent_id=None, fields=None,
     return status, "captured Paseo " + status + " response"
 
 
-def validate_wait_result(payload, expected_agent_id):
+def validate_wait_result(payload, expected_agent_id, with_status=False):
     """Accept captured in-flight and idle wait envelopes for the exact full ID."""
     status, reason = classify_agent_response(
         payload, expected_agent_id, {"agentId", "status", "message"}, {"agentId"})
-    if status in {"idle", "permission", "running"}:
-        return True, reason
-    return False, reason
+    result = status in {"idle", "permission", "running"}
+    return (result, reason, status) if with_status else (result, reason)
 
 
 def permission_limits(spec):
@@ -536,12 +531,11 @@ def validate_run_result(payload, expected_agent_id=None):
     return False, reason
 
 
-def validate_send_result(payload, expected_agent_id):
+def validate_send_result(payload, expected_agent_id, with_status=False):
     status, reason = classify_agent_response(
         payload, expected_agent_id, {"agentId", "status", "message"}, {"agentId"})
-    if status in {"completed", "running", "permission"}:
-        return True, reason
-    return False, reason
+    result = status in {"completed", "running", "permission"}
+    return (result, reason, status) if with_status else (result, reason)
 
 
 def validate_stop_result(payload, requested_agent_id):
@@ -557,7 +551,47 @@ def validate_stop_result(payload, requested_agent_id):
     return True, "captured stop response"
 
 
-def classify_permit_record(row):
+def _path_is_within(path, roots):
+    windows = bool(re.match(r"^[A-Za-z]:[\\/]", path))
+    module = ntpath if windows else posixpath
+    candidate = module.normcase(module.normpath(path))
+    for root in roots:
+        root_windows = bool(re.match(r"^[A-Za-z]:[\\/]", root))
+        if root_windows != windows:
+            continue
+        normalized_root = module.normcase(module.normpath(root))
+        try:
+            if module.commonpath((candidate, normalized_root)) == normalized_root:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _job_trusted_roots(jobdir):
+    roots = []
+    try:
+        job = read_json(Path(jobdir) / "job.json")
+    except QueueError:
+        job = {}
+    values = [job.get("repo"), *(value for key, value in job.items() if key.endswith("_cwd"))]
+    spec = job.get("spec")
+    if isinstance(spec, dict):
+        values.append(spec.get("repo"))
+    try:
+        state = load_state(jobdir)
+        spec_path = state.get("spec_path")
+        if spec_path:
+            values.append(read_json(spec_path).get("repo"))
+    except (QueueError, OSError, AttributeError):
+        pass
+    for value in values:
+        if isinstance(value, str) and value:
+            roots.append(value)
+    return roots
+
+
+def classify_permit_record(row, trusted_roots=()):
     """Reference deny/risky semantics; prose alone can never prove ALLOW."""
     digest = hashlib.sha256(bounded_raw(row, 65536).encode()).hexdigest()
     if not isinstance(row, dict):
@@ -570,17 +604,17 @@ def classify_permit_record(row):
     if set(row) != captured:
         return "UNKNOWN", "permit has uncaptured fields", digest
     name, description = row["name"], row["description"]
-    outside = re.search(r"/tmp|~/|\.\./|/(?:etc|home|root|var|usr)/|"
+    outside = re.search(r"/tmp|~/|\.\./|/(?:etc)/|"
                         r"\boutside (?:(?:the|this|my) )?(?:worktree|workspace|repo|project)\b",
                         description, re.I)
-    if "external_directory" in name.lower() or outside:
+    absolute_paths = [match.rstrip(".,;:)]}") for match in ABSOLUTE_PATH.findall(description)]
+    outside_path = any(not _path_is_within(path, trusted_roots) for path in absolute_paths)
+    if "external_directory" in name.lower() or outside or outside_path:
         return "DENY", "request targets an outside directory", digest
     if REFERENCE_RISKY.search(name + "\n" + description):
         return "DENY", "request matches the risky-operation policy", digest
     if not description.strip() or description.strip() == "-":
         return "UNKNOWN", "permit description contains no evidence", digest
-    if REFERENCE_SAFE.search(description):
-        return "UNKNOWN", "safe-scope prose lacks structured tool input and cwd", digest
     return "UNKNOWN", "request effect cannot be proven from name and description", digest
 
 
@@ -609,12 +643,27 @@ def begin_operation(jobdir, kind, role, details):
             if operation.get("kind") == kind and operation.get("role") == role \
                     and operation.get("status") in {"intent", "uncertain"}:
                 raise QueueError(f"unresolved {kind} operation for {role}; refusing replay")
+        if kind == "send":
+            for op_id, operation in operations.items():
+                if operation.get("kind") == kind and operation.get("role") == role \
+                        and operation.get("request_hash") == digest \
+                        and operation.get("status") in {"completed", "adopted"}:
+                    return op_id
         op_id = uuid.uuid4().hex
         operations[op_id] = {"operation_id": op_id, "kind": kind, "role": role,
                              "request_hash": digest, "details": bounded_raw(details),
                              "status": "intent", "created": time.time()}
         atomic_json(jobdir / "state.json", state)
     return op_id
+
+
+def get_operation(jobdir, op_id):
+    """Read the durable operation result before deciding whether to repeat a send."""
+    with locked(Path(jobdir) / "job.lock"):
+        operation = load_state(jobdir).get("operations", {}).get(op_id)
+        if operation is None:
+            raise QueueError(f"operation {op_id} disappeared from durable state")
+        return dict(operation)
 
 
 def finish_operation(jobdir, op_id, status, evidence, agent_id=None):
@@ -720,6 +769,7 @@ def process_permits(jobdir, owned_ids, listing, rows, invoke=None, trusted_agent
                                  "raw": bounded_raw(listing)})
         return "PARK", reason
     owned_ids = set(owned_ids)
+    trusted_roots = _job_trusted_roots(jobdir)
     for row in rows:
         if not isinstance(row, dict):
             record_decision(jobdir, {"decision": "UNKNOWN", "reason": "malformed permit row",
@@ -752,7 +802,7 @@ def process_permits(jobdir, owned_ids, listing, rows, invoke=None, trusted_agent
             return "PARK", reason
         if matches[0] not in owned_ids:
             continue  # foreign request: do not allow, deny, or rewrite it
-        decision, reason, digest = classify_permit_record(row)
+        decision, reason, digest = classify_permit_record(row, trusted_roots=trusted_roots)
         # The exact captured shortId maps to one full ID; prefix matching is
         # deliberately forbidden. Ambiguous/foreign rows are never touched.
         full_id = matches[0]
@@ -848,6 +898,8 @@ def mark_stop_intent(jobdir, agent_ids, reason="maintenance"):
 def maintenance_stop(jobdir, invoke=None, listing_fn=None, reason="maintenance"):
     """Persist exact stop intents before stopping, then confirm via fresh listing."""
     jobdir = Path(jobdir)
+    if not (jobdir / "state.json").is_file():
+        raise QueueError(f"queue job does not exist or has no state.json: {jobdir}")
     if invoke is None:
         def invoke(argv):
             executable = os.environ.get("AGENTCODER_PASEO", "paseo")
@@ -972,9 +1024,15 @@ def wait_for_event(qdir, task_id=None, after="0", timeout=None):
         if (qdir / "state.json").is_file():
             paths = [qdir / "state.json"]
         if task_id:
-            paths = [qdir / "jobs" / task_id / "state.json"]
+            single = qdir / "state.json"
+            if single.is_file() and load_state(qdir).get("task_id") == task_id:
+                paths = [single]
+            else:
+                paths = [qdir / "jobs" / task_id / "state.json"]
         events = []
         for path in paths:
+            if not path.is_file():
+                continue
             state = load_state(path.parent)
             for event in state.get("outbox", []):
                 if cursor_task is None:
@@ -1020,6 +1078,18 @@ def _supervise(spec_path, jobdir, driver_path, sleep_fn=None):
         if state_path.exists():
             state = load_state(jobdir)
             if state.get("status") in ("landed", "parked", "failed"):
+                events = state.get("outbox", [])
+                event = next((row for row in reversed(events)
+                              if row.get("status") == state["status"]), None)
+                if event is None:
+                    event = {"event_id": None, "task_id": state.get("task_id"),
+                             "status": "already_terminal",
+                             "outcome": state.get("outcome", "already terminal"),
+                             "terminal_status": state["status"]}
+                else:
+                    event = dict(event)
+                    event["batch_id"] = jobdir.name
+                print(json.dumps(event))
                 return 0 if state["status"] == "landed" else 2
         else:
             spec = read_json(spec_path)
@@ -1037,6 +1107,10 @@ def _supervise(spec_path, jobdir, driver_path, sleep_fn=None):
         state.setdefault("active_started_at", None)
         state.setdefault("spec_path", str(spec_path))
         state.setdefault("notification_command", hook)
+        state.setdefault("attempts", [])
+        state.setdefault("outbox", [])
+        state.setdefault("owned_agents", {})
+        state.setdefault("operations", {})
         atomic_json(state_path, state)
     if state.get("maintenance"):
         print(json.dumps({"status": "paused", "reason": "maintenance intent remains set"}))
@@ -1325,7 +1399,10 @@ def cli(argv, driver_path):
             status, reason = maintenance_stop(argv[2])
             print(json.dumps({"status": status, "reason": reason}, sort_keys=True))
             return 0 if status == "PAUSED" else 2
-        except (QueueError, OSError) as exc:
+        except QueueError as exc:
+            print(json.dumps({"status": "error", "reason": str(exc)}))
+            return 2
+        except OSError as exc:
             print(json.dumps({"status": "STOP_PENDING", "reason": str(exc)}))
             return 2
     if argv[:2] == ["queue", "resume"]:

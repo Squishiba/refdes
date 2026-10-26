@@ -145,5 +145,4 @@ remains separately bounded. Fixture README inventories all evidence-only files;
 duplicate stale/listing twins were removed. Six live pilots are orchestrator-
 reported; this worker ran none. No daemon or GitHub command ran.
 
-Final round-11 verification: queue suite 55 passed; tool/workspace/land suites
-131 passed; py_compile, scoped Ruff `F`, and `git diff --check` passed.
+Rounds 11–12: regressions exposed running-wait spin, stale reports, uncertain sends, env opt-in, permission timer, generic outside paths, missing attempts, stop side effects, terminal replay, task-qualified wait, and accepted-send replay; each new regression was RED before its fix. The four round-12 reviews were read; fixtures/spec now label shipped, deferred, and unwired behavior. Queue: 62 passed; legacy tool/workspace/land: 131 passed; py_compile and diff checks passed. This worker ran no daemon or GitHub command.

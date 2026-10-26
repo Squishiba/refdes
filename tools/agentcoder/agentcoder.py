@@ -524,9 +524,25 @@ def send_to(job, agent_key, message):
     if job.get("queue_supervised"):
         if str(Path(__file__).resolve().parent) not in sys.path:
             sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from queue_mode import begin_operation, finish_operation
+        from queue_mode import (begin_operation, finish_operation, get_operation,
+                                resolve_send_acceptance, validate_send_result)
         queue_op = begin_operation(job["jobdir"], "send", agent_key,
-                                   {"agent_id": agent_id, "message": message})
+                                   {"agent_id": agent_id, "message": message,
+                                    "phase": job.get("phase")})
+        previous = get_operation(job["jobdir"], queue_op)
+        if previous["status"] == "completed":
+            check_permits(job)
+            return
+        if previous["status"] == "adopted":
+            try:
+                evidence = json.loads(previous.get("evidence", "{}"))
+            except (TypeError, ValueError):
+                evidence = {}
+            status = evidence.get("status") if isinstance(evidence, dict) else None
+            if status not in {"permission", "running"}:
+                raise Pause(f"saved send operation {queue_op} has an unverified adopted result")
+            wait_for_agent(job, agent_key.removesuffix("_agent"), initial_status=status)
+            return
         message = f"[queue op={queue_op}] {message}"
     try:
         rc, out, err = run_guarded(["paseo", "send", agent_id, "--json", message],
@@ -541,16 +557,16 @@ def send_to(job, agent_key, message):
     if queue_op:
         try:
             data = json_of(out, "send result")
-            from queue_mode import classify_agent_response
-            response_status, reason = classify_agent_response(
-                data, agent_id, {"agentId", "status", "message"}, {"agentId"})
+            valid, reason, response_status = validate_send_result(
+                data, agent_id, with_status=True)
+            acceptance = resolve_send_acceptance(True if rc == 0 and valid else None)
         except Pause as exc:
             finish_operation(job["jobdir"], queue_op, "uncertain",
                              {"rc": rc, "stdout": tail_text(out, 30),
                               "stderr": tail_text(err, 10), "reason": exc.reason})
             raise Pause(f"send acceptance is unverified for {agent_key}; operation {queue_op}: "
                         f"{exc.reason}")
-        if rc != 0 or response_status not in {"completed", "permission", "running"}:
+        if acceptance == "PARK":
             finish_operation(job["jobdir"], queue_op, "uncertain",
                              {"rc": rc, "stdout": tail_text(out, 30),
                               "stderr": tail_text(err, 10), "reason": reason})
@@ -676,10 +692,10 @@ def wait_for_agent(job, role, initial_status=None, sleep_fn=None):
     if job.get("queue_supervised"):
         if str(Path(__file__).resolve().parent) not in sys.path:
             sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from queue_mode import (QueueError, classify_agent_response,
+        from queue_mode import (QueueError,
                                 clear_permission_wait, load_state, permission_limits,
                                 record_permission_prompt, record_permission_progress,
-                                check_permission_progress)
+                                check_permission_progress, validate_wait_result)
         maximum, no_progress_seconds = permission_limits(job["spec"])
         if initial_status == "permission":
             try:
@@ -713,9 +729,9 @@ def wait_for_agent(job, role, initial_status=None, sleep_fn=None):
         if job.get("queue_supervised"):
             if rc != 0:
                 raise Pause(f"unverified paseo wait exit rc={rc}: {tail_text(out + err, 10)}")
-            response_status, reason = classify_agent_response(
-                data, job[f"{role}_agent"], {"agentId", "status", "message"}, {"agentId"})
-            if response_status not in {"idle", "permission", "running"}:
+            valid, reason, response_status = validate_wait_result(
+                data, job[f"{role}_agent"], with_status=True)
+            if not valid:
                 raise Pause(reason)
             if response_status == "permission":
                 try:

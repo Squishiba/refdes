@@ -1,14 +1,16 @@
 # AgentCoder queue v1 — cooperative overnight core
 
-Date: 2026-10-26. Status: slice 1 shipped in PR #376; this is the corrected
-implementation record for that slice. The original planning text is retained
+Date: 2026-10-26. Status: slice 1 is implemented in PR #376 (unmerged); this is
+the corrected implementation record for that slice. The original planning text is retained
 where useful, while the permission and pilot sections below describe shipped
 behavior. The full design remains the future target except where mapped here.
 
-| PR #376 implements | Future work / deferred |
-| --- | --- |
-| Single-job `supervise`, durable `queue wait`, `queue stop`/`resume`, locked state, retained attempts, owned-agent reconciliation, bounded recovery, permissions, maintenance stop, and completion events. | Multi-job scheduler, dependencies, soft caps, overlap reservations, status polish, and queue-level publication changes. |
-| Fail-closed handling of captured permit records with no command/path fields; cooperative opt-in via exact `queue.trusted_agents` IDs or `queue.trust_owned_agents: true` for this job's owned agents. | Structured path containment, OS isolation, and a trusted command broker. |
+| Area | Implemented in PR #376 (unmerged) | Specified for a later slice | Primitive present, not wired |
+| --- | --- | --- | --- |
+| Supervision | Single-job `supervise`, locked atomic state, retained attempts, owned-agent reconciliation/adoption, deliberate maintenance stop, and durable terminal events. | Multi-job scheduler, dependencies, admission caps, cross-queue overlap reservations, status polish, and queue-level publication. | — |
+| Recovery | Bounded daemon-unreachable backoff and fail-closed parking for uncaptured signals. | Automatic transient-provider, idle/turn-limit, loop, and garbled-finish recovery branches. | `bounded_recovery()` policy branches for uncaptured signals have tests but no live detector/caller. |
+| Permissions | Captured permit rows have no command/path; unknown evidence parks unless cooperative exact-ID or owned-agent trust is enabled; outside/risky evidence denies. | Structured path containment and trusted command broker. | — |
+| Acceptance and publication | Existing AgentCoder checks remain in the supervised child; queue mode adds no new acceptance gate or publication protocol. | Full v1 blind-designer/frozen-test acceptance protocol and restricted queue publication. | — |
 
 The orchestrator reports six live supervised pilot runs; the slice worker
 started none. Captured shapes and pilot findings are summarized in
@@ -49,23 +51,20 @@ permit row has `{id,agentId,agentShortId,name,description}` and no structured
 command/path. Non-idle/timeout wait, transient provider error, turn-limit, loop,
 and garbled-finish signals remain uncaptured and park with evidence.
 
-### Exact v1 guarantees and limits
+### Target v1 guarantees and shipped extent
 
-The table records intended v1 guarantees subject to the trusted-worker rules.
-PR #376 implements only the rows identified in the status table at the top;
-other rows remain design targets:
+The table separates this PR's implementation from the broader v1 target.
 
-| Given in v1 | Exact extent |
-| --- | --- |
-| Deterministic overnight supervision | Bounded classified retries/nudges, durable outcomes and parked reports; independent eligible work continues. No orchestrator-model escalation. |
-| AgentCoder acceptance contract | Blind designer by instruction, frozen tests, executor-run base/candidate checks, final code/test/path/log scope and frozen-blob checks before publication. A completion message cannot substitute for checks. |
-| Workspace continuity | One workspace per role per job, reused across nudges/replacement/review; retain commits and edits on recovery, never reset them to base. |
-| Fail-closed permission decisions | Outside/risky evidence always denies; unclassifiable records park with evidence unless the operator opts in exact trusted IDs or `queue.trust_owned_agents: true` for recorded owned agents. The description is agent-controlled text, no path is present, and this is cooperative trust rather than containment. Foreign requests are untouched. |
-| Durable control and parent completion | Locked atomic state, numbered terminal events and a blocking waiter that cannot lose completion during registration/restart; hooks are supplementary. |
-| Cooperative overlap serialization | Every cooperating queue shares repository path reservations; possibly intersecting scopes never run together. Conservative false positives are accepted. |
-| Runtime admission policy | Before each new run/send/reviewer/Sol turn, compare fresh global and configured-prefix live counts with current positive-integer settings. Lowering holds new work and never kills running work. This is a soft performance policy. |
-| Restricted publication | Serial trusted-driver publication pushes HEAD to the expected task branch, adopts/opens PR, never merges. Conflict or stale-base ambiguity parks. |
-| No deletion/rename jobs | Reject those diffs, retain attempt directories/artifacts, no automated cleanup. |
+| Status | Guarantee | Exact extent |
+| --- | --- | --- |
+| Shipped in PR #376 | Single-job recovery | Daemon-unreachable retries use the bounded backoff; other uncaptured signals park with evidence. |
+| Specified, later slice | Full recovery matrix | Transient-provider, idle/turn-limit, loop, and garbled-finish auto-recovery are not live-detected. |
+| Shipped in PR #376 | Permission policy | Captured rows have `{id,agentId,agentShortId,name,description}` and no structured path/command. Outside/risky evidence denies; unclassifiable evidence parks unless cooperative trust is configured. |
+| Shipped baseline, not added by this PR | AgentCoder checks | The existing supervised child still runs its existing checks. This PR does not implement the full blind-designer/frozen-test acceptance contract described in the original proposal. |
+| Specified, later slice | Admission and overlap | Global/provider caps and cross-queue path reservations are not implemented. |
+| Specified, later slice | Restricted publication | Queue-level serial publication, PR adoption, and stale-base handling are not implemented. |
+| Primitive present, not wired | Additional recovery policies | `bounded_recovery()` has tested transient/idle/turn-limit/loop/garbled branches; no live detector calls them. |
+| Shipped in PR #376 | Completion | `wait_for_event()` reads durable terminal events and polls; no batch-generation completion semantics are implemented. |
 
 NOT given in v1:
 
@@ -181,7 +180,7 @@ Its diagnosis does not execute free-form commands, widen permissions, merge,
 or reveal coder evidence to the designer. Unavailable Sol parks for human;
 never fall back to the orchestrator model.
 
-### Completion protocol: reliably wake a waiting parent process
+### Shipped completion protocol and historical batch proposal
 
 Shipped in PR #376: `queue wait QDIR [TASK_ID] --after EVENT_ID
 [--timeout SECONDS]` reads durable terminal events before polling, honors
@@ -189,7 +188,7 @@ task-qualified event cursors, and rechecks at most once per second. A terminal
 event is committed with state before supervise exits; optional hooks are
 supplementary. The shipped waiter returns the next matching terminal event.
 
-Historical future proposal: a batch-generation waiter with
+Historical/future proposal (not shipped): a batch-generation waiter with
 `queue wait QDIR [TASK_ID] --after EVENT_ID` and sealed registration generation.
 Without task ID, wait for the sealed batch generation captured on registration:
 all entries present then must become landed/parked/failed. New entries create a
@@ -204,12 +203,10 @@ blocking. Hints may be a pipe/socket or filesystem notification; they are never
 the sole source. A maximum 1s timed recheck prevents a lost hint, process restart
 or completion-before-registration race from stranding a waiter. No RPC to an LLM.
 
-Wait prints one JSON envelope with event ID, batch/task ID, status, outcome counts
-and report paths, flushes stdout and exits: 0 all selected work landed; 2 any
-parked/failed; 124 timeout; 1 corrupt/unreadable state. An explicit maintenance
-pause is observable but not terminal. Parent persists the returned ID and passes
-it on reconnect for deduplication; if the terminal event was committed before
-its waiter started, return it immediately when its ID exceeds the cursor.
+The shipped waiter prints one terminal event envelope and exits 0 for landed, 2
+for parked/failed, 124 on timeout, and 1 for corrupt/unreadable state. It does
+not report batch outcome counts or sealed generations. Parent persists the
+returned event ID and passes it on reconnect for deduplication.
 The bounded wake-up promise assumes the waiter is scheduled and storage readable;
 it does not promise delivery after arbitrary host/storage failure.
 
