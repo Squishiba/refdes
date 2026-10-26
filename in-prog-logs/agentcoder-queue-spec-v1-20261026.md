@@ -10,16 +10,17 @@ behavior. The full design remains the future target except where mapped here.
 | Single-job `supervise`, durable `queue wait`, `queue stop`/`resume`, locked state, retained attempts, owned-agent reconciliation, bounded recovery, permissions, maintenance stop, and completion events. | Multi-job scheduler, dependencies, soft caps, overlap reservations, status polish, and queue-level publication changes. |
 | Fail-closed handling of captured permit records with no command/path fields; cooperative opt-in via exact `queue.trusted_agents` IDs or `queue.trust_owned_agents: true` for this job's owned agents. | Structured path containment, OS isolation, and a trusted command broker. |
 
-The orchestrator reports five successful live supervised pilot runs; capture
-shapes and review-round summaries are recorded in
-`in-prog-logs/agentcoder-queue-slice1-20261026.md`.
+The orchestrator reports six live supervised pilot runs; the slice worker
+started none. Captured shapes and pilot findings are summarized in
+`in-prog-logs/agentcoder-queue-slice1-20261026.md` and sanitized fixtures.
 
 ## 1. Deliver first: recovery, permissions and reliable parent wake-up
 
 The driver is deterministic: no direct inference API, no orchestrator nudges,
 permission babysitting or per-turn completion callbacks to an orchestrator model.
-It launches workers through Paseo and optional Sol analysis explicitly chosen by
-an entry. These worker turns consume model resources; supervision does not.
+This slice launches workers through Paseo. Optional Sol analysis is a deferred
+proposal, not an implemented path. Worker turns consume model resources;
+supervision does not.
 The parent awaiting completion is an ordinary process, not a model turn.
 
 Implement the first slice as opt-in `supervise SPEC.json JOBDIR` around one
@@ -42,7 +43,8 @@ implementation is summarized by the table above and current source.
 
 Historical initial probe: listing returned `DAEMON_NOT_RUNNING`, and payloads
 were then unverified. PR #376 later captured the real listing, permission,
-run/send/wait/stop, and workspace payloads and passed five live pilots. The
+run/send/wait/stop, and workspace payloads. The orchestrator reports six live
+pilots; the slice worker itself ran none. The
 permit row has `{id,agentId,agentShortId,name,description}` and no structured
 command/path. Non-idle/timeout wait, transient provider error, turn-limit, loop,
 and garbled-finish signals remain uncaptured and park with evidence.
@@ -171,6 +173,8 @@ Uncaptured shapes and unknown permission signals stay fail-closed. The original
 structured-path/OS-broker classifier proposed in full-spec §5 was not shipped;
 its policy prose remains historical future design, not this PR's contract.
 
+### Deferred proposal: optional Sol analysis (not shipped)
+
 Sol stays human-by-default, opt-in per entry: one read-only
 `codex/gpt-6.1-sol` analysis, admitted like any other turn, bounded to 1800s.
 Its diagnosis does not execute free-form commands, widen permissions, merge,
@@ -240,8 +244,8 @@ other registries cannot share path/cap coordination and are unsupported on that
 repository. Repository reservation transactions remain locked; these locks are
 for state/overlap consistency, not an atomic Qwen launch check.
 
-Cap settings live in `QDIR/config.json`: `concurrency_cap` C (shipped global
-default 3); `provider_caps` mapping configured prefix to positive integer.
+Future cap settings live in `QDIR/config.json`: `concurrency_cap` C (proposed
+global default 3); `provider_caps` mapping configured prefix to positive integer.
 Qwen prefix is exactly `opencode/qwenlocal/`; its cap Q is supplied at init by
 the operator, with no fixed numeric default in this spec. Persist both value
 and explicit/default source. Runtime setters are proposed
@@ -347,7 +351,7 @@ and live gates pass. Existing single-job behavior must pass regression tests.
 
 | Slice / order | Lines | Tests and live gate carried with slice |
 | --- | --- | --- |
-| Recovery first: single-job supervise, locked state/retained attempts, owned-ID adoption, fail-closed permission policy, budgets, deliberate maintenance stop and durable completion wait | 850–1200 | `test_outage_backoff_bounded`, `test_transient_error_recovers_without_nudge`, `test_idle_turn_limit_loop_share_budget`, `test_unknown_permit_parks`, `test_risky_or_outside_permit_denied`, `test_foreign_permit_untouched`, `test_verdict_garbage_not_green`, `test_recovery_preserves_workspace_and_edits`, `test_uncertain_send_parks`, `test_maintenance_stop_intent_survives_restart`, `test_wait_completion_before_registration`, `test_wait_lost_hint_rechecks_durable_state`, `test_wait_survives_supervisor_restart`, `test_terminal_hook_failure_still_wakes_parent`; five live pilot runs passed per the slice task log, plus final scope/HEAD regressions. |
+| Recovery first: single-job supervise, locked state/retained attempts, owned-ID adoption, fail-closed permission policy, budgets, deliberate maintenance stop and durable completion wait | 850–1200 | `test_outage_backoff_bounded`, `test_transient_error_recovers_without_nudge`, `test_idle_turn_limit_loop_share_budget`, `test_unknown_permit_parks`, `test_risky_or_outside_permit_denied`, `test_foreign_permit_untouched`, `test_verdict_garbage_not_green`, `test_recovery_preserves_workspace_and_edits`, `test_uncertain_send_parks`, `test_maintenance_stop_intent_survives_restart`, `test_wait_completion_before_registration`, `test_wait_lost_hint_rechecks_durable_state`, `test_wait_survives_supervisor_restart`, `test_terminal_hook_failure_still_wakes_parent`; six live pilots reported by the orchestrator (slice worker ran none), plus final scope/HEAD regressions. |
 | Scheduler: entries/deps, cooperative soft cap variables, conservative cross-queue overlap, fair role dispatch, minimal serialized publication | 650–950 | `test_entry_validation_and_dependency_cycles`, `test_dependency_waits_for_merged_base`, `test_disjoint_jobs_progress_after_park`, `test_overlap_future_paths_and_nested_slashes`, `test_overlap_code_test_shared_union`, `test_cross_queue_hot_file_serialization`, `test_scheduler_aging`, `test_hand_started_qwen_agent_counted`, `test_below_cap_dispatch`, `test_at_cap_hold`, `test_global_and_prefix_caps_both_apply`, `test_idle_agents_excluded`, `test_cap_raised_at_runtime`, `test_cap_lowered_while_running_no_interrupt`, `test_invalid_cap_keeps_previous_value`, `test_all_turn_types_check_caps`, `test_listing_unreachable_holds_dispatch`, `test_landing_target_change_parks_only_job`; pilot D and mandatory mutations. |
 | Status/notification polish: live and JSON status, counts/source/generation, durable event export, coalesced command hooks and parent cursor ergonomics | 180–300 | `test_status_cap_values_prefix_source_generation`, `test_wait_batch_generation_and_cursor`, `test_hook_retry_deduplicates_event_id`, `test_hook_timeout_does_not_block_dispatch`, `test_status_stale_daemon_and_stop_pending`; pilot E. |
 | Pilot evidence and fixture hardening: final end-to-end run and recorded payload fixtures | 180–300 | `test_live_queue_trivial_contract` opt-in integration harness, permission/status fixture replay, existing three AgentCoder suites; full A–F pilot, mutations and saved report. No fake-only waiver. |
@@ -361,8 +365,8 @@ hardening, not ten rounds of guessed fake fixtures.
 
 ## 5. Historical live-pilot outline and mutations
 
-The plan below is retained for provenance. The orchestrator reports five
-successful supervised pilots; captured payloads and still-unverified signals
+The plan below is retained for provenance. The orchestrator reports six live
+supervised pilots; the slice worker ran none. Captured payloads and still-unverified signals
 are summarized above and in the slice task log. Planned structured-request
 auto-allow was superseded by the cooperative-trust policy actually shipped.
 

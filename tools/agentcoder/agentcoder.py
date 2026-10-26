@@ -528,8 +528,16 @@ def send_to(job, agent_key, message):
         queue_op = begin_operation(job["jobdir"], "send", agent_key,
                                    {"agent_id": agent_id, "message": message})
         message = f"[queue op={queue_op}] {message}"
-    rc, out, err = run_guarded(["paseo", "send", agent_id, "--json", message],
-                                timeout=int(job["spec"].get("agent_timeout", 1800)))
+    try:
+        rc, out, err = run_guarded(["paseo", "send", agent_id, "--json", message],
+                                   timeout=int(job["spec"].get("agent_timeout", 1800)))
+    except Exception as exc:
+        if queue_op:
+            finish_operation(job["jobdir"], queue_op, "uncertain",
+                             {"phase": "send transport", "error": str(exc)[:1000]})
+        if isinstance(exc, Pause):
+            raise
+        raise Pause(f"paseo send outcome is uncertain for {agent_key}: {exc}") from exc
     if queue_op:
         try:
             data = json_of(out, "send result")
@@ -662,7 +670,7 @@ def _kill_all(procs):
         proc.wait()
 
 
-def wait_for_agent(job, role, initial_status=None):
+def wait_for_agent(job, role, initial_status=None, sleep_fn=None):
     # rc=0 proves NOTHING: real `paseo wait` exits 0 printing status "error"
     # ("Agent not found") as readily as "idle" -- the JSON status is the signal
     if job.get("queue_supervised"):
@@ -670,7 +678,8 @@ def wait_for_agent(job, role, initial_status=None):
             sys.path.insert(0, str(Path(__file__).resolve().parent))
         from queue_mode import (QueueError, classify_agent_response,
                                 clear_permission_wait, load_state, permission_limits,
-                                record_permission_prompt)
+                                record_permission_prompt, record_permission_progress,
+                                check_permission_progress)
         maximum, no_progress_seconds = permission_limits(job["spec"])
         if initial_status == "permission":
             try:
@@ -678,6 +687,8 @@ def wait_for_agent(job, role, initial_status=None):
             except QueueError as exc:
                 raise Pause(str(exc))
         check_permits(job)
+        record_permission_progress(job["jobdir"])
+    sleep_fn = sleep_fn or time.sleep
     tmo = int(job["spec"].get("agent_timeout", 1800))
     deadline = time.monotonic() + tmo
     while True:
@@ -687,11 +698,14 @@ def wait_for_agent(job, role, initial_status=None):
             if remaining_agent_time <= 0:
                 raise Pause("agent wait exceeded its total timeout")
             wait_timeout = min(wait_timeout, max(1, int(remaining_agent_time)))
-            started = load_state(job["jobdir"]).get("permission_started_at")
+            current_state = load_state(job["jobdir"])
+            try:
+                check_permission_progress(current_state, no_progress_seconds)
+            except QueueError as exc:
+                raise Pause(str(exc))
+            started = current_state.get("permission_started_at")
             if started is not None:
                 remaining = no_progress_seconds - (time.time() - float(started))
-                if remaining <= 0:
-                    raise Pause("permission sequence exceeded its no-progress timer")
                 wait_timeout = min(tmo, max(1, int(remaining)))
         rc, out, err = run_guarded(["paseo", "wait", job[f"{role}_agent"], "--json",
                                     "--timeout", str(wait_timeout)], timeout=wait_timeout + 5)
@@ -709,8 +723,13 @@ def wait_for_agent(job, role, initial_status=None):
                 except QueueError as exc:
                     raise Pause(str(exc))
                 check_permits(job)
+                record_permission_progress(job["jobdir"])
                 continue
             if response_status == "running":
+                record_permission_progress(job["jobdir"])
+                sleep_for = min(1, max(0, deadline - time.monotonic()))
+                if sleep_for:
+                    sleep_fn(sleep_for)
                 continue
             clear_permission_wait(job["jobdir"])
             return
@@ -1209,6 +1228,7 @@ def do_land(job):
     if job.get("queue_supervised") and job["spec"].get("publish") is not True:
         job["publication"] = "disabled-by-default"
         save_job(job)
+        write_report(job, landing=True)
         return
     git(wt, "push", "-u", "origin", f"HEAD:refs/heads/{branch_name(job, 'coder')}", timeout=300)
     job["pushed_sha"] = git(wt, "rev-parse", "HEAD")
@@ -1352,7 +1372,7 @@ def main(argv):
                 return EXIT_ERROR
             job = {"jobdir": str(jobdir), "task_id": spec["task_id"], "spec": spec,
                    "phase": "spawn", "status": "running", "reason": None}
-            job["queue_supervised"] = os.environ.get("AGENTCODER_SUPERVISED") == "1"
+            job["queue_supervised"] = "--queue-supervised" in argv[3:]
             save_job(job)
             rc = ensure_preflight(job)
             if rc is not None:
@@ -1360,8 +1380,6 @@ def main(argv):
         elif cmd in ("resume", "status"):
             job = load_job(arg)
             job["jobdir"] = str(Path(arg).resolve())
-            job["queue_supervised"] = job.get("queue_supervised") or \
-                os.environ.get("AGENTCODER_SUPERVISED") == "1"
             if cmd == "status":
                 keep = ("task_id", "phase", "status", "reason", "base_sha", "test_sha", "coder_sha",
                         "pr_number", "test_review", "execute_round", "review_round", "candidate_round")

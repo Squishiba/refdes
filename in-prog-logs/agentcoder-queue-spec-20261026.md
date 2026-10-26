@@ -9,7 +9,7 @@ future. The shipped behavior and current evidence are summarized here and in
 | --- | --- |
 | Opt-in single-job `supervise`, atomic locked state, retained attempts, owned-agent recovery, bounded retry/nudge budgets, maintenance stop, and durable `queue wait`. Existing publication remains controlled by its prior gate. | Multi-job queue initialization/enqueue/scheduling, dependencies, capacity checks, overlap reservations, live status polish, and queue-level publication changes. |
 | Permission handling for captured `{id,agentId,agentShortId,name,description}` rows. No structured command/path is present. Outside/risky evidence denies; unknown evidence parks unless an exact operator-trusted ID or `queue.trust_owned_agents: true` grants cooperative trust to a recorded owned agent. | OS-enforced path containment, structured-input permission parsing, a command broker, and hard isolation. Cooperative trust is not containment. |
-| Five real supervised pilot runs passed; recorded captures and round summaries are in `in-prog-logs/agentcoder-queue-slice1-20261026.md`. | Live variants not captured remain fail-closed and park with evidence. |
+| The orchestrator reports six live supervised pilot runs; the slice worker started none. Captured facts and findings are summarized in `in-prog-logs/agentcoder-queue-slice1-20261026.md`. | Live variants not captured remain fail-closed and park with evidence. |
 
 The proposal sections below are retained as historical design intent, not a
 claim that their CLI or permission broker shipped. All paths are repository-
@@ -84,8 +84,9 @@ Ran `paseo --help`, `paseo ls --help`, `paseo permit --help`, and help for
 
 Historical evidence at the time of drafting: `paseo ls -g --json` and
 `paseo permit ls --json` returned `DAEMON_NOT_RUNNING`, so payloads were then
-unverified. This was superseded during PR #376 by real captures and five
-successful supervised pilot runs, recorded in the slice task log. Captured
+unverified. This was superseded during PR #376 by real captures and six live
+supervised pilot runs reported by the orchestrator; the slice worker ran none.
+Captured facts are recorded in the slice task log. Captured
 permit rows have no structured command/path. Uncaptured wait/provider/recovery
 signals remain unverified and park; no invented token-count, turn-count,
 last-activity, context-limit, or server-health field is assumed.
@@ -180,8 +181,8 @@ cases_file in reservation footprints. Reject code/test scope intersection within
 a job, keeping test ownership separate. Reviewer is read-only except private
 scratch, with no progress-log exemption.
 
-Queue config new keys: `schema_version`, `queue_id`, `concurrency_cap` (shipped
-default 3), `provider_caps` (empty map), `notification_command` (null or fixed
+Future queue config proposal: `schema_version`, `queue_id`, `concurrency_cap`
+(proposed default 3), `provider_caps` (empty map), `notification_command` (null or fixed
 argv), `poll_seconds` (5), and `escalation_model` (fixed permitted value
 `codex/gpt-6.1-sol`). Provider caps are positive integers keyed by exact
 provider/model string or explicit prefix ending `/*`; all matching limits
@@ -297,7 +298,7 @@ Optional provider caps use identical runtime transaction semantics via
 limits can make local Qwen stricter than hosted turns. On one daemon multiple
 queues share one authoritative global setting: conflicting queue configs are
 rejected, not silently combined. Status shows requested/effective cap, source
-`QDIR/config.json#concurrency_cap` (or shipped-default), generation, last reload,
+`QDIR/config.json#concurrency_cap` (or proposed-default), generation, last reload,
 provider selectors/limits, occupied/reserved counts and cap wait reason.
 
 Reserve paths before starting a job; hold through publication and confirmed
@@ -585,7 +586,8 @@ stays paused. Do not automatically restart daemon or Qwen server.
 ## 9. Test plan and release gates
 
 Historical test/release proposal as drafted before PR #376. Its old pilot gate
-and status claims are superseded by the five passed pilot runs and deferred
+and status claims are superseded by six live pilots reported by the orchestrator
+(the slice worker ran none) and the deferred
 signal list recorded at the top of this document and in the slice task log.
 
 Add `tests/test_agentcoder_queue.py` with a deterministic clock, multiprocess

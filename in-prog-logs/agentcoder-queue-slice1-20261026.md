@@ -1,8 +1,8 @@
 # AgentCoder queue v1 slice 1 progress
 
-Status: slice implementation complete; orchestrator reports five successful
-live pilots. Several runtime signal adapters remain unverified, so
-unattended-release readiness is not claimed.
+Status: slice implementation complete. The orchestrator reports six live
+supervised pilots; the slice worker started none. Several runtime signal
+adapters remain unverified, so unattended-release readiness is not claimed.
 
 ## Captured evidence and adapter boundary
 
@@ -95,8 +95,10 @@ unattended-release readiness is not claimed.
 
 ## Remaining unsatisfied
 
-- The round-4 pilot exposed early permission status; the orchestrator reports
-  pilot #5 passed after the fixes. This worker did not run a live pilot;
+- Pilots exposed early permission statuses for run, wait, and send, plus the
+  initial state-shape crash and sequential permission prompts; these are covered
+  by replay/regression tests. The orchestrator reports six live pilots and
+  pilot #5 passed end-to-end. This worker did not run a live pilot;
   killed-supervisor-during-turn replay remains unrun.
 - Still unverified live: timeout/non-idle wait, transient provider errors,
   turn-limit/loop signatures, and garbled finish payloads; they park with
@@ -108,7 +110,7 @@ unattended-release readiness is not claimed.
 
 Rounds 5–8 fixed owned-agent write-ahead, run/wait/send permission handling,
 Windows lock import, and fixture redaction; the POSIX fallback shim passed while
-native Windows CI was unavailable, and the orchestrator reports pilot #5 passed.
+native Windows CI was unavailable, and the orchestrator reports six live pilots.
 Round 9 tests first went RED: permit transport errors raised `UnboundLocalError`
 (`queue_mode.py:792`), reviewer permission was skipped (`agentcoder.py:270`),
 `a:1` hid unseen `b:1`, and the backoff-clock helper was absent; all regressions
@@ -131,7 +133,17 @@ filesystem cases cannot be exercised in this Linux run. `os.replace` targets
 are closed before replacement in both state writers; native Windows sharing
 behavior remains unverified here.
 
-Final round-10 verification: queue suite 51 passed; tool/workspace/land suites
-130 passed; py_compile, scoped Ruff `F`, and `git diff --check` passed. The
-four same-PR fixed fragments were consolidated into one added-feature fragment.
-The guide remains in the docs index and is labeled developer tooling.
+Round-10 verification: queue 51, legacy 130, py_compile, scoped Ruff `F`, and
+diff checks passed. Four fragments were consolidated; the guide remains indexed.
+
+Round 11: six new regression cases were first run RED against the prior code;
+all now pass. Running waits sleep one bounded second, non-publishing land
+refreshes its report, send timeouts persist uncertain operations, and supervised
+mode is an explicit child argument rather than an environment opt-in. Permission
+no-progress time resets on handled prompts and running responses; prompt count
+remains separately bounded. Fixture README inventories all evidence-only files;
+duplicate stale/listing twins were removed. Six live pilots are orchestrator-
+reported; this worker ran none. No daemon or GitHub command ran.
+
+Final round-11 verification: queue suite 55 passed; tool/workspace/land suites
+131 passed; py_compile, scoped Ruff `F`, and `git diff --check` passed.

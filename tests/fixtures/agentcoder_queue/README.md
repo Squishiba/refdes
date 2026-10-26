@@ -1,10 +1,31 @@
-These fixtures are sanitized replays of verbatim orchestrator captures in `.scratch/live-fixtures2/README-findings.txt` and `.scratch/live-fixtures5/`. Values such as IDs, titles, paths, and free-text activity are redacted; payload keys and value types are preserved.
+# Captured Paseo fixture inventory
 
-The real `run --json` response is one stdout JSON object and writes `Using workspace ...` to stderr. `run-permission.json` preserves the early `status: permission` response. `wait-permission.json` preserves the later wait response with `status: permission`; it triggers another permission check and wait. `send-permission.json` preserves accepted send with early `status: permission`; it must be followed by permission handling and wait, never a repeated send. The real `send --json`, idle `wait --json`, stop, workspace-create/archive, inspect, pending-permit, deny, and stale-permit payloads are replayed here. `logs --json` is plain text despite its flag. `permit-ls.json`, `permit-pending.json`, and `permit-no-description.json` replay captured pending-row shapes; none carries structured command/path data. An empty or `-` description is no evidence: without cooperative trust it parks with the raw row retained, and with owned-agent trust it may be allowed only after the existing risky/outside checks. File-change permits carry no path, so this remains cooperative trust, not containment. The idle stop fixture and stale-permit error preserve the captured zero-stop and `NO_PENDING_PERMISSIONS` cases.
+These payload fixtures are sanitized from orchestrator captures. IDs, project
+names, paths, and free-text activity are redacted while payload keys and value
+types are preserved. The task log summarizes the captured shapes and pilot
+findings; ignored scratch paths are not required to interpret these fixtures.
 
-All three blocking response families use the same status classifier. The stop
-response has no agent status field and is verified by exact stopped ID plus a
-fresh listing; permit allow/deny uses return code and a fresh permit listing.
+`run-completed.json`, `run-running.json`, and `run-permission.json` preserve
+blocking run responses. `run-blocking.stderr.txt` records the workspace banner
+on stderr. `send-completed.json` and `send-permission.json` preserve accepted
+send responses; `wait-idle.json` and `wait-permission.json` preserve wait
+responses. A permission response from any of these accepted operations goes
+through permit handling and then wait; send is never repeated. `run-detached.stderr.txt`
+is unconsumed evidence of the detached-run banner.
 
-`run-detached.stderr.txt` and `workspace-archive.json` are evidence-only; no
-current test consumes them.
+`ls-g.json` and `ls-g-permission.json` preserve global listing rows.
+`workspace-ls.json` preserves the sanitized workspace listing. `workspace-create.json`
+is exercised by tests; `workspace-archive.json` is unconsumed evidence. `stop-idle.json`
+and `stop-running.json` preserve stop results. `inspect.json` and `logs-tail4.txt`
+are unconsumed evidence; `logs --json` returns plain text despite the flag.
+
+Permit records have `id`, `agentId`, `agentShortId`, `name`, and `description`,
+with no structured command or path. `permit-pending.json`,
+`permit-no-description.json`, and `permit-owned-write.json` are exercised by
+tests. `permit-record-shape.json` and `permit-deny.json` are unconsumed evidence.
+`permit-allow-stale.stderr.txt` is exercised by the stale-race test. The daemon's
+`NO_PENDING_PERMISSIONS` error is stderr-only, so there is no corresponding JSON
+stdout fixture. Duplicate permit listing twins were dropped from this fixture set.
+
+`ls-statuses.json` is an unconsumed derived list of statuses accepted by the
+classifier, not a Paseo payload; actual `paseo ls --json` rows are objects.

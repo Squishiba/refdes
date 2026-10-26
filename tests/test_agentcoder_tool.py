@@ -642,6 +642,21 @@ def test_resume_unknown_and_missing(tmp_path, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["status"] == "error"
 
 
+def test_legacy_resume_ignores_supervised_environment_opt_in(tmp_path, monkeypatch, capsys):
+    env = build_env(tmp_path, monkeypatch, name="legacy-env-resume")
+    assert env.run() == 0
+    job = env.job()
+    job["phase"] = "report"
+    job["status"] = "running"
+    job.pop("queue_supervised", None)
+    agentcoder.save_job(job)
+    monkeypatch.setenv("AGENTCODER_SUPERVISED", "1")
+
+    assert agentcoder.main(["resume", str(env.jobdir)]) == 0
+    capsys.readouterr()
+    assert "queue_supervised" not in env.job()
+
+
 def test_json_summary_on_all_exits(tmp_path, monkeypatch, capsys):
     assert agentcoder.main([]) == 1  # the no-args exit prints usage, not JSON
     assert "usage" in capsys.readouterr().out

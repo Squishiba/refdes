@@ -9,6 +9,8 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 QPATH = Path(os.environ.get("AGENTCODER_QUEUE_MODE_PATH",
                             str(ROOT / "tools" / "agentcoder" / "queue_mode.py")))
@@ -141,6 +143,80 @@ def create_state(path, **updates):
     state.update(updates)
     queue.atomic_json(path / "state.json", state)
     return state
+
+
+def load_driver(name):
+    driver_spec = importlib.util.spec_from_file_location(
+        name, ROOT / "tools" / "agentcoder" / "agentcoder.py")
+    driver = importlib.util.module_from_spec(driver_spec)
+    driver_spec.loader.exec_module(driver)
+    return driver
+
+
+def test_supervised_running_waits_back_off_before_retry(tmp_path, monkeypatch):
+    driver = load_driver("agentcoder_running_wait_backoff")
+    monkeypatch.setitem(sys.modules, "queue_mode", queue)
+    create_state(tmp_path)
+    running = {"agentId": "agent-1", "status": "running", "message": "working"}
+    idle = {"agentId": "agent-1", "status": "idle", "message": "done"}
+    responses = [running, running, running, idle]
+    sleeps = []
+
+    def guarded(argv, **_kwargs):
+        assert argv[1] == "wait"
+        return 0, json.dumps(responses.pop(0)), ""
+
+    monkeypatch.setattr(driver, "run_guarded", guarded)
+    monkeypatch.setattr(driver, "check_permits", lambda _job: None)
+    job = {"queue_supervised": True, "jobdir": str(tmp_path), "coder_agent": "agent-1",
+           "spec": {"agent_timeout": 30}}
+    driver.wait_for_agent(job, "coder", sleep_fn=sleeps.append)
+    assert sleeps == [1, 1, 1]
+    assert not responses
+
+
+def test_supervised_land_refreshes_report_when_publish_is_disabled(tmp_path, monkeypatch):
+    driver = load_driver("agentcoder_land_report")
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    report = tmp_path / "report.md"
+    report.write_text("stale PR: -\n", encoding="utf-8")
+    sha = "a" * 40
+
+    def fake_git(_repo, *args, **_kwargs):
+        if args[:2] == ("rev-parse", "HEAD"):
+            return sha
+        return ""
+
+    monkeypatch.setattr(driver, "git", fake_git)
+    monkeypatch.setattr(driver, "save_job", lambda _job: None)
+    job = {"queue_supervised": True, "jobdir": str(tmp_path), "task_id": "land-report",
+           "phase": "land", "status": "ready-for-human-gate", "coder_sha": sha,
+           "base_sha": "b" * 40, "coder_cwd": str(worktree), "test_sha": "c" * 40,
+           "test_paths": [], "spec": {"publish": False}}
+    driver.do_land(job)
+    content = report.read_text(encoding="utf-8")
+    assert "- status: **ready-for-human-gate**" in content
+    assert "- PR: -" in content
+    assert "stale" not in content
+
+
+def test_supervised_send_timeout_marks_operation_uncertain(tmp_path, monkeypatch):
+    driver = load_driver("agentcoder_send_timeout_operation")
+    monkeypatch.setitem(sys.modules, "queue_mode", queue)
+    create_state(tmp_path)
+
+    def timeout(*_args, **_kwargs):
+        raise driver.Pause("paseo send timed out")
+
+    monkeypatch.setattr(driver, "run_guarded", timeout)
+    job = {"queue_supervised": True, "jobdir": str(tmp_path), "coder_agent": "agent-1",
+           "spec": {"agent_timeout": 3}}
+    with pytest.raises(driver.Pause, match="timed out"):
+        driver.send_to(job, "coder_agent", "continue")
+    operation = next(iter(queue.load_state(tmp_path)["operations"].values()))
+    assert operation["status"] == "uncertain"
+    assert "timed out" in operation["evidence"]
 
 
 def permit_row(name, description, short="agent-l", rid="req-1",
@@ -458,13 +534,45 @@ def test_permission_wait_runaway_budget_and_no_progress_timer(tmp_path, monkeypa
 
     state = {"permission_prompts": 0, "permission_started_at": None}
     queue.note_permission_prompt(state, 3, 5, now=10)
-    queue.note_permission_prompt(state, 3, 5, now=14)
+    queue.refresh_permission_progress(state, now=14)
+    queue.check_permission_progress(state, 5, now=18)
     try:
-        queue.note_permission_prompt(state, 3, 5, now=16)
+        queue.check_permission_progress(state, 5, now=19)
     except queue.QueueError as exc:
         assert "no-progress timer" in str(exc)
     else:
-        raise AssertionError("permission chain must stop at its no-progress deadline")
+        raise AssertionError("stuck permission handling must stop at its deadline")
+
+
+def test_long_turn_after_permission_grant_refreshes_no_progress_timer(tmp_path, monkeypatch):
+    driver = load_driver("agentcoder_long_turn_permission_progress")
+    monkeypatch.setitem(sys.modules, "queue_mode", queue)
+    create_state(tmp_path)
+    permission = fixture("wait-permission.json")
+    running = dict(permission, status="running", message="agent is working")
+    idle = dict(fixture("wait-idle.json"), agentId=permission["agentId"])
+    responses = [permission, running, running, running, running, idle]
+    now = [100.0]
+
+    def wall_time():
+        value = now[0]
+        now[0] += 10
+        return value
+
+    monkeypatch.setattr(queue.time, "time", wall_time)
+
+    def guarded(_argv, **_kwargs):
+        return 0, json.dumps(responses.pop(0)), ""
+
+    monkeypatch.setattr(driver, "run_guarded", guarded)
+    monkeypatch.setattr(driver, "check_permits", lambda _job: None)
+    job = {"queue_supervised": True, "jobdir": str(tmp_path),
+           "coder_agent": permission["agentId"], "spec": {"agent_timeout": 1000,
+               "queue": {"permission_no_progress_seconds": 30}}}
+    driver.wait_for_agent(job, "coder")
+    state = queue.load_state(tmp_path)
+    assert state["permission_prompts"] == 1 and now[0] - 100 > 30
+    assert state["permission_started_at"] is None
 
 
 def test_owned_trust_still_denies_outside_and_risky_descriptions():
@@ -587,7 +695,10 @@ def test_supervise_initial_state_records_first_spawn_and_parks_crash(tmp_path, m
     run = fixture("run-permission.json")
     monkeypatch.setattr(driver, "agent_cwd", lambda _job, _agent_id: run["cwd"])
 
-    def child_run(_cmd, **_kwargs):
+    def child_run(cmd, **kwargs):
+        assert "--queue-supervised" in cmd
+        assert kwargs["env"].get("AGENTCODER_SUPERVISED") == \
+            os.environ.get("AGENTCODER_SUPERVISED")
         job = {"queue_supervised": True, "jobdir": str(jobdir),
                "task_id": spec["task_id"], "spec": spec}
         driver.record_turn(job, "coder", 0, json.dumps(run), "workspace banner")

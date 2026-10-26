@@ -480,15 +480,33 @@ def note_permission_prompt(state, maximum=MAX_PERMISSION_PROMPTS,
     """Record one permission wait without consuming the stall/nudge budget."""
     now = time.time() if now is None else now
     count = int(state.get("permission_prompts", 0)) + 1
-    started = state.get("permission_started_at")
-    if started is None:
-        started = now
-    state.update(permission_prompts=count, permission_started_at=started)
+    state.update(permission_prompts=count, permission_started_at=now)
     if count > maximum:
         raise QueueError(f"permission prompt budget exhausted ({maximum} per job)")
-    if now - float(started) >= no_progress_seconds:
-        raise QueueError("permission sequence exceeded its no-progress timer")
     return count
+
+
+def refresh_permission_progress(state, now=None):
+    """Move the permission no-progress origin to the latest handled progress."""
+    if state.get("permission_started_at") is not None:
+        state["permission_started_at"] = time.time() if now is None else now
+
+
+def check_permission_progress(state, no_progress_seconds, now=None):
+    started = state.get("permission_started_at")
+    if started is not None:
+        now = time.time() if now is None else now
+        if now - float(started) >= no_progress_seconds:
+            raise QueueError("permission sequence exceeded its no-progress timer")
+
+
+def record_permission_progress(jobdir):
+    with locked(Path(jobdir) / "job.lock"):
+        state = load_state(jobdir)
+        if state.get("permission_started_at") is None:
+            return
+        refresh_permission_progress(state)
+        atomic_json(Path(jobdir) / "state.json", state)
 
 
 def record_permission_prompt(jobdir, maximum, no_progress_seconds):
@@ -1096,10 +1114,11 @@ def _supervise(spec_path, jobdir, driver_path, sleep_fn=None):
                str(jobdir) if command == "resume" else str(spec_path)]
         if command == "run":
             cmd.append(str(jobdir))
+            cmd.append("--queue-supervised")
         started = time.monotonic()
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=MAX_ACTIVE_SECONDS,
-                                  env=dict(os.environ, AGENTCODER_SUPERVISED="1"))
+                                  env=os.environ.copy())
             out_path.write_text(proc.stdout, encoding="utf-8")
             err_path.write_text(proc.stderr, encoding="utf-8")
             rc = proc.returncode

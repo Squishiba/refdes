@@ -86,5 +86,5 @@ run results, send, idle wait, stop,
 workspace create/archive, inspect, logs, and permission responses. `logs --json`
 is plain text, and only the captured idle wait is recognized. Non-idle/timeout
 wait responses, transient provider errors, turn limits, loop signatures, and
-garbled finishes have no captured payload and park with evidence. No live worker
-was started in this work.
+garbled finishes have no captured payload and park with evidence. The
+orchestrator reports six live supervised pilots; the slice worker started none.
