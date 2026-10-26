@@ -1,4 +1,9 @@
-Status: Decided -- ready to plan implementation
+Status: Decided -- and implemented. The plan arrived (`living-notes-plan.md`,
+"Implemented (H1–H8; optional H9 not landed)") and its phases landed on main:
+history store (H1 `d84e123`) through the gate rules (H8 #193), with
+`refdes thread` (#191) and `refdes work` (#194) registered in `cli.py:1246` /
+`:1453` and the merged-log `tasks:` field at `v3/base.yaml:302`. H9 has not
+landed. The decisions below stand as ratified.
 
 # Living notes, captured history, and task lists
 
