@@ -66,7 +66,8 @@ not change the shapes they verified.
   `_make_calc_resolver` (cross-item `ITEM.NAME` reads, :1588) and
   `_make_source_resolver` (lockfile-pinned `source()`, :1644).
   `run_calcs` (:1937) is the dependency-order scheduler — edges from
-  fence lines *and* inline span references (:1941-1946) — builds
+  fence lines *and* inline span references (docstring :1941-1948; the
+  scheduler code follows) — builds
   `by_key = _key_index(project)` (:1957) and caches each item's `env`
   on `item._env` (written :1933, docstring :1752-1756).
 - `src/refdes/calc.py` — the restricted evaluator (owner D3): AST-whitelist
@@ -155,7 +156,8 @@ changes for this design):**
   `inline_calc.py` — the live route's replacement ranges build on
   `code_span_ranges` with no branch dependency left. The cross-item span
   dependency edges are landed (`run_calcs`' scheduler,
-  `build.py:1941-1946`), and F12-5's "has not been evaluated yet" error
+  `build.py:1941-1948`, docstring), and F12-5's "has not been evaluated
+  yet" error
   is gone (`build.py:1622-1627` records the retirement) — the live route
   resolves cross-item refs and `source()` from the snapshot exactly as a
   build will, today. Spans now enter `calc_hash_for` (:2390, arithmetic
@@ -211,8 +213,11 @@ decisions of 2026-10-25, §6, are folded into the sections they change):
   owner-confirmed 2026-10-25, §6.2), **and a `blur` on the textarea
   flushes the pending schedule immediately** (§6.2): blur is a trigger
   for the same scheduled request, not a second request type — the
-  flush goes through the identical closure, guards and apply path
-  (§3.6 covers the interactions).
+  flush goes through the identical closure and guards. Exactly one
+  difference: a response landing while the textarea is **unfocused**
+  is display-only — panel, chips, computed values, armed Fill rows;
+  it never mutates text and never calls `focus()` (the §3.5 focus
+  rule, review 6a6db80 finding 1; §3.6 covers the guards).
 - Client pre-gate: skip (and clear any panel) when the current text
   contains no `:=` substring — no request, no panel, no churn. This gate
   is an optimization only; the server is authoritative.
@@ -394,19 +399,44 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
   `selectionStart/End` over the result range and
   `document.execCommand('insertText', false, computed)`, spans applied
   **last-to-first** so earlier ranges stay valid; restore the caret
-  (shift by the length delta of applied ranges after the caret). Skip a
-  span when the caret sits inside its result range (author mid-edit),
-  when the textarea is not focused *and* the caret is inside the span
-  range, and whenever the response failed §3.6's guards. After the edits:
+  (shift by the length delta of applied ranges after the caret).
+  Apply precondition: **the textarea is focused** (focus rule below —
+  unfocused, nothing applies). Per-span skip: the caret sits inside
+  the result range **inclusive of both boundaries** —
+  `result_start <= caret <= result_end` — so a caret parked at the
+  end of a partially typed result (`= 5| V`, caret after `5`) counts
+  as inside and a pause never overwrites a result being typed (the
+  boundary is undefined in the first draft and collides with the
+  common case; review 6a6db80 finding 2); and whenever the response
+  failed §3.6's guards. After the edits:
   call `area._refdesCommit()` once — the draft, dirty flag, sessionStorage
   mirror, revision gate, and conflict screen all behave exactly as for
   typed text (`editor.js:96-101`'s comment is the contract).
+- **Focus rule (review 6a6db80, finding 1)**: auto-fill's text
+  mutation runs **only while the textarea is focused**.
+  `document.execCommand('insertText')` acts on the focused editing
+  host — unfocused it is a silent no-op (§3.8's undo argument then
+  degrades to a `.value` write, which native undo does not cover),
+  so a blur-time apply would have to call `focus()` first, as
+  `insertIntoBody` does (`editor.js:102-118`, focus at :114). That
+  alternative (refocus-then-insert) is **rejected**: blur names the
+  element the author *chose next* (Save, a Fill button, a picker),
+  and stealing it mid-flow is worse than a fill that lands when the
+  author returns. The codebase's `area.focus()` precedent is an
+  insertion the user *invoked* by clicking Insert — focus restoration
+  there is the user's own request; ambient auto-fill has no such
+  consent. The owner's answer "evaluate on `blur` as well"
+  (2026-10-25, §6.2) is honored exactly: blur **evaluates** — flushes
+  the request, refreshes the panel, arms the Fill rows — it just
+  never applies text while unfocused. A response arriving after the
+  author refocuses (text unchanged, §3.6 guards passed) applies
+  under the normal focused-typing rules.
 - **Why the gate is `stale` and not `computed != stored` (review
   96ae35f, finding 1)**: the checker *accepts* within-window literals —
   `compare_stored` returns `None` when the stored nominal is inside its
   rounding window (`inline_calc.py:597`, window logic :555-594).
-  Verified 2026-10-26 (`.scratch/inline-calc-window/probe_window.py`,
-  from this tree): `` `Vout := 2.218 V * 2 = 4.4 V` `` is status **ok**
+  Verified 2026-10-26 (in-tree; §7 inlines the reproduction):
+  `` `Vout := 2.218 V * 2 = 4.4 V` `` is status **ok**
   with computed `4.436 V` — a `computed != stored` rule spanning ok
   spans would rewrite a literal the checker accepts, on every pause,
   under the default, which is exactly the silent rewrite D1 forbids
@@ -438,14 +468,24 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
   mutation. The `execCommand`-false session fallback
   (next bullet) is a separate mechanism; it disables auto-fill *for the
   session* and says so, independent of the stored preference.
-- **Fill fallback**: each stale row carries a `Fill` button applying that
-  one replacement through the same code path. If
-  `document.execCommand('insertText')` returns false (undo-unsafe
-  browser), auto-fill disables itself for the session, the panel says so
-  in one line, and only the Fill buttons remain — they take the same
-  `insertText` path, so a browser where it fails gets a manual splice
-  through the `insertIntoBody`-style `.value` write with the honest
-  panel note "native undo may not cover this insertion".
+- **Fill fallback — one path per case (review 6a6db80, finding 3)**:
+  each stale row carries a `Fill` button applying that one
+  replacement through auto-fill's shared apply path. **Case A** —
+  `document.execCommand('insertText')` succeeds (every supported
+  browser): the single native-undo-protected edit of §3.8. **Case
+  B** — `insertText` returns false (undo-unsafe browser, detected
+  once per session): the apply uses an `insertIntoBody`-style
+  `.value` splice (`editor.js:102-118`), which is **not**
+  native-undo-protected — the panel shows one honest standing line
+  while Case B is active ("native undo may not cover these fills"),
+  auto-fill disables itself for the session and says so (its
+  mutation shares the path), and rows, chips and Fill rows keep
+  working. Case B is entered only after `insertText` has *proven* to
+  fail in that session — never preemptively. (Fill on a focused
+  textarea may restore focus to the body through the splice, as
+  `insertIntoBody` does: the author invoked the insertion by
+  clicking it, so that focus move is the user's own request — the
+  §3.5 focus-rule consent argument covers it.)
 - The stored-result text is the **only** text the live layer writes:
   name, `:=`, RHS, unit, backticks are the author's.
 
@@ -473,14 +513,24 @@ request — no blur-specific bypass exists. Blur does not change
 `area.value`, so the text-snapshot compare is against the same string;
 the revision guard is unchanged; and a flush that lands while an older
 request is in flight supersedes it through guard 1 exactly as fast
-typing does. The caret rules (§3.5 skip, §3.8 protection) read
-`selectionStart/selectionEnd` from the textarea **element at apply
-time**, and a textarea keeps its selection after losing focus in both
-Chromium and Firefox — so an author who blurs with the caret parked
-inside a result range keeps the caret-skip: auto-fill still will not
-touch that span, and its `Fill` row remains offered for the explicit
-click (§6.1's coexistence). The undo story is unchanged: a blur-applied
-fill is the same single `insertText` edit (§3.8).
+typing does. **What a blur-fired response does (review 6a6db80,
+finding 1):** the §3.5 focus rule decides — while the textarea is
+unfocused the response is **display-only**: rows, status chips,
+computed values refresh, Fill rows arm, **no text mutates and no
+`focus()` is called** (focus stays on the element the author moved to
+— Save, a Fill button, a picker). The refocus-then-insert alternative
+is rejected in §3.5's focus-rule bullet, with the `insertIntoBody`
+precedent and why it does not transfer. If the author refocuses with
+the text unchanged, the response applies under the normal focused
+rules, caret-skip included. The caret rule (§3.5 skip, inclusive of
+both boundaries) reads `selectionStart/selectionEnd` from the textarea
+element **at apply time**, and a textarea keeps its selection after
+losing focus in both Chromium and Firefox — so the skip decision for
+an author who blurs with the caret parked in a result range is made
+from that same caret when they return and the fill applies. The undo
+story: every *applied* fill is one native-undo step (Case A, §3.8);
+blur applies nothing, so the first draft's "Ctrl+Z undoes a
+blur-applied fill" claim is retired with the blur-time apply.
 
 ### 3.7 Error and unsafe-expression UX
 
@@ -502,9 +552,12 @@ fill is the same single `insertText` edit (§3.8).
 ### 3.8 Normal text and undo protection
 
 - Text mutates only via `execCommand('insertText')` (undo-merged into the
-  native stack) and only over result ranges; the 400 ms debounce means
+  native stack), only while the textarea is focused (§3.5 focus rule),
+  and only over result ranges; the 400 ms debounce means
   pauses, not mid-word, are when it fires; a result range the caret is
-  inside is never touched.
+  inside — inclusive of both boundaries, §3.5 — is never touched.
+  (Case B's `.value` splice, §3.5, is the one mutation this bullet
+  does not cover, and it says so on the panel.)
 - Every mutation goes through the textarea's own input pipeline (an
   `insertText` edit fires `input` → existing `writeBody` → draft), so
   there is **one** draft, one Save, one revision check — the live layer
@@ -537,7 +590,7 @@ fill is the same single `insertText` edit (§3.8).
 | B2 | result-slot range from the parse (`parse_span` returns content-relative cut column; `triggered_spans` unchanged) | `src/refdes/inline_calc.py` | ~15 lines (`code_span_ranges` is in main, :124 — dependency retired) |
 | B3 | `POST /api/item/<ref>/calc` route + guards + `fields` bag validation (shape only; §6.5 owns semantics) | `src/refdes/serve/api.py` | ~60 lines |
 | F1 | `{signal}` support in `api()` | `src/refdes/serve/static/api.js` | ~3 lines |
-| F2 | `live-calc.js`: debounce + blur flush, abort, supersede, panel (incl. truncated footer), auto-fill on stale rows only + user toggle (localStorage, default ON) + idempotent Fill, execCommand fallback | new static module | ~200 lines |
+| F2 | `live-calc.js`: debounce, blur flush (evaluate + panel only, never applies unfocused — §3.5 focus rule), abort, supersede, panel (incl. truncated footer), auto-fill on stale rows only (caret-skip inclusive of result-range boundaries) + user toggle (localStorage, default ON) + idempotent Fill, Case A/B apply paths (§3.5) | new static module | ~200 lines |
 | F3 | wiring: construct/teardown in `createEditor`, panel mount, save-in-flight flag | `src/refdes/serve/static/editor.js`, `item.js` | ~25 lines |
 | D1 | docs pass (below) | `docs/design/inline-calc-later.md` status, `docs/design/browser-editor.md` §"Editing and previewing bodies" pointer, `docs/math.md` editor sentence, `changelog.d/*.added.md` | — |
 
@@ -587,22 +640,34 @@ saves (orthogonal: the live layer writes no files, §3.8).
   `tests/test_serve_editor_e2e.py` posture: draft a stale span via
   `/api/item/<ref>/calc`, apply the computed text, save through the
   normal edit route with the form's revision, assert file bytes carry the
-  computed value and the post-save `check` is clean.
+  computed value and the post-save `check` is clean; the same posture
+  for an ok-within-window span (`Vout := 2.218 V * 2 = 4.4 V` →
+  status ok, computed `4.436 V`, §3.5 gate): the route reports the
+  computed value, never marks it stale. (Focus rule, caret boundary
+  and Case B are browser behaviours — pinned by the checklist below.)
 - Manual browser checklist (recorded in the PR's in-prog-logs entry, per
   inline-calc-later.md Q8): (1) type `Vbad := 2 V * 2 = 5 V` → panel
   warns live, text settles to `= 4 V` after pause; (2) Ctrl+Z **once**
-  restores the author's typed text (undo-merged); (3) caret mid-result
-  blocks auto-fill for that span; (4) fast typing never reorders/clobbers
+  restores the author's typed text (undo-merged); (3) caret inside a
+  result range **inclusive of both boundaries** — pause mid-result,
+  and pause with the caret just after a partially typed `= 5` —
+  blocks auto-fill for that span, its bytes never change (§3.5);
+  (4) fast typing never reorders/clobbers
    typed text (supersede guard; monitor network panel); (5) stale-span
    item opened → panel warns before first keystroke; (6) toggle OFF
    (panel checkbox, §3.5): panel + diagnostics keep rendering, text
    never mutates, Fill works; toggle state survives reload and item
    switch (localStorage); (7) toggle ON: clicking Fill on an
    auto-filled span is a no-op (idempotent, §3.5); (8) blur
-   mid-debounce → request fires immediately and fills apply; blur with
-   the caret parked mid-result → that span keeps being skipped and its
-   Fill row stays offered (§3.6); (9) Ctrl+Z undoes a blur-applied fill
-   as one native step; (10) Firefox + Chromium both pass (1)-(5),
+   mid-debounce → request fires immediately: panel refreshes and Fill
+   rows arm, **no text mutates, focus stays on the blur target**
+   (§3.5 focus rule); refocus with the text unchanged → the pending
+   fills apply; blur with the caret parked in a result range → that
+   span stays skipped at apply time and its Fill row stays offered
+   (§3.6); (9) Ctrl+Z undoes an applied fill as one native step;
+   Case B (force `insertText` false in devtools): the `.value` splice
+   fills, the no-undo panel line shows, auto-fill self-disables for
+   the session (§3.5); (10) Firefox + Chromium both pass (1)-(5),
    (7)-(9) and (11); (11) an ok-within-window literal
    (`Vout := 2.218 V * 2 = 4.4 V`, computed `4.436 V`, §3.5's probe):
    the row renders, **the body bytes never change** under auto-fill ON
@@ -656,10 +721,12 @@ record outside this branch is preferred, transcribe §6.1-§6.4 into
    §3.6 (blur is born under both stale-response guards: text-snapshot
    supersede compares the unchanged `area.value`, the revision guard
    is unchanged, and the flush supersedes any in-flight request via
-   guard 1), §3.6/§3.8 (caret rules read the textarea's
-   `selectionStart/End` at apply time — selection persists after blur,
-   so caret-skip and the undo merge behave the same for blur-fired
-   fills).
+   guard 1). Scope of "evaluate", fixed in review round 4
+   (6a6db80 finding 1): the answer commits to **evaluation**, not to
+   applying — a blur-fired response refreshes the panel and arms the
+   Fill rows; text applies only while the textarea is focused
+   (§3.5 focus rule; refocus-then-insert considered and rejected
+   there, with the `insertIntoBody` precedent).
 3. **Panel directly under the body textarea**, beside the image/source
    pickers (`item.js:176-190`), not in the Edit-bar — as proposed;
    recorded in §3.5.
@@ -761,17 +828,39 @@ Scratch project: `.scratch/inline-calc-live-20261020/probe/` (2 items;
 a cross-item span; `SRC-001` defines `V_in = 5.1 V` in a fence). CLI run
 from the worktree (`PYTHONPATH=src python -m refdes.cli`, d620ab5):
 
-**Reproducibility (review 96ae35f, finding 4):** the scratch dirs named
-here are gitignored and not part of the PR — §7 is a record, not a
-reproducer. A review pass on 2026-10-26 re-ran the behavioural claims
-against the current tree and reproduced: the half-typed "stored result
-missing" error, the unclosed-span silence, the stale-case fill
-round-trip, and the within-window case that pins §3.5's stale gate
-(`.scratch/inline-calc-window/probe_window.py` in this checkout:
-`Vout := 2.218 V * 2 = 4.4 V` → status ok, computed `4.436 V`). The
-**timings** (~130 µs/span, 0.011 s overlay floor) were measured on the
-2026-10-20 machine and are indicative; §3.4's scaling argument leans on
-the committed `docs/performance.md:44-52` table, not on them.
+**Reproducibility (reviews 96ae35f finding 4, 6a6db80 finding 4):**
+the scratch dirs named here are gitignored and not part of the PR, so
+the behavioural claims are **inlined below** — run from the checkout
+with `PYTHONPATH=src python`; a reviewer re-ran them 2026-10-26 and
+all four outcomes reproduced. The **timings** (~130 µs/span, 0.011 s
+overlay floor) were measured on the 2026-10-20 machine and are
+indicative; §3.4's scaling argument leans on the committed
+`docs/performance.md:44-52` table, not on them.
+
+```python
+# §3.5/§3.7 claims, from the tree (PYTHONPATH=src python):
+from refdes import inline_calc, calc
+
+cases = ["Vout := 2.218 V * 2 = 4.4 V",  # ok, computed 4.436 V (§3.5 gate)
+         "Vbad := 2 V * 2 = 5 V",        # stale: "stored result says 5 V, ..."
+         "Vhalf := 3 V *"]               # parse: "stored result missing; ..."
+for text in cases:
+    span = inline_calc.parse_span(0, text)
+    if span.error:
+        print(text, "-> parse error:", span.error)
+        continue
+    expr = f"{span.name} = {span.rhs}" + (f" | {span.unit}" if span.unit else "")
+    for outcome in calc.evaluate_block(expr, {}):
+        if outcome.error or outcome.value is None:   # build.py guards alike
+            continue
+        computed = calc.format_value(outcome.value, 4)
+        verdict = inline_calc.compare_stored(outcome.value, span, computed)
+        print(text, "-> computed", computed,
+              "| status:", "ok" if verdict is None else f"stale ({verdict})")
+# and: inline_calc.triggered_spans("`Vnew := 1 F * 2") == []  (unclosed: silence)
+# fill round-trip: after writing `computed` over the stored literal
+# ("Vbad := 2 V * 2 = 4 V"), the same loop prints status: ok.
+```
 
 1. `refdes check` reports, at `items/items.yaml`:
    `WARNING … inline calc Vbad: stored result says 5 V, now computes 4 V`;
@@ -799,5 +888,7 @@ the committed `docs/performance.md:44-52` table, not on them.
     - `load_readonly` warm floor 0.011 s on this toy project (the
       `docs/performance.md:44-52` table is the scale reference).
 
-Line counts: this file is the deliverable report; the companion progress
-log is capped separately.
+Line counts: this file is a **deliverable report**, which AGENTS.md
+exempts from the 150-line cap on task-progress logs ("a deliverable
+report … is the work product itself, has no length cap"); the
+companion progress log is the capped task log.

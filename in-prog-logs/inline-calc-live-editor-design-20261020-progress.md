@@ -61,20 +61,15 @@ type". Docs-only; no product code. Deliverable:
 
 ## Review round 1 (CHANGES REQUESTED)
 
-Fixed broken internal §-references (the probes are §7, slices §5, and
-the `indexOf`-exception note is §3.1, not the nonexistent §4.3);
-updated the sequencing premise to main `1d6d325` (#351 merged, #347/
-#345 still open) and re-checked the shifted `inline_calc.py`/`build.py`
-line cites against it; rephrased "no route accepts body text" (the edit
-route does — what is missing is a route that *evaluates* unsaved text).
-Design proposal and owner-choice questions unchanged.
+Fixed broken internal §-references; updated the sequencing premise to
+main `1d6d325` (#351 merged) with shifted cites re-checked; rephrased
+"no route accepts body text" (the edit route does — none *evaluates*
+unsaved text). Design proposal unchanged.
 
 ## Review round 2 (2026-10-26): owner decisions + baseline refresh
 
-Task (Jared's answers, 2026-10-25): record the decisions in the
-deliverable, replace §6's open questions with them, fold each into the
-affected sections, and bring the baseline to current main. Docs-only;
-the PR stays held.
+Task (Jared's answers, 2026-10-25): record the decisions in §6, fold
+each into the affected sections, bring the baseline to current main.
 
 - Rebased the branch onto origin/main (78c8954) — conflict-free (the
   branch touches only its two in-prog-logs files); pushed
@@ -105,45 +100,50 @@ the PR stays held.
   B's checklist grew (6)-(10); work table B3 ~60, F2 ~200 lines; §7
   flags the F12-5 probe record as historical.
 
-## Review round 3 (2026-10-26): CHANGES REQUESTED fixes
+## Review round 3 (2026-10-26): 96ae35f CHANGES REQUESTED
 
-Reviews: 96ae35f (CHANGES REQUESTED, design doc) + 13c70b5 (approve;
-ran the full suite on head: 4888 passed / 2 skipped; CI green incl.
-Windows — `gh pr checks 350` confirms, nothing to fix there).
+(13c70b5 approved: full suite on head 4888 passed / 2 skipped; CI
+green incl. Windows — nothing to fix.)
 
-- **F1 (high, agreed — design defect, probe-confirmed):** §3.5 keyed
-  auto-fill on `computed != stored` across ok+stale spans, but
-  `compare_stored` *accepts* within-window literals (:597, window
-  :555-594) — probe `.scratch/inline-calc-window/probe_window.py`:
-  `Vout := 2.218 V * 2 = 4.4 V` is status ok with computed `4.436 V`,
-  so auto-fill would rewrite checker-accepted text on every pause
-  under default ON. Fixed: auto-fill gates on `status == "stale"`
-  (gate bullet in §3.5, §6.1 note, F2 row); checklist (11) added as
-  the byte-identical regression pin (design doc = the test plan here;
-  no code in this PR to test first). §7 fill round-trip annotated as
-  stale-case-only.
-- **F2 (agreed):** §6 gained a provenance paragraph — the four answers
-  were given in session 2026-10-25; §6 + the round-2 PR comment are
-  the first tree record; transcription into inline-calc.md offered.
-- **F3 (agreed):** `truncated` is now a schema key (sibling of
-  `spans`, omitted when nothing cut); guard bullet specifies source
-  order, omission of the excess, and the panel footer line.
-- **F4 (agreed, one sub-finding rejected):** release-gate cites fixed
-  to `lifecycle.py:825`/registered :908 (`release_gate:` is the
-  project-config section, not a module). §7 reproducibility paragraph:
-  behaviour claims re-runnable from the tree, timings indicative.
-  Rejected: "slice C names `docs/math.md`/`changelog.d/` without
-  checking" — both exist (verified by `ls`), so slice C is accurate.
-- **F5 (agreed):** PR body reconciled (grammar #351 landed, §6
-  decisions status, :44-52). `gh pr edit` aborts on the
-  projects-classic GraphQL deprecation; `gh api PATCH …/issues/350`
-  works.
-- 13c70b5: no findings on the progress log; nothing to change.
+- F1 (high, probe-confirmed defect): auto-fill keyed on
+  `computed != stored` across ok+stale spans rewrote within-window
+  literals the checker accepts (`compare_stored` → None,
+  `inline_calc.py:597`; `Vout := 2.218 V * 2 = 4.4 V` is ok at
+  computed `4.436 V`). Gate is now `status == "stale"` (§3.5, §6.1,
+  F2 row); checklist (11) = byte-identical regression pin.
+- F2: §6 provenance paragraph (in-session answers 2026-10-25; §6 is
+  the first tree record; transcription into inline-calc.md offered).
+- F3: `truncated` schema key (sibling of `spans`, omitted when not
+  cut) + guard: source order, excess omitted, panel footer line.
+- F4: release-gate cites → `lifecycle.py:825`/:908; §7 reproducibility
+  paragraph. Rejected: `docs/math.md`/`changelog.d/` exist (ls) —
+  slice C accurate. F5: PR body reconciled (`gh pr edit` aborts on
+  the projects-classic GraphQL deprecation; `gh api PATCH` works).
+
+## Review round 4 (2026-10-26): 6a6db80 CHANGES REQUESTED
+
+- F1 (high): blur-time apply needs the focused host
+  (`execCommand('insertText')`; `insertIntoBody` focuses first,
+  `editor.js:102-118`) — as written, blur fills no-op or splice.
+  Per the owner's exact answer ("evaluate on blur", not
+  apply-on-blur): blur flushes + refreshes the panel + arms Fill
+  rows, **never applies text, never calls focus()**; applies only
+  while focused (§3.1, §3.5 focus-rule bullet — refocus-then-insert
+  rejected; §3.6, §6.2); checklist (8)/(9) rewritten.
+- F2: caret-skip defined inclusive, `result_start <= caret <=
+  result_end` — pausing after a partly-typed `= 5` never overwrites
+  (§3.5, §3.8, checklist (3); the old "unfocused *and* caret-in-span"
+  clause is subsumed by the focus rule).
+- F3: Fill fallback = one path per case: Case A `insertText`
+  (undo-protected) / Case B `.value` splice (**not**
+  undo-protected, panel says so, entered only after `insertText`
+  proves false in the session; §3.5, §3.8).
+- F4: §7 inlines a runnable reproduction of the ok/stale/parse/
+  unclosed claims + fill round-trip (verified from the tree).
+  Citation fixes: `run_calcs` edges cited as docstring :1941-1948;
+  footer states AGENTS.md's deliverable-report exemption.
 
 ## Status
 
-Round 3 done: F1-F5 fixed in the deliverable, PR body reconciled;
-pushed. Still held: §6.5 field-reference grammar is the one open
-question for Jared; slices unstarted by design. No product code
-touched, no tests run (docs-only; reviewer 13c70b5 ran the full suite
-on head green).
+Rounds 3+4 done, pushed. Held: §6.5 grammar question for Jared;
+slices unstarted by design. Docs-only; suite green on head.
