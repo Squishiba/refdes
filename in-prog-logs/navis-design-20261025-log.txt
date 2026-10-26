@@ -1,0 +1,56 @@
+Task: Navis design doc (docs(design): Navis - project-wide flying notes)
+Date: 2026-10-26. Docs only: no product code, tests, or schema changes.
+
+Deliverable: in-prog-logs/navis-design-20261025.md — the Navis design doc
+(concept verbatim, binding owner decisions of 2026-10-25, options +
+recommendations per open question, PR slice plan, open questions for Jared).
+
+What I did
+- Checked docs/ first: no existing Navis/flying-notes page (grep for
+  navi*/flying note finds only nav.py/CSS "nav" substrings); closest
+  neighbors cited in the doc: living-notes.md, threads.md, keys.md,
+  inline-calc.md, thread-workbench.md §7a, browser-editor.md.
+- Two explore agents mapped: task pane (task_pane.py, taskpane.js/css,
+  base.html.j2 include pattern, bar.css offsets), serve routes (server.py
+  dispatch, api.py), editor drafts (drafts.js) + journal (editor_journal.py,
+  unwired per edit.py:13-14), the full inline-syntax inventory in
+  build.py/calc.py/inline_calc.py/blocks.py, CLI subcommand list, and the
+  .refdes/ state inventory (zero compression in src/ today).
+- Verified every load-bearing citation myself: keys format (keys.py:35-37,
+  117-128), _hash_payload body-gating (build.py:2309-2313), HASH_FORMAT=6
+  (build.py:2260), seal reseal hint (seal.py:69-74), append-only sealing
+  (seal.py:384,418,476,621), history layout/digest/capture_index
+  (history.py:26-31,799-807), Diagnostic (model.py:144-156), items_json keys
+  (render.py:640-642,734,756), taskpane asset gate (render.py:1026-1050),
+  base.html.j2:10,66, z-index 62/63 (taskpane.css:21,36), bar.css:41-42
+  offsets, drafts.js:9, api.py:1082-1083 (403 under --no-write) and
+  1144-1148 (rebuild-after-save), server.py:741-744,783-786,
+  _refuse_no_write (cli.py:94), _load (cli.py:58), anchor_follows call
+  (loader.py:149), calc-fence placeholder swap (build.py:3155-3157,3955),
+  html=False (build.py:2694), inline-calc comment skip
+  (inline_calc.py:1-4,48-59,519).
+- Ran the decisive syntax probe in .scratch/navis-design-20261025/:
+  markdown-it-py 4.2.0 with html=False RENDERS HTML COMMENTS AS VISIBLE
+  ESCAPED TEXT. That kills "inert for free" and shaped the recommendation:
+  comment marker + explicit consuming pass in the scan (the same
+  placeholder-swap pattern calc fences already use).
+
+Difficulties
+- Interrupted mid-first-pass by Qwen server maintenance (session 1); two
+  explore agents had been cancelled; re-ran them on resume. One agent
+  returned only a compressed summary, so I re-verified its claims directly.
+- Explore agents' line numbers drifted from HEAD (living-notes.md's own
+  stale cites, links.py 633-818 -> 685/822, loader.py:143 -> 149,
+  bar.css 11-15 -> 41-42); all citations in the doc re-checked against the
+  files, doc cites current code.
+
+Review round (PR #377, cross-model review 3bcb46d): one P3 finding — the
+marker-option table claimed "Invisible in every standard Markdown renderer",
+contradicting the doc's own probe (html:False escapes comments to visible
+text); the table row now states the renderer-specific behavior and frames the
+consuming pass as the design's own inertness requirement. All findings
+accepted; nothing rejected. CI at 1d01356: ubuntu, py3.13, windows all pass
+(gh pr checks 377). Docs-only change, so no test applies.
+
+Status: finished. Doc committed on docs/navis-design-20261025, docs-only PR
+opened; not merged. Line count of this log: see final reply.
