@@ -1,13 +1,18 @@
 # AgentCoder queue v1 — cooperative overnight core
 
-Date: 2026-10-26. Proposed implementation contract; no code changes in this task.
-This is the owner's approved scope cut of
-`in-prog-logs/agentcoder-queue-spec-20261026.md` (the **full spec**), which remains
-unchanged as the long-term target. This document overrides its daemon-admission,
-OS-isolation and release-prerequisite requirements for v1. Overnight batches are
-routine; ship the cooperative core, default-off until each slice's gates pass.
-The latest owner simplification governs Qwen admission: soft variable caps,
-Paseo inventory only, acceptable race overshoot, no corrective parking.
+Date: 2026-10-26. Status: slice 1 shipped in PR #376; this is the corrected
+implementation record for that slice. The original planning text is retained
+where useful, while the permission and pilot sections below describe shipped
+behavior. The full design remains the future target except where mapped here.
+
+| PR #376 implements | Future work / deferred |
+| --- | --- |
+| Single-job `supervise`, durable `queue wait`, `queue stop`/`resume`, locked state, retained attempts, owned-agent reconciliation, bounded recovery, permissions, maintenance stop, and completion events. | Multi-job scheduler, dependencies, soft caps, overlap reservations, status polish, and queue-level publication changes. |
+| Fail-closed handling of captured permit records with no command/path fields; cooperative opt-in via exact `queue.trusted_agents` IDs or `queue.trust_owned_agents: true` for this job's owned agents. | Structured path containment, OS isolation, and a trusted command broker. |
+
+The orchestrator reports five successful live supervised pilot runs; capture
+shapes and review-round summaries are recorded in
+`in-prog-logs/agentcoder-queue-slice1-20261026.md`.
 
 ## 1. Deliver first: recovery, permissions and reliable parent wake-up
 
@@ -32,25 +37,28 @@ workspaces at D:450–505; it matches scope at D:597–617; it pushes HEAD and
 creates/adopts PRs at D:926–1013; Pause/Escalate exit the loop at D:1054–1071.
 No bounded queue recovery or durable parent-wake protocol is claimed present.
 Full spec §2 supplies the remaining source-cited baseline and timeout facts.
+These D: line anchors are historical drafting references; the shipped
+implementation is summarized by the table above and current source.
 
-Re-ran `paseo ls --help`, permit allow/deny help, run/send help and
-`paseo ls -g --json`. Help confirms global listing, exact-request allow/deny,
-run labels/workspace/environment options and nonblocking send syntax. Listing
-returned `error.code: DAEMON_NOT_RUNNING`; live status/permission payloads remain
-unverified. Do not guess their fields from the current heuristic. The owner's
-model server is down for maintenance; this task does not start it or run a pilot.
+Historical initial probe: listing returned `DAEMON_NOT_RUNNING`, and payloads
+were then unverified. PR #376 later captured the real listing, permission,
+run/send/wait/stop, and workspace payloads and passed five live pilots. The
+permit row has `{id,agentId,agentShortId,name,description}` and no structured
+command/path. Non-idle/timeout wait, transient provider error, turn-limit, loop,
+and garbled-finish signals remain uncaptured and park with evidence.
 
 ### Exact v1 guarantees and limits
 
-Guarantees are implementation requirements subject to the trusted-worker
-operating rules below, not claims about current code:
+The table records intended v1 guarantees subject to the trusted-worker rules.
+PR #376 implements only the rows identified in the status table at the top;
+other rows remain design targets:
 
 | Given in v1 | Exact extent |
 | --- | --- |
 | Deterministic overnight supervision | Bounded classified retries/nudges, durable outcomes and parked reports; independent eligible work continues. No orchestrator-model escalation. |
 | AgentCoder acceptance contract | Blind designer by instruction, frozen tests, executor-run base/candidate checks, final code/test/path/log scope and frozen-blob checks before publication. A completion message cannot substitute for checks. |
 | Workspace continuity | One workspace per role per job, reused across nudges/replacement/review; retain commits and edits on recovery, never reset them to base. |
-| Fail-closed permission decisions | Only provably local, recognized requests may be allowed. Outside/risky requests are denied; unclassifiable requests park with their raw bounded evidence. Foreign requests are untouched. |
+| Fail-closed permission decisions | Outside/risky evidence always denies; unclassifiable records park with evidence unless the operator opts in exact trusted IDs or `queue.trust_owned_agents: true` for recorded owned agents. The description is agent-controlled text, no path is present, and this is cooperative trust rather than containment. Foreign requests are untouched. |
 | Durable control and parent completion | Locked atomic state, numbered terminal events and a blocking waiter that cannot lose completion during registration/restart; hooks are supplementary. |
 | Cooperative overlap serialization | Every cooperating queue shares repository path reservations; possibly intersecting scopes never run together. Conservative false positives are accepted. |
 | Runtime admission policy | Before each new run/send/reviewer/Sol turn, compare fresh global and configured-prefix live counts with current positive-integer settings. Lowering holds new work and never kills running work. This is a soft performance policy. |
@@ -81,7 +89,10 @@ NOT given in v1:
 Use trusted workers and reviewed contract/check commands on a dedicated checkout.
 Keep credentials and sensitive unrelated work out of worker environments. Require
 a permission-requesting provider mode; never bypass/full-access as a substitute
-for the classifier. Unknown provider/request schema means park, not allow.
+for the classifier. Unknown provider or uncaptured request schema parks. For
+the captured row shape only, unknown free-text evidence remains parked unless
+the operator explicitly enables owned-agent cooperative trust as described in
+the shipped permission contract below.
 Treat executable checks and repository hooks as trusted reviewed code. These
 rules reduce risk; they do not provide the full spec's filesystem isolation.
 
@@ -107,11 +118,16 @@ shared. Missing dependencies park setup, never trigger a network install.
 Adopt the failure matrix, fixed continuation/loop/verdict/replacement templates
 and role-blindness restrictions of full spec §5. In v1 these are mandatory:
 
+This matrix records bounded policy transitions, not all live detectors. In PR
+#376 only daemon-unreachable recovery is automatically recognized by the
+supervisor. Transient provider errors, idle/turn-limit, loop, and garbled-finish
+signals without captured payloads park with evidence.
+
 | Mode | v1 detection / bounded action |
 | --- | --- |
 | Qwen outage/restart | Failed run/send and verified provider error signatures in listing/logs; pause Qwen admission, backoff, recover same context after inactivity confirmation. Never restart server. Other hosted jobs may proceed. |
 | Self-recovering error/errored/context overflow | Pilot-recorded listing/log signature; observe 120s first, with no send if it recovers. Persistent error permits one same-workspace replacement from retained HEAD; ambiguity parks. |
-| Permission block | Exact owned agent/request IDs and full structured tool input/cwd from verified `permit ls --json` payload. Apply classifier below; no prefix-ID guess. |
+| Permission block | Captured records contain exact `id`, `agentId`, `agentShortId`, `name`, and `description`, with no structured command/path/cwd. Exact owned IDs are reconciled against a fresh listing; outside/risky evidence denies, unknown evidence parks unless cooperative trust is explicitly configured. |
 | Idle without output / turn limit | Verified idle plus missing committed role artifacts, or pilot-recorded limit signature. One admitted continuation, then executor re-evaluation. No assumed turnCount field. |
 | Garbled finished report | Invalid/missing final JSON or missing reviewer final VERDICT; reconcile operation identity first. One verdict repair when safe; unknown send acceptance parks. Never infer green from prose. |
 | Loop | Same HEAD/diff/failure signature with no substantive improvement for 600s, regardless of streamed prose. Stop/confirm own turn then bounded checkpoint follow-up; two no-progress windows park. |
@@ -123,8 +139,8 @@ infrastructure retries per incident, ten per job; max_nudges 2 across all roles
 and causes, separate from max_rounds; one replacement per role; active job wall
 cap 14400s. Existing agent/test/tool timeouts still apply. A bounded outage never
 becomes infinite continuation. Budgets and retry_at survive restart. Deliberate
-maintenance intervals are excluded from active wall time; cap-wait time after
-first dispatch is included. Whole-queue pause/resume and deliberate stop intents
+maintenance intervals and deliberate daemon-recovery backoff sleeps are excluded
+from active wall time. Whole-queue pause/resume and deliberate stop intents
 follow full spec §8, without an OS sandbox prerequisite. Never classify an
 intentional maintenance stop as a crash or spend a nudge on it.
 
@@ -134,45 +150,26 @@ reconciled. Parked work requires explicit resume authorization and reacquires
 scope. Daemon-wide outage necessarily prevents all new dispatch, while a local
 job failure blocks only its dependencies/overlapping paths.
 
-### Permission classifier, without OS isolation
+### Shipped permission contract for PR #376
 
-Classify into ALLOW / DENY / UNKNOWN before any action, with request hash and
-reason persisted. Requests must be attributed to a full recorded owned agent ID
-and request ID; never use `--all` or modify input to evade policy.
+Classify captured requests as ALLOW / DENY / UNKNOWN and persist the exact IDs,
+decision, reason, and bounded raw evidence before a side effect. The live row is
+`{id,agentId,agentShortId,name,description}`; it has no structured command,
+path, or verified cwd. Both IDs must agree with the fresh global listing. Never
+touch foreign requests or use prefix matching / `--all`.
 
-- ALLOW: a known structured file read/write whose verified cwd and all resolved
-  targets are inside that role worktree, including its `.scratch/`; writes must
-  also match role scope, exact progress-log path or private scratch. Resolve
-  existing parents/symlinks and reject escape/ambiguous targets. Allow known
-  structured read-only tools with the same containment proof.
-- DENY: every outside-worktree target and the risky class: rm/delete/unlink,
-  git push, sudo, network/package install or download, cleanup, destructive git
-  operations, and writes outside the worktree. Containment never makes these
-  operations auto-allowable. Deny the exact owned request, persist the decision
-  and park if the task needs it. No deletion/rename tasks are supported.
-- UNKNOWN: malformed schema, unknown tool, opaque shell, unresolved cwd/path,
-  symlink ambiguity or incomplete inputs. Never allow. Persist bounded raw
-  input and classifier reason, stop/park the job. If the exact request is
-  safely attributable, deny it with the reason before stopping; otherwise do
-  not touch a possibly foreign request.
+- DENY outside-workspace or risky evidence (including `../`, `/tmp`, `~/`,
+  `curl`, `git push`, and `rm`) even when trust is enabled.
+- UNKNOWN or incomplete evidence parks with evidence by default.
+- ALLOW is limited to cooperative opt-in: an exact operator-supplied full ID in
+  `queue.trusted_agents`, or an exact agent recorded as spawned by this job when
+  `queue.trust_owned_agents: true`. The description is agent-controlled text;
+  this is trust, not path containment. `-` and empty descriptions are no
+  evidence. File-change permits have no path, including when trusted.
 
-Shell text is not containment proof. No substitutions, pipelines, redirects,
-wrappers, interpreters, eval or arbitrary scripts auto-approved. Permit only
-small exact argv templates whose complete effect is known: read-only git
-status/diff restricted to cwd; scoped git add/commit with explicit paths, fixed
-message arguments, disabled hooks/signing/external filters; reviewed fixed check
-commands whose referenced script paths are local. The last category proves
-command/path provenance, not the behavior of executable code: it is allowed only
-under the trusted-check operating rule. Unknown flags/templates park. Structured
-file edits remain preferred. Do not relax classification to get a pilot green.
-
-Use full spec §5's denial text and follow-up messages unchanged. Current
-D:388–414's malformed-payload skip and ID-prefix heuristic must not govern v1
-auto-approval. Pilot must demonstrate the actual provider emits enough input
-for at least the approved local edits/commands; otherwise that job parks. The
-missing OS boundary, provider bypasses, shared-user access and path-check races
-are accepted limitations, explicitly listed above, not future release blockers
-for this cooperative cut.
+Uncaptured shapes and unknown permission signals stay fail-closed. The original
+structured-path/OS-broker classifier proposed in full-spec §5 was not shipped;
+its policy prose remains historical future design, not this PR's contract.
 
 Sol stays human-by-default, opt-in per entry: one read-only
 `codex/gpt-6.1-sol` analysis, admitted like any other turn, bounded to 1800s.
@@ -182,7 +179,14 @@ never fall back to the orchestrator model.
 
 ### Completion protocol: reliably wake a waiting parent process
 
-Add proposed `queue wait QDIR [TASK_ID] --after EVENT_ID [--timeout SECONDS]`.
+Shipped in PR #376: `queue wait QDIR [TASK_ID] --after EVENT_ID
+[--timeout SECONDS]` reads durable terminal events before polling, honors
+task-qualified event cursors, and rechecks at most once per second. A terminal
+event is committed with state before supervise exits; optional hooks are
+supplementary. The shipped waiter returns the next matching terminal event.
+
+Historical future proposal: a batch-generation waiter with
+`queue wait QDIR [TASK_ID] --after EVENT_ID` and sealed registration generation.
 Without task ID, wait for the sealed batch generation captured on registration:
 all entries present then must become landed/parked/failed. New entries create a
 new batch generation. This avoids a moving drain condition or busy-looping on
@@ -215,13 +219,16 @@ without generating an orchestrator turn for every worker completion.
 
 ## 3. Queue, scheduler and runtime variables
 
+The PR implements single-job supervision only. Scheduling, dependencies,
+capacity and overlap material in this section is retained as future design.
+
 Reuse the full spec §3 entry format and queue states, including depends_on,
 priority, pinned plan_ref, shared_paths, max_nudges, job_wall_timeout, human/sol
 escalation. Dependencies require verified merged results in the selected base;
 landed means PR-ready, not merged. Park dependency-blocked descendants with
-ancestor IDs; keep unrelated jobs eligible. Parent review/merge remains outside
-queue supervision. Keep basic queue status and terminal hooks in the first slice;
-UI polish follows scheduling.
+ancestor IDs; keep unrelated jobs eligible. These are future scheduling
+requirements. Shipped slice 1 includes durable terminal events/hooks and
+`queue wait`; live queue status polish follows scheduling.
 
 Reuse full spec §3's directory layout, stable advisory locks for every
 multiprocess writable file, atomic fsync/replace/directory-fsync writes, event
@@ -340,7 +347,7 @@ and live gates pass. Existing single-job behavior must pass regression tests.
 
 | Slice / order | Lines | Tests and live gate carried with slice |
 | --- | --- | --- |
-| Recovery first: single-job supervise, locked state/retained attempts, owned-ID adoption, fail-closed permission policy, budgets, deliberate maintenance stop and durable completion wait | 850–1200 | `test_outage_backoff_bounded`, `test_transient_error_recovers_without_nudge`, `test_idle_turn_limit_loop_share_budget`, `test_unknown_permit_parks`, `test_risky_or_outside_permit_denied`, `test_foreign_permit_untouched`, `test_verdict_garbage_not_green`, `test_recovery_preserves_workspace_and_edits`, `test_uncertain_send_parks`, `test_maintenance_stop_intent_survives_restart`, `test_wait_completion_before_registration`, `test_wait_lost_hint_rechecks_durable_state`, `test_wait_survives_supervisor_restart`, `test_terminal_hook_failure_still_wakes_parent`; pilot steps A–C and final scope/HEAD regressions. |
+| Recovery first: single-job supervise, locked state/retained attempts, owned-ID adoption, fail-closed permission policy, budgets, deliberate maintenance stop and durable completion wait | 850–1200 | `test_outage_backoff_bounded`, `test_transient_error_recovers_without_nudge`, `test_idle_turn_limit_loop_share_budget`, `test_unknown_permit_parks`, `test_risky_or_outside_permit_denied`, `test_foreign_permit_untouched`, `test_verdict_garbage_not_green`, `test_recovery_preserves_workspace_and_edits`, `test_uncertain_send_parks`, `test_maintenance_stop_intent_survives_restart`, `test_wait_completion_before_registration`, `test_wait_lost_hint_rechecks_durable_state`, `test_wait_survives_supervisor_restart`, `test_terminal_hook_failure_still_wakes_parent`; five live pilot runs passed per the slice task log, plus final scope/HEAD regressions. |
 | Scheduler: entries/deps, cooperative soft cap variables, conservative cross-queue overlap, fair role dispatch, minimal serialized publication | 650–950 | `test_entry_validation_and_dependency_cycles`, `test_dependency_waits_for_merged_base`, `test_disjoint_jobs_progress_after_park`, `test_overlap_future_paths_and_nested_slashes`, `test_overlap_code_test_shared_union`, `test_cross_queue_hot_file_serialization`, `test_scheduler_aging`, `test_hand_started_qwen_agent_counted`, `test_below_cap_dispatch`, `test_at_cap_hold`, `test_global_and_prefix_caps_both_apply`, `test_idle_agents_excluded`, `test_cap_raised_at_runtime`, `test_cap_lowered_while_running_no_interrupt`, `test_invalid_cap_keeps_previous_value`, `test_all_turn_types_check_caps`, `test_listing_unreachable_holds_dispatch`, `test_landing_target_change_parks_only_job`; pilot D and mandatory mutations. |
 | Status/notification polish: live and JSON status, counts/source/generation, durable event export, coalesced command hooks and parent cursor ergonomics | 180–300 | `test_status_cap_values_prefix_source_generation`, `test_wait_batch_generation_and_cursor`, `test_hook_retry_deduplicates_event_id`, `test_hook_timeout_does_not_block_dispatch`, `test_status_stale_daemon_and_stop_pending`; pilot E. |
 | Pilot evidence and fixture hardening: final end-to-end run and recorded payload fixtures | 180–300 | `test_live_queue_trivial_contract` opt-in integration harness, permission/status fixture replay, existing three AgentCoder suites; full A–F pilot, mutations and saved report. No fake-only waiver. |
@@ -352,10 +359,15 @@ broker to inflate this cut. Do not replace durable parent completion with a
 best-effort hook to meet a line target. Unexpected schema work belongs in pilot
 hardening, not ten rounds of guessed fake fixtures.
 
-## 5. Live-pilot script outline and mutations
+## 5. Historical live-pilot outline and mutations
 
-This is a script OUTLINE for implementation; no new queue commands are claimed
-runnable yet. Save all artifacts under `.scratch/queue-v1-pilot/<run_id>/` and
+The plan below is retained for provenance. The orchestrator reports five
+successful supervised pilots; captured payloads and still-unverified signals
+are summarized above and in the slice task log. Planned structured-request
+auto-allow was superseded by the cooperative-trust policy actually shipped.
+
+At the time this script was drafted, this was a plan to implement the queue
+commands. Save artifacts under `.scratch/queue-v1-pilot/<run_id>/` and
 retain them. Parent harness and CLI probes must use bounded timeouts. Do not
 start/restart shared services during maintenance. Pilot waits for the real
 Paseo daemon and real Qwen to be available; an unavailable service leaves the

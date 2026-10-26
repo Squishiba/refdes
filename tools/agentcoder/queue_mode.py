@@ -363,6 +363,11 @@ def stop_active_clock(state, now):
     return state
 
 
+def pause_active_for_backoff(state, now):
+    """Do not charge a deliberate daemon-recovery sleep to the active budget."""
+    return stop_active_clock(state, now)
+
+
 def _queue_limits(spec):
     policy = spec.get("queue", {})
     if not isinstance(policy, dict):
@@ -630,8 +635,7 @@ def reconcile_job_agents(jobdir, listing=None):
     """Recover recorded role IDs from the legacy job record and fresh inventory."""
     jobdir = Path(jobdir)
     job = read_json(jobdir / "job.json")
-    prior_state = load_state(jobdir)
-    owned = sorted(set(_job_agent_ids(job)) | set(prior_state.get("owned_agents", {})))
+    owned = _durable_agent_ids(jobdir, job)
     if listing is None:
         listing, error = _listing_from_cli()
         if error:
@@ -745,6 +749,9 @@ def process_permits(jobdir, owned_ids, listing, rows, invoke=None, trusted_agent
         if decision == "UNKNOWN" and not trusted:
             return "PARK", f"owned permit {request_id} is unclassifiable; evidence retained: {reason}"
         deny_message = DENIAL.format(reason=reason)
+        stale = False
+        remains = True
+        result = None
         try:
             argv = ["permit", action, full_id, request_id, "--json"]
             if action == "deny":
@@ -784,7 +791,8 @@ def process_permits(jobdir, owned_ids, listing, rows, invoke=None, trusted_agent
                                          "raw_response": bounded_raw(reread.stdout)})
         except (OSError, subprocess.TimeoutExpired) as exc:
             record_decision(jobdir, {**record, "decision": "STOP_PENDING",
-                                     "reason": f"deny outcome uncertain: {exc}"})
+                                     "reason": f"permit {action} outcome uncertain: {exc}"})
+            return "PARK", f"owned permit {request_id} resolution is uncertain: {exc}; evidence retained"
         if action == "deny" and stale and not remains:
             continue  # NO_PENDING_PERMISSIONS is a benign list/action race
         if action == "deny":
@@ -916,8 +924,17 @@ def _parse_event(event):
 def wait_for_event(qdir, task_id=None, after="0", timeout=None):
     """Durable-state-first wait. One-second polling makes hints optional."""
     qdir = Path(qdir)
+    cursor_task = None
     try:
-        cursor = int(after.rsplit(":", 1)[-1])
+        if not isinstance(after, str):
+            raise ValueError
+        if ":" in after:
+            cursor_task, cursor_text = after.rsplit(":", 1)
+            if not cursor_task:
+                raise ValueError
+        else:
+            cursor_text = after
+        cursor = int(cursor_text)
     except (ValueError, AttributeError):
         raise QueueError("--after must be a numeric event ID or task:ID")
     started = time.monotonic()
@@ -930,9 +947,15 @@ def wait_for_event(qdir, task_id=None, after="0", timeout=None):
         events = []
         for path in paths:
             state = load_state(path.parent)
-            events.extend(e for e in state.get("outbox", [])
-                          if _parse_event(e) > cursor and
-                          e.get("status") in ("landed", "parked", "failed"))
+            for event in state.get("outbox", []):
+                if cursor_task is None:
+                    is_after_cursor = _parse_event(event) > cursor
+                elif event.get("task_id") == cursor_task:
+                    is_after_cursor = _parse_event(event) > cursor
+                else:
+                    is_after_cursor = True
+                if is_after_cursor and event.get("status") in ("landed", "parked", "failed"):
+                    events.append(event)
         if events:
             event = min(events, key=_parse_event)
             event["batch_id"] = qdir.name
@@ -996,6 +1019,7 @@ def _supervise(spec_path, jobdir, driver_path, sleep_fn=None):
         while error:
             state, action, reason = bounded_recovery(
                 old_state, {"kind": "daemon_unreachable", "evidence": error}, time.time())
+            pause_active_for_backoff(state, time.time())
             with locked(jobdir / "job.lock"):
                 atomic_json(state_path, state)
             if action == "park":
@@ -1004,6 +1028,7 @@ def _supervise(spec_path, jobdir, driver_path, sleep_fn=None):
                 return 2
             sleep_fn(max(0, state["retry_at"] - time.time()))
             old_state = state
+            start_active_clock(old_state, time.time())
             listing, error = _listing_from_cli()
         if owned:
             adopted, uncertain = reconcile_job_agents(jobdir, listing)
@@ -1144,9 +1169,11 @@ def _supervise(spec_path, jobdir, driver_path, sleep_fn=None):
                 print(json.dumps(event))
                 return 2
             delay = state["retry_at"] - time.time()
+            pause_active_for_backoff(state, time.time())
             with locked(jobdir / "job.lock"):
                 atomic_json(state_path, state)
             sleep_fn(max(0, delay))
+            start_active_clock(state, time.time())
             # Queue-owned resumes, rather than resubmitting a run that may have
             # created workers, require a reconciled live inventory. Fail closed
             # when no durable owned IDs can be proven.
@@ -1154,6 +1181,7 @@ def _supervise(spec_path, jobdir, driver_path, sleep_fn=None):
             if error:
                 state, action, message = bounded_recovery(
                     state, {"kind": "daemon_unreachable", "evidence": error}, time.time())
+                pause_active_for_backoff(state, time.time())
                 with locked(jobdir / "job.lock"):
                     atomic_json(state_path, state)
                 if action == "park":

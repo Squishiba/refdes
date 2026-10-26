@@ -429,6 +429,7 @@ def check_permits(job):
             sys.path.insert(0, str(Path(__file__).resolve().parent))
         from queue_mode import process_permits
         owned = {str(i) for i in (job.get("coder_agent"), job.get("designer_agent"),
+                                  job.get("reviewer_agent"),
                                   *(job.get("reviewers") or {}).values()) if i}
         trusted = (job.get("spec", {}).get("queue") or {}).get("trusted_agents", [])
         trust_owned = (job.get("spec", {}).get("queue") or {}).get(

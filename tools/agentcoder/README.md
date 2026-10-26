@@ -194,12 +194,13 @@ observed (live) to exit 0 for a not-found id with `Agent not found` in the
 output, so the exit code is never the completion signal, only the JSON
 status is. Phases are **not all
 idempotent**: a crash after a side effect but before the next save
-replays it. Safe to replay: **spawn** (each completed turn records its
-agent id, and only the role with no saved id is re-spawned; a real
-re-spawn reuses the role's recorded workspace and resets its branch onto
-the base with `git checkout -B` — a dirty tree **pauses** for a human
-rather than silently resetting uncommitted work) and **land** (an existing PR for the branch is
-adopted, never forked). What can repeat: a **feedback send** to a
+replays it. In legacy `run`/`resume`, **spawn** is safe to replay (each
+completed turn records its agent id, and only a role with no saved id is
+re-spawned; that re-spawn resets its reused branch onto the base with
+`git checkout -B`, and a dirty tree **pauses** rather than discarding edits).
+Supervised recovery instead preserves the role workspace after initial
+preparation. **Land** is safe to replay too: an existing PR for the branch is
+adopted, never forked. What can repeat: a **feedback send** to a
 designer/coder whose turn ended during the crash window — agents are
 re-prompted with the same text, which a human reviewing the PR can see.
 The driver never claims to have deduplicated a send it did not record.
@@ -342,11 +343,13 @@ spawned with `--new-workspace` per agent is what left one real pilot with
   role, else the driver creates one — `paseo workspace create --isolation
   worktree --mode branch-off --new-branch ac/<task>/<role> --base <sha>
   --json` — and records the returned `workspaceId` before launching.
-- Before every spawn the workspace's tree is reset to a clean checkout of
-  the branch that agent needs (`git checkout -B <branch> <sha>`; the
-  reviewer's SHA is the frozen test SHA). A **dirty** tree **pauses** the
-  job — the driver refuses to reset uncommitted work; commit, revert, or
-  clean it, then `resume`.
+- In legacy `run`/`resume`, before every spawn the workspace is reset to a
+  clean checkout of the branch that agent needs (`git checkout -B <branch>
+  <sha>`; the reviewer's SHA is the frozen test SHA). A **dirty** tree
+  **pauses** the job rather than resetting uncommitted work. In supervised
+  mode, initial workspace preparation uses the same clean-checkout rule;
+  after `*_workspace_ready` is recorded, recovery keeps committed and
+  uncommitted edits without resetting the role branch.
 - The driver never archives and never deletes a workspace. After the PR
   lands (or the job dies for good), the **human** cleans up:
   `paseo workspace archive <id>` for the job's one to three workspace ids
@@ -372,7 +375,7 @@ branch-off --json` (returns `workspaceId`/`cwd`, no `id` key), `run
 `workspace archive` (returns `status: "archived"`, drops out of
 `workspace ls`); the probe workspace was archived afterwards. **Not
 verified live** (offline-tested against the
-fake only, incl. the dirty-tree respawn pause): the remaining feedback
+fake only, incl. the legacy-mode dirty-tree respawn pause): the remaining feedback
 `send` loops (test-review changes,
 executor
 feedback, scope-feedback rounds, candidate-red feedback), the `test_review`
@@ -413,10 +416,12 @@ never raise a `UnicodeDecodeError` out of the driver and strand
   gap: a resume re-spawns any role with no recorded agent id — or with a
   recorded id that no longer appears in `paseo ls` (dead recorded ids are
   dropped, see the state machine above). With workspace reuse the branch
-  collision is gone (the re-spawn's `git checkout -B` resets the branch
-  onto the base, and a dirty tree pauses first), but that same reset
-  discards a stopped agent's committed work on the role branch — start a
-  fresh jobdir if that turn's output must be kept.
+  collision is gone in legacy `run`/`resume` (the re-spawn's
+  `git checkout -B` resets the branch onto the base, and a dirty tree pauses
+  first), but that same reset discards a stopped agent's committed work on
+  the role branch — start a fresh jobdir if that turn's output must be kept.
+  Supervised recovery skips that reset once the role workspace is ready, so
+  it retains stopped-agent commits and uncommitted edits.
 - Candidate rounds are recorded one-per-round: a resume re-runs the round
   and replaces its entry in `candidate_results` instead of appending a
   duplicate.

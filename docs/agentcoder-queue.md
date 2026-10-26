@@ -7,6 +7,8 @@ locked JSON state in the job directory, keeps per-invocation output under
 QDIR [TASK_ID] --after EVENT_ID [--timeout SECONDS]` checks durable event state
 before each one-second recheck, so a completion committed before registration
 can still be observed.
+Task-qualified `--after TASK_ID:N` cursors apply only to that task; an unseen
+terminal event for another task remains eligible.
 
 Queue state uses `owned_agents` as an object keyed by full agent ID (each value
 records role and reconciliation status), `operations`, `replacements`, and
@@ -28,11 +30,13 @@ Supervised jobs run one role at a time, accept pre-provisioned workspaces from
 the `workspaces` spec field or create one from the captured workspace response,
 and retain role trees across recovery. Publication
 is disabled unless the spec sets `publish: true`. `queue.max_nudges` defaults to
-2 (maximum 10), and `queue.job_wall_timeout` defaults to 14,400 seconds. The
+2 (maximum 10), and `queue.job_wall_timeout` defaults to 14,400 active seconds.
+Deliberate daemon-recovery backoff sleeps are excluded from that budget; child
+execution and ordinary supervision time count. The
 permission path has its own `queue.max_permission_prompts` budget (default 100,
 maximum 1,000 per job) and `queue.permission_no_progress_seconds` timer
 (default 900 seconds, maximum 86,400); it does not consume continuation nudges.
-recovery policy applies bounded outage backoff, a 120-second transient-error
+Recovery policy applies bounded outage backoff, a 120-second transient-error
 grace, a shared continuation budget, a 600-second no-progress window, one
 replacement per identified role, one verdict repair, and explicit park behavior
 for ambiguous sends. Automatic signal extraction for transient errors, loops,

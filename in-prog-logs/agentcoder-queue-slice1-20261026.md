@@ -1,7 +1,8 @@
 # AgentCoder queue v1 slice 1 progress
 
-Status: implementation advanced; the live pilot and several runtime signal
-adapters remain unverified, so unattended-release readiness is not claimed.
+Status: slice implementation complete; orchestrator reports five successful
+live pilots. Several runtime signal adapters remain unverified, so
+unattended-release readiness is not claimed.
 
 ## Captured evidence and adapter boundary
 
@@ -89,61 +90,24 @@ adapters remain unverified, so unattended-release readiness is not claimed.
 
 ## Remaining unsatisfied
 
-- The orchestrator's round-4 supervised pilot ran and exposed the early
-  permission-status run response. This worker did not rerun that live pilot
-  after the fix; killed-supervisor-during-turn replay also remains unrun.
+- The round-4 pilot exposed early permission status; the orchestrator reports
+  pilot #5 passed after the fixes. This worker did not run a live pilot;
+  killed-supervisor-during-turn replay remains unrun.
 - Still unverified live: timeout/non-idle wait, transient provider errors,
   turn-limit/loop signatures, and garbled finish payloads; they park with
   evidence. Multi-process supervisor-kill fencing and batch generation remain
   outside this single-job slice. Permit descriptions still cannot prove
   containment; owned-agent auto-allow is cooperative trust.
 
-## Review rounds
+## Review-round summary
 
-Two implementation passes, one fixture-boundary correction, and one legacy
-regression run completed; unresolved live/schema gates are listed above.
-
-## Round 5 state-shape crash correction
-
-- `.scratch/live-fixtures4/` exposed `owned_agents: []` vs ID-keyed writes.
-  Tests first went RED at `queue_mode.py:431`; schema-loader and write-ahead
-  checks were also RED. State shape is documented and validated; IDs are saved
-  before cwd/job journaling and survive the supervisor's post-child merge.
-- Unexpected exceptions park with a short outcome and full retained traceback.
-  Resume/stop reconcile state-owned IDs as well as `job.json`. Round 5 passed
-  36 queue and 129 legacy tests; review caught/fixed a stale snapshot overwriting
-  write-ahead ownership.
-
-## Round 6 permission wait correction
-
-- `.scratch/live-fixtures5/` captured wait `permission` and `CodexFileChange`
-  with description `-`; tests first went RED for wait handling, empty evidence,
-  and unbounded sequential prompts. Separate defaults are 100 prompts and 900
-  seconds, independent of nudges. Empty evidence parks unless owned trust is
-  enabled after risky/outside checks; file-change trust cannot prove paths.
-- Round 6 passed 39 queue tests, including happy/runaway loops and mutations.
-  No daemon or GitHub command was run.
-
-## Round 7 send permission correction
-
-- `.scratch/live-fixtures6/` shows accepted send can return `permission`.
-  Run/send/wait now share a completed/idle/permission/running/unknown classifier
-  and the same permission-check-then-wait path. Send operations are adopted and
-  waited on; they are never replayed.
-- Audit: stop has no agent-status field and requires exact stop response plus
-  fresh inventory; permit allow/deny uses return code plus fresh permit listing.
-- Tests first went RED for missing classification and send parked unverified.
-  Queue suite: 41 passed; legacy suite: 129 passed. No pilot rerun, daemon, or
-  GitHub command was run.
-
-## Round 8 Windows lock and fixture hygiene
-
-- RED at `queue_mode.py:6` raised `ModuleNotFoundError`; forced-fallback
-  exclusivity failed before a selector existed. Added guarded imports and an exclusive one-byte
-  `msvcrt.locking` Windows backend; POSIX exclusivity was verified through a
-  forced fallback shim. Native Windows CI was not available here.
-- Redacted `workspace-ls.json` to fixture placeholders, preserving fields;
-  README marks detached stderr/archive evidence-only. Queue tests: 43 passed;
-  existing tool/workspace/land suites: 129 passed; `git diff --check` passed.
-- Orchestrator reports pilot #5 passed. `paseo ls -g --json` returned
-  `DAEMON_NOT_RUNNING`; review logs unavailable. No daemon start or GitHub run.
+Rounds 5–8 fixed owned-agent write-ahead, run/wait/send permission handling,
+Windows lock import, and fixture redaction; the POSIX fallback shim passed while
+native Windows CI was unavailable, and the orchestrator reports pilot #5 passed.
+Round 9 tests first went RED: permit transport errors raised `UnboundLocalError`
+(`queue_mode.py:792`), reviewer permission was skipped (`agentcoder.py:270`),
+`a:1` hid unseen `b:1`, and the backoff-clock helper was absent; all regressions
+now pass. `prior_state` already contributed durable owned IDs and is now read via
+`_durable_agent_ids`; README and both specs distinguish shipped behavior from
+legacy/future design. Seven review reports read; queue: 48 passed; legacy: 129.
+Review-log access returned `DAEMON_NOT_RUNNING`; no daemon or GitHub command ran.

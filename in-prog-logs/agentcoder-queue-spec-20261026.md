@@ -1,9 +1,20 @@
 # AgentCoder queue mode — implementation specification
 
-Date: 2026-10-26. Status: proposed, implementation not started.
-All paths below are repository-relative. References to current behavior are
-source citations; everything labeled proposed is a requirement, not an existing
-capability. This document supersedes no current CLI contract.
+Date: 2026-10-26. Status: historical full design proposal; slice 1 shipped in
+PR #376. The design below remains the long-term target where explicitly marked
+future. The shipped behavior and current evidence are summarized here and in
+`in-prog-logs/agentcoder-queue-spec-v1-20261026.md`.
+
+| PR #376 implements | Future work retained from this design |
+| --- | --- |
+| Opt-in single-job `supervise`, atomic locked state, retained attempts, owned-agent recovery, bounded retry/nudge budgets, maintenance stop, and durable `queue wait`. Existing publication remains controlled by its prior gate. | Multi-job queue initialization/enqueue/scheduling, dependencies, capacity checks, overlap reservations, live status polish, and queue-level publication changes. |
+| Permission handling for captured `{id,agentId,agentShortId,name,description}` rows. No structured command/path is present. Outside/risky evidence denies; unknown evidence parks unless an exact operator-trusted ID or `queue.trust_owned_agents: true` grants cooperative trust to a recorded owned agent. | OS-enforced path containment, structured-input permission parsing, a command broker, and hard isolation. Cooperative trust is not containment. |
+| Five real supervised pilot runs passed; recorded captures and round summaries are in `in-prog-logs/agentcoder-queue-slice1-20261026.md`. | Live variants not captured remain fail-closed and park with evidence. |
+
+The proposal sections below are retained as historical design intent, not a
+claim that their CLI or permission broker shipped. All paths are repository-
+relative. Source citations in the baseline describe the original drafting
+snapshot; they are not current line anchors.
 
 ## 1. Scope and non-goals
 
@@ -71,27 +82,27 @@ Ran `paseo --help`, `paseo ls --help`, `paseo permit --help`, and help for
 - `paseo logs <id> --tail <n> --json`, `inspect <id> --json`,
   `wait <id> --timeout <seconds> --json`, `stop <id> --json`.
 
-Ran `paseo ls -g --json` and `paseo permit ls --json`: both returned an error
-object with `error.code: DAEMON_NOT_RUNNING`. No daemon was started or modified.
-Thus live agent/permission payload shapes and provider availability are
-**UNVERIFIED in this session**. D:295 and D:529 record earlier observations of
-listing keys/statuses; D:404 explicitly calls permit keys unverified. In
-particular owner-reported `errored` must not be assumed identical to the
-current driver's `error`. Proposed adapters must fixture actual live payloads;
-unknown status/permit shape fails closed. No invented token-count, turn-count,
-last-activity, context-limit, or server-health JSON field is assumed below.
+Historical evidence at the time of drafting: `paseo ls -g --json` and
+`paseo permit ls --json` returned `DAEMON_NOT_RUNNING`, so payloads were then
+unverified. This was superseded during PR #376 by real captures and five
+successful supervised pilot runs, recorded in the slice task log. Captured
+permit rows have no structured command/path. Uncaptured wait/provider/recovery
+signals remain unverified and park; no invented token-count, turn-count,
+last-activity, context-limit, or server-health field is assumed.
 Forum workflow and failure history are owner-supplied requirements, not an
 independently audited incident history.
 
-## 3. Queue model
+## 3. Queue model (historical future scheduler design)
 
-Proposed CLI: `agentcoder.py queue init QDIR`, `queue add QDIR SPEC.json`,
+Historical scheduler proposal (not shipped in PR #376): `agentcoder.py queue init QDIR`, `queue add QDIR SPEC.json`,
 `queue start QDIR`, `queue status QDIR [--live] [--json]`,
 `queue pause QDIR [--stop-agents]`, `queue resume QDIR [TASK_ID]`,
 `queue set-cap QDIR N`, and `queue retry QDIR TASK_ID`.
 `start` stays foreground; an ordinary service manager can restart it. `resume`
 without a task clears maintenance mode; with a task authorizes its retry.
-These are new interfaces, not verified existing commands.
+These remain future interfaces, not verified existing commands. Shipped entry
+points are `supervise SPEC.json JOBDIR`, `queue wait QDIR [TASK_ID] --after
+EVENT_ID [--timeout SECONDS]`, `queue stop JOBDIR`, and `queue resume JOBDIR`.
 
 QDIR is `.scratch/agentcoder-queues/<queue_id>` within a dedicated queue-control
 worktree. Each job owns separate coder/designer/reviewer worktrees. Queue control
@@ -243,7 +254,7 @@ proven unperformed action, or parks. Never reset a recovered role branch to base
 retain its committed and uncommitted work and resume on that branch. Existing
 D:459/D:550 respawn behavior needs a queue-specific path.
 
-## 4. Scheduler and mutable capacity
+## 4. Historical future scheduler and mutable capacity
 
 `concurrency_cap` is a variable C, not a job-count limit. Each initial role,
 reviewer, resumed turn and Sol analysis needs one admission. Jobs may start with
@@ -390,7 +401,27 @@ CHANGES REQUESTED. Do not infer approval from your previous prose.`
 current commits and edits; do not reset to base. Its role-only checkpoint is:
 {checkpoint}.` Never include cross-role implementation information.
 
-### Fail-closed permission policy
+### Historical structured permission policy (not shipped)
+
+This section preserves the original structured-input design. It is not the
+permission contract implemented by PR #376: live `permit ls --json` records
+contain no structured command or path. The shipped cooperative policy is below.
+
+### Shipped permission contract for PR #376
+
+The captured record is `{id, agentId, agentShortId, name, description}` and
+contains no structured command/path or verified cwd. Exact request and agent
+IDs must agree with a fresh listing, and foreign requests are untouched.
+Outside-workspace or risky evidence always denies the exact owned request;
+unclassifiable evidence parks with the raw record. Unknown requests may be
+allowed only for an exact operator-supplied trusted full ID or an owned agent
+when `queue.trust_owned_agents: true`; this is cooperative trust in
+agent-controlled description text, not containment. A `-` or empty description
+is no evidence: it parks by default and is eligible for owned-agent trust.
+File-change permits contain no path, so even that allow cannot prove scope.
+The default remains no automatic allow.
+
+The structured policy that follows is historical proposal text:
 
 Auto-allow only a known structured read/write tool request whose complete inputs,
 verified cwd and resolved file targets are provably within that role's own
@@ -425,7 +456,7 @@ designer. Park pending explicit disposition; do not automatically execute Sol's
 free-form commands. Verify model availability in pilot; unavailable Sol falls
 back to parked human report. No orchestrator model fallback exists.
 
-## 6. Landing order and PR flow
+## 6. Historical future scheduler landing order and PR flow
 
 Use one per-repository landing lease across queues; ready candidates ordered by
 ready time then task ID. Hold it for base freshness check, local integration,
@@ -465,7 +496,7 @@ checks and merges PRs one at a time; queue never invokes orchestrator or merges.
 This may defer dependency jobs overnight until an independently authorized merge
 is observed. Fixes from review are new queue entries with explicit dependencies.
 
-## 7. Observability
+## 7. Historical future status and observability
 
 `queue status QDIR` reads committed state; `--live` refreshes every poll_seconds
 without mutating jobs, `--json` provides versioned fields. Display queue identity,
@@ -496,7 +527,7 @@ parked/failed/dependency-blocked results. No per-turn completion messages to
 orchestrator. `start` remains available to retry parked work rather than spinning
 on it; exit on operator interrupt with durable checkpoint.
 
-## 8. Safety and maintenance
+## 8. Historical safety and maintenance proposal
 
 No automatic deletion: retain workspaces, attempt dirs, transcripts and XML;
 no cleanup command, git clean, forced worktree removal or file unlink in queue
@@ -552,6 +583,10 @@ other operator pauses do not reset recovery budgets. Restart during maintenance
 stays paused. Do not automatically restart daemon or Qwen server.
 
 ## 9. Test plan and release gates
+
+Historical test/release proposal as drafted before PR #376. Its old pilot gate
+and status claims are superseded by the five passed pilot runs and deferred
+signal list recorded at the top of this document and in the slice task log.
 
 Add `tests/test_agentcoder_queue.py` with a deterministic clock, multiprocess
 fixtures, real git worktrees/bare origin under .scratch, and fake CLI fault
@@ -646,7 +681,7 @@ writes denied and per-attempt import origins correct. A fake-CLI pass cannot
 substitute for any of these live gates. Current author could not perform a live
 payload probe because local daemon was unreachable; see section 2.
 
-## 10. Independently landable slices
+## 10. Historical implementation roadmap
 
 Estimates are added/changed production + test + docs lines, not generated
 fixtures. Each slice remains default-off until its gates pass; source-only

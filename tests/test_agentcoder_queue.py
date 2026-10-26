@@ -215,6 +215,66 @@ def test_trusted_agent_allow_and_stale_race(tmp_path):
     assert queue.read_json(jobdir / "state.json")["permit_decisions"][0]["decision"] == "ALLOW"
 
 
+def test_permit_action_transport_failures_park_with_evidence(tmp_path):
+    listing = fixture("ls-g.json")
+    rows = (permit_row("CodexFileChange", "-", short=listing[0]["shortId"],
+                       agent_id=listing[0]["id"]),
+            permit_row("CodexBash", "write outside this workspace",
+                       short=listing[0]["shortId"], agent_id=listing[0]["id"]))
+    case = 0
+    for row in rows:
+        for fail_call in (1, 2):
+            case += 1
+            jobdir = tmp_path / f"job-{case}"
+            create_state(jobdir)
+            calls = []
+
+            def invoke(argv):
+                calls.append(argv)
+                if len(calls) == fail_call:
+                    raise OSError("paseo unavailable")
+                return fake_result(out="[]")
+
+            decision, reason = queue.process_permits(
+                jobdir, [listing[0]["id"]], listing, [row], invoke,
+                trust_owned_agents=True)
+            assert decision == "PARK" and "uncertain" in reason
+            assert "paseo unavailable" in json.dumps(
+                queue.load_state(jobdir)["permit_decisions"])
+
+
+def test_check_permits_recognizes_owned_reviewer_agent(tmp_path, monkeypatch):
+    driver_spec = importlib.util.spec_from_file_location(
+        "agentcoder_reviewer_permit", ROOT / "tools" / "agentcoder" / "agentcoder.py")
+    driver = importlib.util.module_from_spec(driver_spec)
+    driver_spec.loader.exec_module(driver)
+    monkeypatch.setitem(sys.modules, "queue_mode", queue)
+    listing = fixture("ls-g.json")
+    reviewer = listing[1]
+    row = permit_row("CodexFileChange", "-", short=reviewer["shortId"],
+                     agent_id=reviewer["id"])
+    payloads = [json.dumps([row]), json.dumps(listing)]
+
+    def guarded(_argv, **_kwargs):
+        return 0, payloads.pop(0), ""
+
+    permit_calls = []
+
+    def paseo(argv, **_kwargs):
+        permit_calls.append(argv)
+        return fake_result(out="[]")
+
+    monkeypatch.setattr(driver, "run_guarded", guarded)
+    monkeypatch.setattr(queue.subprocess, "run", paseo)
+    jobdir = tmp_path / "job"
+    create_state(jobdir)
+    job = {"queue_supervised": True, "jobdir": str(jobdir),
+           "reviewer_agent": reviewer["id"],
+           "spec": {"queue": {"trust_owned_agents": True}}}
+    driver.check_permits(job)
+    assert permit_calls[0][:4] == ["paseo", "permit", "allow", reviewer["id"]]
+
+
 def test_stale_deny_race_is_benign(tmp_path):
     jobdir = tmp_path / "job"
     create_state(jobdir)
@@ -676,6 +736,16 @@ def test_owned_agent_resume_adopts_exact_ids(tmp_path):
     assert not queue.validate_wait_result(dict(wait, status="error"), wait["agentId"])[0]
 
 
+def test_reconcile_job_agents_keeps_state_owned_ids(tmp_path):
+    listing = fixture("ls-g.json")
+    agent_id = listing[0]["id"]
+    create_state(tmp_path, owned_agents={agent_id: {"role": "reviewer"}})
+    queue.atomic_json(tmp_path / "job.json", {})
+    adopted, uncertain = queue.reconcile_job_agents(tmp_path, listing)
+    assert adopted == {agent_id: "active"} and uncertain == {}
+    assert agent_id in queue.load_state(tmp_path)["owned_agents"]
+
+
 def test_unverified_listing_shape_parks_with_evidence():
     adopted, uncertain = queue.reconcile_owned_agents([fixture("ls-g.json")[0]["id"]],
                                                        {"error": {"code": "UNKNOWN"}})
@@ -787,6 +857,16 @@ def test_wait_survives_supervisor_restart(tmp_path):
     assert event["event_id"] == "queue-test:1"
 
 
+def test_wait_after_cursor_honors_task_id(tmp_path):
+    qdir = tmp_path / "batch"
+    for task_id in ("a", "b"):
+        jobdir = qdir / "jobs" / task_id
+        state = create_state(jobdir, task_id=task_id)
+        queue.save_terminal(jobdir, state, "parked", "needs human")
+    event, code = queue.wait_for_event(qdir, after="a:1", timeout=0)
+    assert code == 2 and event["task_id"] == "b" and event["event_id"] == "b:1"
+
+
 def test_terminal_hook_failure_still_wakes_parent(tmp_path):
     state = create_state(tmp_path)
     event = queue.save_terminal(tmp_path, state, "landed", "ready")
@@ -851,3 +931,11 @@ def test_wall_clock_pauses_only_for_deliberate_maintenance():
     assert state["active_seconds"] == 9 and state["active_started_at"] is None
     queue.start_active_clock(state, 100)
     assert queue.wall_elapsed(state, 103) == 12
+
+
+def test_daemon_recovery_backoff_is_excluded_from_active_budget():
+    state = {"active_seconds": 4, "active_started_at": 10}
+    queue.pause_active_for_backoff(state, 15)
+    assert queue.wall_elapsed(state, 115) == 9
+    queue.start_active_clock(state, 115)
+    assert queue.wall_elapsed(state, 118) == 12
