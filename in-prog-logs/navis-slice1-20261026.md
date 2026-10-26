@@ -100,3 +100,14 @@ design grammar says key + space, inline_calc precedent); duplicate
 delivery with merged #377 (informational, now moot -- rebased onto main);
 list-continuation inertness as code (design-adopted region rules,
 inline_calc parity; documented in markdown.md instead).
+
+## Rebase onto merged #377
+
+#377 merged as squash b839a80; branch rebased with
+`git rebase --onto origin/main 1d01356` so the diff is slice-1 files only.
+One conflict: the design doc's §4 marker-table cell (main's #377 review
+rewrote the "invisible" row) -- kept main's wording, applied the
+build.py:1798-1804 cite shift. Diff scope verified file-by-file; targeted
+49 green, diff gate PASS, full suite 4937 passed / 2 skipped; pushed
+--force-with-lease (head 8ce86b3), PR body updated, disposition comment
+posted.
