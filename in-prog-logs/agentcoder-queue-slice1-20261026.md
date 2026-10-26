@@ -135,3 +135,15 @@ regression run completed; unresolved live/schema gates are listed above.
 - Tests first went RED for missing classification and send parked unverified.
   Queue suite: 41 passed; legacy suite: 129 passed. No pilot rerun, daemon, or
   GitHub command was run.
+
+## Round 8 Windows lock and fixture hygiene
+
+- RED at `queue_mode.py:6` raised `ModuleNotFoundError`; forced-fallback
+  exclusivity failed before a selector existed. Added guarded imports and an exclusive one-byte
+  `msvcrt.locking` Windows backend; POSIX exclusivity was verified through a
+  forced fallback shim. Native Windows CI was not available here.
+- Redacted `workspace-ls.json` to fixture placeholders, preserving fields;
+  README marks detached stderr/archive evidence-only. Queue tests: 43 passed;
+  existing tool/workspace/land suites: 129 passed; `git diff --check` passed.
+- Orchestrator reports pilot #5 passed. `paseo ls -g --json` returned
+  `DAEMON_NOT_RUNNING`; review logs unavailable. No daemon start or GitHub run.

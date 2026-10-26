@@ -5,3 +5,6 @@ The real `run --json` response is one stdout JSON object and writes `Using works
 All three blocking response families use the same status classifier. The stop
 response has no agent status field and is verified by exact stopped ID plus a
 fresh listing; permit allow/deny uses return code and a fresh permit listing.
+
+`run-detached.stderr.txt` and `workspace-archive.json` are evidence-only; no
+current test consumes them.

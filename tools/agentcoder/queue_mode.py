@@ -3,7 +3,6 @@
 This module intentionally does not change the legacy run/resume path. Queue
 state is cooperative same-user state, not a security boundary.
 """
-import fcntl
 import hashlib
 import json
 import os
@@ -15,6 +14,15 @@ import traceback
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # Windows imports the driver and uses msvcrt below.
+    fcntl = None
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
 
 POLL_SECONDS = 5
 BACKOFF_SECONDS = (15, 30, 60, 120, 300)
@@ -79,11 +87,39 @@ def locked(lock_path):
     path = Path(lock_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a+b") as stream:
-        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        backend = _lock_backend()
+        if backend == "posix":
+            if fcntl is None:
+                raise QueueError("queue state locking is unavailable on this platform")
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            return
+        if msvcrt is None:
+            raise QueueError("queue state locking requires the Windows msvcrt backend")
+        stream.seek(0)
+        if not stream.read(1):
+            stream.seek(0)
+            stream.write(b"\0")
+            stream.flush()
+        stream.seek(0)
+        while True:
+            try:
+                msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+                break
+            except OSError:
+                time.sleep(0.05)
         try:
             yield
         finally:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+def _lock_backend():
+    return "windows" if os.name == "nt" else "posix"
 
 
 def read_json(path):

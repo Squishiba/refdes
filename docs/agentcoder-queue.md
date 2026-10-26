@@ -13,6 +13,9 @@ records role and reconciliation status), `operations`, `replacements`, and
 `maintenance.agents` as ID-keyed objects, and `attempts`, `outbox`,
 `permit_decisions`, and `hook_results` as arrays. The state loader rejects
 list/object shape mismatches with a schema error.
+The state lock uses `fcntl.flock` on POSIX and the one-byte `msvcrt.locking`
+backend on Windows. Both are exclusive locks on the same stable lock file;
+the queue module can be imported on Windows without importing POSIX-only modules.
 After a supervised run returns an exact agent ID, the driver records ownership
 before cwd validation or job journaling; the supervisor reloads durable state
 before committing attempt results so a child cannot overwrite that write-ahead

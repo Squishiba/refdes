@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +20,66 @@ spec.loader.exec_module(queue)
 
 def fixture(name):
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def test_queue_imports_when_posix_lock_module_is_unavailable():
+    script = r'''
+import builtins, importlib.util, sys
+original = builtins.__import__
+def guarded(name, *args, **kwargs):
+    if name == "fcntl":
+        raise ModuleNotFoundError("simulated Windows: no fcntl")
+    return original(name, *args, **kwargs)
+builtins.__import__ = guarded
+spec = importlib.util.spec_from_file_location("queue_mode_windows_import", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+'''
+    proc = subprocess.run([sys.executable, "-c", script, str(QPATH)],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_windows_lock_fallback_is_exclusive_on_posix(tmp_path, monkeypatch):
+    if importlib.util.find_spec("fcntl") is None:
+        return  # The Windows runner exercises the real msvcrt backend instead.
+    import fcntl as posix_fcntl
+
+    class MsvcrtShim:
+        LK_LOCK = 1
+        LK_UNLCK = 2
+
+        @staticmethod
+        def locking(fd, operation, _length):
+            posix_fcntl.flock(fd, posix_fcntl.LOCK_EX if operation == 1
+                              else posix_fcntl.LOCK_UN)
+
+    monkeypatch.setattr(queue, "_lock_backend", lambda: "windows")
+    monkeypatch.setattr(queue, "msvcrt", MsvcrtShim)
+    entered = threading.Event()
+    release = threading.Event()
+    second_entered = threading.Event()
+
+    def first():
+        with queue.locked(tmp_path / "queue.lock"):
+            entered.set()
+            release.wait(2)
+
+    def second():
+        entered.wait(2)
+        with queue.locked(tmp_path / "queue.lock"):
+            second_entered.set()
+
+    one = threading.Thread(target=first)
+    two = threading.Thread(target=second)
+    one.start()
+    two.start()
+    assert entered.wait(2)
+    assert not second_entered.wait(0.1)
+    release.set()
+    one.join(2)
+    two.join(2)
+    assert second_entered.is_set()
 
 
 def create_state(path, **updates):
