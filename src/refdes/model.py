@@ -561,6 +561,24 @@ class CalcLine:
 
 
 @dataclass
+class Navi:
+    """One hand-authored Navi marker scanned out of an item body (Navis
+    design §3). A Navi is one closed, single-line `<!--navi:...-->` comment;
+    the containing item is its source, so it carries no item reference.
+
+    `key` is the marker's own 11-character identity -- "" for a keyless
+    marker (slice 1 never mints; a later slice writes the minted key into
+    the marker, §5/§7.2). `text` is the reminder, single line. `line_offset`
+    is 0-indexed within `Item.body` (add `Item.body_line` for the absolute
+    source line, the `inline_calc` pattern).
+    """
+
+    text: str = ""
+    key: str = ""
+    line_offset: int = 0
+
+
+@dataclass
 class Item:
     id: str
     type: str
@@ -601,6 +619,11 @@ class Item:
     body_line: int | None = None
     # Populated during build:
     calcs: list[CalcLine] = field(default_factory=list)
+    # The item's Navis, scanned out of `body` by navis.scan() during build
+    # (design §3). Deliberately not in build._hash_payload -- which reads
+    # type/fields/links/body, never this -- so a scan-side change can never
+    # move a content hash, seal, or history digest (§7).
+    navis: list[Navi] = field(default_factory=list)
     checks: list[CheckResult] = field(default_factory=list)
     body_html: str = ""
     on_change_override: dict[str, Any] = field(default_factory=dict)  # item-level change policy

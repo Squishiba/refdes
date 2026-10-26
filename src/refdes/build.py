@@ -29,6 +29,7 @@ from . import history as history_mod
 from . import ids as ids_mod
 from . import keys as keys_mod
 from . import nav as nav_mod
+from . import navis as navis_mod
 from . import pages as pages_mod
 from . import status_links as status_links_mod
 from . import workspaces as workspaces_mod
@@ -3941,8 +3942,14 @@ def render_bodies(project: Project) -> None:
     md = _markdown_parser()
 
     for item in project.local_items:
+        # Navis markers are *consumed* here (design §4: the published page
+        # shows no marker bytes), on the render-local copy of the body --
+        # never on item.body, which is hash input. strip_markers returns the
+        # same string object when the body has no `navi:` prefix at all, so
+        # a Navi-free project renders byte-identically.
+        source = navis_mod.strip_markers(item.body)
         # Substitute inline calc values before markdown sees the text.
-        source = INLINE_VALUE_RE.sub(_inline_value_replacer(project, item), item.body)
+        source = INLINE_VALUE_RE.sub(_inline_value_replacer(project, item), source)
 
         # Swap calc blocks for placeholders, render, then inject the evaluated
         # tables. The placeholder has to be plain text -- an HTML comment would be
@@ -4326,6 +4333,13 @@ def build(
     compute_coverage(project, chain_graph=chain_graph)
     compute_board_coverage(project, chain_graph=chain_graph)
     citations_mod.verify(project, require=require_citations)
+    # Navis (in-prog-logs/navis-design-20261025.md §7): the scan reads body
+    # bytes and populates Item.navis -- it is deliberately *after*
+    # compute_hashes/seal.verify, and it mutates neither body nor any hash
+    # input, so a Navi-free project's hashes and a Navi'd project's hashes
+    # are byte-identical to the same content scanned without it (§7.1).
+    for d in navis_mod.scan(project):
+        project.diagnostics.append(d)
     render_bodies(project)
     render_pages(project)
     # After EVERY render pass that can reference an asset (bodies and

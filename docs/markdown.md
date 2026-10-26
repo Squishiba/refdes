@@ -64,6 +64,38 @@ The converter loses {{P_diss}} at full load.
 
 Substitutes a calc value from the same item.
 
+### Navis markers
+
+```markdown
+<!--navi: Model worst-case copper temperature.-->
+```
+
+A **Navi** is one flying note: a single-line HTML comment on the `navi:`
+prefix, written by hand inside an item's body. The published page consumes
+it — the marker's bytes never appear in the rendered HTML — while the tool
+scans every body into one project-wide list you can read with
+[`refdes navis ls`](cli-reference.md#refdes-navis-ls-all-show), and the
+`index` payload carries under its top-level `navis` key.
+
+The grammar is closed and strict:
+
+- one marker per line, a closed `<!--navi: … -->` comment; the text is
+  single-line and may not contain `-->`;
+- a marker may carry its own 11-character key
+  (`<!--navi:k7f3q2x8d0m Model worst-case copper temperature.-->`); keys
+  are minted by the tool in a later slice, so hand-write none of them
+  today;
+- a marker inside a fenced code block, an indented code block, an inline
+  code span, or an open HTML comment is inert — it is literal text there,
+  rendered as-is and not scanned;
+- a malformed marker (no text, a key-shaped head outside the key alphabet)
+  is a warning naming the fix, never quietly swallowed.
+
+The comment form is the point: any standard Markdown renderer already
+hides the marker, and it cannot trigger an inline calc span under it.
+Markers are scanned in **item bodies** only — narrative pages keep the
+plain-comment behavior.
+
 ### Cross-references
 
 ```markdown

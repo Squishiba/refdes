@@ -19,6 +19,7 @@ from . import dates
 from . import history as history_mod
 from . import ids as ids_mod
 from . import nav as nav_mod
+from . import navis as navis_mod
 from . import task_pane as task_pane_mod
 from . import theme as theme_mod
 from . import threads as threads_mod
@@ -695,6 +696,14 @@ def items_json(
     )
     if thread_rows:
         payload["threads"] = thread_rows
+    # Navis (design §11): the projection is present only when the project
+    # has Navis at all -- the same "absent key, not null" convention as
+    # `boards` and `threads`, so a Navi-free project's payload stays
+    # byte-identical. navis.projection is the one service; the CLI reads
+    # the same rows.
+    navi_rows = navis_mod.projection(project)
+    if navi_rows:
+        payload["navis"] = navi_rows
     # `doc` appears only where a definition was actually declared (finding 38),
     # so a project that writes no `doc:` keys gets byte-identical output.
     payload["types"] = {

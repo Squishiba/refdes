@@ -26,6 +26,7 @@ from . import key_restore as key_restore_mod
 from . import keys as keys_mod
 from . import lifecycle as lifecycle_mod
 from . import loader as loader_mod
+from . import navis as navis_mod
 from . import render as render_mod
 from . import revise as revise_mod
 from . import scaffold as scaffold_mod
@@ -2924,6 +2925,77 @@ def cmd_history_migrate_seals(args) -> int:
     return 0
 
 
+def cmd_navis(args) -> int:
+    """The project's Navis -- flying notes (in-prog-logs/navis-design-20261025.md §11).
+
+    The read-only surface of slice 1: `ls` (active markers), `all` (active
+    plus the archive's honest absence), `show <selector>` (one Navi in
+    full). Every row comes from `navis.projection` -- the same single
+    answer the `index` payload carries -- so the CLI can never disagree
+    with `refdes index` about a marker's text, source, or order, and there
+    is no second implementation to maintain (§11's "panel/CLI never a
+    second implementation" rule, the `cmd_thread` precedent).
+
+    Slice 1 mints no keys and archives nothing (design §13), so `show`'s
+    selector is the `ls` ordinal number or a marker's full 11-character key
+    (the key only exists once a later slice writes it), and `all` is the
+    active list with a stated note. Exit posture is the read-only
+    neighbours': a clean run is 0 -- including a project with no Navis at
+    all -- and a selector that names nothing is a naming error, exit 2,
+    like `thread <unknown-ref>`.
+    """
+    project, _stale = _load(args, require_ids=False)
+    _announce_load_writes(project)
+    load_errors = list(project.errors)
+    for d in load_errors:
+        print(str(d), file=sys.stderr)
+    build_mod.build(project, seal_write=False, reseal=False)
+    # Malformed markers are warnings the build already carries; a listing
+    # command must not hide the reason a marker it does not list is missing
+    # (report-on-typo, build.py:66-68).
+    for d in project.diagnostics:
+        if d.level == model.WARNING and "navi marker" in d.message:
+            print(str(d), file=sys.stderr)
+    rows = navis_mod.projection(project)
+
+    if args.navis_command == "show":
+        row = None
+        if args.navi.isdigit():
+            index = int(args.navi) - 1
+            if 0 <= index < len(rows):
+                row = rows[index]
+        else:
+            row = next((r for r in rows if r["key"] == args.navi), None)
+        if row is None:
+            print(
+                f"no Navi {args.navi!r}: `refdes navis ls` numbers them "
+                f"1..{len(rows)}; a selector is a number or a full key",
+                file=sys.stderr,
+            )
+            return 2
+        src = row["source"]
+        key_note = row["key"] if row["key"] else "(keyless -- keys are minted by a later slice)"
+        print(f"Navi: {row['text']}")
+        print(f"  key: {key_note}")
+        print(f"  source: {src['item']} ({src['file']}:{src['line']})")
+        return 0
+
+    verb = args.navis_command
+    if not rows:
+        print("no Navis: no `<!--navi: text-->` marker in any item body")
+        return 1 if load_errors else 0
+    if verb == "all":
+        print(f"{len(rows)} Navis (active):")
+    else:
+        print(f"{len(rows)} Navis:")
+    for number, row in enumerate(rows, 1):
+        src = row["source"]
+        print(f"  {number}. {row['text']}  {src['item']} ({src['file']}:{src['line']})")
+    if verb == "all":
+        print("  archived: none -- archive records land in a later slice (design §13)")
+    return 1 if load_errors else 0
+
+
 def _version_line() -> str:
     """The `--version` output: the installed package's own version, or an
     honest admission when running from a raw checkout with nothing installed.
@@ -3307,6 +3379,51 @@ def main(argv: list[str] | None = None) -> int:
         "regardless: this flag changes the text view's header only)",
     )
     p_thread.set_defaults(func=cmd_thread)
+
+    p_navis = sub.add_parser(
+        "navis",
+        help="list and show the project's Navis (flying notes in item bodies)",
+        description="A Navi is one hand-authored `<!--navi: text-->` comment "
+        "in an item body: a flying note the published page consumes, and "
+        "which the tool scans into one project-wide list "
+        "(in-prog-logs/navis-design-20261025.md). Read-only slice 1: ls "
+        "lists the active markers ordered by (file, line), show prints one "
+        "Navi in full, addressed by its ls number or its full 11-character "
+        "key, all is the active list with a stated note where archived "
+        "Navis will appear. Keys are minted and archive records written "
+        "by later slices, not here. The rows are the same projection the "
+        "index payload's top-level navis key carries. A project with no "
+        "Navis is a clean exit 0; a show selector that names nothing is "
+        "exit 2.",
+    )
+    navis_sub = p_navis.add_subparsers(dest="navis_command", required=True)
+    navis_sub.add_parser(
+        "ls",
+        help="list the active Navis",
+        description="Every marker in any item body, ordered by (file, line), "
+        "as `N. text  DISPLAY-ID (file:line)`. Malformed markers print as "
+        "warnings on stderr with their file:line -- the listing never "
+        "hides the reason a marker it does not list is missing.",
+    )
+    navis_sub.add_parser(
+        "all",
+        help="active Navis, plus the archive's stated (slice 1: empty) half",
+        description="The active list, labelled, plus the archived section's "
+        "line: slice 1 writes no archive records, so it names its absence "
+        "rather than printing nothing where a reader expects the archived "
+        "rows (design §11: `all` distinguishes the two states).",
+    )
+    p_navis_show = navis_sub.add_parser(
+        "show",
+        help="one Navi in full: text, key, source",
+        description="One Navi by its `ls` ordinal (1-based) or its full "
+        "11-character key. A keyless marker's key line says so. An unknown "
+        "selector is exit 2, naming the valid selectors.",
+    )
+    p_navis_show.add_argument(
+        "navi", help="an ls number (1-based) or a full 11-character key"
+    )
+    p_navis.set_defaults(func=cmd_navis)
 
     p_work = sub.add_parser(
         "work",

@@ -652,6 +652,45 @@ never-opened project. Its build never writes a seal.
 
 ---
 
+## `refdes navis ls` / `all` / `show`
+
+The read-only face of [Navis — flying notes](markdown.md#navis-markers):
+one hand-authored `<!--navi: text-->` comment in an item body is scanned
+into one project-wide list, and this command reads that list. The rows are
+the same `navis.projection` the `index` payload carries under its top-level
+`navis` key (ordered by file, then line) — the CLI renders one projection
+and computes no second answer of its own, the `thread` precedent.
+
+```console
+$ refdes navis ls
+2 Navis:
+  1. Model worst-case copper temperature.  NOTE-001 (items/note-a.md:6)
+  2. Recheck decoupling near U14.  NOTE-002 (items/note-b.md:5)
+
+$ refdes navis show 1
+Navi: Model worst-case copper temperature.
+  key: k7f3q2x8d0m
+  source: NOTE-001 (items/note-a.md:6)
+```
+
+| Verb | Meaning |
+| --- | --- |
+| `ls` | Every active marker, as `N. text  DISPLAY-ID (file:line)`. Malformed markers print as warnings on stderr with their `file:line` — the listing never hides the reason a marker it does not list is missing |
+| `all` | The active list, labelled, plus the archived section's line. Slice 1 writes no archive records, so that line names its absence rather than printing nothing where a reader expects the archived rows |
+| `show <selector>` | One Navi in full: text, key, source. The selector is the `ls` ordinal (1-based) or a marker's full 11-character key; a keyless marker's key line says so |
+
+A project with no Navis is a clean **exit 0** (`ls` and `all` print
+`no Navis: …`); a `show` selector that names nothing is a naming error,
+**exit 2**. An items file that fails to parse is reported on stderr and the
+command exits 1 (like `ls`). The commands write nothing: like `thread`, the
+load's own key minting/expansions are announced on **stderr**, and the
+build runs with no seal write.
+
+Keys are minted and archive records written by later slices of the design,
+not by slice 1 — `show` can only print a key that is already in the marker.
+
+---
+
 ## `refdes work`
 
 The project-wide worklist of
