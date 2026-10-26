@@ -116,6 +116,33 @@ def test_navis_show_unknown_exits_2(tmp_path, capsys):
     assert "no Navi" in capsys.readouterr().err
 
 
+def test_navis_show_non_ascii_digit_selector_exits_2(tmp_path, capsys):
+    # `str.isdigit()` is True for '²' and int() then raises -- the
+    # documented posture for a selector that names nothing is exit 2,
+    # not a traceback.
+    config = _setup(tmp_path, TWO_MARKERS)
+    assert _run(config, "--no-write", "navis", "show", "²") == 2
+    assert "no Navi" in capsys.readouterr().err
+
+
+def test_navis_ls_numbers_document_order_on_one_line(tmp_path, capsys):
+    # Two markers share a line: `ls` numbers them as the page reads them
+    # (design §11 (file, line) order + document order), and `show 1` is
+    # the one that comes first in the file, not the one first in the
+    # alphabet.
+    files = {
+        "note-a.md": (
+            "---\nid: NOTE-001\ntype: note\ntitle: Power\n---\n"
+            "<!--navi: zebra first--><!--navi: apple second-->\n"
+        ),
+    }
+    config = _setup(tmp_path, files)
+    assert _run(config, "--no-write", "navis", "show", "1") == 0
+    assert "zebra first" in capsys.readouterr().out
+    assert _run(config, "--no-write", "navis", "show", "2") == 0
+    assert "apple second" in capsys.readouterr().out
+
+
 def test_navis_show_by_all_digit_key(tmp_path, capsys):
     # The key alphabet includes every digit, so an 11-character all-digit
     # key is legal grammar; a full-key selector must resolve as a key, not

@@ -2965,7 +2965,10 @@ def cmd_navis(args) -> int:
         # 11-character all-digit string is legal key grammar and a full-key
         # selector must not be read as an out-of-range ordinal number.
         row = next((r for r in rows if r["key"] == args.navi), None)
-        if row is None and args.navi.isdigit():
+        # ASCII digits only: `str.isdigit()` is true for '²', and int()
+        # then raises -- a selector that names nothing is a naming error,
+        # exit 2, never a traceback.
+        if row is None and re.fullmatch(r"[0-9]+", args.navi):
             index = int(args.navi) - 1
             if 0 <= index < len(rows):
                 row = rows[index]

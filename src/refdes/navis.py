@@ -14,10 +14,18 @@ mints a key, writes a file, or reads an archive record.
 Inertness is the whole point of the comment form (§4): the marker is
 invisible in every standard Markdown renderer, it cannot trigger inline
 calc (comments suppress spans, `inline_calc.py:1-4`), and fenced code,
-indented code blocks, inline code spans and open HTML comments carry it
-as literal text -- so the scan skips all four, the same regions
-`inline_calc._scan_body` already skips. Consumption (stripping the marker
-from the body copy handed to `md.render`, build.render_bodies) is what
+indented code blocks, inline code spans (including ones that close on a
+later line) and open HTML comments carry it as literal text. Inertness
+is therefore defined by the project's OWN renderer, not re-derived:
+`_live_markers` parses the body with `build._markdown_parser` -- the
+same parse the site renders with -- and scans only the `inline` tokens'
+content, so a fence inside a list item, a fence inside a blockquote, a
+multi-line code span and a CRLF body are inert exactly when the
+renderer says they are (the reviews of the first line-based scanner kept
+finding one more context it got wrong; the matrix in
+`tests/test_navis_matrix.py` pins that this stays true).
+Consumption (stripping the marker from the body copy handed to
+`md.render`, build.render_bodies) is what
 keeps the escaped comment text off the published site; it happens on a
 render-local string, never on `Item.body`, so no hash, seal or history
 input ever sees a scan-side change (§7).
@@ -44,105 +52,131 @@ COMMENT_CLOSE = "-->"
 _KEY_SHAPED_RE = re.compile(r"^(\S{11})(?:[ \t]+(.*)|\Z)", re.DOTALL)
 _ALPHABET = frozenset(keys_mod.ALPHABET)
 
+# A line that is left with nothing but blockquote prefixes (plus
+# whitespace) once its markers go is a structural line: the `>` prefixes
+# are container markers, not content -- and a bare `>` line is a blockquote
+# paragraph break, so the residue would split the quoted paragraph. Such a
+# line is dropped whole, terminator with it, like a whitespace-only one.
+_CONTAINER_ONLY_RE = re.compile(r"[ \t]*(?:>[ \t]*)+")
 
-def _scan_line(
-    line: str, offset: int, in_comment: bool
-) -> tuple[list[tuple[int, int, int, str]], bool]:
-    """The `<!--navi:` markers of one line outside inline code spans and
-    comments, as ``(line_offset, start, end, inner)`` (``inner`` is the text
-    between ``<!--navi:`` and the first ``-->``), and the comment state at
-    the line's end.
 
-    Same character rules as `inline_calc._scan_comment_line`: comments do
-    not nest and run to the first ``-->``; a code span is a backtick run
-    closed by an equal run, its content inert; an unclosed run is literal
-    text. A ``<!--navi:`` with no ``-->`` on its line is an opened comment
-    (the grammar is one line, and the existing unclosed-comment warning --
-    `build.py:1797-1803` -- owns that diagnostic; a marker must never be
-    swallowed silently).
+def _scan_block(
+    content: str, base_line: int
+) -> tuple[list[tuple[int, int, int, str]], list[tuple[int, str]]]:
+    """Markers and two-line-marker warnings of one `inline` token's raw
+    content, whose first source line is `base_line`.
+
+    One pass over the whole content -- comment state AND code-span state
+    carry across its newlines, exactly as the renderer reads them: a code
+    span opened on one line and closed on the next is inert, an open
+    comment swallows every marker until its first ``-->``, and a
+    ``<!--navi:`` that closes on a LATER line is a warning naming the
+    one-line grammar (its bytes stay on the page as the escaped comment
+    the renderer shows -- never a silent swallow). A ``<!--navi:`` that
+    never closes belongs to the existing unclosed-comment warning
+    (`build.py:1797-1803`), so nothing is reported for it here.
+
+    Spans are ``(line, start, end)`` offsets into `content`, whose line
+    offsets index the body's lines (markdown-it hands LF-normalized
+    content; a CRLF body's trailing ``\\r`` sits after every span's end,
+    so the offsets index the raw lines too).
     """
     found: list[tuple[int, int, int, str]] = []
-    n = len(line)
+    warnings: list[tuple[int, str]] = []
+    n = len(content)
     i = 0
+    line = 0
+    in_comment = False
     while i < n:
+        char = content[i]
+        if char == "\n":
+            line += 1
+            i += 1
+            continue
         if in_comment:
-            close = line.find(COMMENT_CLOSE, i)
+            close = content.find(COMMENT_CLOSE, i)
             if close < 0:
-                break  # the rest of the line is comment text
+                break  # the rest is comment text (the unclosed-comment warning's)
+            line += content.count("\n", i, close + len(COMMENT_CLOSE))
+            i = close + len(COMMENT_CLOSE)
             in_comment = False
-            i = close + len(COMMENT_CLOSE)
             continue
-        if line.startswith(MARKER_OPEN, i):
-            close = line.find(COMMENT_CLOSE, i + len(MARKER_OPEN))
+        if content.startswith(MARKER_OPEN, i):
+            close = content.find(COMMENT_CLOSE, i + len(MARKER_OPEN))
             if close < 0:
-                in_comment = True  # `<!--` opened; the line has no marker
-                break
-            found.append(
-                (offset, i, close + len(COMMENT_CLOSE), line[i + len(MARKER_OPEN):close])
-            )
-            i = close + len(COMMENT_CLOSE)
+                break  # an unclosed `<!--navi:`: the unclosed-comment warning owns it
+            end = close + len(COMMENT_CLOSE)
+            inner = content[i + len(MARKER_OPEN):close]
+            if "\n" in inner:
+                warnings.append(
+                    (
+                        base_line + line,
+                        "navi marker spans lines; a marker is one line: "
+                        "`<!--navi: the reminder-->`",
+                    )
+                )
+            else:
+                # line-relative spans: `strip_markers` slices body lines.
+                line_start = content.rfind("\n", 0, i) + 1
+                found.append((base_line + line, i - line_start, end - line_start, inner))
+            line += content.count("\n", i, end)
+            i = end
             continue
-        if line.startswith("<!--", i):
+        if content.startswith("<!--", i):
             in_comment = True
-            i += 4
+            i += len("<!--")
             continue
-        if line[i] == "`":
-            start = i
-            while i < n and line[i] == "`":
+        if char == "`":
+            run_start = i
+            while i < n and content[i] == "`":
                 i += 1
-            run = i - start
-            close = i
-            while close < n:
-                if line[close] != "`":
-                    close += 1
-                    continue
+            run = i - run_start
+            close = content.find("`", i)
+            while close >= 0:
                 run_end = close
-                while run_end < n and line[run_end] == "`":
+                while run_end < n and content[run_end] == "`":
                     run_end += 1
                 if run_end - close == run:
+                    # the span is inert, its newlines included
+                    line += content.count("\n", run_start, run_end)
                     i = run_end
                     break
-                close = run_end
-            else:
-                # Unclosed run: literal text; scanning already sits past it.
-                pass
+                close = content.find("`", run_end)
+            # an unclosed run is literal text; i already sits past it
             continue
         i += 1
-    return found, in_comment
+    return found, warnings
 
 
-def _scan_body_lines(
-    lines: list[str],
-) -> list[tuple[int, int, int, str]]:
-    """Every live marker occurrence of the given lines, in source order, as
-    ``(line_offset, start, end, inner)``.
+def _live_markers(body: str) -> tuple[list[tuple[int, int, int, str]], list[tuple[int, str]]]:
+    """Every live marker of one body, in source order, as
+    ``(line, start, end, inner)``, plus two-line-marker warnings as
+    ``(line, message)``.
 
-    Fenced code, indented code blocks and open comments are skipped across
-    lines exactly like `inline_calc._scan_body` (a fence opened in ordinary
-    text ignores comment markers; a comment opened in ordinary text ignores
-    fence lines -- the two inert regions never open inside each other).
+    Live means *outside the renderer's inert regions*: `md.parse` (the
+    project's own parser, `build._markdown_parser`) tokenizes the body;
+    every block that is not an `inline` token -- fenced code, tilde
+    fences, indented code, code that lives inside a list item or a
+    blockquote, on LF or CRLF source alike -- is inert by construction,
+    and a marker inside an inline token's code spans or open comments is
+    inert by the character rules `inline_calc._scan_comment_line` uses.
+    Offsets are into the body's lines (CRLF bodies: markdown-it
+    normalizes a copy for parsing, and marker spans never reach a line's
+    trailing `\\r`, so the offsets index the raw lines too).
     """
-    from . import inline_calc  # circular-import dance: inline_calc is import-light
+    from .build import _markdown_parser  # lazy: build imports this module
 
     found: list[tuple[int, int, int, str]] = []
-    fence: str | None = None
-    in_comment = False
-    for offset, line in enumerate(lines):
-        if fence is not None:
-            close = inline_calc.FENCE_CLOSE_RE.match(line)
-            if close and close.group(1)[0] == fence[0] and len(close.group(1)) >= len(fence):
-                fence = None
+    warnings: list[tuple[int, str]] = []
+    for token in _markdown_parser().parse(body):
+        if token.type != "inline" or token.map is None:
             continue
-        if not in_comment:
-            open_match = inline_calc.FENCE_OPEN_RE.match(line)
-            if open_match:
-                fence = open_match.group(1)[0] * len(open_match.group(1))
-                continue
-            if line.startswith(("    ", "\t")):
-                continue  # an indented code block carries no markers
-        markers, in_comment = _scan_line(line, offset, in_comment)
-        found.extend(markers)
-    return found
+        block_found, block_warnings = _scan_block(token.content, token.map[0])
+        found.extend(block_found)
+        warnings.extend(block_warnings)
+    found.sort(key=lambda marker: (marker[0], marker[1]))
+    warnings.sort()
+    return found, warnings
 
 
 def parse_marker(inner: str) -> tuple[str, str, str | None]:
@@ -174,19 +208,22 @@ def scan_body(body: str) -> tuple[list[Navi], list[tuple[int, str]]]:
     `line_offset` is 0-indexed within the body (add `Item.body_line` for
     the absolute source line, the `inline_calc` pattern). Malformed
     markers -- empty text, a key-shaped head outside the key alphabet --
-    are returned as (offset, message) and never become Navis; an unclosed
-    `<!--navi:` is not a malformed marker (the existing unclosed-comment
-    warning owns it, §4) and is silently inert here because it is already
-    reported there.
+    and a marker that spans two lines are returned as (offset, message)
+    and never become Navis; an unclosed `<!--navi:` is not a malformed
+    marker (the existing unclosed-comment warning owns it, §4) and is
+    silently inert here because it is already reported there.
     """
     navis: list[Navi] = []
     bad: list[tuple[int, str]] = []
-    for offset, _start, _end, inner in _scan_body_lines(body.split("\n")):
+    markers, warnings = _live_markers(body)
+    for offset, _start, _end, inner in markers:
         key, text, error = parse_marker(inner)
         if error is not None:
             bad.append((offset, error))
             continue
         navis.append(Navi(key=key, text=text, line_offset=offset))
+    bad.extend(warnings)
+    bad.sort()
     return navis, bad
 
 
@@ -198,10 +235,11 @@ def strip_markers(body: str) -> str:
     blank line is a paragraph break -- so a marker inside a paragraph
     split it. The rules, in order of application per line:
 
-    * a line that consists only of whitespace plus markers is dropped
-      whole, line terminator with it, so the text around it stays one
-      paragraph (dropping the line keeps CRLF endings intact -- a CRLF
-      body's per-line `\r` rides along and disappears with the line);
+    * a line that consists only of whitespace, blockquote prefixes and
+      markers is dropped whole, line terminator with it -- the text
+      around it stays one paragraph, in plain text and inside a quote
+      (a leftover `>` is itself a blockquote paragraph break; CRLF
+      bodies: a per-line `\r` rides along and disappears with the line);
     * a marker sharing a line with text is removed together with the
       whitespace runs on its sides, collapsed to a single space where
       text remains on both sides -- never a double space, never a
@@ -218,30 +256,53 @@ def strip_markers(body: str) -> str:
     if MARKER_OPEN not in body:
         return body
     lines = body.split("\n")
-    spans_by_line: dict[int, list[tuple[int, int]]] = {}
-    for offset, start, end, _inner in _scan_body_lines(lines):
-        spans_by_line.setdefault(offset, []).append((start, end))
-    if not spans_by_line:
+    by_line: dict[int, list[tuple[int, int, str]]] = {}
+    for offset, start, end, inner in _live_markers(body)[0]:
+        by_line.setdefault(offset, []).append((start, end, inner))
+    if not by_line:
         return body
     kept: list[str] = []
     for offset, line in enumerate(lines):
-        spans = spans_by_line.get(offset)
+        items = by_line.get(offset)
+        if not items:
+            kept.append(line)
+            continue
+        # The scan spans index the inline token's content, which is the
+        # body line minus its container prefix (a list bullet, a `>`, a
+        # table cell's pipes). Use the span when it names the marker's
+        # bytes on the raw line; otherwise locate those bytes by text --
+        # the scan's order is the line's left-to-right order.
+        spans: list[tuple[int, int]] = []
+        cursor = 0
+        for start, end, inner in items:
+            marker = f"{MARKER_OPEN}{inner}{COMMENT_CLOSE}"
+            if line[start:end] == marker:
+                spans.append((start, end))
+                cursor = end
+                continue
+            idx = line.find(marker, cursor)
+            if idx < 0:
+                idx = line.find(marker)
+            if idx < 0:
+                continue  # cannot name the bytes on the raw line: leave them
+            spans.append((idx, idx + len(marker)))
+            cursor = idx + len(marker)
         if not spans:
             kept.append(line)
             continue
         segments = []
-        cursor = 0
+        pos = 0
         for start, end in sorted(spans):
-            segments.append(line[cursor:start])
-            cursor = end
-        segments.append(line[cursor:])
+            segments.append(line[pos:start])
+            pos = end
+        segments.append(line[pos:])
         joined = segments[0]
         for segment in segments[1:]:
             joined = joined.rstrip(" \t")
             rest = segment.lstrip(" \t")
             joined += (" " if joined and rest else "") + rest
-        if not joined.strip():
-            continue  # whitespace + markers only: drop the whole line
+        if not joined.strip() or _CONTAINER_ONLY_RE.fullmatch(joined.rstrip("\r")):
+            continue  # markers (+whitespace/container prefixes) only: drop the line
         kept.append(joined)
     return "\n".join(kept)
 
@@ -298,10 +359,17 @@ def projection(project: Project) -> list[dict]:
                     "text": navi.text,
                     "source": {
                         "item": item.id,
+                        # Design §10: identity resolves by key, never by
+                        # display id (renames move display ids), so the
+                        # row carries the key it should be resolved by.
+                        "key": item.key or None,
                         "file": item.source_file,
                         "line": marker_line(item, navi.line_offset),
                     },
                 }
             )
-    rows.sort(key=lambda row: (row["source"]["file"], row["source"]["line"], row["text"]))
+    # (file, line) only -- a stable sort keeps document order within a
+    # line (two markers on one line are the page's order, not the
+    # alphabet's), which is what `ls` numbers and `show <n>` addresses.
+    rows.sort(key=lambda row: (row["source"]["file"], row["source"]["line"]))
     return rows

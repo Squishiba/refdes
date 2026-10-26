@@ -658,7 +658,8 @@ The read-only face of [Navis — flying notes](markdown.md#navis-markers):
 one hand-authored `<!--navi: text-->` comment in an item body is scanned
 into one project-wide list, and this command reads that list. The rows are
 the same `navis.projection` the `index` payload carries under its top-level
-`navis` key (ordered by file, then line) — the CLI renders one projection
+`navis` key (ordered by file, then line; markers on one line keep document
+order, left to right) — the CLI renders one projection
 and computes no second answer of its own, the `thread` precedent.
 
 ```console
@@ -677,7 +678,7 @@ Navi: Model worst-case copper temperature.
 | --- | --- |
 | `ls` | Every active marker, as `N. text  DISPLAY-ID (file:line)`. Malformed markers print as warnings on stderr with their `file:line` — the listing never hides the reason a marker it does not list is missing |
 | `all` | The active list, labelled, plus the archived section's line. Slice 1 writes no archive records, so that line names its absence rather than printing nothing where a reader expects the archived rows |
-| `show <selector>` | One Navi in full: text, key, source. The selector is the `ls` ordinal (1-based) or a marker's full 11-character key — a key is matched first, so an all-digit key is a selector, not an ordinal; a keyless marker's key line says so |
+| `show <selector>` | One Navi in full: text, key, source. The selector is the `ls` ordinal (1-based, ASCII digits only — `²` is not a digit here) or a marker's full 11-character key — a key is matched first, so an all-digit key is a selector, not an ordinal; a keyless marker's key line says so |
 
 A project with no Navis is a clean **exit 0** (`ls` and `all` print
 `no Navis: …`); a `show` selector that names nothing is a naming error,

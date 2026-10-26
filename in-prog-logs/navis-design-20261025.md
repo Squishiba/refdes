@@ -122,6 +122,8 @@ text        = any text, single line, not containing "-->"
   the kind of byte-equality trap `textio` exists to avoid), keeps line
   reporting exact (a marker line is `item.body_line + offset`, the
   `inline_calc` line-reporting pattern), and keeps the panel row a sentence.
+  A `<!--navi:` that closes on a later line is a warning naming the
+  opening line (`navis._scan_block`), not a silently-ignored Navi.
 - Author writes `<!--navi: remember X-->`; the tool mints the key into the
   marker on the next writable load (§5, §7.2). Malformed `navi:` comment
   (bad key length/alphabet, empty text) is a warning diagnostic at the line
@@ -295,10 +297,15 @@ markers are consumed at render, so there is no in-page anchor target in v1.
 
 ## 11. Project-wide index, panel placement, CLI parity
 
-**Build path.** Markers are discovered in the body scan (regex over item
-bodies outside fences — `inline_calc.triggered_spans` precedent,
-`src/refdes/inline_calc.py:519`; linear in body size, the same cost class
-inline calc already pays). The projection is computed **once per build /
+**Build path.** Markers are discovered by a scan driven by the renderer
+itself: `build._markdown_parser`'s token stream with source maps
+(`src/refdes/navis.py`, `_live_markers`/`_scan_block`), so a marker is
+inert exactly where the published page renders it as literal text --
+fences (including inside blockquotes), indented code, code spans
+spanning lines, open comments -- and linear in body size, the same cost
+class inline calc already pays. A marker that *closes* on a later line
+is a warning naming the opening line; an unclosed one stays the
+existing unclosed-comment diagnostic's. The projection is computed **once per build /
 once per render** — the standing rule for task-pane data
 (`render.py:1145-1157`, "one projection per render", PR #197 review P4) —
 and merged with the `.refdes/navis/` record set (active = markers minus

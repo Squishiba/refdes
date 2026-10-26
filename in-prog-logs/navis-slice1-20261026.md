@@ -1,51 +1,47 @@
 # Navis slice 1 -- grammar, body scan, model, read-only CLI
 
 Task: implement slice 1 of in-prog-logs/navis-design-20261025.md.
-Branch: feat/navis-slice1, base = main (design-doc commits included).
+Branch: feat/navis-slice1, PR #382.
 
 ## Approach
 
-Test-first as required: wrote tests/test_navis.py (grammar, inertness,
-stripping, build integration, hash invariants, rendering, index payload)
-and tests/test_navis_cli.py (ls/all/show, exit codes, help) before the
-implementation. RED recorded on the base: test_navis.py collection failed
-with `ImportError: cannot import name 'navis' from 'refdes'`; the CLI
-file ran 11 failed / 1 passed (argparse `invalid choice: 'navis'`).
+Test-first: tests/test_navis.py (grammar, inertness, stripping, build
+integration, hash invariants, rendering, index payload) and
+tests/test_navis_cli.py (ls/all/show, exit codes, help) before the
+implementation; RED recorded on the base (no `navis` module, argparse
+`invalid choice: 'navis'`).
 
 ## What landed
 
 - src/refdes/navis.py -- closed grammar
-  (`<!--navi: [key ]text-->`, one closed comment per line), a scanner
-  that reuses inline_calc's fence regexes and comment/backtick rules so
-  fenced code, indented code, code spans, and open comments stay inert;
+  (`<!--navi: [key ]text-->`, one closed comment per line), a scanner,
   parse_marker (closed family: no-text and key-shaped-head-outside-the-
-  alphabet are warnings, never absorbed); strip_markers (render-local);
-  scan(project) populates Item.navis; projection(project) is the one
+  alphabet are warnings, never absorbed), strip_markers (render-local),
+  scan(project) populating Item.navis, projection(project) as the one
   shared row service for the payload and the CLI.
-- model.py: Navi dataclass; Item.navis (deliberately outside
-  _hash_payload's type/fields/links/body, so the scan cannot move a hash).
+- model.py: Navi dataclass; Item.navis (outside _hash_payload, so the
+  scan cannot move a hash).
 - build.py: scan step after compute_hashes/seal.verify; render_bodies
   strips markers from the render-local copy before md.render.
 - render.py: top-level `navis` key in items_json, absent-key convention.
 - cli.py: `refdes navis ls|all|show <selector>`; exit 0 clean, exit 2
   unknown selector, malformed markers on stderr.
-- docs/markdown.md (Navis markers section), docs/cli-reference.md
-  (navis section), changelog.d/navis-slice-1.added.md.
+- docs/markdown.md, docs/cli-reference.md,
+  changelog.d/navis-slice-1.added.md.
 
 ## Hard invariant proof
 
-Full suite: 4935 passed, 2 skipped. Differential gate in
-.scratch/navis-slice1-diff/ (old code = main merge-base 78c8954 via
-`git archive`, nasty fixture: CRLF file, list-file body, fence/inline-
-code/page markers, malformed markers, unicode, inline calc on a marker
-line, plus a marker-free twin):
+Differential gate in .scratch/navis-slice1-diff/ (old code = main
+merge-base via `git archive`, nasty fixture: CRLF file, list-file body,
+fence/inline-code/page markers, malformed markers, unicode, inline calc
+on a marker line, marker-splitting-paragraph repro, plus a marker-free
+twin):
 - plain project: check/index/build byte-IDENTICAL (minted keys
   normalized -- keys.mint uses secrets, run-local in both trees);
-- marker project: the ONLY diffs are the `navis` payload key, the
-  malformed-marker warnings in check/diagnostics, and marker bytes
-  consumed from item pages (whole-file normalized equality proves every
-  html delta is navi-explained). content_hash values identical with
-  markers present (index `items` unchanged).
+- marker project: the ONLY diffs are the `navis` payload key, marker
+  warnings in check/diagnostics, and marker bytes consumed from item
+  pages (whole-file normalized equality proves every html delta is
+  navi-explained). content_hash values identical with markers present.
 
 ## Notes / decisions
 
@@ -54,98 +50,68 @@ line, plus a marker-free twin):
 - `all` names the archive's absence honestly (no store in slice 1).
 - Marker line for a list-file body falls back to source_line (the
   body_line-is-None precedent).
-- ruff scoped to touched files: clean (repo-wide baseline has ~99
-  pre-existing findings, untouched).
+- ruff scoped to touched files (repo-wide baseline has ~99 pre-existing
+  findings, untouched; one pre-existing E501 in test_navis.py left).
 
-## Review round (PR #382, head 8a1b835)
+## Review rounds 1-3 (condensed)
 
-Four reviews: 00c8317 (docs chunk, CHANGES REQUESTED), 992a913 (build/cli/
-model, CHANGES REQUESTED), 7c53fb1 (navis.py/tests, CHANGES REQUESTED),
-800855c (render, APPROVE). `gh pr checks 382`: all green.
+Three CHANGES-REQUESTED review rounds on PR #382. Round 1 fixed:
+key-first `show` selector + show's exit-1 on load errors; a vacuous
+scan-changes-no-hash test (stub placed before the first build, direct
+payload pin added); dead code and a stale docstring; docs (usage banner,
+key-first selector row, malformed-marker consumption, payload grammar).
+Design-doc Status line and line cites refreshed. Rejected: design-doc
+relocation, NBSP-after-key semantics, list-continuation inertness as
+code (documented instead). Then rebased onto merged #377 (design-doc
+§4 table-cell conflict; diff scope verified). Round 2: docs said "one
+marker per line" -- the grammar yields two Navis for two closed
+markers on a line; doc corrected, scan + strip pinned, fixture gained
+the twin-marker line. Round 3: behavioural defect -- a marker alone on
+its line inside a paragraph split the paragraph (strip left an empty
+line = paragraph break). strip_markers became structural: marker-only
+lines dropped whole (CRLF-safe), shared lines collapsed; docs, tests,
+and the fixture/normalizer follow.
 
-Fixed:
-- cli.py cmd_navis: show resolves a full 11-char key before reading the
-  selector as an ordinal (all-digit keys are legal grammar); show now
-  returns 1 on load errors (matches ls/all, `thread`, and the
-  cli-reference claim). RED first: two new tests in test_navis_cli.py
-  (all-digit key; show with a broken items file) -> green.
-- tests/test_navis.py test_scan_changes_no_hash was vacuous (build never
-  resets Item.navis, so stubbing scan on an already-scanned project
-  compared navis-populated against navis-populated). Stub goes in before
-  the first build now; added a direct payload pin (the builder's dict has
-  no "navis" key on an item whose navis ARE populated) because the scan
-  runs after compute_hashes, so the on/off build comparison alone is
-  insensitive to a payload regression. Proof harness in
-  .scratch/pr382-review-fixes/verify_scan_hash_test2.py: unpoisoned
-  passes, poisoned _hash_payload trips the pin. The probe project builds
-  before the monkeypatch is in force.
-- navis.py: deleted dead _WSP; scan() docstring said project.warn, build
-  appends to project.diagnostics.
-- cli-reference.md: usage banner gained navis; show row documents
-  key-first selectors. The exit-1-on-parse-failure claim is now true for
-  all three verbs (code fixed, not docs weakened).
-- markdown.md: malformed markers' bytes are consumed from the page (the
-  text disappears until the warning's fix is applied); index payload
-  "carries it" grammar; line-based indented-code rule noted (a marker
-  indented under a list item is inert -- write markers at column 0).
-- design doc: Status line was stale ("Nothing is implemented") -- now
-  names slice 1 implemented, slices 2-4 not; build.py/cli.py/render.py
-  line cites re-verified and shifted to head (the +1 import shifts and
-  the navis insertions).
+## Round 4: renderer-driven scan (root cause of review round 4)
 
-Rejected (PR comment): design doc placement (in-prog-logs, deliberate --
-the design commits ride here; docs/design/ move is a docs-only follow-up
-like #377/#379 territory); NBSP-after-key reads keyless (visible in ls,
-design grammar says key + space, inline_calc precedent); duplicate
-delivery with merged #377 (informational, now moot -- rebased onto main);
-list-continuation inertness as code (design-adopted region rules,
-inline_calc parity; documented in markdown.md instead).
+Fourth review (two reviews, CHANGES REQUESTED) found the hand-rolled
+line scanner diverging from the renderer in seven ways: Unicode-digit
+`show` selectors crashing (str.isdigit accepts `²`); marker-only line
+inside a blockquote splitting the quoted paragraph (bare `>` residue);
+projection sorting by (file, line, TEXT) reordering same-line markers
+(design §11 says document order); inline code spans closing on a later
+line not inert; fences inside blockquotes not inert; a closed marker
+spanning lines silently ignored; CRLF fences breaking inertness after
+the fence. Plus projection rows must carry the item key (design §10:
+resolve by key).
 
-## Rebase onto merged #377
+Root-cause fix, not per-case patches: the scan is now driven by the
+project's own renderer -- `build._markdown_parser` token stream with
+source maps (navis._live_markers/_scan_block). Comment and code-span
+state carry across an inline token's newlines exactly as the renderer
+reads them; markers outside the token stream (fences, indented code,
+html blocks, tables structure) are inert by construction; a closed
+marker spanning lines is a warning naming the opening line (unclosed
+stays the existing unclosed-comment machinery). strip_markers maps the
+scan's content spans onto raw lines (container prefixes shift columns;
+validated span, text-locate fallback) and drops lines left as only
+`>` prefixes. CLI: ASCII-digit ordinals. Projection: stable
+(file, line) sort; source gains `key`.
 
-#377 merged as squash b839a80; branch rebased with
-`git rebase --onto origin/main 1d01356` so the diff is slice-1 files only.
-One conflict: the design doc's §4 marker-table cell (main's #377 review
-rewrote the "invisible" row) -- kept main's wording, applied the
-build.py:1798-1804 cite shift. Diff scope verified file-by-file; targeted
-49 green, diff gate PASS, full suite 4937 passed / 2 skipped; pushed
---force-with-lease (head 8ce86b3), PR body updated, disposition comment
-posted.
-
-## Review round 2 (head 75f0c0d, 1307f94a: one P3)
-
-Docs/markdown.md said "one marker per line"; the scan yields one Navi per
-marker (adjacent markers on a line are two Navis). Design §4 says "One
-line, always" -- that binds a marker to a line (CRLF safety, exact line
-reporting), it does not bind a line to one marker, and §4's closed-family
-grammar closes each marker at the first `-->`; the scan matching the
-grammar is right, the doc over-constrained. Fixed the doc to state the
-accepted grammar (two closed markers on one line are two Navis at the
-same line; one-per-line is convention, not enforcement), added
-test_scan_two_markers_on_one_line pinning scan + strip of the adjacent
-case, and appended a twin-marker line to the differential fixture's
-marker project (gate PASS: both Navis in the payload at line 13, both
-marker lines consumed from the page; plain project byte-identical).
-
-Round 3 (orchestrator differential, head 56bb74a): behavioural defect.
-A marker alone on its own line inside a paragraph split the paragraph:
-strip_markers removed the marker bytes, leaving an EMPTY line, and a
-blank line is a paragraph break. Old code (markers visible as escaped
-text) kept one paragraph; new code broke it. Fix: strip_markers is now
-structural -- a line of whitespace + markers only is dropped whole,
-terminator with it (CRLF-safe: the per-line `\r` rides along); a marker
-sharing a line with text is removed with the whitespace runs on its
-sides, collapsed to one space where text remains both sides (no double
-space, no leading-space line, no trailing-whitespace hard break). Line
-numbers unchanged: scan runs on the original body, strip is render-local
-(pinned by test_payload_lines_name_the_original_body_lines). Tests first
-(RED with the exact repro, 9 failed): repro + paragraph-join, between
-paragraphs, body start/end, CRLF, list item, table row, blockquote,
-render-level single-<p>. Three pre-existing strip assertions (double
-space, leading space, blank-line residue) updated to the new documented
-rule. docs/markdown.md documents the removal rule. Differential fixture
-gained the exact repro paragraph; its normalizer now drops marker-only
-lines too, mirroring the fix; gate PASS (plain byte-identical, marker
-deltas all explained, payload lines 16/17 name the original lines).
-Targeted 59 passed; full suite 4947 passed, 2 skipped; ruff clean on
-touched lines (one pre-existing E501 left alone).
+Pinned by tests/test_navis_matrix.py: 21 Markdown contexts x 5 marker
+placements x LF/CRLF = 210 cells, each asserting scan count, warning
+count, and rendered HTML. Contexts include fences (bare, in-list,
+in-blockquote), indented code, multi-line code spans, open comments,
+raw html, tables, ATX/setext headings, link text, emphasis, escaped
+backslash; placement alone/leading/trailing/two/span. The
+open-comment + two-markers cell pins the swallow-to-first-`-->`
+semantics; list-context span cells pin the unclosed-in-new-item
+consequence. Two existing pins updated to the intended new behavior:
+two-line closed marker now warns; payload source rows carry `key`.
+docs/markdown.md: inertness reworded renderer-driven (lazy-continuation
+markers under list items now COUNT -- behavior change from round 1's
+documented "write at column 0" rule, which is now just a convention);
+span warning; blockquote-only-line drop. docs/cli-reference.md: ASCII
+ordinals, document-order row. Log itself trimmed per the same review
+(no commit shas, rounds condensed, no stale pass counts -- CI is the
+record).

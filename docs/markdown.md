@@ -83,29 +83,36 @@ The grammar is closed and strict:
   (it never spans lines); the text is single-line and may not contain
   `-->` -- the first `-->` closes the marker, so two closed markers on one
   line are two Navis at the same line. One marker per line is the
-  convention the tooling assumes you write; it is not enforced;
+  convention the tooling assumes you write; it is not enforced. A marker
+  that *closes* on a later line is a warning naming the opening line,
+  not a Navi;
 - a marker may carry its own 11-character key
   (`<!--navi:k7f3q2x8d0m Model worst-case copper temperature.-->`); keys
   are minted by the tool in a later slice, so hand-write none of them
   today;
-- a marker inside a fenced code block, an indented code block, an inline
-  code span, or an open HTML comment is inert — it is literal text there,
-  rendered as-is and not scanned. The indented-code rule is line-based,
-  like the inline-calc scan it shares: a marker indented under a list
-  item (a lazy continuation) counts as indented code and is inert —
-  write markers at column 0;
+- a marker is inert exactly where the page's own Markdown renderer says
+  it is literal text: inside a fenced code block, an indented code
+  block, an inline code span (however many lines the span covers), or an
+  open HTML comment. The scan is driven by that renderer's token stream,
+  so fences inside blockquotes, code spans that close on a later line,
+  and CRLF sources all classify the same way the published page does.
+  A marker written as a continuation line under a list item is *not*
+  indented code — it is paragraph text there, and it counts;
 - a malformed marker (no text, a key-shaped head outside the key alphabet)
   is a warning naming the fix, never quietly swallowed. Its bytes are
   still consumed from the published page, so the text inside it disappears
   until the fix the warning names is applied;
 - removal is structural, not just byte-deletion: a line consisting only
   of markers (plus surrounding whitespace) is dropped whole, line
-  terminator with it — a lone marker inside a paragraph never splits it —
-  and a marker sharing a line with text is removed together with the
-  whitespace runs on its sides, collapsed to a single space where text
-  remains on both sides (no double space, no leading-space line). Line
-  numbers in the projection always name the ORIGINAL body lines; markers
-  are stripped only in the render-local copy of the body.
+  terminator with it — a lone marker inside a paragraph never splits it.
+  The same applies inside blockquotes: a line left as only its `>`
+  prefixes is dropped too, so a marker-only line never breaks the
+  quoted paragraph in two. A marker sharing a line with text is removed
+  together with the whitespace runs on its sides, collapsed to a single
+  space where text remains on both sides (no double space, no
+  leading-space line). Line numbers in the projection always name the
+  ORIGINAL body lines; markers are stripped only in the render-local
+  copy of the body.
 
 The comment form is the point: any standard Markdown renderer already
 hides the marker, and it cannot trigger an inline calc span under it.

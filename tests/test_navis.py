@@ -102,12 +102,14 @@ def test_scan_multiple_markers_line_offsets():
 
 
 def test_marker_is_one_line_only():
-    # Grammar §4: one line, always. A `<!--navi:` opened with no `-->` on
-    # its line is not a marker; the existing unclosed-comment machinery
-    # owns that diagnostic (build.py:1797-1803, inline_calc).
+    # Grammar §4: one line, always. A marker that *closes* on a later
+    # line was never a marker: it is a warning naming the opening line.
+    # A `<!--navi:` that never closes is the existing unclosed-comment
+    # machinery's territory (build.py), not this one.
     found, bad = navis.scan_body("<!--navi: spans\ntwo lines-->\n")
     assert found == []
-    assert bad == []
+    assert bad == [(0, "navi marker spans lines; a marker is one line: "
+                       "`<!--navi: the reminder-->`")]
 
 
 def test_malformed_empty_text_is_a_warning():
@@ -285,11 +287,58 @@ def test_strip_marker_in_table_row_collapses_to_clean_row():
 
 
 def test_strip_marker_only_line_in_blockquote():
-    # The `>` is text on the line, so this is the in-place case, not the
-    # whole-line case; the marker's leading whitespace collapses with it.
+    # A `> ` line whose content is only markers is a structural line
+    # (the `>` is a container prefix, not text): the whole line goes, so
+    # the quoted paragraph stays ONE paragraph (a bare `>` line is a
+    # blockquote paragraph break -- the reviewed defect).
     assert navis.strip_markers("> quoted\n> <!--navi: x-->\n> more\n") == (
-        "> quoted\n>\n> more\n"
+        "> quoted\n> more\n"
     )
+
+
+def test_scan_marker_spanning_lines_warns():
+    found, bad = navis.scan_body("text <!--navi: spans\ntwo lines--> more\n")
+    assert found == []
+    assert len(bad) == 1
+    assert bad[0][0] == 0  # reported at the line the marker opened on
+    assert "one line" in bad[0][1]
+    # the bytes are left for the page (an HTML comment, escaped, visible)
+    assert "<!--navi: spans" in navis.strip_markers("text <!--navi: spans\ntwo lines--> more\n")
+
+
+def test_scan_marker_spanning_lines_never_closes_stays_quiet():
+    # An unclosed `<!--navi:` is the existing unclosed-comment warning's
+    # territory (design §4) -- no second diagnostic for it.
+    found, bad = navis.scan_body("text <!--navi: spans\nand stays open forever\n")
+    assert found == [] and bad == []
+
+
+def test_multiline_inline_code_span_is_inert():
+    # CommonMark code spans close on LATER lines; the marker inside is
+    # literal code text, not a Navi, and strip must not delete code.
+    body = "`alpha\n<!--navi: inside span--> beta`\n"
+    found, bad = navis.scan_body(body)
+    assert found == [] and bad == []
+    assert navis.strip_markers(body) is body
+
+
+def test_fence_inside_blockquote_is_inert():
+    body = "> q1\n> ```\n> <!--navi: x-->\n> ```\n> q2\n"
+    found, bad = navis.scan_body(body)
+    assert found == [] and bad == []
+    assert navis.strip_markers(body) is body
+
+
+def test_scan_is_inert_after_fence_on_crlf_body():
+    # The functions advertise CRLF; every marker after a fence used to
+    # vanish on a CRLF body because the close regex lacked a CR.
+    body = "a\r\n```\r\n<!--navi: x-->\r\n```\r\nb\r\n"
+    found, bad = navis.scan_body(body)
+    assert found == [] and bad == []
+    assert navis.strip_markers(body) is body
+    # and a live marker on a CRLF body still lives
+    live = navis.scan_body("a\r\n<!--navi: x-->\r\nb\r\n")
+    assert [n.text for n in live[0]] == ["x"]
 
 
 def test_render_marker_only_line_does_not_split_paragraph(tmp_path):
@@ -308,6 +357,22 @@ def test_render_marker_only_line_does_not_split_paragraph(tmp_path):
     assert "navi" not in html
     assert html.count("<p>") == 1
     assert "a 3V3 rail at\ntext" in html
+
+
+def test_render_marker_only_line_does_not_split_blockquote(tmp_path):
+    project = _project(
+        tmp_path,
+        {
+            "note.md": _md(
+                "NOTE-001", "note", "Power",
+                "> quoted one\n> <!--navi: middle-->\n> quoted two\n",
+            )
+        },
+    )
+    html = project.item_by_id("NOTE-001").body_html
+    assert "navi" not in html
+    assert html.count("<p>") == 1
+    assert "quoted one\nquoted two" in html
 
 
 def test_payload_lines_name_the_original_body_lines(tmp_path):
@@ -554,6 +619,34 @@ def _payload(tmp_path, files):
     return render.items_json(project)
 
 
+def test_projection_keeps_document_order_on_one_line(tmp_path):
+    # Design §11: (file, line) order -- a line with two markers must
+    # keep document order, not text-alphabetical order, so `ls` numbers
+    # and `show <n>` address the markers the way the page reads them.
+    payload = _payload(
+        tmp_path,
+        {"note.md": _md("NOTE-001", "note", "P", "<!--navi: zebra--><!--navi: apple-->\n")},
+    )
+    assert [row["text"] for row in payload["navis"]] == ["zebra", "apple"]
+
+
+def test_projection_source_names_the_item_key(tmp_path):
+    # Design §10: identity resolves by key, never by display id (renames
+    # move display ids); a panel/archive consumer must be able to resolve
+    # the row from the row itself.
+    project = _project(
+        tmp_path,
+        {
+            "note.md": (
+                "---\nid: NOTE-001\ntype: note\ntitle: P\nkey: k7f3q2x8d0m\n---\n"
+                "<!--navi: resolve me-->\n"
+            )
+        },
+    )
+    row = navis.projection(project)[0]
+    assert row["source"]["key"] == "k7f3q2x8d0m"
+
+
 def test_index_payload_omits_navis_key_when_none(tmp_path):
     payload = _payload(
         tmp_path, {"note.md": _md("NOTE-001", "note", "Power", "plain body\n")}
@@ -581,6 +674,7 @@ def test_index_payload_navis_key_rows(tmp_path):
     assert keyed["text"] == "Model the copper thing"
     assert keyed["source"] == {
         "item": "NOTE-001",
+        "key": None,  # the *item* has no key; the row key is the marker's
         "file": "items/note.md",
         "line": 7,
     }
