@@ -1,0 +1,16 @@
+[
+  {
+    "workspaceId": "wks_02c1e172edeaa8ab",
+    "project": "paseo-pr-review-plugin",
+    "name": "redacted",
+    "isolation": "local",
+    "cwd": "/home/jorb/work/paseo-pr-review-plugin"
+  },
+  {
+    "workspaceId": "wks_082b8eac15f08f64",
+    "project": "refdes",
+    "name": "redacted",
+    "isolation": "worktree",
+    "cwd": "/home/jorb/.paseo/worktrees/16msma8v/report-inline-calc-rerun-352-20261025-1"
+  }
+]

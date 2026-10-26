@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -20,8 +21,28 @@ MAX_INCIDENT_RETRIES = 5
 MAX_JOB_RETRIES = 10
 MAX_NUDGES = 2
 MAX_ACTIVE_SECONDS = 14400
+TRANSIENT_GRACE_SECONDS = 120
+LOOP_WINDOW_SECONDS = 600
 DENIAL = ("Queue policy denied this request: {reason}. Use only scoped relative paths and "
           "approved commands in your worktree; do not retry the denied operation.")
+REFERENCE_RISKY = re.compile(
+    r"\b(rm\s|delete|remove|unlink|git push|push (to|the branch)|"
+    r"(?<!direction )merge(?! diffs?)|force|sudo|chmod|chown|curl|wget|ssh|"
+    r"install|reset|checkout\s+main|branch\s+-D|kill|systemctl)\b|"
+    r"/tmp|~/|\.paseo|\.ssh|\.config|/etc/|"
+    r"/home/jorb/work/(paseo-pr-review-plugin|refdes)(?!-dev)\b", re.I)
+REFERENCE_SAFE = re.compile(
+    r"\.scratch|\bscratch probes?\b|\bindependent [a-z ]*probes?\b|"
+    r"(re)?runn?ing[a-z ,-]* probes?|requested foreground checks|existing probes|"
+    r"isolated fixture|(edit|write|update|fix)[a-z ]* the report|"
+    r"untracked REVIEW-[A-Z]+\.md|untracked probes|read-only probes|own worktree|"
+    r"review artifacts|foreground (tests|test)", re.I)
+
+CAPTURED_STATUSES = {"running", "idle", "closed"}
+CAPTURED_AGENT_FIELDS = {"id", "shortId", "name", "provider", "thinking", "status",
+                         "cwd", "created"}
+CAPTURED_WORKSPACE_FIELDS = {"workspaceId", "project", "name", "isolation", "cwd"}
+TERMINAL = {"landed", "parked", "failed"}
 
 
 class QueueError(Exception):
@@ -74,7 +95,8 @@ def _event(state, kind, outcome):
     event_id = f"{state['task_id']}:{seq}"
     event = {"event_id": event_id, "task_id": state["task_id"],
              "kind": kind, "status": state["status"], "outcome": outcome,
-             "report": state.get("report"), "created": time.time()}
+             "report": state.get("report"),
+             "counts": {state["status"]: 1}, "created": time.time()}
     state["event_seq"] = seq
     state.setdefault("outbox", []).append(event)
     return event
@@ -86,11 +108,53 @@ def save_terminal(jobdir, state, status, outcome):
     with locked(jobdir / "job.lock"):
         current = read_json(jobdir / "state.json") if (jobdir / "state.json").exists() else state
         if current.get("status") in ("landed", "parked", "failed"):
-            return current.get("outbox", [])[-1]
+            events = current.get("outbox", [])
+            if events:
+                return events[-1]
+            current["status"] = "paused"  # repair an interrupted terminal commit
         current.update(status=status, outcome=outcome, updated=time.time())
         event = _event(current, "terminal", outcome)
         atomic_json(jobdir / "state.json", current)
-        return event
+    notify_terminal(jobdir, event)
+    return event
+
+
+def notify_terminal(jobdir, event, invoke=None):
+    """Best-effort trusted argv hook; durable event is committed before attempts."""
+    jobdir = Path(jobdir)
+    state = read_json(jobdir / "state.json")
+    command = state.get("notification_command")
+    if command is None:
+        return
+    if not isinstance(command, list) or not command or not all(
+            isinstance(arg, str) and arg for arg in command):
+        result = {"event_id": event["event_id"], "status": "invalid-command"}
+        with locked(jobdir / "job.lock"):
+            current = read_json(jobdir / "state.json")
+            current.setdefault("hook_results", []).append(result)
+            atomic_json(jobdir / "state.json", current)
+        return
+    if invoke is None:
+        def invoke(argv):
+            return subprocess.run(argv, input=json.dumps(event), capture_output=True, text=True,
+                                  cwd=jobdir, env={"PATH": os.environ.get("PATH", ""),
+                                                   "LANG": "C.UTF-8"}, timeout=10)
+    attempts = []
+    for number in range(2):
+        try:
+            proc = invoke(command)
+            attempts.append({"attempt": number + 1, "rc": proc.returncode,
+                             "evidence": bounded_raw(proc.stdout + proc.stderr, 1000)})
+            if proc.returncode == 0:
+                break
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            attempts.append({"attempt": number + 1, "error": str(exc)[:500]})
+    result = {"event_id": event["event_id"], "attempts": attempts,
+              "status": "delivered" if attempts and attempts[-1].get("rc") == 0 else "failed"}
+    with locked(jobdir / "job.lock"):
+        current = read_json(jobdir / "state.json")
+        current.setdefault("hook_results", []).append(result)
+        atomic_json(jobdir / "state.json", current)
 
 
 def bounded_raw(value, limit=8192):
@@ -110,82 +174,502 @@ def resolve_send_acceptance(accepted):
     return "PARK"
 
 
-def classify_permission(request, role_root, allowed_paths=()):
-    """Return (decision, reason, hash); schema uncertainty is never permissive.
-
-    The supported structured schema is deliberately narrow and must be extended
-    only from a real recorded Paseo permit payload.
-    """
-    digest = hashlib.sha256(bounded_raw(request, 65536).encode()).hexdigest()
-    if not isinstance(request, dict):
-        return "UNKNOWN", "request is not an object", digest
-    tool = request.get("tool")
-    cwd = request.get("cwd")
-    args = request.get("input")
-    if tool not in {"read_file", "write_file", "edit_file"}:
-        return "UNKNOWN", "unrecognized or opaque tool request", digest
-    if not isinstance(cwd, str) or not os.path.isabs(cwd) or not isinstance(args, dict):
-        return "UNKNOWN", "missing verified cwd or structured tool input", digest
-    root = Path(role_root).resolve(strict=True)
-    work = Path(cwd).resolve(strict=True)
-    if work != root and root not in work.parents:
-        return "DENY", "working directory is outside the role worktree", digest
-    target_value = args.get("path")
-    if not isinstance(target_value, str) or not target_value or os.path.isabs(target_value):
-        return "UNKNOWN", "target path is missing or not relative", digest
-    candidate = work / target_value
-    # Resolve the nearest existing ancestor; nonexistent tails cannot conceal an
-    # existing symlink escape.
-    parent = candidate
-    while not parent.exists() and parent != parent.parent:
-        parent = parent.parent
-    resolved_parent = parent.resolve(strict=True)
-    if resolved_parent != root and root not in resolved_parent.parents:
-        return "DENY", "resolved target escapes the role worktree", digest
-    target = candidate.resolve(strict=False)
-    if target != root and root not in target.parents:
-        return "DENY", "resolved target escapes the role worktree", digest
-    rel = target.relative_to(root).as_posix()
-    if rel == ".scratch" or rel.startswith(".scratch/"):
-        return "ALLOW", "private role scratch path", digest
-    import fnmatch
-    if tool in {"write_file", "edit_file"} and not any(fnmatch.fnmatchcase(rel, p)
-                                                       for p in allowed_paths):
-        return "DENY", "write is outside declared role scope", digest
-    return "ALLOW", "recognized structured local file operation", digest
+def verified_job_completion(job):
+    """Require the driver's saved executor gate, never child prose/exit alone."""
+    if not isinstance(job, dict) or job.get("phase") != "done" \
+            or job.get("status") != "ready-for-human-gate":
+        return False
+    if not all(job.get(k) for k in ("base_sha", "test_sha", "coder_sha")):
+        return False
+    if not isinstance(job.get("controls"), int) or not isinstance(job.get("intended_reds"), int):
+        return False
+    results = job.get("candidate_results")
+    return isinstance(results, list) and any(
+        isinstance(row, dict) and row.get("rc") == 0 and row.get("failed") == []
+        for row in results)
 
 
-def record_permit(jobdir, owned_ids, row):
-    """Record exact owned permit decisions; foreign requests are untouched."""
-    agent_id = row.get("agentId") if isinstance(row, dict) else None
-    request_id = row.get("requestId") if isinstance(row, dict) else None
-    if not isinstance(agent_id, str) or agent_id not in set(owned_ids):
-        return "FOREIGN"
-    if not isinstance(request_id, str) or not request_id:
-        return "UNKNOWN"
-    decision, reason, digest = classify_permission(row, row.get("cwd", "/"))
+def bounded_recovery(state, signal, now):
+    """Pure bounded recovery policy; returned state can be persisted verbatim."""
+    state = json.loads(json.dumps(state))
+    kind = signal.get("kind") if isinstance(signal, dict) else None
+    evidence = bounded_raw(signal)
+    if not isinstance(signal, dict) or not kind:
+        state.update(status="parked", parked_reason="unknown recovery signal: " + evidence,
+                     retry_at=None)
+        return state, "park", state["parked_reason"]
+
+    def park(reason):
+        state.update(status="parked", parked_reason=reason, retry_at=None)
+        return state, "park", reason
+
+    if kind == "maintenance_stop":
+        state["status"] = "paused"
+        state.setdefault("maintenance", {"intent": "stop", "requested_at": now})
+        return state, "maintenance", "deliberate maintenance stop"
+    if kind == "uncertain_send":
+        return park("send acceptance is uncertain; refusing duplicate delivery")
+    if kind == "daemon_unreachable":
+        attempt, total = int(state.get("incident_retries", 0)), int(state.get("retries", 0))
+        if attempt >= MAX_INCIDENT_RETRIES or total >= MAX_JOB_RETRIES:
+            return park("daemon retry budget exhausted: " + evidence)
+        delay = BACKOFF_SECONDS[attempt]
+        state.update(status="paused", incident_retries=attempt + 1, retries=total + 1,
+                     retry_at=now + delay, recovery_kind=kind, recovery_evidence=evidence)
+        return state, "backoff", f"daemon unreachable; retry in {delay}s"
+    if kind == "transient_error":
+        first = state.setdefault("transient_error_since", now)
+        if signal.get("recovered") is True:
+            state.pop("transient_error_since", None)
+            state["status"] = "running"
+            return state, "adopt", "transient error recovered without nudge"
+        if now - first < TRANSIENT_GRACE_SECONDS:
+            state.update(status="paused", retry_at=first + TRANSIENT_GRACE_SECONDS)
+            return state, "observe", "observing transient error; no send before 120s"
+        if signal.get("verified_signature") is not True:
+            return park("unverified transient-error signature: " + evidence)
+        role = signal.get("role")
+        if role not in {"coder", "designer", "reviewer"}:
+            return park("persistent error has no verified role identity")
+        replacements = state.setdefault("replacements", {})
+        if replacements.get(role, 0) >= 1:
+            return park("persistent error after the one allowed replacement")
+        replacements[role] = replacements.get(role, 0) + 1
+        state.update(status="paused", retry_at=now, recovery_kind=kind)
+        return state, "replace_same_workspace", "persistent verified error; retain workspace"
+    if kind in {"idle", "turn_limit", "loop", "garbled_finish"}:
+        if kind == "loop":
+            since = state.setdefault("loop_signature_since", now)
+            if signal.get("signature_changed") is True or signal.get("artifact_progress") is True:
+                state.pop("loop_signature_since", None)
+                state["status"] = "running"
+                return state, "adopt", "artifact progress resets loop observation"
+            if now - since < LOOP_WINDOW_SECONDS:
+                state.update(status="paused", retry_at=since + LOOP_WINDOW_SECONDS)
+                return state, "observe", "loop signature unchanged; observe to 600s"
+            windows = int(state.get("no_progress_windows", 0)) + 1
+            state["no_progress_windows"] = windows
+            if windows > 1:
+                return park("two no-progress windows with the same failure signature")
+        if kind == "garbled_finish" and signal.get("operation_reconciled") is not True:
+            return park("garbled completion with unreconciled operation identity: " + evidence)
+        if kind == "garbled_finish" and state.get("verdict_repair_used"):
+            return park("review verdict remained malformed after one repair")
+        if kind == "garbled_finish":
+            state["verdict_repair_used"] = True
+        used, maximum = int(state.get("nudges", 0)), state.get("max_nudges", MAX_NUDGES)
+        if isinstance(maximum, bool) or not isinstance(maximum, int) or maximum < 0:
+            return park("invalid persisted nudge budget")
+        if used >= min(maximum, MAX_NUDGES):
+            return park("shared nudge budget exhausted: " + evidence)
+        state.update(status="paused", nudges=used + 1, retry_at=now, recovery_kind=kind,
+                     recovery_evidence=evidence)
+        return state, "continue_same_workspace", f"bounded {kind} continuation"
+    return park("unrecognized recovery kind: " + evidence)
+
+
+def wall_elapsed(state, now):
+    elapsed = float(state.get("active_seconds", 0))
+    started = state.get("active_started_at")
+    if started is not None:
+        elapsed += max(0, now - float(started))
+    return elapsed
+
+
+def start_active_clock(state, now):
+    if state.get("active_started_at") is None:
+        state["active_started_at"] = now
+    return state
+
+
+def stop_active_clock(state, now):
+    state["active_seconds"] = wall_elapsed(state, now)
+    state["active_started_at"] = None
+    return state
+
+
+def _queue_limits(spec):
+    policy = spec.get("queue", {})
+    if not isinstance(policy, dict):
+        raise QueueError("queue must be a JSON object")
+    max_nudges = policy.get("max_nudges", MAX_NUDGES)
+    wall_timeout = policy.get("job_wall_timeout", MAX_ACTIVE_SECONDS)
+    if isinstance(max_nudges, bool) or not isinstance(max_nudges, int) or not 0 <= max_nudges <= 10:
+        raise QueueError("queue.max_nudges must be an integer from 0 through 10")
+    if isinstance(wall_timeout, bool) or not isinstance(wall_timeout, int) or wall_timeout < 1:
+        raise QueueError("queue.job_wall_timeout must be a positive integer")
+    return max_nudges, wall_timeout
+
+
+def reconcile_owned_agents(owned_ids, listing):
+    """Adopt exact captured full IDs; unknown rows never authorize a relaunch."""
+    if not isinstance(listing, list):
+        return {}, {str(a): "listing is not an array" for a in owned_ids}
+    rows, malformed = {}, []
+    for row in listing:
+        if not isinstance(row, dict) or not all(
+                isinstance(row.get(k), str) and row[k] for k in CAPTURED_AGENT_FIELDS) \
+                or set(row) != CAPTURED_AGENT_FIELDS:
+            malformed.append(bounded_raw(row, 1000))
+            continue
+        if row["id"] in rows:
+            malformed.append("duplicate id " + row["id"])
+        rows[row["id"]] = row
+    result, uncertain = {}, {}
+    for agent_id in owned_ids:
+        row = rows.get(agent_id)
+        if row is None:
+            uncertain[agent_id] = "owned full ID absent from fresh listing; do not relaunch"
+        elif row["shortId"] != agent_id[:7]:
+            uncertain[agent_id] = "listing shortId does not match captured full-ID mapping"
+        elif row["status"] == "running":
+            result[agent_id] = "active"
+        elif row["status"] == "idle":
+            result[agent_id] = "idle"
+        elif row["status"] == "closed":
+            result[agent_id] = "closed"
+        else:
+            uncertain[agent_id] = "unverified listing status " + repr(row["status"])
+    if malformed:
+        uncertain["_listing"] = "malformed rows: " + bounded_raw(malformed, 3000)
+    return result, uncertain
+
+
+def validate_wait_result(payload, expected_agent_id):
+    """Accept only the captured idle envelope for the exact full agent ID."""
+    if not isinstance(payload, dict) or set(payload) != {"agentId", "status", "message"}:
+        return False, "unverified paseo wait payload shape: " + bounded_raw(payload)
+    if payload.get("agentId") != expected_agent_id:
+        return False, "paseo wait agentId does not match exact owned ID: " + bounded_raw(payload)
+    if not isinstance(payload.get("message"), str):
+        return False, "paseo wait message is not text: " + bounded_raw(payload)
+    if payload.get("status") != "idle":
+        return False, "paseo wait status is not the captured idle state: " + bounded_raw(payload)
+    return True, "captured idle response"
+
+
+def classify_permit_record(row):
+    """Reference deny/risky semantics; prose alone can never prove ALLOW."""
+    digest = hashlib.sha256(bounded_raw(row, 65536).encode()).hexdigest()
+    if not isinstance(row, dict):
+        return "UNKNOWN", "permit is not an object", digest
+    required = ("agentShortId", "id", "name", "description")
+    if any(not isinstance(row.get(k), str) or not row[k] for k in required):
+        return "UNKNOWN", "permit schema is incomplete", digest
+    if set(row) != set(required):
+        return "UNKNOWN", "permit has uncaptured fields", digest
+    name, description = row["name"], row["description"]
+    if "external_directory" in name.lower() or re.search(r"/tmp|~/", description):
+        return "DENY", "request targets an outside directory", digest
+    if REFERENCE_RISKY.search(name + "\n" + description):
+        return "DENY", "request matches the risky-operation policy", digest
+    if REFERENCE_SAFE.search(description):
+        return "UNKNOWN", "safe-scope prose lacks structured tool input and cwd", digest
+    return "UNKNOWN", "request effect cannot be proven from name and description", digest
+
+
+def record_decision(jobdir, record):
     with locked(Path(jobdir) / "job.lock"):
         state = read_json(Path(jobdir) / "state.json")
-        record = {"agent_id": agent_id, "request_id": request_id,
+        state.setdefault("permit_decisions", []).append(record)
+        atomic_json(Path(jobdir) / "state.json", state)
+
+
+def note_agent(jobdir, agent_id, role):
+    with locked(Path(jobdir) / "job.lock"):
+        state = read_json(Path(jobdir) / "state.json")
+        rows = state.setdefault("owned_agents", {})
+        rows[agent_id] = {"role": role, "status": "recorded"}
+        atomic_json(Path(jobdir) / "state.json", state)
+
+
+def begin_operation(jobdir, kind, role, details):
+    jobdir = Path(jobdir)
+    digest = hashlib.sha256(bounded_raw(details, 65536).encode()).hexdigest()
+    with locked(jobdir / "job.lock"):
+        state = read_json(jobdir / "state.json")
+        operations = state.setdefault("operations", {})
+        for operation in operations.values():
+            if operation.get("kind") == kind and operation.get("role") == role \
+                    and operation.get("status") in {"intent", "uncertain"}:
+                raise QueueError(f"unresolved {kind} operation for {role}; refusing replay")
+        op_id = uuid.uuid4().hex
+        operations[op_id] = {"operation_id": op_id, "kind": kind, "role": role,
+                             "request_hash": digest, "details": bounded_raw(details),
+                             "status": "intent", "created": time.time()}
+        atomic_json(jobdir / "state.json", state)
+    return op_id
+
+
+def finish_operation(jobdir, op_id, status, evidence, agent_id=None):
+    with locked(Path(jobdir) / "job.lock"):
+        state = read_json(Path(jobdir) / "state.json")
+        operation = state.setdefault("operations", {}).get(op_id)
+        if operation is None:
+            raise QueueError(f"operation {op_id} disappeared from durable state")
+        operation.update(status=status, evidence=bounded_raw(evidence), finished=time.time())
+        if agent_id:
+            operation["agent_id"] = agent_id
+        atomic_json(Path(jobdir) / "state.json", state)
+
+
+def unresolved_operations(state):
+    return [op for op in state.get("operations", {}).values()
+            if op.get("status") in {"intent", "uncertain"}]
+
+
+def _listing_from_cli():
+    executable = os.environ.get("AGENTCODER_PASEO", "paseo")
+    try:
+        proc = subprocess.run([executable, "ls", "-g", "--json"], capture_output=True,
+                              text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"global listing failed: {exc}"
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError as exc:
+        return None, f"global listing is not JSON: {exc}; raw={bounded_raw(proc.stdout)}"
+    if proc.returncode or not isinstance(data, list):
+        return None, f"global listing unavailable: rc={proc.returncode}; raw={bounded_raw(data)}"
+    return data, None
+
+
+def _job_agent_ids(job):
+    ids = {job.get(k) for k in ("coder_agent", "designer_agent", "reviewer_agent")}
+    ids.update((job.get("reviewers") or {}).values())
+    return sorted(i for i in ids if isinstance(i, str) and i)
+
+
+def reconcile_job_agents(jobdir, listing=None):
+    """Recover recorded role IDs from the legacy job record and fresh inventory."""
+    jobdir = Path(jobdir)
+    job = read_json(jobdir / "job.json")
+    owned = _job_agent_ids(job)
+    if listing is None:
+        listing, error = _listing_from_cli()
+        if error:
+            return {}, {"_listing": error}
+    adopted, uncertain = reconcile_owned_agents(owned, listing)
+    with locked(jobdir / "job.lock"):
+        state = read_json(jobdir / "state.json")
+        state["owned_agents"] = {aid: {"role": next(
+            (r for r in ("coder", "designer", "reviewer")
+             if job.get(f"{r}_agent") == aid), "reviewer"),
+            "status": adopted.get(aid, "unknown")} for aid in owned}
+        state["reconciliation"] = {"adopted": adopted, "uncertain": uncertain,
+                                    "observed_at": time.time()}
+        for op_id, operation in state.get("operations", {}).items():
+            if operation.get("kind") == "run" and operation.get("status") == "intent":
+                role = operation.get("role")
+                agent_id = job.get(f"{role}_agent") if role else None
+                if isinstance(agent_id, str) and agent_id in adopted:
+                    operation.update(status="adopted", agent_id=agent_id,
+                                     evidence="reconciled from exact saved job.json agent ID")
+                    uncertain.pop(agent_id, None)
+        state["reconciliation"]["uncertain"] = uncertain
+        atomic_json(jobdir / "state.json", state)
+    return adopted, uncertain
+
+
+def process_permits(jobdir, owned_ids, listing, rows, invoke=None):
+    """Process only exact owned short IDs; unknown/risky evidence parks the job."""
+    if not isinstance(rows, list):
+        reason = "permit listing is not the captured array shape: " + bounded_raw(rows)
+        record_decision(jobdir, {"decision": "UNKNOWN", "reason": reason,
+                                "raw": bounded_raw(rows)})
+        return "PARK", reason
+    if invoke is None:
+        def invoke(argv):
+            executable = os.environ.get("AGENTCODER_PASEO", "paseo")
+            return subprocess.run([executable] + argv, capture_output=True, text=True, timeout=60)
+    identity = {}
+    if isinstance(listing, list):
+        for row in listing:
+            if not isinstance(row, dict) or set(row) != CAPTURED_AGENT_FIELDS or any(
+                    not isinstance(row.get(k), str) or not row[k]
+                    for k in CAPTURED_AGENT_FIELDS) or row.get("status") not in CAPTURED_STATUSES:
+                reason = "global listing contains an uncaptured row/status: " + bounded_raw(row)
+                record_decision(jobdir, {"decision": "UNKNOWN", "reason": reason,
+                                         "raw": bounded_raw(row)})
+                return "PARK", reason
+            identity.setdefault(row["shortId"], []).append(row["id"])
+    else:
+        reason = "global listing is not the captured array shape: " + bounded_raw(listing)
+        record_decision(jobdir, {"decision": "UNKNOWN", "reason": reason,
+                                 "raw": bounded_raw(listing)})
+        return "PARK", reason
+    owned_ids = set(owned_ids)
+    for row in rows:
+        if not isinstance(row, dict):
+            record_decision(jobdir, {"decision": "UNKNOWN", "reason": "malformed permit row",
+                                    "raw": bounded_raw(row)})
+            return "PARK", "malformed permit row"
+        short = row.get("agentShortId")
+        request_id = row.get("id")
+        if not isinstance(short, str) or not short or not isinstance(request_id, str) \
+                or not request_id:
+            reason = "permit lacks exact agentShortId or request id; attribution unknown"
+            record_decision(jobdir, {"decision": "UNKNOWN", "reason": reason,
+                                    "raw": bounded_raw(row)})
+            return "PARK", reason
+        matches = identity.get(short, [])
+        if not matches:
+            reason = "permit agentShortId is absent from fresh listing; attribution unknown"
+            record_decision(jobdir, {"decision": "UNKNOWN", "reason": reason,
+                                    "raw": bounded_raw(row)})
+            return "PARK", reason
+        if len(matches) > 1:
+            reason = "permit agentShortId maps to multiple full IDs; attribution ambiguous"
+            record_decision(jobdir, {"decision": "UNKNOWN", "reason": reason,
+                                    "raw": bounded_raw(row)})
+            return "PARK", reason
+        if matches[0] not in owned_ids:
+            continue  # foreign request: do not allow, deny, or rewrite it
+        decision, reason, digest = classify_permit_record(row)
+        # The exact captured shortId maps to one full ID; prefix matching is
+        # deliberately forbidden. Ambiguous/foreign rows are never touched.
+        full_id = matches[0]
+        record = {"agent_id": full_id, "agent_short_id": short, "request_id": request_id,
                   "decision": decision, "reason": reason, "request_hash": digest,
                   "raw": bounded_raw(row)}
-        state.setdefault("permits", []).append(record)
-        atomic_json(Path(jobdir) / "state.json", state)
-    return decision
+        record_decision(jobdir, record)  # durable before any external side effect
+        # The live record has no structured input/cwd, so even a safe-scope
+        # description is incomplete. Deny this exact owned request, then park.
+        deny_message = DENIAL.format(reason=reason)
+        try:
+            result = invoke(["permit", "deny", full_id, request_id, "--message",
+                             deny_message, "--json"])
+            if result.returncode != 0:
+                record_decision(jobdir, {**record, "decision": "STOP_PENDING",
+                                         "reason": "deny response failed; " + reason,
+                                         "raw_response": bounded_raw(result.stdout + result.stderr)})
+            reread = invoke(["permit", "ls", "--json"])
+            try:
+                pending = json.loads(reread.stdout) if reread.returncode == 0 else None
+            except ValueError:
+                pending = None
+            if not isinstance(pending, list):
+                record_decision(jobdir, {**record, "decision": "STOP_PENDING",
+                                         "reason": "permit resolution could not be verified",
+                                         "raw_response": bounded_raw(reread.stdout + reread.stderr)})
+            elif any(isinstance(p, dict) and p.get("agentShortId") == short
+                     and p.get("id") == request_id for p in pending):
+                record_decision(jobdir, {**record, "decision": "STOP_PENDING",
+                                         "reason": "exact permit remains pending after deny",
+                                         "raw_response": bounded_raw(reread.stdout)})
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            record_decision(jobdir, {**record, "decision": "STOP_PENDING",
+                                     "reason": f"deny outcome uncertain: {exc}"})
+        return "PARK", f"owned permit {request_id} denied/parked: {reason}"
+    return "CLEAR", "no exact owned pending permits"
 
 
 def mark_stop_intent(jobdir, agent_ids, reason="maintenance"):
     jobdir = Path(jobdir)
     with locked(jobdir / "job.lock"):
         state = read_json(jobdir / "state.json")
-        state["maintenance"] = {"intent": reason, "requested": time.time(),
+        now = time.time()
+        stop_active_clock(state, now)
+        state["maintenance"] = {"intent": reason, "requested": now,
                                 "agents": {aid: "pending" for aid in agent_ids}}
         state["status"] = "paused"
         atomic_json(jobdir / "state.json", state)
 
 
+def maintenance_stop(jobdir, invoke=None, listing_fn=None, reason="maintenance"):
+    """Persist exact stop intents before stopping, then confirm via fresh listing."""
+    jobdir = Path(jobdir)
+    if invoke is None:
+        def invoke(argv):
+            executable = os.environ.get("AGENTCODER_PASEO", "paseo")
+            return subprocess.run([executable] + argv, capture_output=True, text=True, timeout=60)
+    if listing_fn is None:
+        listing_fn = _listing_from_cli
+    job = read_json(jobdir / "job.json")
+    ids = _job_agent_ids(job)
+    mark_stop_intent(jobdir, ids, reason)
+    before, error = listing_fn()
+    if error:
+        with locked(jobdir / "job.lock"):
+            state = read_json(jobdir / "state.json")
+            state["stop_pending"] = True
+            state["maintenance"]["evidence"] = error
+            atomic_json(jobdir / "state.json", state)
+        return "STOP_PENDING", error
+    states, uncertain = reconcile_owned_agents(ids, before)
+    for aid, status in states.items():
+        if status in {"idle", "closed"}:
+            continue
+        if status != "active":
+            uncertain[aid] = "unverified pre-stop status"
+            continue
+        try:
+            result = invoke(["stop", aid, "--json"])
+            if result.returncode != 0:
+                uncertain[aid] = "stop command failed: " + bounded_raw(
+                    result.stdout + result.stderr, 1000)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            uncertain[aid] = f"stop outcome unknown: {exc}"
+    after, after_error = listing_fn()
+    confirmed = {}
+    if after_error:
+        uncertain["_listing"] = after_error
+    else:
+        confirmed, unresolved = reconcile_owned_agents(ids, after)
+        for aid in ids:
+            if confirmed.get(aid) in {"idle", "closed"}:
+                uncertain.pop(aid, None)
+            else:
+                uncertain[aid] = unresolved.get(aid, "agent remains active or status unknown")
+    with locked(jobdir / "job.lock"):
+        state = read_json(jobdir / "state.json")
+        state["stop_pending"] = bool(uncertain)
+        state["maintenance"]["agents"] = {
+            aid: ("confirmed-inactive" if not uncertain.get(aid) and
+                  (not after_error and confirmed.get(aid) in {"idle", "closed"}) else "pending")
+            for aid in ids}
+        state["maintenance"]["evidence"] = bounded_raw(uncertain) if uncertain else None
+        atomic_json(jobdir / "state.json", state)
+    return ("STOP_PENDING", bounded_raw(uncertain)) if uncertain else ("PAUSED", "all owned agents inactive")
+
+
+def authorize_resume(jobdir, listing=None):
+    """Explicitly authorize parked/maintenance work after fresh reconciliation."""
+    jobdir = Path(jobdir)
+    state = read_json(jobdir / "state.json")
+    if state.get("status") not in {"parked", "paused"}:
+        return False, "job is not parked or paused"
+    job_path = jobdir / "job.json"
+    if not job_path.exists():
+        return False, "legacy job record is missing"
+    job = read_json(job_path)
+    ids = _job_agent_ids(job)
+    if listing is None:
+        listing, error = _listing_from_cli()
+        if error:
+            return False, "fresh daemon inventory required: " + error
+    adopted, uncertain = reconcile_owned_agents(ids, listing)
+    if uncertain:
+        return False, "owned-agent reconciliation is uncertain: " + bounded_raw(uncertain)
+    if state.get("stop_pending") or state.get("maintenance"):
+        if any(status not in {"idle", "closed"} for status in adopted.values()):
+            return False, "maintenance stop is not confirmed for every owned agent"
+    with locked(jobdir / "job.lock"):
+        current = read_json(jobdir / "state.json")
+        current.update(status="paused", explicit_resume=True, resumed_at=time.time(),
+                       maintenance=None, stop_pending=False, parked_reason=None)
+        start_active_clock(current, time.time())
+        current["reconciliation"] = {"adopted": adopted, "uncertain": {},
+                                      "observed_at": time.time()}
+        atomic_json(jobdir / "state.json", current)
+    return True, "resume authorized after fresh inventory"
+
+
 def _parse_event(event):
-    return int(event.get("event_id", "").rsplit(":", 1)[1])
+    try:
+        return int(event.get("event_id", "").rsplit(":", 1)[1])
+    except (AttributeError, IndexError, ValueError) as exc:
+        raise QueueError("corrupt terminal event ID") from exc
 
 
 def wait_for_event(qdir, task_id=None, after="0", timeout=None):
@@ -215,16 +699,28 @@ def wait_for_event(qdir, task_id=None, after="0", timeout=None):
         if timeout is not None and time.monotonic() - started >= timeout:
             return {"event_id": None, "batch_id": qdir.name, "task_id": task_id,
                     "status": "timeout", "outcome": None}, 124
-        time.sleep(1)
+        time.sleep(min(1, POLL_SECONDS))
 
 
-def supervise(spec_path, jobdir, driver_path):
+def supervise(spec_path, jobdir, driver_path, sleep_fn=None):
     """Run one legacy job as a child, retaining every invocation transcript.
 
     Recovery is deliberately conservative: daemon failures are backoff bounded;
     ambiguous child outcomes park. The child owns the existing acceptance gates.
     """
     spec_path, jobdir = Path(spec_path).resolve(), Path(jobdir).resolve()
+    sleep_fn = sleep_fn or time.sleep
+    spec = read_json(spec_path)
+    max_nudges, wall_timeout = _queue_limits(spec)
+    if "publish" in spec and not isinstance(spec["publish"], bool):
+        raise QueueError("publish must be a JSON boolean")
+    queue_config = spec.get("queue", {})
+    hook = spec.get("notification_command")
+    if hook is None and isinstance(queue_config, dict):
+        hook = queue_config.get("notification_command")
+    if hook is not None and (not isinstance(hook, list) or not hook or not all(
+            isinstance(arg, str) and arg for arg in hook)):
+        raise QueueError("notification_command must be a fixed non-empty argv list")
     jobdir.mkdir(parents=True, exist_ok=True)
     state_path = jobdir / "state.json"
     with locked(jobdir / "job.lock"):
@@ -236,14 +732,84 @@ def supervise(spec_path, jobdir, driver_path):
             spec = read_json(spec_path)
             state = {"task_id": spec.get("task_id", jobdir.name), "status": "queued",
                      "event_seq": 0, "outbox": [], "nudges": 0, "retries": 0,
-                     "attempts": [], "owned_agents": [], "report": str(jobdir / "report.md")}
-        state.update(status="running", started=time.time(), maintenance=None)
+                     "attempts": [], "owned_agents": [], "report": str(jobdir / "report.md"),
+                     "spec_path": str(spec_path), "notification_command": hook,
+                     "max_nudges": max_nudges, "job_wall_timeout": wall_timeout,
+                     "active_seconds": 0, "active_started_at": None}
+        if not state.get("maintenance"):
+            state.update(status="running", started=state.get("started", time.time()))
+        state.setdefault("max_nudges", max_nudges)
+        state.setdefault("job_wall_timeout", wall_timeout)
+        state.setdefault("active_seconds", 0)
+        state.setdefault("active_started_at", None)
+        state.setdefault("spec_path", str(spec_path))
+        state.setdefault("notification_command", hook)
         atomic_json(state_path, state)
+    if state.get("maintenance"):
+        print(json.dumps({"status": "paused", "reason": "maintenance intent remains set"}))
+        return 1
+    if (jobdir / "job.json").exists():
+        old_state = read_json(state_path)
+        owned = _job_agent_ids(read_json(jobdir / "job.json"))
+        listing, error = _listing_from_cli()
+        while error:
+            state, action, reason = bounded_recovery(
+                old_state, {"kind": "daemon_unreachable", "evidence": error}, time.time())
+            with locked(jobdir / "job.lock"):
+                atomic_json(state_path, state)
+            if action == "park":
+                event = save_terminal(jobdir, state, "parked", reason)
+                print(json.dumps(event))
+                return 2
+            sleep_fn(max(0, state["retry_at"] - time.time()))
+            old_state = state
+            listing, error = _listing_from_cli()
+        if owned:
+            adopted, uncertain = reconcile_job_agents(jobdir, listing)
+            if uncertain:
+                state = read_json(state_path)
+                state.update(status="parked", parked_reason="owned-agent reconciliation uncertain",
+                             recovery_evidence=bounded_raw(uncertain))
+                with locked(jobdir / "job.lock"):
+                    atomic_json(state_path, state)
+                event = save_terminal(jobdir, state, "parked", state["parked_reason"])
+                print(json.dumps(event))
+                return 2
+    current_state = read_json(state_path)
+    state = current_state
+    pending_ops = unresolved_operations(current_state)
+    if pending_ops:
+        evidence = bounded_raw(pending_ops, 4000)
+        current_state.update(status="parked", parked_reason="unresolved external operation",
+                             recovery_evidence=evidence)
+        with locked(jobdir / "job.lock"):
+            atomic_json(state_path, current_state)
+        event = save_terminal(jobdir, current_state, "parked",
+                              "unresolved external operation; refusing duplicate side effect")
+        print(json.dumps(event))
+        return 2
     attempt_root = jobdir / "attempts"
     attempt_root.mkdir(exist_ok=True)
-    backoff_index = 0
     while True:
-        attempt = attempt_root / f"attempt-{len(state['attempts']) + 1:03d}"
+        now = time.time()
+        if wall_elapsed(state, now) >= state.get("job_wall_timeout", wall_timeout):
+            stop_status, stop_reason = maintenance_stop(jobdir, reason="wall-timeout")
+            if stop_status == "STOP_PENDING":
+                print(json.dumps({"status": "STOP_PENDING", "reason": stop_reason}))
+                return 2
+            state = read_json(state_path)
+            state["maintenance"] = None
+            state["stop_pending"] = False
+            state["status"] = "running"
+            with locked(jobdir / "job.lock"):
+                atomic_json(state_path, state)
+            event = save_terminal(jobdir, state, "parked", "active job wall-time budget exhausted")
+            print(json.dumps(event))
+            return 2
+        start_active_clock(state, now)
+        with locked(jobdir / "job.lock"):
+            atomic_json(state_path, state)
+        attempt = attempt_root / f"attempt-{uuid.uuid4().hex}"
         attempt.mkdir()
         out_path, err_path = attempt / "stdout.txt", attempt / "stderr.txt"
         command = "resume" if (jobdir / "job.json").exists() else "run"
@@ -253,7 +819,8 @@ def supervise(spec_path, jobdir, driver_path):
             cmd.append(str(jobdir))
         started = time.monotonic()
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=MAX_ACTIVE_SECONDS)
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=MAX_ACTIVE_SECONDS,
+                                  env=dict(os.environ, AGENTCODER_SUPERVISED="1"))
             out_path.write_text(proc.stdout, encoding="utf-8")
             err_path.write_text(proc.stderr, encoding="utf-8")
             rc = proc.returncode
@@ -264,44 +831,101 @@ def supervise(spec_path, jobdir, driver_path):
             rc = 124
         state["attempts"].append({"path": str(attempt), "rc": rc,
                                   "duration": time.monotonic() - started})
-        state["retries"] += 1
         state["status"] = "running"
         with locked(jobdir / "job.lock"):
             atomic_json(state_path, state)
         if rc == 0:
-            event = save_terminal(jobdir, state, "landed", "ready-for-human-gate")
+            try:
+                completed_job = read_json(jobdir / "job.json")
+            except QueueError:
+                completed_job = {}
+            if not verified_job_completion(completed_job):
+                event = save_terminal(jobdir, state, "parked",
+                                      "child exit did not have a verified terminal job record")
+                print(json.dumps(event))
+                return 2
+            if spec.get("publish") is True:
+                terminal_status, outcome, code = "landed", "ready-for-human-gate", 0
+            else:
+                terminal_status, code = "parked", 2
+                outcome = "acceptance checks complete; publication disabled for this job"
+            stop_active_clock(state, time.time())
+            with locked(jobdir / "job.lock"):
+                atomic_json(state_path, state)
+            event = save_terminal(jobdir, state, terminal_status, outcome)
             print(json.dumps(event))
-            return 0
+            return code
         # Legacy job.json provides typed pause/escalation; don't turn arbitrary
         # failures into repeated worker turns.
         try:
             job = read_json(jobdir / "job.json")
         except QueueError:
             job = {}
-        reason = str(job.get("reason") or "supervised child failed")
+        child_evidence = ""
+        try:
+            child_evidence = "\n".join((out_path.read_text(encoding="utf-8", errors="replace")
+                                         + "\n" + err_path.read_text(
+                                             encoding="utf-8", errors="replace")).splitlines()[-30:])
+        except OSError:
+            pass
+        reason = str(job.get("reason") or child_evidence or "supervised child failed")
         if rc == 2:
+            stop_active_clock(state, time.time())
+            with locked(jobdir / "job.lock"):
+                atomic_json(state_path, state)
             event = save_terminal(jobdir, state, "parked", reason)
             print(json.dumps(event))
             return 2
         if "DAEMON_NOT_RUNNING" in reason or "cannot launch paseo" in reason.lower():
-            if state["retries"] >= MAX_JOB_RETRIES or backoff_index >= len(BACKOFF_SECONDS):
+            if state.get("incident_retries", 0) >= MAX_INCIDENT_RETRIES \
+                    or state.get("retries", 0) >= MAX_JOB_RETRIES:
                 event = save_terminal(jobdir, state, "parked", reason)
                 print(json.dumps(event))
                 return 2
-            delay = BACKOFF_SECONDS[backoff_index]
-            backoff_index += 1
-            state["retry_at"] = time.time() + delay
+            state, action, reason = bounded_recovery(
+                state, {"kind": "daemon_unreachable", "evidence": reason}, time.time())
+            if action == "park":
+                stop_active_clock(state, time.time())
+                with locked(jobdir / "job.lock"):
+                    atomic_json(state_path, state)
+                event = save_terminal(jobdir, state, "parked", reason)
+                print(json.dumps(event))
+                return 2
+            delay = state["retry_at"] - time.time()
             with locked(jobdir / "job.lock"):
                 atomic_json(state_path, state)
-            time.sleep(delay)
+            sleep_fn(max(0, delay))
             # Queue-owned resumes, rather than resubmitting a run that may have
             # created workers, require a reconciled live inventory. Fail closed
             # when no durable owned IDs can be proven.
-            state["status"] = "parked"
-            message = reason + "; daemon recovery requires reconciliation"
-            event = save_terminal(jobdir, state, "parked", message)
-            print(json.dumps(event))
-            return 2
+            listing, error = _listing_from_cli()
+            if error:
+                state, action, message = bounded_recovery(
+                    state, {"kind": "daemon_unreachable", "evidence": error}, time.time())
+                with locked(jobdir / "job.lock"):
+                    atomic_json(state_path, state)
+                if action == "park":
+                    stop_active_clock(state, time.time())
+                    with locked(jobdir / "job.lock"):
+                        atomic_json(state_path, state)
+                    event = save_terminal(jobdir, state, "parked", message)
+                    print(json.dumps(event))
+                    return 2
+                sleep_fn(max(0, state["retry_at"] - time.time()))
+                continue
+            if (jobdir / "job.json").exists():
+                adopted, uncertain = reconcile_job_agents(jobdir, listing)
+                if uncertain:
+                    message = "daemon recovered but owned-agent reconciliation is uncertain: " \
+                        + bounded_raw(uncertain)
+                    event = save_terminal(jobdir, state, "parked", message)
+                    print(json.dumps(event))
+                    return 2
+            state["incident_retries"] = 0
+            state["status"] = "running"
+            with locked(jobdir / "job.lock"):
+                atomic_json(state_path, state)
+            continue
         event = save_terminal(jobdir, state, "parked", reason)
         print(json.dumps(event))
         return 2
@@ -318,6 +942,31 @@ def cli(argv, driver_path):
             return supervise(argv[1], argv[2], driver_path)
         except (QueueError, OSError) as exc:
             print(json.dumps({"status": "parked", "reason": str(exc)}))
+            return 2
+    if argv[:2] == ["queue", "stop"]:
+        if len(argv) != 3:
+            print("usage: agentcoder.py queue stop JOBDIR")
+            return 1
+        try:
+            status, reason = maintenance_stop(argv[2])
+            print(json.dumps({"status": status, "reason": reason}, sort_keys=True))
+            return 0 if status == "PAUSED" else 2
+        except (QueueError, OSError) as exc:
+            print(json.dumps({"status": "STOP_PENDING", "reason": str(exc)}))
+            return 2
+    if argv[:2] == ["queue", "resume"]:
+        if len(argv) != 3:
+            print("usage: agentcoder.py queue resume JOBDIR")
+            return 1
+        try:
+            ok, reason = authorize_resume(argv[2])
+            if not ok:
+                print(json.dumps({"status": "parked", "reason": reason}, sort_keys=True))
+                return 2
+            state = read_json(Path(argv[2]) / "state.json")
+            return supervise(state["spec_path"], argv[2], driver_path)
+        except (QueueError, OSError, KeyError) as exc:
+            print(json.dumps({"status": "parked", "reason": str(exc)}, sort_keys=True))
             return 2
     if argv[:2] == ["queue", "wait"]:
         import argparse

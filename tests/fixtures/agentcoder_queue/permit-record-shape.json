@@ -1,0 +1,6 @@
+{
+  "agentShortId": "f399385",
+  "id": "request-id-fixture",
+  "name": "external_directory",
+  "description": "read outside the worktree"
+}

@@ -1,8 +1,7 @@
 # agentcoder — a small driver for coder / blind test designer / executor loops
 
-`tools/agentcoder/agentcoder.py` is a **plain driver script** (stdlib only,
-one file; currently 955 non-blank/non-comment lines — ~1000 is a soft
-sanity ceiling, not enforced by a check) that runs the AgentCoder paper
+`tools/agentcoder/agentcoder.py` is a **plain driver script** with an opt-in
+stdlib-only `queue_mode.py` state module that runs the AgentCoder paper
 loop against Paseo agents:
 
 - a **CODER** agent implements a contract,
@@ -16,10 +15,10 @@ loop against Paseo agents:
   the tests, checks them against the *base* commit, then runs them against
   the coder's candidate and feeds precise failures back.
 
-It deliberately replaces the earlier Paseo-plugin attempt (hooks, journal,
-receipts). There are **no event hooks here**: `paseo run` and
-`paseo send` block until the agent's turn ends, so *the blocking subprocess
-call is the completion signal*. No daemon, no journal, no subscriptions.
+Legacy `run`/`resume` have no Paseo event hooks or journal: `paseo run` and
+`paseo send` block until the agent's turn ends, so *the blocking subprocess call
+is the completion signal*. Opt-in supervised mode adds local durable state and
+the process/event wait surface described below.
 
 ## Usage
 
@@ -29,6 +28,8 @@ python tools/agentcoder/agentcoder.py resume JOBDIR
 python tools/agentcoder/agentcoder.py status JOBDIR
 python tools/agentcoder/agentcoder.py supervise SPEC.json JOBDIR
 python tools/agentcoder/agentcoder.py queue wait QDIR [TASK_ID] --after EVENT_ID [--timeout SECONDS]
+python tools/agentcoder/agentcoder.py queue stop JOBDIR
+python tools/agentcoder/agentcoder.py queue resume JOBDIR
 ```
 
 The first opt-in supervised entry point stores locked state and retained
@@ -36,7 +37,10 @@ attempt transcripts in `JOBDIR`; terminal state is committed with an event
 before the process exits. `queue wait` reads durable events before waiting and
 rechecks at most once per second. See [the supervised mode guide](../../docs/agentcoder-queue.md)
 for current limits and the pending real-daemon gate. Existing `run`, `resume`,
-and `status` behavior remains the default.
+and `status` behavior remains the default. Supervised jobs need existing role
+workspaces in `SPEC.json`; `publish` defaults to false and must be explicitly
+true for trusted-driver push/PR creation. Queue policy fields
+`queue.max_nudges` and `queue.job_wall_timeout` default to 2 and 14400 seconds.
 
 `JOBDIR` defaults to `<repo>/.scratch/agentcoder/<task_id>/` — keep job
 dirs out of tracked paths (in this repo `.scratch/` is gitignored). Exit
