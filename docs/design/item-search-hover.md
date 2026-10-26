@@ -1,6 +1,10 @@
-Status: **proposed**; **no slices scoped, no code written**. Nothing in this
-document is a commitment to build it. It records a way for an author who cannot
-remember whether a fact is already in the project to ask the project instead.
+Status: **proposed**; **no code for the search has landed**. The VS Code
+adapter this design builds on is partly built — Slice V−1 (`da2e44b`/#58) and
+Slice V0 (`0f38619`/#66) have both landed (§3.5) — so the earlier header claim
+"no slices scoped, no code written" is true only of the search itself.
+Nothing in this document is a commitment to build it. It records a way for an
+author who cannot remember whether a fact is already in the project to ask
+the project instead.
 The earlier §4 conclusion against the trigger was based on the wrong evidence:
 this repository's tiny dogfood items and AI-agent task logs do not represent
 Jared's private hardware-spec authoring. Jared has now described three real

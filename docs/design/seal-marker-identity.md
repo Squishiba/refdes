@@ -1,6 +1,9 @@
 Status: proposed (drafted 2026-09-27) — a design note, not a decision. Nothing here is
-landed; `history.py` and its tests are untouched. Jared's call is required before any
-implementation.
+landed: `history.py` has no `deleted:` namespace. The file is no longer untouched —
+it has been edited since drafting (#212, #271, #272, #323, #330 — store,
+redact-restore, capture and calc-digest fixes)
+and the display-id fallback §1 names is live code (`history.py:1279`). Jared's call
+is required before any implementation.
 
 # What a `legacy-seal` marker is about when its item is gone
 
