@@ -130,3 +130,10 @@ _DestinationMoved surface the clear warning. Crash-point matrix added:
 state in every cell). Rename route: the CLI rename command is not a
 journaled route (journal scope is the serve save path) -- not in the
 matrix. Wiring suite 55 passed, module 122.
+
+## Round-3 CI fix
+
+windows-latest failed one test: NTFS reads the colon in `vin:min.md` as a
+stream separator, so the fixture file never exists as an item and the GET
+has no edit shape. Skipped the colon test on nt (the device-name test
+covers the same arm class on every platform).

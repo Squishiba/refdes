@@ -798,6 +798,12 @@ def test_a_device_name_item_file_refuses_the_save_cleanly(tmp_path):
     assert editor_journal.pending(str(tmp_path)) is None
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows cannot create a filename with a colon: NTFS reads it "
+    "as a stream separator (the device-name test covers this arm class "
+    "on every platform)",
+)
 def test_a_colon_in_the_item_file_name_refuses_the_save_cleanly(tmp_path):
     make_project(tmp_path)
     (tmp_path / "items" / "vin:min.md").write_text(COLON_MD, encoding="utf-8")
