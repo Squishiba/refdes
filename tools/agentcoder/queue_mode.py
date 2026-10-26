@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import time
+import traceback
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -91,6 +92,33 @@ def read_json(path):
         raise QueueError(f"corrupt or unreadable state {path}: {exc}") from exc
 
 
+def load_state(jobdir):
+    """Load queue state after checking its durable schema.
+
+    `owned_agents` is always an object keyed by full agent ID; operations and
+    maintenance agent records are also objects, while attempts and outbox are
+    arrays. Missing collections are accepted for older opt-in state files.
+    """
+    jobdir = Path(jobdir)
+    state = read_json(jobdir / "state.json")
+    if not isinstance(state, dict):
+        raise QueueError("invalid queue state schema: root must be an object")
+    for key in ("owned_agents", "operations", "replacements"):
+        if key in state and not isinstance(state[key], dict):
+            raise QueueError(f"invalid queue state schema: {key} must be an object keyed by ID")
+    for key in ("attempts", "outbox", "permit_decisions", "hook_results"):
+        if key in state and not isinstance(state[key], list):
+            raise QueueError(f"invalid queue state schema: {key} must be an array")
+    if "maintenance" in state and state["maintenance"] is not None \
+            and not isinstance(state["maintenance"], dict):
+        raise QueueError("invalid queue state schema: maintenance must be an object or null")
+    if isinstance(state.get("maintenance"), dict) \
+            and "agents" in state["maintenance"] \
+            and not isinstance(state["maintenance"]["agents"], dict):
+        raise QueueError("invalid queue state schema: maintenance.agents must be an object keyed by ID")
+    return state
+
+
 def _event(state, kind, outcome):
     seq = int(state.get("event_seq", 0)) + 1
     event_id = f"{state['task_id']}:{seq}"
@@ -123,7 +151,7 @@ def save_terminal(jobdir, state, status, outcome):
 def notify_terminal(jobdir, event, invoke=None):
     """Best-effort trusted argv hook; durable event is committed before attempts."""
     jobdir = Path(jobdir)
-    state = read_json(jobdir / "state.json")
+    state = load_state(jobdir)
     command = state.get("notification_command")
     if command is None:
         return
@@ -131,7 +159,7 @@ def notify_terminal(jobdir, event, invoke=None):
             isinstance(arg, str) and arg for arg in command):
         result = {"event_id": event["event_id"], "status": "invalid-command"}
         with locked(jobdir / "job.lock"):
-            current = read_json(jobdir / "state.json")
+            current = load_state(jobdir)
             current.setdefault("hook_results", []).append(result)
             atomic_json(jobdir / "state.json", current)
         return
@@ -153,7 +181,7 @@ def notify_terminal(jobdir, event, invoke=None):
     result = {"event_id": event["event_id"], "attempts": attempts,
               "status": "delivered" if attempts and attempts[-1].get("rc") == 0 else "failed"}
     with locked(jobdir / "job.lock"):
-        current = read_json(jobdir / "state.json")
+        current = load_state(jobdir)
         current.setdefault("hook_results", []).append(result)
         atomic_json(jobdir / "state.json", current)
 
@@ -419,14 +447,14 @@ def classify_permit_record(row):
 
 def record_decision(jobdir, record):
     with locked(Path(jobdir) / "job.lock"):
-        state = read_json(Path(jobdir) / "state.json")
+        state = load_state(jobdir)
         state.setdefault("permit_decisions", []).append(record)
         atomic_json(Path(jobdir) / "state.json", state)
 
 
 def note_agent(jobdir, agent_id, role):
     with locked(Path(jobdir) / "job.lock"):
-        state = read_json(Path(jobdir) / "state.json")
+        state = load_state(jobdir)
         rows = state.setdefault("owned_agents", {})
         rows[agent_id] = {"role": role, "status": "recorded"}
         atomic_json(Path(jobdir) / "state.json", state)
@@ -436,7 +464,7 @@ def begin_operation(jobdir, kind, role, details):
     jobdir = Path(jobdir)
     digest = hashlib.sha256(bounded_raw(details, 65536).encode()).hexdigest()
     with locked(jobdir / "job.lock"):
-        state = read_json(jobdir / "state.json")
+        state = load_state(jobdir)
         operations = state.setdefault("operations", {})
         for operation in operations.values():
             if operation.get("kind") == kind and operation.get("role") == role \
@@ -452,7 +480,7 @@ def begin_operation(jobdir, kind, role, details):
 
 def finish_operation(jobdir, op_id, status, evidence, agent_id=None):
     with locked(Path(jobdir) / "job.lock"):
-        state = read_json(Path(jobdir) / "state.json")
+        state = load_state(jobdir)
         operation = state.setdefault("operations", {}).get(op_id)
         if operation is None:
             raise QueueError(f"operation {op_id} disappeared from durable state")
@@ -489,18 +517,23 @@ def _job_agent_ids(job):
     return sorted(i for i in ids if isinstance(i, str) and i)
 
 
+def _durable_agent_ids(jobdir, job):
+    return sorted(set(_job_agent_ids(job)) | set(load_state(jobdir).get("owned_agents", {})))
+
+
 def reconcile_job_agents(jobdir, listing=None):
     """Recover recorded role IDs from the legacy job record and fresh inventory."""
     jobdir = Path(jobdir)
     job = read_json(jobdir / "job.json")
-    owned = _job_agent_ids(job)
+    prior_state = load_state(jobdir)
+    owned = sorted(set(_job_agent_ids(job)) | set(prior_state.get("owned_agents", {})))
     if listing is None:
         listing, error = _listing_from_cli()
         if error:
             return {}, {"_listing": error}
     adopted, uncertain = reconcile_owned_agents(owned, listing)
     with locked(jobdir / "job.lock"):
-        state = read_json(jobdir / "state.json")
+        state = load_state(jobdir)
         state["owned_agents"] = {aid: {"role": next(
             (r for r in ("coder", "designer", "reviewer")
              if job.get(f"{r}_agent") == aid), "reviewer"),
@@ -661,7 +694,7 @@ def process_permits(jobdir, owned_ids, listing, rows, invoke=None, trusted_agent
 def mark_stop_intent(jobdir, agent_ids, reason="maintenance"):
     jobdir = Path(jobdir)
     with locked(jobdir / "job.lock"):
-        state = read_json(jobdir / "state.json")
+        state = load_state(jobdir)
         now = time.time()
         stop_active_clock(state, now)
         state["maintenance"] = {"intent": reason, "requested": now,
@@ -679,13 +712,14 @@ def maintenance_stop(jobdir, invoke=None, listing_fn=None, reason="maintenance")
             return subprocess.run([executable] + argv, capture_output=True, text=True, timeout=60)
     if listing_fn is None:
         listing_fn = _listing_from_cli
-    job = read_json(jobdir / "job.json")
-    ids = _job_agent_ids(job)
+    job_path = jobdir / "job.json"
+    job = read_json(job_path) if job_path.exists() else {}
+    ids = _durable_agent_ids(jobdir, job)
     mark_stop_intent(jobdir, ids, reason)
     before, error = listing_fn()
     if error:
         with locked(jobdir / "job.lock"):
-            state = read_json(jobdir / "state.json")
+            state = load_state(jobdir)
             state["stop_pending"] = True
             state["maintenance"]["evidence"] = error
             atomic_json(jobdir / "state.json", state)
@@ -722,7 +756,7 @@ def maintenance_stop(jobdir, invoke=None, listing_fn=None, reason="maintenance")
             else:
                 uncertain[aid] = unresolved.get(aid, "agent remains active or status unknown")
     with locked(jobdir / "job.lock"):
-        state = read_json(jobdir / "state.json")
+        state = load_state(jobdir)
         state["stop_pending"] = bool(uncertain)
         state["maintenance"]["agents"] = {
             aid: ("confirmed-inactive" if not uncertain.get(aid) and
@@ -736,7 +770,7 @@ def maintenance_stop(jobdir, invoke=None, listing_fn=None, reason="maintenance")
 def authorize_resume(jobdir, listing=None):
     """Explicitly authorize parked/maintenance work after fresh reconciliation."""
     jobdir = Path(jobdir)
-    state = read_json(jobdir / "state.json")
+    state = load_state(jobdir)
     if state.get("status") not in {"parked", "paused"}:
         return False, "job is not parked or paused"
     if state.get("outcome") == "acceptance checks complete; publication disabled for this job":
@@ -745,7 +779,7 @@ def authorize_resume(jobdir, listing=None):
     if not job_path.exists():
         return False, "legacy job record is missing"
     job = read_json(job_path)
-    ids = _job_agent_ids(job)
+    ids = _durable_agent_ids(jobdir, job)
     if listing is None:
         listing, error = _listing_from_cli()
         if error:
@@ -757,7 +791,7 @@ def authorize_resume(jobdir, listing=None):
         if any(status not in {"idle", "closed"} for status in adopted.values()):
             return False, "maintenance stop is not confirmed for every owned agent"
     with locked(jobdir / "job.lock"):
-        current = read_json(jobdir / "state.json")
+        current = load_state(jobdir)
         current.update(status="paused", explicit_resume=True, resumed_at=time.time(),
                        maintenance=None, stop_pending=False, parked_reason=None)
         start_active_clock(current, time.time())
@@ -790,7 +824,7 @@ def wait_for_event(qdir, task_id=None, after="0", timeout=None):
             paths = [qdir / "jobs" / task_id / "state.json"]
         events = []
         for path in paths:
-            state = read_json(path)
+            state = load_state(path.parent)
             events.extend(e for e in state.get("outbox", [])
                           if _parse_event(e) > cursor and
                           e.get("status") in ("landed", "parked", "failed"))
@@ -804,7 +838,7 @@ def wait_for_event(qdir, task_id=None, after="0", timeout=None):
         time.sleep(min(1, POLL_SECONDS))
 
 
-def supervise(spec_path, jobdir, driver_path, sleep_fn=None):
+def _supervise(spec_path, jobdir, driver_path, sleep_fn=None):
     """Run one legacy job as a child, retaining every invocation transcript.
 
     Recovery is deliberately conservative: daemon failures are backoff bounded;
@@ -827,14 +861,14 @@ def supervise(spec_path, jobdir, driver_path, sleep_fn=None):
     state_path = jobdir / "state.json"
     with locked(jobdir / "job.lock"):
         if state_path.exists():
-            state = read_json(state_path)
+            state = load_state(jobdir)
             if state.get("status") in ("landed", "parked", "failed"):
                 return 0 if state["status"] == "landed" else 2
         else:
             spec = read_json(spec_path)
             state = {"task_id": spec.get("task_id", jobdir.name), "status": "queued",
                      "event_seq": 0, "outbox": [], "nudges": 0, "retries": 0,
-                     "attempts": [], "owned_agents": [], "report": str(jobdir / "report.md"),
+                     "attempts": [], "owned_agents": {}, "report": str(jobdir / "report.md"),
                      "spec_path": str(spec_path), "notification_command": hook,
                      "max_nudges": max_nudges, "job_wall_timeout": wall_timeout,
                      "active_seconds": 0, "active_started_at": None}
@@ -851,8 +885,8 @@ def supervise(spec_path, jobdir, driver_path, sleep_fn=None):
         print(json.dumps({"status": "paused", "reason": "maintenance intent remains set"}))
         return 1
     if (jobdir / "job.json").exists():
-        old_state = read_json(state_path)
-        owned = _job_agent_ids(read_json(jobdir / "job.json"))
+        old_state = load_state(jobdir)
+        owned = _durable_agent_ids(jobdir, read_json(jobdir / "job.json"))
         listing, error = _listing_from_cli()
         while error:
             state, action, reason = bounded_recovery(
@@ -869,7 +903,7 @@ def supervise(spec_path, jobdir, driver_path, sleep_fn=None):
         if owned:
             adopted, uncertain = reconcile_job_agents(jobdir, listing)
             if uncertain:
-                state = read_json(state_path)
+                state = load_state(jobdir)
                 state.update(status="parked", parked_reason="owned-agent reconciliation uncertain",
                              recovery_evidence=bounded_raw(uncertain))
                 with locked(jobdir / "job.lock"):
@@ -877,7 +911,7 @@ def supervise(spec_path, jobdir, driver_path, sleep_fn=None):
                 event = save_terminal(jobdir, state, "parked", state["parked_reason"])
                 print(json.dumps(event))
                 return 2
-    current_state = read_json(state_path)
+    current_state = load_state(jobdir)
     state = current_state
     pending_ops = unresolved_operations(current_state)
     if pending_ops:
@@ -890,6 +924,8 @@ def supervise(spec_path, jobdir, driver_path, sleep_fn=None):
                               "unresolved external operation; refusing duplicate side effect")
         print(json.dumps(event))
         return 2
+
+
     attempt_root = jobdir / "attempts"
     attempt_root.mkdir(exist_ok=True)
     while True:
@@ -899,7 +935,7 @@ def supervise(spec_path, jobdir, driver_path, sleep_fn=None):
             if stop_status == "STOP_PENDING":
                 print(json.dumps({"status": "STOP_PENDING", "reason": stop_reason}))
                 return 2
-            state = read_json(state_path)
+            state = load_state(jobdir)
             state["maintenance"] = None
             state["stop_pending"] = False
             state["status"] = "running"
@@ -931,6 +967,12 @@ def supervise(spec_path, jobdir, driver_path, sleep_fn=None):
                                 encoding="utf-8")
             err_path.write_text("supervised child timed out", encoding="utf-8")
             rc = 124
+        except Exception:
+            err_path.write_text(traceback.format_exc(), encoding="utf-8")
+            rc = 70
+        # The driver records newly spawned IDs write-ahead while this child is
+        # running. Merge the attempt result into that latest durable snapshot.
+        state = load_state(jobdir)
         state["attempts"].append({"path": str(attempt), "rc": rc,
                                   "duration": time.monotonic() - started})
         state["status"] = "running"
@@ -970,7 +1012,10 @@ def supervise(spec_path, jobdir, driver_path, sleep_fn=None):
                                              encoding="utf-8", errors="replace")).splitlines()[-30:])
         except OSError:
             pass
-        reason = str(job.get("reason") or child_evidence or "supervised child failed")
+        if rc == 70:
+            reason = _short_traceback(err_path.read_text(encoding="utf-8", errors="replace"))
+        else:
+            reason = str(job.get("reason") or child_evidence or "supervised child failed")
         if rc == 2:
             stop_active_clock(state, time.time())
             with locked(jobdir / "job.lock"):
@@ -1033,6 +1078,70 @@ def supervise(spec_path, jobdir, driver_path, sleep_fn=None):
         return 2
 
 
+def _short_traceback(text):
+    """Return a compact class/message summary; full traceback stays in attempt."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in reversed(lines):
+        match = re.match(r"([A-Za-z_][\w.]*?(?:Error|Exception|Exit)):\s*(.*)", line)
+        if match:
+            message = re.sub(r"\s+", " ", match.group(2))[:140]
+            return f"supervised worker exception ({match.group(1)}): {message}"
+    return "supervised worker exited after an unclassified exception"
+
+
+def _park_supervisor_exception(jobdir, exc, trace):
+    """Persist an unexpected supervisor failure without exposing its traceback."""
+    jobdir = Path(jobdir).resolve()
+    jobdir.mkdir(parents=True, exist_ok=True)
+    attempts = jobdir / "attempts"
+    attempts.mkdir(exist_ok=True)
+    attempt = attempts / f"attempt-{uuid.uuid4().hex}"
+    attempt.mkdir()
+    (attempt / "stdout.txt").write_text("", encoding="utf-8")
+    (attempt / "stderr.txt").write_text(trace, encoding="utf-8")
+    try:
+        state = load_state(jobdir)
+    except QueueError:
+        try:
+            state = read_json(jobdir / "state.json")
+        except QueueError:
+            state = {}
+    if not isinstance(state, dict):
+        state = {}
+    state.setdefault("task_id", jobdir.name)
+    state.setdefault("event_seq", 0)
+    if not isinstance(state.get("outbox"), list):
+        state["outbox"] = []
+    if not isinstance(state.get("attempts"), list):
+        state["attempts"] = []
+    if not isinstance(state.get("owned_agents"), dict):
+        state["owned_agents"] = {}
+        try:
+            job = read_json(jobdir / "job.json")
+        except QueueError:
+            job = {}
+        for agent_id in _job_agent_ids(job):
+            role = next((name for name in ("coder", "designer", "reviewer")
+                         if job.get(f"{name}_agent") == agent_id), "reviewer")
+            state["owned_agents"][agent_id] = {"role": role, "status": "needs-reconciliation"}
+    state.setdefault("report", str(jobdir / "report.md"))
+    state["attempts"].append({"path": str(attempt), "rc": 70, "duration": 0})
+    short = f"supervisor exception ({type(exc).__name__}): {str(exc).splitlines()[0][:140]}"
+    with locked(jobdir / "job.lock"):
+        atomic_json(jobdir / "state.json", state)
+    return save_terminal(jobdir, state, "parked", short)
+
+
+def supervise(spec_path, jobdir, driver_path, sleep_fn=None):
+    """Supervise one job and convert unexpected faults into durable parked events."""
+    try:
+        return _supervise(spec_path, jobdir, driver_path, sleep_fn=sleep_fn)
+    except Exception as exc:
+        event = _park_supervisor_exception(jobdir, exc, traceback.format_exc())
+        print(json.dumps(event))
+        return 2
+
+
 def cli(argv, driver_path):
     if not argv:
         return None
@@ -1065,7 +1174,7 @@ def cli(argv, driver_path):
             if not ok:
                 print(json.dumps({"status": "parked", "reason": reason}, sort_keys=True))
                 return 2
-            state = read_json(Path(argv[2]) / "state.json")
+            state = load_state(argv[2])
             return supervise(state["spec_path"], argv[2], driver_path)
         except (QueueError, OSError, KeyError) as exc:
             print(json.dumps({"status": "parked", "reason": str(exc)}, sort_keys=True))

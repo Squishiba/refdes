@@ -49,6 +49,12 @@ descriptions are agent-controlled text, so this opt-in is cooperative trust,
 not containment. Outside/risky evidence such as outside-workspace paths,
 `curl`, `git push`, or `rm` is still denied.
 
+Queue state stores `owned_agents` as an object keyed by full agent ID. The
+supervised driver writes each returned ID before later job journaling, and the
+supervisor merges attempt results into freshly loaded state. Unexpected
+exceptions create a parked event with a short classified outcome and keep the
+full traceback in the retained attempt stderr.
+
 `JOBDIR` defaults to `<repo>/.scratch/agentcoder/<task_id>/` — keep job
 dirs out of tracked paths (in this repo `.scratch/` is gitignored). Exit
 codes: **0** done (`ready-for-human-gate`), **2** escalated, **1**

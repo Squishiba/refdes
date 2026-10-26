@@ -8,6 +8,18 @@ QDIR [TASK_ID] --after EVENT_ID [--timeout SECONDS]` checks durable event state
 before each one-second recheck, so a completion committed before registration
 can still be observed.
 
+Queue state uses `owned_agents` as an object keyed by full agent ID (each value
+records role and reconciliation status), `operations`, `replacements`, and
+`maintenance.agents` as ID-keyed objects, and `attempts`, `outbox`,
+`permit_decisions`, and `hook_results` as arrays. The state loader rejects
+list/object shape mismatches with a schema error.
+After a supervised run returns an exact agent ID, the driver records ownership
+before cwd validation or job journaling; the supervisor reloads durable state
+before committing attempt results so a child cannot overwrite that write-ahead
+record. Unexpected supervisor or child exceptions park the job with a short
+classified event outcome; their full traceback remains in the retained attempt
+stderr file for diagnosis.
+
 The supervisor delegates acceptance checks to the existing AgentCoder driver.
 Supervised jobs run one role at a time, accept pre-provisioned workspaces from
 the `workspaces` spec field or create one from the captured workspace response,

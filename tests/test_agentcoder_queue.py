@@ -24,7 +24,8 @@ def fixture(name):
 def create_state(path, **updates):
     path.mkdir(parents=True, exist_ok=True)
     state = {"task_id": "queue-test", "status": "running", "event_seq": 0,
-             "outbox": [], "nudges": 0, "retries": 0}
+             "outbox": [], "nudges": 0, "retries": 0, "owned_agents": {},
+             "operations": {}, "attempts": []}
     state.update(updates)
     queue.atomic_json(path / "state.json", state)
     return state
@@ -245,6 +246,108 @@ def test_permission_run_records_agent_then_processes_and_waits(tmp_path, monkeyp
     assert job["coder_agent"] == permission_run["agentId"]
     operation = next(iter(queue.read_json(tmp_path / "state.json")["operations"].values()))
     assert operation["status"] == "adopted"
+
+
+def test_supervise_initial_state_records_first_spawn_and_parks_crash(tmp_path, monkeypatch):
+    """Exercise supervise's actual initializer before the first supervised turn."""
+    driver_spec = importlib.util.spec_from_file_location(
+        "agentcoder_first_spawn_fixture", ROOT / "tools" / "agentcoder" / "agentcoder.py")
+    driver = importlib.util.module_from_spec(driver_spec)
+    driver_spec.loader.exec_module(driver)
+    spec_path, jobdir = tmp_path / "spec.json", tmp_path / "job"
+    spec = {"task_id": "first-spawn", "queue": {"enabled": True}}
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+    run = fixture("run-permission.json")
+    monkeypatch.setattr(driver, "agent_cwd", lambda _job, _agent_id: run["cwd"])
+
+    def child_run(_cmd, **_kwargs):
+        job = {"queue_supervised": True, "jobdir": str(jobdir),
+               "task_id": spec["task_id"], "spec": spec}
+        driver.record_turn(job, "coder", 0, json.dumps(run), "workspace banner")
+        raise TypeError("simulated post-spawn supervisor fault")
+
+    monkeypatch.setattr(queue.subprocess, "run", child_run)
+    result = queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py",
+                             sleep_fn=lambda _seconds: None)
+    assert result == 2
+    state = queue.load_state(jobdir)
+    assert run["agentId"] in state["owned_agents"]
+    assert state["status"] == "parked"
+    assert "Traceback" not in state["outcome"]
+    attempts = list((jobdir / "attempts").glob("attempt-*"))
+    assert attempts and "Traceback" in (attempts[0] / "stderr.txt").read_text()
+
+
+def test_state_loader_rejects_wrong_owned_agent_shape(tmp_path):
+    create_state(tmp_path, owned_agents=[])
+    try:
+        queue.load_state(tmp_path)
+    except queue.QueueError as exc:
+        assert "owned_agents" in str(exc) and "object" in str(exc)
+    else:
+        raise AssertionError("list-shaped owned_agents must be rejected clearly")
+
+
+def test_state_loader_rejects_wrong_nested_collection_shapes(tmp_path):
+    create_state(tmp_path, maintenance={"agents": []})
+    try:
+        queue.load_state(tmp_path)
+    except queue.QueueError as exc:
+        assert "maintenance.agents" in str(exc)
+    else:
+        raise AssertionError("list-shaped maintenance agent rows must be rejected clearly")
+
+
+def test_unexpected_supervisor_exception_is_a_short_durable_park(tmp_path, monkeypatch):
+    jobdir, spec_path = tmp_path / "job", tmp_path / "spec.json"
+    spec_path.write_text(json.dumps({"task_id": "supervisor-fault"}), encoding="utf-8")
+    jobdir.mkdir()
+    create_state(jobdir)
+    (jobdir / "job.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(queue, "_listing_from_cli", lambda: (_ for _ in ()).throw(
+        TypeError("simulated inventory failure")))
+    assert queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py") == 2
+    state = queue.load_state(jobdir)
+    assert state["status"] == "parked"
+    assert "TypeError" in state["outcome"] and "Traceback" not in state["outcome"]
+    attempt = Path(state["attempts"][-1]["path"])
+    assert "Traceback" in (attempt / "stderr.txt").read_text(encoding="utf-8")
+
+
+def test_record_turn_writes_agent_ownership_before_job_save(tmp_path, monkeypatch):
+    driver_spec = importlib.util.spec_from_file_location(
+        "agentcoder_write_ahead_fixture", ROOT / "tools" / "agentcoder" / "agentcoder.py")
+    driver = importlib.util.module_from_spec(driver_spec)
+    driver_spec.loader.exec_module(driver)
+    create_state(tmp_path, owned_agents={})
+    run = fixture("run-permission.json")
+    monkeypatch.setattr(driver, "agent_cwd", lambda _job, _agent_id: run["cwd"])
+
+    def crash_save(_job):
+        assert run["agentId"] in queue.load_state(tmp_path)["owned_agents"]
+        raise OSError("simulated job journal failure")
+
+    monkeypatch.setattr(driver, "save_job", crash_save)
+    job = {"queue_supervised": True, "jobdir": str(tmp_path), "task_id": "t",
+           "spec": {}}
+    try:
+        driver.record_turn(job, "coder", 0, json.dumps(run), "")
+    except OSError:
+        pass
+    else:
+        raise AssertionError("simulated crash should propagate to supervisor boundary")
+    assert run["agentId"] in queue.load_state(tmp_path)["owned_agents"]
+    listing = [dict(fixture("ls-g.json")[0], id=run["agentId"],
+                    shortId=run["agentId"][:7], status="running")]
+    after = [dict(listing[0], status="idle")]
+    listings = [listing, after]
+    calls = []
+    status, _ = queue.maintenance_stop(
+        tmp_path,
+        lambda argv: (calls.append(argv) or fake_result(out=json.dumps(
+            {"stoppedCount": 1, "agentIds": [run["agentId"]]}))),
+        lambda: (listings.pop(0), None))
+    assert status == "PAUSED" and calls == [["stop", run["agentId"], "--json"]]
 
 
 def test_run_unknown_status_still_parks():

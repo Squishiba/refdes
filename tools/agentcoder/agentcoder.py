@@ -489,6 +489,13 @@ def record_turn(job, role, rc, out, err):
     agent_id = data.get("agentId")
     if not agent_id:
         raise Pause(f"{role} agent turn reported no agentId: {tail_text(out, 3)}")
+    if job.get("queue_supervised"):
+        if str(Path(__file__).resolve().parent) not in sys.path:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from queue_mode import note_agent
+        # Write ahead immediately after learning the exact ID. If later cwd or
+        # job journal handling fails, queue resume/stop can still find the spawn.
+        note_agent(job["jobdir"], agent_id, role)
     cwd = agent_cwd(job, agent_id)  # derive BEFORE mutating: a Pause leaves the job untouched
     if job.get("queue_supervised") and os.path.normpath(os.path.expanduser(data["cwd"])) \
             != os.path.normpath(cwd):
@@ -499,10 +506,6 @@ def record_turn(job, role, rc, out, err):
     job[f"{role}_run_status"] = status
     save_job(job)  # ids survive a hard crash mid-loop, so resume adopts them
     if job.get("queue_supervised"):
-        if str(Path(__file__).resolve().parent) not in sys.path:
-            sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from queue_mode import note_agent
-        note_agent(job["jobdir"], agent_id, role)
         op_id = job.pop("_queue_operation_id", None)
         if op_id:
             from queue_mode import finish_operation

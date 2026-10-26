@@ -111,3 +111,32 @@ adapters remain unverified, so unattended-release readiness is not claimed.
 
 Two implementation passes, one fixture-boundary correction, and one legacy
 regression run completed; unresolved live/schema gates are listed above.
+
+## Round 5 state-shape crash correction
+
+- The supplied `.scratch/live-fixtures4/` traceback showed `supervise` creating
+  `owned_agents: []` while `note_agent` indexed it by full ID. A regression now
+  drives the real `supervise` initializer and first supervised `record_turn`;
+  its old-code RED failed at `queue_mode.py:431` with the reported list-index
+  `TypeError` (loader and write-ahead assertions were also RED before fixes).
+- State shape is documented in `docs/agentcoder-queue.md`: ID-keyed objects
+  for owned agents, operations, replacements, and maintenance agent rows;
+  arrays for attempts, outbox, permit decisions, and hook results. `load_state`
+  validates each collection and raises `QueueError` with the offending key.
+- `record_turn` writes the exact returned ID before cwd lookup/job save. After
+  the child returns, supervision reloads state before adding attempt metadata,
+  preserving concurrent write-ahead ownership. Reconciliation, resume, and
+  deliberate stop include IDs present in queue state as well as `job.json`.
+- Unexpected supervisor exceptions and child exceptions now produce parked
+  events with short class/message outcomes. Their full traceback is retained
+  in the corresponding attempt's `stderr.txt`; exception recovery also carries
+  any exact IDs found in `job.json` into the terminal queue state.
+- Round-5 RED first run: three new tests failed (initializer/note_agent
+  `TypeError`, missing schema loader, and missing write-ahead record). Green
+  queue suite: 36 passed, including classifier and retry-bound mutations.
+  Existing tool/workspace/land-push suites: 129 passed. `py_compile` and
+  `git diff --check` passed. No daemon or GitHub command was run.
+- Review update: the first green pass caught the supervisor's stale post-child
+  snapshot overwriting the write-ahead ID; a regression now confirms it stays
+  present through terminal parking. Captured-but-unverified live signal list
+  remains as above; the round-5 crash path is verified offline, not live.
