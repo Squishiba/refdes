@@ -513,6 +513,108 @@ def _header_column(header, name, label, line, problems) -> int:
 
 # --------------------------------------------------------------------------- XLSX
 
+def _xlsx_module(name: str):
+    """openpyxl, through the one import site, with the extra's install hint."""
+    try:
+        return importlib.import_module("openpyxl")
+    except ModuleNotFoundError as exc:
+        if exc.name != "openpyxl":
+            raise
+        raise SourceExtractionError([
+            f"{name}: the xlsx source reader needs the optional XLSX extra: "
+            'install with pip install "refdes[xlsx]"'
+        ]) from exc
+
+
+def _xlsx_open(path: Path, name: str, openpyxl, data_only: bool = True):
+    """The workbook, read-only, with `name` in every failure's first words.
+
+    A password-protected workbook is an OLE compound document; openpyxl's zip
+    reader rejects it as "not a zip file", which names the container and not
+    the reason. The magic number is probed first so the message says what the
+    author has to undo.
+    """
+    try:
+        with open(path, "rb") as fh:
+            magic = fh.read(8)
+    except OSError:
+        magic = b""  # the load below raises through the same open, with the label
+    if magic == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        raise SourceExtractionError([
+            f"{name}: the workbook is encrypted (password-protected) and the "
+            "xlsx source reader cannot open it -- remove the password, save a "
+            "copy, and cite that"
+        ])
+    try:
+        return openpyxl.load_workbook(path, data_only=data_only, keep_links=False)
+    except OSError as exc:
+        raise _cannot_read(name, exc) from exc
+    except (BadZipFile, ValueError, TypeError, KeyError) as exc:
+        raise SourceExtractionError([
+            f"{name}: cannot read XLSX workbook: {exc}"
+        ]) from exc
+
+
+def _xlsx_destination(workbook, defined) -> tuple[str, int, int, str]:
+    """`(sheet, row, col, problem)` for one defined name: the single cell the
+    key grammar selects, in the same words on every path that asks.
+
+    `problem` is complete and empty on success; the cell coordinates mean
+    nothing beside a problem. Shared by `extract()` and `list_entries()` on
+    purpose: a name the picker marks broken is a name `refdes fetch` refuses,
+    in the same words, or the panel is showing the author a file that is not
+    the file `fetch` reads."""
+    try:
+        destinations = list(defined.destinations)
+    except (ValueError, TypeError, AttributeError):
+        # openpyxl's `destinations` crashes on a destination it
+        # tokenizes as a range but cannot regex back into
+        # sheet!cells (e.g. a bare `A1:B2` with no sheet) --
+        # AttributeError on a None match. Raw, that reads
+        # `'NoneType' object has no attribute 'group'` (docs PR
+        # #294); quote the offending destination text instead, so
+        # the message names the file, the name, and what is wrong.
+        return "", 0, 0, (
+            f"defined-name destination {defined.attr_text!r} "
+            "is not a cell reference this reader can parse -- a "
+            "defined name must point at exactly one cell, like "
+            "Sheet1!$B$2"
+        )
+    if len(destinations) != 1:
+        return "", 0, 0, "defined name must refer to exactly one cell"
+    sheet, address = destinations[0]
+    if "[" in sheet or "]" in sheet or "[" in defined.attr_text:
+        return "", 0, 0, "external workbook references are not supported"
+    if sheet not in workbook:
+        return "", 0, 0, f"destination sheet {sheet!r} does not exist"
+    try:
+        from openpyxl.utils.cell import range_boundaries
+
+        col1, row1, col2, row2 = range_boundaries(address)
+        if None in (col1, row1, col2, row2) or (col1, row1) != (col2, row2):
+            raise ValueError("not a single cell")
+    except (ValueError, TypeError) as exc:
+        return "", 0, 0, f"defined name must refer to one cell: {exc}"
+    return sheet, row1, col1, ""
+
+
+def _xlsx_defined_names(workbook):
+    """`(key, defined)` for every defined name, in scope order: workbook-scope
+    names first (key: the bare name), then each sheet's in workbook order
+    (key: `Title!name` -- the qualified spelling `extract()`'s grammar
+    requires).
+
+    A sheet-scoped name is listed only qualified, never bare: the bare
+    spelling resolves only when exactly one sheet has that name, which is a
+    fact about the whole set of names, not about this one row, and offering
+    it would let the picker propose a key `fetch` may refuse as ambiguous."""
+    for key, defined in workbook.defined_names.items():
+        yield key, defined, None
+    for sheet in workbook.worksheets:
+        for key, defined in sheet.defined_names.items():
+            yield f"{sheet.title}!{key}", defined, sheet.title
+
+
 class XlsxReader:
     """One finite numeric cell selected by an Excel defined name (§4)."""
 
@@ -527,24 +629,8 @@ class XlsxReader:
         label: str | None = None,
     ) -> dict[str, ExtractedSource]:
         label = label if label else path.as_posix()
-        try:
-            openpyxl = importlib.import_module("openpyxl")
-        except ModuleNotFoundError as exc:
-            if exc.name != "openpyxl":
-                raise
-            raise SourceExtractionError([
-                f"{label}: the xlsx source reader needs the optional XLSX extra: "
-                'install with pip install "refdes[xlsx]"'
-            ]) from exc
-
-        try:
-            workbook = openpyxl.load_workbook(path, data_only=True, keep_links=False)
-        except OSError as exc:
-            raise _cannot_read(label, exc) from exc
-        except (BadZipFile, ValueError, TypeError, KeyError) as exc:
-            raise SourceExtractionError([
-                f"{label}: cannot read XLSX workbook: {exc}"
-            ]) from exc
+        openpyxl = _xlsx_module(label)
+        workbook = _xlsx_open(path, label, openpyxl)
         try:
             problems: list[str] = []
             out: dict[str, ExtractedSource] = {}
@@ -575,43 +661,11 @@ class XlsxReader:
                     problems.append(prefix + "no defined name has this key")
                     continue
 
-                try:
-                    destinations = list(defined.destinations)
-                except (ValueError, TypeError, AttributeError):
-                    # openpyxl's `destinations` crashes on a destination it
-                    # tokenizes as a range but cannot regex back into
-                    # sheet!cells (e.g. a bare `A1:B2` with no sheet) --
-                    # AttributeError on a None match. Raw, that reads
-                    # `'NoneType' object has no attribute 'group'` (docs PR
-                    # #294); quote the offending destination text instead, so
-                    # the message names the file, the name, and what is wrong.
-                    problems.append(
-                        prefix + f"defined-name destination {defined.attr_text!r} "
-                        "is not a cell reference this reader can parse -- a "
-                        "defined name must point at exactly one cell, like "
-                        "Sheet1!$B$2"
-                    )
+                sheet, row1, col1, problem = _xlsx_destination(workbook, defined)
+                if problem:
+                    problems.append(prefix + problem)
                     continue
-                if len(destinations) != 1:
-                    problems.append(prefix + "defined name must refer to exactly one cell")
-                    continue
-                sheet, address = destinations[0]
-                if "[" in sheet or "]" in sheet or "[" in defined.attr_text:
-                    problems.append(prefix + "external workbook references are not supported")
-                    continue
-                if sheet not in workbook:
-                    problems.append(prefix + f"destination sheet {sheet!r} does not exist")
-                    continue
-                try:
-                    from openpyxl.utils.cell import range_boundaries
-
-                    col1, row1, col2, row2 = range_boundaries(address)
-                    if None in (col1, row1, col2, row2) or (col1, row1) != (col2, row2):
-                        raise ValueError("not a single cell")
-                    cell = workbook[sheet].cell(row1, col1)
-                except (ValueError, TypeError) as exc:
-                    problems.append(prefix + f"defined name must refer to one cell: {exc}")
-                    continue
+                cell = workbook[sheet].cell(row1, col1)
 
                 raw = cell.value
                 if raw is None:
@@ -643,6 +697,126 @@ class XlsxReader:
             if problems:
                 raise SourceExtractionError(problems)
             return out
+        finally:
+            workbook.close()
+
+    def list_entries(
+        self,
+        path: Path,
+        *,
+        label: str | None = None,
+        max_rows: int = MAX_LIST_ROWS,
+        max_bytes: int = MAX_LIST_BYTES,
+    ) -> SourceListing:
+        """Every defined name of the workbook, in scope order, as `SourceEntry`.
+
+        The keys are the key grammar `extract()` accepts, spelled the way a
+        `source()` call must spell them: a workbook-scoped name bare, a
+        sheet-scoped name qualified (`Sheet1!case_rise`) -- the qualification
+        §11 Q6 of calc-sources.md decided. A bare A1 address is not a key at
+        all -- the xlsx reader selects cells by name, so the picker lists
+        names, not cells.
+
+        Same open, same destination resolution and same numeric grammar as
+        `extract()` (`_xlsx_open`, `_xlsx_destination`, `parse_decimal` are
+        the only things that read a cell), and the CSV listing's failure
+        policy, which is a display decision: a workbook `fetch` cannot open
+        at all (corrupt, encrypted, above the byte cap) raises, because a
+        file the fetcher cannot read must not be browsed, while a name
+        `fetch` would refuse (a range, an external reference, a blank, text,
+        an uncached formula) is listed and marked, never hidden. A merged
+        range marks what `extract()` sees: the top-left cell is the value,
+        every cell inside the range is blank. Hidden sheets are listed and
+        marked in the entry's context -- `fetch` reads them, so a picker that
+        refused them would hide where a picked value came from.
+
+        Bounded by the shared caps, enforced where the file is read: above
+        `max_bytes` the workbook is not opened, and the listing stops at
+        `max_rows` names and says so. `label` is the file's name in every
+        message, for the reason `CsvReader.list_entries` documents. The
+        listing only reads -- the file's bytes are unchanged.
+        """
+        name = label if label else path.as_posix()
+        openpyxl = _xlsx_module(name)
+        try:
+            size = path.stat().st_size
+        except OSError as exc:
+            raise _cannot_read(name, exc) from exc
+        if size > max_bytes:
+            raise SourceExtractionError([
+                f"{name}: the file is {size} bytes and a source listing refuses "
+                f"anything above {max_bytes} bytes ({max_bytes // 1024} KiB) -- "
+                "split it, or point the citation at the names you need"
+            ])
+        workbook = _xlsx_open(path, name, openpyxl)
+        try:
+            entries: list[SourceEntry] = []
+            blanks: list[tuple[int, str, int, int, str]] = []
+            truncated = False
+            for key, defined, sheet_scope in _xlsx_defined_names(workbook):
+                if len(entries) >= max_rows:
+                    truncated = True
+                    break
+                prefix = f"{name}: key {key!r}: "
+                if sheet_scope is not None and "!" in sheet_scope:
+                    entries.append(SourceEntry(
+                        key, defined.attr_text, "", 0, (),
+                        prefix + "the sheet name contains '!', which the "
+                        "qualified key grammar splits on, so no key can name "
+                        "this name -- rename the sheet",
+                    ))
+                    continue
+                sheet, row, col, problem = _xlsx_destination(workbook, defined)
+                if problem:
+                    entries.append(SourceEntry(
+                        key, defined.attr_text, "", 0, (), prefix + problem,
+                    ))
+                    continue
+                cell = workbook[sheet].cell(row, col)
+                context = [("cell", f"{sheet}!{cell.coordinate}")]
+                if workbook[sheet].sheet_state != "visible":
+                    context.append(("sheet", "hidden"))
+                raw = cell.value
+                if raw is None:
+                    blanks.append((len(entries), sheet, row, col, cell.coordinate))
+                    entries.append(SourceEntry(
+                        key, "", "", row, tuple(context),
+                        prefix + f"{sheet}!{cell.coordinate} is blank",
+                    ))
+                    continue
+                if isinstance(raw, bool) or not isinstance(raw, (int, float, Decimal)):
+                    entries.append(SourceEntry(
+                        key, str(raw), "", row, tuple(context),
+                        prefix + f"{sheet}!{cell.coordinate} is not a numeric cell",
+                    ))
+                    continue
+                try:
+                    value = str(parse_decimal(str(raw)))
+                except ValueError as exc:
+                    entries.append(SourceEntry(
+                        key, str(raw), "", row, tuple(context),
+                        prefix + f"{sheet}!{cell.coordinate}: {exc}",
+                    ))
+                    continue
+                entries.append(SourceEntry(key, str(raw), value, row, tuple(context)))
+            if blanks:
+                # data_only=True hides the formula itself. One reopen names
+                # the uncached formulas -- the same actionable hint
+                # `extract()` gives, not a bare "is blank".
+                formula_book = _xlsx_open(path, name, openpyxl, data_only=False)
+                try:
+                    for index, sheet, row, col, coordinate in blanks:
+                        if formula_book[sheet].cell(row, col).data_type != "f":
+                            continue
+                        entry = entries[index]
+                        entries[index] = replace(entry, problem=(
+                            f"{name}: key {entry.key!r}: {sheet}!{coordinate} has "
+                            "no cached numeric value; open the workbook in a "
+                            "calculating application, save it, then fetch --update"
+                        ))
+                finally:
+                    formula_book.close()
+            return SourceListing(tuple(entries), truncated, len(entries))
         finally:
             workbook.close()
 

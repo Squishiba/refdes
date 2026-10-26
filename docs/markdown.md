@@ -607,10 +607,14 @@ in [math](math.md#reading-a-value-from-a-source-file).
 
 The panel lists only the files the open item cites; a citation on a
 *different* item authorizes nothing. CSV files open as key/value lists (the
-file must be `key,value` shaped, as above); PDFs open as page text and need
+file must be `key,value` shaped, as above); XLSX files open as a list of
+their defined names — workbook-scope names bare, sheet-scope names qualified
+(`Sheet1!name`, spelled exactly as a `source()` call must spell them), with
+hidden sheets included and marked — and a name `refdes fetch` would refuse
+(a range, a blank, text, an uncached formula) is shown with its problem
+named, not selectable; PDFs open as page text and need
 the optional extra (`pip install refdes[pdf]`). A citation the panel cannot
-offer — a remote URL with no kept copy, a `.xlsx` (its reader can extract
-named keys, it cannot list a file's entries), a type with no reader, a
+offer — a remote URL with no kept copy, a type with no reader, a
 missing file — is listed with the reason, and the fix, under the list.
 
 For a CSV, click a file and its keys load into a filterable list; a row

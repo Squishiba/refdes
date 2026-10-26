@@ -229,7 +229,10 @@ rise = source("analysis/thermal-model.xlsx", "Sheet1!case_rise") | delta_degC
 The XLSX reader uses the workbook's saved numeric result for a formula; it
 does not calculate formulas. Open and save a workbook in a calculating
 application before fetching a formula that has no cached value. The same
-`fetch --update` acceptance and locked-value rules below apply to XLSX.
+`fetch --update` acceptance and locked-value rules below apply to XLSX. The
+browser editor's source picker lists a cited workbook's defined names for
+you, qualified as above — see
+[the picker](markdown.md#picking-a-source-value-in-the-browser-editor).
 
 ### When the file changes
 

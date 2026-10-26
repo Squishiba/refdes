@@ -30,7 +30,8 @@ applies:
   local case returns, or the URL as the citation spells it in the remote case.
 - **Only a file whose registered reader can list entries.** Dispatch is
   `sources.reader_for` by extension, exactly as extraction dispatches. A cited
-  `.xlsx` has an extractor but no picker listing yet; `.py` and extensionless
+  `.csv` lists its rows and a cited `.xlsx` its defined names (the qualified
+  `Sheet1!name` spellings `extract()` accepts); `.py` and extensionless
   files have no reader. None is opened by this keyed-file picker. A cited `.pdf` is
   refused too when the `refdes[pdf]` extra is not installed, with that extra's
   install hint rather than as an unhandled file type.

@@ -383,10 +383,11 @@ re-authorizes the path it is given rather than trusting that it came from the
 list.
 
 **Only a file with a registered reader.** Dispatch is `reader_for()` by
-extension (`sources.py:233-243`): today that means `.csv`. A cited `.xlsx`,
-`.pdf`, `.py`, or extensionless file is reported as "no source reader for
-this file type" — the reader's own error, verbatim — and is not opened. There
-is no fallback to a text parse, which is the registry's existing posture.
+extension (`sources.py:233-243`): for keyed files that means `.csv` and
+`.xlsx`. A cited `.py` or extensionless file is reported as "no source reader
+for this file type" — the reader's own error, verbatim — and is not opened.
+There is no fallback to a text parse, which is the registry's existing
+posture.
 
 **Bounded, and it says so.** A listing refuses above 1 MiB or 5000 rows and
 names the limit; a truncated result carries `truncated: true` and the row count
@@ -446,10 +447,15 @@ a picked value exactly as they do to a typed sentence — no second editor state
   frames it. The picker's shape does not depend on the reader: `list_entries`
   is one method on one more reader. *Update (re-check 2026-10-16):* the
   **reader** landed on 2026-10-04 (ef7bed7, #170) as the optional
-  `refdes[xlsx]` extra, behind the §4 contract; what is still open is exactly
-  what this bullet framed — `list_entries` for it, i.e. the picker listing
-  (`serve/sources.py` records `.xlsx` as "an extractor but no picker listing
-  yet").
+  `refdes[xlsx]` extra, behind the §4 contract; what was still open was
+  exactly what this bullet framed — `list_entries` for it, i.e. the picker
+  listing. **Landed 2026-10-26**: `XlsxReader.list_entries` lists the
+  workbook's defined names (workbook-scope bare, sheet-scope qualified as
+  `extract()` spells them, hidden sheets included and marked, refusals listed
+  and marked through the same `_xlsx_destination` helper `extract()` uses),
+  behind the §4/§5 contract and the §6 caps; `tests/test_sources_xlsx_list.py`
+  proves the selectable⇔`extract()`-accepts pairing, `test_serve_sources_xlsx.py`
+  the panel reads and the `calc-sources.md` §11 Q2 `fetch --update` gate.
 - **PDF datasheet values.** Deferred at drafting, and explicitly the *reason*
   §3's confirm
   contract exists. It needs a PDF text-and-coordinates library plus page
@@ -633,7 +639,7 @@ C is composition.
 **Later.** The citations row editor, which is what unlocks "cite a new file"
 (§8). The xlsx reader behind the same `list_entries` contract — the reader
 itself landed 2026-10-04 (ef7bed7, #170); the `list_entries` listing behind
-this panel is what remains. The PDF
+this panel landed 2026-10-26 (§8's xlsx bullet). The PDF
 datasheet picker behind the same confirm-before-accept panel, with the page
 context and candidate-list rules already agreed in `calc-sources.md` §1 —
 **landed 2026-09-27** as Slices P-A/P-B/P-C of

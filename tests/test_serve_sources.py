@@ -162,23 +162,22 @@ def test_the_source_picker_lists_only_the_citing_item_s_own_files(served):
 
 
 def test_the_file_list_says_why_a_cited_file_is_not_listable(tmp_path):
-    # A cited .xlsx has an extractor but no picker listing (a PDF is listable
-    # now that it has a page reader -- see tests/test_serve_pdf_sources.py),
-    # a remote URL and a path that escapes the
-    # root are all named with the reason, and none of them is listable. This is
-    # the honest gap of §8 -- an item that cites no readable file gets an empty
-    # picker -- made legible rather than silent.
+    # A cited `.py` has no reader at all (.csv, .xlsx and -- with its extra
+    # installed -- .pdf are all listable now), a remote URL and a path that
+    # escapes the root are all named with the reason, and none of them is
+    # listable. This is the honest gap of §8 -- an item that cites no
+    # readable file gets an empty picker -- made legible rather than silent.
     root = make_root(tmp_path, items=(
         "defaults: { type: decision }\n"
         "items:\n"
         "  - id: DEC-003\n"
         "    citations:\n"
-        "      - path: analysis/sheet.xlsx\n"
+        "      - path: analysis/notes.py\n"
         "      - path: https://example.com/budget.csv\n"
         "      - path: ../outside/budget.csv\n"
         "      - path: analysis/budget.csv\n"
     ))
-    (root / "analysis" / "sheet.xlsx").write_bytes(b"PK\x03\x04 not a zip we read")
+    (root / "analysis" / "notes.py").write_text("x = 1\n", encoding="utf-8")
     app = start(root)
     try:
         client = Client(app)
@@ -186,7 +185,7 @@ def test_the_file_list_says_why_a_cited_file_is_not_listable(tmp_path):
         assert status == 200, payload
         assert [f["path"] for f in payload["files"]] == ["analysis/budget.csv"]
         reasons = {p["path"]: p["problem"] for p in payload["problems"]}
-        assert "can extract named keys but cannot list" in reasons["analysis/sheet.xlsx"]
+        assert "no source reader" in reasons["analysis/notes.py"]
         assert "remote citation" in reasons["https://example.com/budget.csv"]
         assert "escapes the project root" in reasons["../outside/budget.csv"]
     finally:
