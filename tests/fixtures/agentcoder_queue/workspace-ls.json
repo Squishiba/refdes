@@ -1,0 +1,23 @@
+[
+  {
+    "workspaceId": "wks_listing_fixture",
+    "project": "redacted",
+    "name": "redacted",
+    "isolation": "local",
+    "cwd": "/workspace/probe"
+  },
+  {
+    "workspaceId": "wks_fixture_2",
+    "project": "redacted",
+    "name": "redacted",
+    "isolation": "worktree",
+    "cwd": "/workspace/probe-2"
+  },
+  {
+    "workspaceId": "wks_fixture",
+    "project": "redacted",
+    "name": "redacted-title",
+    "isolation": "worktree",
+    "cwd": "/workspace/probe"
+  }
+]

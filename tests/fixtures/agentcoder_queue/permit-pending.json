@@ -1,0 +1,9 @@
+[
+  {
+    "id": "permission-exec-redacted",
+    "agentId": "agent-running-001",
+    "agentShortId": "agent-r",
+    "name": "CodexBash",
+    "description": "May I run the exact command to write the requested probe file outside this workspace?"
+  }
+]

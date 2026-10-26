@@ -29,6 +29,7 @@ build time.
 | [Change tracking](change-tracking.md) | `on_change`, content hashes, auditing suppression |
 | [Multiple boards](multi-board.md) | Folders, separate projects, imports, version pinning |
 | [Workspaces](workspaces.md) | Grouping boards by product, the two-level layout, the cross-workspace lint |
+| [AgentCoder supervised mode](agentcoder-queue.md) | Developer tooling: opt-in single-job supervision, durable terminal waiting, and live-gate status |
 | [Project lifecycle](lifecycle.md) | draft → `revision` → `release`, the readiness gate, baselines, the diff |
 | [Parts](parts.md) | The parts page, exact-string indexing, `drop_in`/`alternate` |
 

@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -262,8 +263,11 @@ def validate_spec(spec):
 def paseo_ls():
     rc, out, err = run_guarded(["paseo", "ls", "-g", "--json"])
     if rc != 0:
-        raise Pause(f"cannot list agents (paseo ls -g): {tail_text(err, 5) or rc}")
+        raise Pause(f"cannot list agents (paseo ls -g): {tail_text(out + err, 5) or rc}")
     data = json_of(out, "paseo ls output")
+    if isinstance(data, dict) and isinstance(data.get("error"), dict):
+        code = data["error"].get("code", "unknown")
+        raise Pause(f"paseo ls -g error {code}: {tail_text(out, 5)}")
     return data.get("agents", []) if isinstance(data, dict) else data
 
 
@@ -292,8 +296,12 @@ def preflight(job):
     if not shutil.which("prlimit") and not spec.get("allow_no_prlimit"):
         raise Pause("prlimit is not on PATH: tests would run WITHOUT CPU/address-space "
                     "limits; install prlimit, or set \"allow_no_prlimit\": true to accept")
-    # real `paseo ls -g --json` keys (verified): id/shortId/name/provider/status/cwd
-    running = [a for a in paseo_ls() if a.get("status") == "running" and "qwen" in str(a.get("provider", "")).lower()]
+    listing = paseo_ls()
+    if job.get("queue_supervised") and not captured_queue_listing(listing):
+        raise Pause(f"unverified global listing in supervised preflight: "
+                    f"{tail_text(json.dumps(listing), 10)}")
+    running = [a for a in listing if a.get("status") == "running"
+               and "qwen" in str(a.get("provider", "")).lower()]
     room = int(spec["qwen_cap"]) - int(spec["reserve"])
     if len(running) >= room:
         raise Pause(f"refusing to start: {len(running)} Qwen agents running, "
@@ -372,14 +380,26 @@ def base_env(job):
 
 
 def agent_cwd(job, agent_id):
-    for a in paseo_ls():
+    rows = paseo_ls()
+    if job.get("queue_supervised") and not captured_queue_listing(rows):
+        raise Pause(f"unverified agent listing shape while resolving {agent_id}: "
+                    f"{tail_text(json.dumps(rows), 10)}")
+    for a in rows:
         if a.get("id") == agent_id and a.get("cwd"):
             return os.path.expanduser(a["cwd"])  # real cwd can start with ~
     raise Pause(f"agent {agent_id} reports no worktree path (cwd) in paseo ls output")
 
 
 def workspace_cwd(job, ws_id):
-    for w in workspace_ls():
+    workspaces = workspace_ls()
+    if job.get("queue_supervised") and not isinstance(workspaces, list):
+        raise Pause("unknown workspace listing shape in supervised mode")
+    for w in workspaces:
+        if job.get("queue_supervised") and (not isinstance(w, dict) or
+                set(w) != {"workspaceId", "project", "name", "isolation", "cwd"} or
+                not all(isinstance(w.get(k), str) and w[k]
+                        for k in ("workspaceId", "project", "name", "isolation", "cwd"))):
+            raise Pause(f"unknown workspace row shape: {json.dumps(w, sort_keys=True)[:1000]}")
         if w.get("workspaceId") == ws_id and w.get("cwd"):
             return os.path.expanduser(w["cwd"])  # real cwd can start with ~
     raise Pause(f"workspace {ws_id} is not an active workspace (paseo workspace ls)")
@@ -387,6 +407,39 @@ def workspace_cwd(job, ws_id):
 
 def check_permits(job):
     rc, out, err = run_guarded(["paseo", "permit", "ls", "--json"])
+    if job.get("queue_supervised"):
+        if rc != 0:
+            raise Pause(f"cannot list pending permits (paseo permit ls rc={rc}): "
+                        f"{tail_text(out + err, 5)}")
+        data = json_of(out, "paseo permit ls output")
+        if isinstance(data, dict) and isinstance(data.get("error"), dict):
+            code = data["error"].get("code", "unknown")
+            raise Pause(f"paseo permit ls error {code}: {tail_text(out, 5)}")
+        if not isinstance(data, list):
+            raise Pause(f"unknown permit listing shape; evidence={tail_text(out, 10)}")
+        lrc, lout, lerr = run_guarded(["paseo", "ls", "-g", "--json"])
+        if lrc != 0:
+            raise Pause(f"permit attribution held because global inventory failed: "
+                        f"{tail_text(lout + lerr, 5)}")
+        listing = json_of(lout, "paseo global agent listing")
+        if not isinstance(listing, list):
+            raise Pause(f"unknown global listing shape for permit attribution: "
+                        f"{tail_text(lout, 10)}")
+        if str(Path(__file__).resolve().parent) not in sys.path:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from queue_mode import process_permits
+        owned = {str(i) for i in (job.get("coder_agent"), job.get("designer_agent"),
+                                  job.get("reviewer_agent"),
+                                  *(job.get("reviewers") or {}).values()) if i}
+        trusted = (job.get("spec", {}).get("queue") or {}).get("trusted_agents", [])
+        trust_owned = (job.get("spec", {}).get("queue") or {}).get(
+            "trust_owned_agents", False)
+        decision, reason = process_permits(job["jobdir"], owned, listing, data,
+                                           trusted_agent_ids=trusted,
+                                           trust_owned_agents=trust_owned)
+        if decision != "CLEAR":
+            raise Pause(reason)
+        return
     if rc != 0:
         raise Pause(f"cannot list pending permits (paseo permit ls rc={rc}): "
                     f"{tail_text(err, 3)}")
@@ -417,28 +470,114 @@ def check_permits(job):
 def record_turn(job, role, rc, out, err):
     if rc != 0:
         raise Pause(f"{role} agent turn failed (rc={rc}, quota/usage?): {tail_text(err, 5)}")
-    data = last_json_of(out, f"{role} run result")  # real run --json: running doc, then final
+    if job.get("queue_supervised"):
+        data = json_of(out, f"{role} run result")  # JSON is stdout; workspace banner is stderr
+        if str(Path(__file__).resolve().parent) not in sys.path:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from queue_mode import validate_run_result
+        valid, reason = validate_run_result(data)
+        if not valid:
+            raise Pause(reason)
+    else:
+        data = last_json_of(out, f"{role} run result")
     status = data.get("status")
     if status == "permission":
-        raise Pause(f"{role} agent is waiting on a permission prompt; approve/deny it with "
-                    "`paseo permit`, then `resume`")
-    if status != "completed":
+        if not job.get("queue_supervised"):
+            raise Pause(f"{role} agent is waiting on a permission prompt; approve/deny it with "
+                        "`paseo permit`, then `resume`")
+    elif status != "completed" and not (
+            job.get("queue_supervised") and status == "running"):
         raise Pause(f"{role} agent turn ended with status {status!r}: {tail_text(out, 5)}")
     agent_id = data.get("agentId")
     if not agent_id:
         raise Pause(f"{role} agent turn reported no agentId: {tail_text(out, 3)}")
+    if job.get("queue_supervised"):
+        if str(Path(__file__).resolve().parent) not in sys.path:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from queue_mode import note_agent
+        # Write ahead immediately after learning the exact ID. If later cwd or
+        # job journal handling fails, queue resume/stop can still find the spawn.
+        note_agent(job["jobdir"], agent_id, role)
     cwd = agent_cwd(job, agent_id)  # derive BEFORE mutating: a Pause leaves the job untouched
+    if job.get("queue_supervised") and os.path.normpath(os.path.expanduser(data["cwd"])) \
+            != os.path.normpath(cwd):
+        raise Pause(f"paseo run cwd disagrees with the exact global listing for {agent_id}: "
+                    f"run={data['cwd']!r} listing={cwd!r}")
     job[f"{role}_agent"] = agent_id
     job[f"{role}_cwd"] = cwd
+    job[f"{role}_run_status"] = status
     save_job(job)  # ids survive a hard crash mid-loop, so resume adopts them
+    if job.get("queue_supervised"):
+        op_id = job.pop("_queue_operation_id", None)
+        if op_id:
+            from queue_mode import finish_operation
+            operation_status = "adopted" if status in {"permission", "running"} else "completed"
+            finish_operation(job["jobdir"], op_id, operation_status,
+                             {"status": status, "agentId": agent_id}, agent_id=agent_id)
 
 
 def send_to(job, agent_key, message):
     agent_id = job.get(agent_key)
     if not agent_id:
         raise Pause(f"no recorded agent for {agent_key}; refusing to guess")
-    rc, out, err = run_guarded(["paseo", "send", agent_id, "--json", message],
-                                timeout=int(job["spec"].get("agent_timeout", 1800)))
+    queue_op = None
+    if job.get("queue_supervised"):
+        if str(Path(__file__).resolve().parent) not in sys.path:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from queue_mode import (begin_operation, finish_operation, get_operation,
+                                resolve_send_acceptance, validate_send_result)
+        queue_op = begin_operation(job["jobdir"], "send", agent_key,
+                                   {"agent_id": agent_id, "message": message,
+                                    "phase": job.get("phase")})
+        previous = get_operation(job["jobdir"], queue_op)
+        if previous["status"] == "completed":
+            check_permits(job)
+            return
+        if previous["status"] == "adopted":
+            try:
+                evidence = json.loads(previous.get("evidence", "{}"))
+            except (TypeError, ValueError):
+                evidence = {}
+            status = evidence.get("status") if isinstance(evidence, dict) else None
+            if status not in {"permission", "running"}:
+                raise Pause(f"saved send operation {queue_op} has an unverified adopted result")
+            wait_for_agent(job, agent_key.removesuffix("_agent"), initial_status=status)
+            return
+        message = f"[queue op={queue_op}] {message}"
+    try:
+        rc, out, err = run_guarded(["paseo", "send", agent_id, "--json", message],
+                                   timeout=int(job["spec"].get("agent_timeout", 1800)))
+    except Exception as exc:
+        if queue_op:
+            finish_operation(job["jobdir"], queue_op, "uncertain",
+                             {"phase": "send transport", "error": str(exc)[:1000]})
+        if isinstance(exc, Pause):
+            raise
+        raise Pause(f"paseo send outcome is uncertain for {agent_key}: {exc}") from exc
+    if queue_op:
+        try:
+            data = json_of(out, "send result")
+            valid, reason, response_status = validate_send_result(
+                data, agent_id, with_status=True)
+            acceptance = resolve_send_acceptance(True if rc == 0 and valid else None)
+        except Pause as exc:
+            finish_operation(job["jobdir"], queue_op, "uncertain",
+                             {"rc": rc, "stdout": tail_text(out, 30),
+                              "stderr": tail_text(err, 10), "reason": exc.reason})
+            raise Pause(f"send acceptance is unverified for {agent_key}; operation {queue_op}: "
+                        f"{exc.reason}")
+        if acceptance == "PARK":
+            finish_operation(job["jobdir"], queue_op, "uncertain",
+                             {"rc": rc, "stdout": tail_text(out, 30),
+                              "stderr": tail_text(err, 10), "reason": reason})
+            raise Pause(f"send acceptance is unverified for {agent_key}; operation {queue_op}: {reason}")
+        if response_status in {"permission", "running"}:
+            finish_operation(job["jobdir"], queue_op, "adopted", data, agent_id=agent_id)
+            wait_for_agent(job, agent_key.removesuffix("_agent"), initial_status=response_status)
+            return
+        finish_operation(job["jobdir"], queue_op, "completed", data, agent_id=agent_id)
+        check_permits(job)
+        return
     if rc != 0:
         raise Pause(f"send to {agent_key} failed (rc={rc}): {tail_text(err, 5)}")
     status = last_json_of(out, "send result").get("status")  # send streams like run
@@ -468,12 +607,20 @@ def ensure_workspace(job, role, base, branch):
     # an EXISTING workspace: used as given, never created, same tree reset.
     ws = job.get(f"{role}_workspace")
     if ws:
-        prepare_tree(job, workspace_cwd(job, ws), branch, base, role)
+        cwd = workspace_cwd(job, ws)
+        if job.get("queue_supervised") and job.get(f"{role}_workspace_ready"):
+            return ws  # preserve both committed and uncommitted role work on recovery
+        prepare_tree(job, cwd, branch, base, role)
+        if job.get("queue_supervised"):
+            job[f"{role}_workspace_ready"] = True
+            save_job(job)
         return ws
     ws = (job["spec"].get("workspaces") or {}).get(role)
     if ws:
         prepare_tree(job, workspace_cwd(job, ws), branch, base, role)  # live existence check
         job[f"{role}_workspace"] = ws
+        if job.get("queue_supervised"):
+            job[f"{role}_workspace_ready"] = True
         save_job(job)
         return ws
     rc, out, err = run_guarded(
@@ -483,10 +630,18 @@ def ensure_workspace(job, role, base, branch):
         cwd=job["spec"]["repo"])
     if rc != 0:
         raise Pause(f"cannot create the {role} workspace: {tail_text(err, 5) or rc}")
-    ws = json_of(out, "workspace create output").get("workspaceId")
+    workspace = json_of(out, "workspace create output")
+    if job.get("queue_supervised") and (not isinstance(workspace, dict) or
+            set(workspace) != {"workspaceId", "project", "name", "isolation", "cwd"} or
+            any(not isinstance(workspace.get(k), str) or not workspace[k]
+                for k in ("workspaceId", "project", "name", "isolation", "cwd"))):
+        raise Pause(f"unverified workspace-create payload: {tail_text(out, 5)}")
+    ws = workspace.get("workspaceId") if isinstance(workspace, dict) else None
     if not ws:
         raise Pause(f"workspace create returned no workspaceId: {tail_text(out, 3)}")
     job[f"{role}_workspace"] = ws
+    if job.get("queue_supervised"):
+        job[f"{role}_workspace_ready"] = True
     save_job(job)
     return ws
 
@@ -494,14 +649,33 @@ def ensure_workspace(job, role, base, branch):
 def spawn_agent(job, role, model, base, prompt):
     key = "reviewer" if role.startswith("review") else role
     ws = ensure_workspace(job, key, base, branch_name(job, role))
+    op_id = None
+    if job.get("queue_supervised"):
+        if str(Path(__file__).resolve().parent) not in sys.path:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from queue_mode import begin_operation, finish_operation
+        op_id = begin_operation(job["jobdir"], "run", key,
+                                {"workspace": ws, "model": model, "role": key})
+        job["_queue_operation_id"] = op_id
     argv = ["paseo", "run", "--workspace", ws, "--provider", model,
             "--title", f"AgentCoder {job['task_id']} {role}", "--json", prompt]
     try:
         rc, out, err = run_guarded(argv, cwd=job["spec"]["repo"],
                                    timeout=int(job["spec"].get("agent_timeout", 1800)))
     except Pause as exc:
+        if op_id:
+            finish_operation(job["jobdir"], op_id, "uncertain", str(exc))
         raise Pause(f"{role} spawn: {exc}")
-    record_turn(job, key, rc, out, err)
+    try:
+        record_turn(job, key, rc, out, err)
+    except Pause as exc:
+        if op_id:
+            finish_operation(job["jobdir"], op_id, "uncertain",
+                             {"rc": rc, "stdout": tail_text(out, 30), "stderr": tail_text(err, 10),
+                              "reason": str(exc)})
+        raise
+    if job.get("queue_supervised") and job.get(f"{key}_run_status") in {"permission", "running"}:
+        wait_for_agent(job, key, initial_status=job[f"{key}_run_status"])
     return job[f"{key}_cwd"]
 
 
@@ -512,17 +686,89 @@ def _kill_all(procs):
         proc.wait()
 
 
-def wait_for_agent(job, role):
+def wait_for_agent(job, role, initial_status=None, sleep_fn=None):
     # rc=0 proves NOTHING: real `paseo wait` exits 0 printing status "error"
     # ("Agent not found") as readily as "idle" -- the JSON status is the signal
+    if job.get("queue_supervised"):
+        if str(Path(__file__).resolve().parent) not in sys.path:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from queue_mode import (QueueError,
+                                clear_permission_wait, load_state, permission_limits,
+                                record_permission_prompt, record_permission_progress,
+                                check_permission_progress, validate_wait_result,
+                                wall_elapsed)
+        maximum, no_progress_seconds = permission_limits(job["spec"])
+        if initial_status == "permission":
+            try:
+                record_permission_prompt(job["jobdir"], maximum, no_progress_seconds)
+            except QueueError as exc:
+                raise Pause(str(exc))
+        check_permits(job)
+        record_permission_progress(job["jobdir"])
+    sleep_fn = sleep_fn or time.sleep
     tmo = int(job["spec"].get("agent_timeout", 1800))
-    rc, out, err = run_guarded(["paseo", "wait", job[f"{role}_agent"], "--json",
-                                "--timeout", str(tmo)], timeout=tmo + 30)  # outlive the CLI
-    data = last_json_of(out, f"{role} wait result")
-    if data.get("status") != "idle":
-        aid = job[f"{role}_agent"]
-        raise Pause(f"{role} agent {aid} is not idle: paseo wait reports "
-                    f"{data.get('status')!r} {tail_text(str(data.get('message', '')), 3)}")
+    deadline = time.monotonic() + tmo
+    while True:
+        wait_timeout = tmo
+        if job.get("queue_supervised"):
+            remaining_agent_time = deadline - time.monotonic()
+            if remaining_agent_time <= 0:
+                raise Pause("agent wait exceeded its total timeout")
+            current_state = load_state(job["jobdir"])
+            try:
+                check_permission_progress(current_state, no_progress_seconds)
+            except QueueError as exc:
+                raise Pause(str(exc))
+            budgets = [float(tmo), remaining_agent_time]
+            wall_limit = current_state.get("job_wall_timeout")
+            if isinstance(wall_limit, (int, float)) and not isinstance(wall_limit, bool):
+                remaining_wall_time = float(wall_limit) - wall_elapsed(
+                    current_state, time.time())
+                if remaining_wall_time <= 0:
+                    raise Pause("job wall-time budget exhausted during agent wait")
+                budgets.append(remaining_wall_time)
+            started = current_state.get("permission_started_at")
+            if started is not None:
+                remaining = no_progress_seconds - (time.time() - float(started))
+                if remaining <= 0:
+                    raise Pause("permission sequence exceeded its no-progress timer")
+                budgets.append(remaining)
+            wait_timeout = min(budgets)
+            if wait_timeout <= 0:
+                raise Pause("agent wait budget exhausted")
+        rc, out, err = run_guarded(["paseo", "wait", job[f"{role}_agent"], "--json",
+                                    "--timeout", str(wait_timeout)],
+                                   timeout=(wait_timeout if job.get("queue_supervised")
+                                            else wait_timeout + 5))
+        data = last_json_of(out, f"{role} wait result")
+        if job.get("queue_supervised"):
+            if rc != 0:
+                raise Pause(f"unverified paseo wait exit rc={rc}: {tail_text(out + err, 10)}")
+            valid, reason, response_status = validate_wait_result(
+                data, job[f"{role}_agent"], with_status=True)
+            if not valid:
+                raise Pause(reason)
+            if response_status == "permission":
+                try:
+                    record_permission_prompt(job["jobdir"], maximum, no_progress_seconds)
+                except QueueError as exc:
+                    raise Pause(str(exc))
+                check_permits(job)
+                record_permission_progress(job["jobdir"])
+                continue
+            if response_status == "running":
+                record_permission_progress(job["jobdir"])
+                sleep_for = min(1, max(0, deadline - time.monotonic()))
+                if sleep_for:
+                    sleep_fn(sleep_for)
+                continue
+            clear_permission_wait(job["jobdir"])
+            return
+        if data.get("status") != "idle":
+            aid = job[f"{role}_agent"]
+            raise Pause(f"{role} agent {aid} is not idle: paseo wait reports "
+                        f"{data.get('status')!r} {tail_text(str(data.get('message', '')), 3)}")
+        return
 
 
 def live_ids():
@@ -546,7 +792,18 @@ def stop_job_agents(job):
 
 def do_spawn(job):
     spec = job["spec"]
-    live = live_ids()
+    if job.get("queue_supervised"):
+        lrc, lout, lerr = run_guarded(["paseo", "ls", "-g", "--json"])
+        if lrc != 0:
+            raise Pause(f"cannot reconcile owned agents (global listing rc={lrc}): "
+                        f"{tail_text(lout + lerr, 5)}")
+        rows = json_of(lout, "paseo global listing")
+        if not captured_queue_listing(rows):
+            raise Pause(f"unverified global listing row/status; evidence={tail_text(lout, 10)}")
+        live = {row["id"] for row in rows
+                if row["status"] in {"running", "idle", "permission"}}
+    else:
+        live = live_ids()
     for role in ("coder", "designer"):  # resume: a recorded id that died must respawn
         if job.get(f"{role}_agent") and str(job[f"{role}_agent"]) not in live:
             job.pop(f"{role}_agent", None), job.pop(f"{role}_cwd", None)
@@ -556,38 +813,44 @@ def do_spawn(job):
             save_job(job)
     need = [r for r in ("coder", "designer") if not job.get(f"{r}_agent")]
     if need:
-        prompts = {"coder": coder_prompt(job), "designer": designer_prompt(job)}
-        # workspaces first (sequential creation is fine), agents in parallel after:
-        # a role that already has one reuses it, so a respawn never piles up worktrees
-        ws_for = {role: ensure_workspace(job, role, job["base_sha"], branch_name(job, role))
-                  for role in need}
-        procs = {}
-        for role in need:
-            model = spec.get(f"{role}_model") or DEFAULT_MODEL
-            argv = resolve(["paseo", "run", "--workspace", ws_for[role], "--provider", model,
-                            "--title", f"AgentCoder {job['task_id']} {role}",
-                            "--json", prompts[role]])
-            try:
-                procs[role] = subprocess.Popen(argv, cwd=spec["repo"], stdout=subprocess.PIPE,
-                                               stderr=subprocess.PIPE, text=True,
-                                               errors="replace")
-            except OSError as exc:  # same cleanup as the other spawn failures
-                _kill_all(procs)
-                stop_job_agents(job)
-                raise Pause(f"cannot launch paseo ({role} spawn): {exc}")
-        for role, proc in procs.items():
-            try:
-                out, err = proc.communicate(timeout=int(spec.get("agent_timeout", 1800)))
-            except subprocess.TimeoutExpired:
-                _kill_all(procs)
-                stop_job_agents(job)
-                raise Pause(f"{role} agent turn timed out")
-            try:
-                record_turn(job, role, proc.returncode, out, err)
-            except Pause:
-                _kill_all(procs)
-                stop_job_agents(job)
-                raise
+        if job.get("queue_supervised"):
+            for role in need:  # one role turn at a time; no paired initial spawn
+                spawn_agent(job, role, spec.get(f"{role}_model") or DEFAULT_MODEL,
+                            job["base_sha"],
+                            coder_prompt(job) if role == "coder" else designer_prompt(job))
+        else:
+            prompts = {"coder": coder_prompt(job), "designer": designer_prompt(job)}
+            # workspaces first (sequential creation is fine), agents in parallel after:
+            # a role that already has one reuses it, so a respawn never piles up worktrees
+            ws_for = {role: ensure_workspace(job, role, job["base_sha"], branch_name(job, role))
+                      for role in need}
+            procs = {}
+            for role in need:
+                model = spec.get(f"{role}_model") or DEFAULT_MODEL
+                argv = resolve(["paseo", "run", "--workspace", ws_for[role], "--provider", model,
+                                "--title", f"AgentCoder {job['task_id']} {role}",
+                                "--json", prompts[role]])
+                try:
+                    procs[role] = subprocess.Popen(argv, cwd=spec["repo"], stdout=subprocess.PIPE,
+                                                   stderr=subprocess.PIPE, text=True,
+                                                   errors="replace")
+                except OSError as exc:  # same cleanup as the other spawn failures
+                    _kill_all(procs)
+                    stop_job_agents(job)
+                    raise Pause(f"cannot launch paseo ({role} spawn): {exc}")
+            for role, proc in procs.items():
+                try:
+                    out, err = proc.communicate(timeout=int(spec.get("agent_timeout", 1800)))
+                except subprocess.TimeoutExpired:
+                    _kill_all(procs)
+                    stop_job_agents(job)
+                    raise Pause(f"{role} agent turn timed out")
+                try:
+                    record_turn(job, role, proc.returncode, out, err)
+                except Pause:
+                    _kill_all(procs)
+                    stop_job_agents(job)
+                    raise
     for role in ("coder", "designer"):  # every recorded live role must be idle to proceed
         if job.get(f"{role}_agent"):
             wait_for_agent(job, role)
@@ -597,12 +860,29 @@ def do_spawn(job):
 def path_matches(p, g):
     if not isinstance(p, str) or not isinstance(g, str):
         return False
+    # Git reports slash-separated paths on every platform, while Python's glob
+    # may return native separators. Specs and saved paths use one canonical form.
+    p = p.replace("\\", "/")
+    g = g.replace("\\", "/")
     g = g.rstrip("/")
+    if os.name == "nt":
+        p, g = p.casefold(), g.casefold()
     plain = not any(ch in g for ch in "*?[")
     return (p == g or p.startswith(g + "/")) if plain else fnmatch.fnmatch(p, g)
 
 
 LOGS_PREFIX = "in-prog-logs/"  # AGENTS.md progress logs: always allowed, both agents
+
+
+QUEUE_AGENT_FIELDS = {"id", "shortId", "name", "provider", "thinking", "status", "cwd", "created"}
+
+
+def captured_queue_listing(rows):
+    return isinstance(rows, list) and all(
+        isinstance(row, dict) and set(row) == QUEUE_AGENT_FIELDS
+        and all(isinstance(row.get(k), str) and row[k] for k in QUEUE_AGENT_FIELDS)
+        and row["status"] in {"running", "idle", "closed", "permission"}
+        for row in rows)
 
 
 def scope_check(job, sha, globs, who):
@@ -691,7 +971,8 @@ def do_test_review(job):
 
 
 def expand_tests(globs, wt):
-    found = sorted({p for g in globs for p in glob.glob(g, root_dir=wt, recursive=True)
+    found = sorted({p.replace(os.sep, "/") for g in globs
+                    for p in glob.glob(g, root_dir=wt, recursive=True)
                     if Path(wt, p).is_dir() or p.endswith(".py")})  # pytest can't take data files
     if not found:
         raise Pause(f"allowed_test_paths {globs} matched nothing in the worktree; "
@@ -975,6 +1256,11 @@ def do_land(job):
         # driver's own test commit as landable on resume, without string matching
         job["test_landed_sha"] = git(wt, "rev-parse", "HEAD")
         save_job(job)
+    if job.get("queue_supervised") and job["spec"].get("publish") is not True:
+        job["publication"] = "disabled-by-default"
+        save_job(job)
+        write_report(job, landing=True)
+        return
     git(wt, "push", "-u", "origin", f"HEAD:refs/heads/{branch_name(job, 'coder')}", timeout=300)
     job["pushed_sha"] = git(wt, "rev-parse", "HEAD")
     save_job(job)
@@ -1076,8 +1362,17 @@ def exit_json(status, reason):
 
 
 def main(argv):
+    # Queue supervision is opt-in; legacy run/resume/status retain their exact
+    # command path and defaults.
+    if str(Path(__file__).resolve().parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from queue_mode import cli as queue_cli
+    queue_result = queue_cli(argv, Path(__file__).resolve())
+    if queue_result is not None:
+        return queue_result
     if not argv:
-        print("usage: agentcoder.py run SPEC.json [JOBDIR] | resume JOBDIR | status JOBDIR")
+        print("usage: agentcoder.py run SPEC.json [JOBDIR] | resume JOBDIR | status JOBDIR | "
+              "supervise SPEC.json JOBDIR | queue wait QDIR [TASK_ID] --after EVENT_ID")
         return EXIT_ERROR
     cmd, arg = argv[0], argv[1] if len(argv) > 1 else ""
     if cmd in ("resume", "status") and not arg:  # never read a stray ./job.json
@@ -1108,6 +1403,7 @@ def main(argv):
                 return EXIT_ERROR
             job = {"jobdir": str(jobdir), "task_id": spec["task_id"], "spec": spec,
                    "phase": "spawn", "status": "running", "reason": None}
+            job["queue_supervised"] = "--queue-supervised" in argv[3:]
             save_job(job)
             rc = ensure_preflight(job)
             if rc is not None:

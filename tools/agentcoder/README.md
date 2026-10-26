@@ -1,8 +1,7 @@
 # agentcoder — a small driver for coder / blind test designer / executor loops
 
-`tools/agentcoder/agentcoder.py` is a **plain driver script** (stdlib only,
-one file; currently 955 non-blank/non-comment lines — ~1000 is a soft
-sanity ceiling, not enforced by a check) that runs the AgentCoder paper
+`tools/agentcoder/agentcoder.py` is a **plain driver script** with an opt-in
+stdlib-only `queue_mode.py` state module that runs the AgentCoder paper
 loop against Paseo agents:
 
 - a **CODER** agent implements a contract,
@@ -16,10 +15,10 @@ loop against Paseo agents:
   the tests, checks them against the *base* commit, then runs them against
   the coder's candidate and feeds precise failures back.
 
-It deliberately replaces the earlier Paseo-plugin attempt (hooks, journal,
-receipts). There are **no event hooks here**: `paseo run` and
-`paseo send` block until the agent's turn ends, so *the blocking subprocess
-call is the completion signal*. No daemon, no journal, no subscriptions.
+Legacy `run`/`resume` have no Paseo event hooks or journal: `paseo run` and
+`paseo send` block until the agent's turn ends, so *the blocking subprocess call
+is the completion signal*. Opt-in supervised mode adds local durable state and
+the process/event wait surface described below.
 
 ## Usage
 
@@ -27,7 +26,50 @@ call is the completion signal*. No daemon, no journal, no subscriptions.
 python tools/agentcoder/agentcoder.py run SPEC.json [JOBDIR]
 python tools/agentcoder/agentcoder.py resume JOBDIR
 python tools/agentcoder/agentcoder.py status JOBDIR
+python tools/agentcoder/agentcoder.py supervise SPEC.json JOBDIR
+python tools/agentcoder/agentcoder.py queue wait QDIR [TASK_ID] --after EVENT_ID [--timeout SECONDS]
+python tools/agentcoder/agentcoder.py queue stop JOBDIR
+python tools/agentcoder/agentcoder.py queue resume JOBDIR
 ```
+
+The first opt-in supervised entry point stores locked state and retained
+attempt transcripts in `JOBDIR`; terminal state is committed with an event
+before the process exits. `queue wait` reads durable events before waiting and
+rechecks at most once per second. See [the supervised mode guide](../../docs/agentcoder-queue.md)
+for current limits. The orchestrator reports six supervised pilots passed; this
+slice worker did not start a live worker. Existing `run`, `resume`,
+and `status` behavior remains the default. Supervised jobs can reuse explicit
+role workspaces or create them from the captured Paseo response. `publish`
+defaults to false and must be explicitly true for trusted-driver push/PR
+creation. Queue policy fields `queue.max_nudges` and
+`queue.job_wall_timeout` default to 2 and 14400 seconds.
+`queue.job_wall_timeout` cannot exceed 14400 seconds because the supervised
+child has that hard execution cap; larger values are rejected during validation.
+Permit requests park when their free-text record cannot be classified;
+`queue.trusted_agents` can
+opt exact full agent IDs into cooperative auto-allow, and
+`queue.trust_owned_agents: true` opts this job's spawned agents in. Permit
+descriptions are agent-controlled text, so this opt-in is cooperative trust,
+not containment. Outside/risky evidence such as outside-workspace paths,
+`curl`, `git push`, or `rm` is still denied.
+Wait responses with status `permission` trigger another permit check and wait.
+They have a separate default budget of 100 prompts per job and a 900-second
+no-progress timer (`queue.max_permission_prompts` and
+`queue.permission_no_progress_seconds` configure those limits); they do not use
+the nudge budget. Empty or `-` permit descriptions are no evidence, so they
+park by default. Owned-agent trust may allow them, but file-change prompts
+contain no path and this remains cooperative trust, not containment.
+Run, send, and wait share a response classifier for completed, idle, permission,
+running, and unknown outcomes. A permission response after an accepted send is
+handled and followed by wait. Accepted sends are keyed to the current job phase
+and recovered from durable operation state without repeating the send; uncertain
+acceptance parks for reconciliation.
+
+Queue state stores `owned_agents` as an object keyed by full agent ID. The
+supervised driver writes each returned ID before later job journaling, and the
+supervisor merges attempt results into freshly loaded state. Unexpected
+exceptions create a parked event with a short classified outcome and keep the
+full traceback in the retained attempt stderr.
 
 `JOBDIR` defaults to `<repo>/.scratch/agentcoder/<task_id>/` — keep job
 dirs out of tracked paths (in this repo `.scratch/` is gitignored). Exit
@@ -158,12 +200,13 @@ observed (live) to exit 0 for a not-found id with `Agent not found` in the
 output, so the exit code is never the completion signal, only the JSON
 status is. Phases are **not all
 idempotent**: a crash after a side effect but before the next save
-replays it. Safe to replay: **spawn** (each completed turn records its
-agent id, and only the role with no saved id is re-spawned; a real
-re-spawn reuses the role's recorded workspace and resets its branch onto
-the base with `git checkout -B` — a dirty tree **pauses** for a human
-rather than silently resetting uncommitted work) and **land** (an existing PR for the branch is
-adopted, never forked). What can repeat: a **feedback send** to a
+replays it. In legacy `run`/`resume`, **spawn** is safe to replay (each
+completed turn records its agent id, and only a role with no saved id is
+re-spawned; that re-spawn resets its reused branch onto the base with
+`git checkout -B`, and a dirty tree **pauses** rather than discarding edits).
+Supervised recovery instead preserves the role workspace after initial
+preparation. **Land** is safe to replay too: an existing PR for the branch is
+adopted, never forked. What can repeat: a **feedback send** to a
 designer/coder whose turn ended during the crash window — agents are
 re-prompted with the same text, which a human reviewing the PR can see.
 The driver never claims to have deduplicated a send it did not record.
@@ -306,11 +349,13 @@ spawned with `--new-workspace` per agent is what left one real pilot with
   role, else the driver creates one — `paseo workspace create --isolation
   worktree --mode branch-off --new-branch ac/<task>/<role> --base <sha>
   --json` — and records the returned `workspaceId` before launching.
-- Before every spawn the workspace's tree is reset to a clean checkout of
-  the branch that agent needs (`git checkout -B <branch> <sha>`; the
-  reviewer's SHA is the frozen test SHA). A **dirty** tree **pauses** the
-  job — the driver refuses to reset uncommitted work; commit, revert, or
-  clean it, then `resume`.
+- In legacy `run`/`resume`, before every spawn the workspace is reset to a
+  clean checkout of the branch that agent needs (`git checkout -B <branch>
+  <sha>`; the reviewer's SHA is the frozen test SHA). A **dirty** tree
+  **pauses** the job rather than resetting uncommitted work. In supervised
+  mode, initial workspace preparation uses the same clean-checkout rule;
+  after `*_workspace_ready` is recorded, recovery keeps committed and
+  uncommitted edits without resetting the role branch.
 - The driver never archives and never deletes a workspace. After the PR
   lands (or the job dies for good), the **human** cleans up:
   `paseo workspace archive <id>` for the job's one to three workspace ids
@@ -336,7 +381,7 @@ branch-off --json` (returns `workspaceId`/`cwd`, no `id` key), `run
 `workspace archive` (returns `status: "archived"`, drops out of
 `workspace ls`); the probe workspace was archived afterwards. **Not
 verified live** (offline-tested against the
-fake only, incl. the dirty-tree respawn pause): the remaining feedback
+fake only, incl. the legacy-mode dirty-tree respawn pause): the remaining feedback
 `send` loops (test-review changes,
 executor
 feedback, scope-feedback rounds, candidate-red feedback), the `test_review`
@@ -377,10 +422,12 @@ never raise a `UnicodeDecodeError` out of the driver and strand
   gap: a resume re-spawns any role with no recorded agent id — or with a
   recorded id that no longer appears in `paseo ls` (dead recorded ids are
   dropped, see the state machine above). With workspace reuse the branch
-  collision is gone (the re-spawn's `git checkout -B` resets the branch
-  onto the base, and a dirty tree pauses first), but that same reset
-  discards a stopped agent's committed work on the role branch — start a
-  fresh jobdir if that turn's output must be kept.
+  collision is gone in legacy `run`/`resume` (the re-spawn's
+  `git checkout -B` resets the branch onto the base, and a dirty tree pauses
+  first), but that same reset discards a stopped agent's committed work on
+  the role branch — start a fresh jobdir if that turn's output must be kept.
+  Supervised recovery skips that reset once the role workspace is ready, so
+  it retains stopped-agent commits and uncommitted edits.
 - Candidate rounds are recorded one-per-round: a resume re-runs the round
   and replaces its entry in `candidate_results` instead of appending a
   duplicate.
