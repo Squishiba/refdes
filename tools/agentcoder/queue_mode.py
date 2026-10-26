@@ -38,7 +38,7 @@ REFERENCE_SAFE = re.compile(
     r"untracked REVIEW-[A-Z]+\.md|untracked probes|read-only probes|own worktree|"
     r"review artifacts|foreground (tests|test)", re.I)
 
-CAPTURED_STATUSES = {"running", "idle", "closed"}
+CAPTURED_STATUSES = {"running", "idle", "closed", "permission"}
 CAPTURED_AGENT_FIELDS = {"id", "shortId", "name", "provider", "thinking", "status",
                          "cwd", "created"}
 CAPTURED_WORKSPACE_FIELDS = {"workspaceId", "project", "name", "isolation", "cwd"}
@@ -294,6 +294,11 @@ def _queue_limits(spec):
         raise QueueError("queue must be a JSON object")
     max_nudges = policy.get("max_nudges", MAX_NUDGES)
     wall_timeout = policy.get("job_wall_timeout", MAX_ACTIVE_SECONDS)
+    trusted = policy.get("trusted_agents", [])
+    if not isinstance(trusted, list) or any(not isinstance(agent_id, str) or not agent_id
+                                            for agent_id in trusted) \
+            or len(set(trusted)) != len(trusted):
+        raise QueueError("queue.trusted_agents must be a list of unique exact full agent IDs")
     if isinstance(max_nudges, bool) or not isinstance(max_nudges, int) or not 0 <= max_nudges <= 10:
         raise QueueError("queue.max_nudges must be an integer from 0 through 10")
     if isinstance(wall_timeout, bool) or not isinstance(wall_timeout, int) or wall_timeout < 1:
@@ -348,18 +353,58 @@ def validate_wait_result(payload, expected_agent_id):
     return True, "captured idle response"
 
 
+def validate_run_result(payload, expected_agent_id=None):
+    fields = {"agentId", "status", "provider", "cwd", "title"}
+    if not isinstance(payload, dict) or set(payload) != fields:
+        return False, "unverified paseo run payload shape: " + bounded_raw(payload)
+    if not all(isinstance(payload.get(k), str) and payload[k]
+               for k in fields):
+        return False, "paseo run payload has missing/non-text fields: " + bounded_raw(payload)
+    if payload["status"] not in {"completed", "running"}:
+        return False, "unverified paseo run status: " + bounded_raw(payload)
+    if expected_agent_id and payload["agentId"] != expected_agent_id:
+        return False, "paseo run agentId does not match exact ID: " + bounded_raw(payload)
+    return True, "captured run response"
+
+
+def validate_send_result(payload, expected_agent_id):
+    fields = {"agentId", "status", "message"}
+    if not isinstance(payload, dict) or set(payload) != fields:
+        return False, "unverified paseo send payload shape: " + bounded_raw(payload)
+    if payload.get("agentId") != expected_agent_id or payload.get("status") != "completed" \
+            or not isinstance(payload.get("message"), str):
+        return False, "paseo send result does not confirm exact completed agent: " + bounded_raw(payload)
+    return True, "captured completed send response"
+
+
+def validate_stop_result(payload, requested_agent_id):
+    fields = {"stoppedCount", "agentIds"}
+    if not isinstance(payload, dict) or set(payload) != fields:
+        return False, "unverified paseo stop payload shape: " + bounded_raw(payload)
+    ids = payload.get("agentIds")
+    count = payload.get("stoppedCount")
+    if not isinstance(count, int) or count < 0 or not isinstance(ids, list) \
+            or any(not isinstance(agent_id, str) for agent_id in ids) \
+            or count != len(ids) or any(agent_id != requested_agent_id for agent_id in ids):
+        return False, "paseo stop result does not match exact requested ID: " + bounded_raw(payload)
+    return True, "captured stop response"
+
+
 def classify_permit_record(row):
     """Reference deny/risky semantics; prose alone can never prove ALLOW."""
     digest = hashlib.sha256(bounded_raw(row, 65536).encode()).hexdigest()
     if not isinstance(row, dict):
         return "UNKNOWN", "permit is not an object", digest
-    required = ("agentShortId", "id", "name", "description")
+    required = ("agentShortId", "agentId", "id", "name", "description")
     if any(not isinstance(row.get(k), str) or not row[k] for k in required):
         return "UNKNOWN", "permit schema is incomplete", digest
     if set(row) != set(required):
         return "UNKNOWN", "permit has uncaptured fields", digest
     name, description = row["name"], row["description"]
-    if "external_directory" in name.lower() or re.search(r"/tmp|~/", description):
+    outside = re.search(r"/tmp|~/|\.\./|/(?:etc|home|root|var|usr)/|"
+                        r"\boutside (?:(?:the|this|my) )?(?:worktree|workspace|repo|project)\b",
+                        description, re.I)
+    if "external_directory" in name.lower() or outside:
         return "DENY", "request targets an outside directory", digest
     if REFERENCE_RISKY.search(name + "\n" + description):
         return "DENY", "request matches the risky-operation policy", digest
@@ -471,7 +516,7 @@ def reconcile_job_agents(jobdir, listing=None):
     return adopted, uncertain
 
 
-def process_permits(jobdir, owned_ids, listing, rows, invoke=None):
+def process_permits(jobdir, owned_ids, listing, rows, invoke=None, trusted_agent_ids=()):
     """Process only exact owned short IDs; unknown/risky evidence parks the job."""
     if not isinstance(rows, list):
         reason = "permit listing is not the captured array shape: " + bounded_raw(rows)
@@ -506,8 +551,9 @@ def process_permits(jobdir, owned_ids, listing, rows, invoke=None):
             return "PARK", "malformed permit row"
         short = row.get("agentShortId")
         request_id = row.get("id")
+        full_from_record = row.get("agentId")
         if not isinstance(short, str) or not short or not isinstance(request_id, str) \
-                or not request_id:
+                or not request_id or not isinstance(full_from_record, str) or not full_from_record:
             reason = "permit lacks exact agentShortId or request id; attribution unknown"
             record_decision(jobdir, {"decision": "UNKNOWN", "reason": reason,
                                     "raw": bounded_raw(row)})
@@ -523,44 +569,86 @@ def process_permits(jobdir, owned_ids, listing, rows, invoke=None):
             record_decision(jobdir, {"decision": "UNKNOWN", "reason": reason,
                                     "raw": bounded_raw(row)})
             return "PARK", reason
+        if matches[0] != full_from_record:
+            reason = "permit full agentId disagrees with exact shortId mapping"
+            record_decision(jobdir, {"decision": "UNKNOWN", "reason": reason,
+                                    "raw": bounded_raw(row)})
+            return "PARK", reason
         if matches[0] not in owned_ids:
             continue  # foreign request: do not allow, deny, or rewrite it
         decision, reason, digest = classify_permit_record(row)
         # The exact captured shortId maps to one full ID; prefix matching is
         # deliberately forbidden. Ambiguous/foreign rows are never touched.
         full_id = matches[0]
+        trusted = full_id in set(trusted_agent_ids)
+        unverified_schema = decision == "UNKNOWN" and (
+                set(row) != {"agentShortId", "agentId", "id", "name", "description"}
+                or reason in {"permit schema is incomplete", "permit has uncaptured fields"})
+        if unverified_schema:
+            record_decision(jobdir, {"agent_id": full_id, "agent_short_id": short,
+                                     "request_id": request_id, "decision": "UNKNOWN",
+                                     "reason": reason, "request_hash": digest,
+                                     "raw": bounded_raw(row)})
+            return "PARK", f"owned permit {request_id} has unverified schema; evidence retained"
+        action = "allow" if decision == "UNKNOWN" and trusted else "deny"
+        if action == "allow":
+            reason = "operator-listed cooperative trusted agent; " + reason
+            decision = "ALLOW"
         record = {"agent_id": full_id, "agent_short_id": short, "request_id": request_id,
                   "decision": decision, "reason": reason, "request_hash": digest,
                   "raw": bounded_raw(row)}
         record_decision(jobdir, record)  # durable before any external side effect
-        # The live record has no structured input/cwd, so even a safe-scope
-        # description is incomplete. Deny this exact owned request, then park.
+        if decision == "UNKNOWN" and not trusted:
+            return "PARK", f"owned permit {request_id} is unclassifiable; evidence retained: {reason}"
         deny_message = DENIAL.format(reason=reason)
         try:
-            result = invoke(["permit", "deny", full_id, request_id, "--message",
-                             deny_message, "--json"])
+            argv = ["permit", action, full_id, request_id, "--json"]
+            if action == "deny":
+                argv[-1:-1] = ["--message", deny_message]
+            result = invoke(argv)
+            stale = False
             if result.returncode != 0:
+                for stream in (result.stdout, result.stderr):
+                    try:
+                        error = json.loads(stream).get("error", {})
+                    except (ValueError, AttributeError):
+                        continue
+                    if error.get("code") == "NO_PENDING_PERMISSIONS":
+                        stale = True
+                        break
+            if result.returncode != 0 and not stale:
                 record_decision(jobdir, {**record, "decision": "STOP_PENDING",
-                                         "reason": "deny response failed; " + reason,
+                                         "reason": f"{action} response failed; " + reason,
                                          "raw_response": bounded_raw(result.stdout + result.stderr)})
             reread = invoke(["permit", "ls", "--json"])
             try:
                 pending = json.loads(reread.stdout) if reread.returncode == 0 else None
             except ValueError:
                 pending = None
+            remains = None
             if not isinstance(pending, list):
                 record_decision(jobdir, {**record, "decision": "STOP_PENDING",
                                          "reason": "permit resolution could not be verified",
                                          "raw_response": bounded_raw(reread.stdout + reread.stderr)})
-            elif any(isinstance(p, dict) and p.get("agentShortId") == short
-                     and p.get("id") == request_id for p in pending):
+                remains = True
+            else:
+                remains = any(isinstance(p, dict) and p.get("agentShortId") == short
+                              and p.get("id") == request_id for p in pending)
+            if remains:
                 record_decision(jobdir, {**record, "decision": "STOP_PENDING",
-                                         "reason": "exact permit remains pending after deny",
+                                         "reason": f"exact permit remains pending after {action}",
                                          "raw_response": bounded_raw(reread.stdout)})
         except (OSError, subprocess.TimeoutExpired) as exc:
             record_decision(jobdir, {**record, "decision": "STOP_PENDING",
                                      "reason": f"deny outcome uncertain: {exc}"})
-        return "PARK", f"owned permit {request_id} denied/parked: {reason}"
+        if action == "deny" and stale and not remains:
+            continue  # NO_PENDING_PERMISSIONS is a benign list/action race
+        if action == "deny":
+            return "PARK", f"owned permit {request_id} denied/parked: {reason}"
+        if result.returncode != 0 and not stale:
+            return "PARK", f"trusted permit allow failed; evidence retained: {reason}"
+        if remains:
+            return "PARK", f"trusted permit allow is unresolved: {reason}"
     return "CLEAR", "no exact owned pending permits"
 
 
@@ -605,9 +693,15 @@ def maintenance_stop(jobdir, invoke=None, listing_fn=None, reason="maintenance")
             continue
         try:
             result = invoke(["stop", aid, "--json"])
-            if result.returncode != 0:
+            try:
+                payload = json.loads(result.stdout)
+            except ValueError:
+                payload = None
+            valid, stop_reason = validate_stop_result(payload, aid)
+            if result.returncode != 0 or not valid:
                 uncertain[aid] = "stop command failed: " + bounded_raw(
-                    result.stdout + result.stderr, 1000)
+                    {"reason": stop_reason, "stdout": result.stdout,
+                     "stderr": result.stderr}, 1000)
         except (OSError, subprocess.TimeoutExpired) as exc:
             uncertain[aid] = f"stop outcome unknown: {exc}"
     after, after_error = listing_fn()

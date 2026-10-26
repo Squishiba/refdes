@@ -30,8 +30,10 @@ def create_state(path, **updates):
     return state
 
 
-def permit_row(name, description, short="f399385", rid="req-1"):
-    return {"agentShortId": short, "id": rid, "name": name, "description": description}
+def permit_row(name, description, short="agent-l", rid="req-1",
+               agent_id="agent-live-running"):
+    return {"agentShortId": short, "agentId": agent_id, "id": rid,
+            "name": name, "description": description}
 
 
 def fake_result(rc=0, out="[]", err=""):
@@ -107,8 +109,8 @@ def test_unknown_permit_parks(tmp_path):
         return fake_result(out="[]")
 
     result, reason = queue.process_permits(jobdir, [listing[0]["id"]], listing, rows, invoke)
-    assert result == "PARK" and "lacks structured" in reason
-    assert calls[0][:4] == ["permit", "deny", listing[0]["id"], "req-1"]
+    assert result == "PARK" and "unclassifiable" in reason
+    assert calls == []
     decision = queue.read_json(jobdir / "state.json")["permit_decisions"][0]
     assert decision["decision"] == "UNKNOWN" and decision["request_hash"]
 
@@ -118,13 +120,140 @@ def test_risky_or_outside_permit_denied(tmp_path):
     create_state(jobdir)
     listing = fixture("ls-g.json")
     for row in (permit_row("external_directory", "browse project"),
-                permit_row("CodexBash", "write output to /tmp/probe"),
+                permit_row("CodexBash", "write output outside this workspace"),
                 permit_row("CodexBash", "git push the branch")):
         calls = []
         result, _ = queue.process_permits(
             jobdir, [listing[0]["id"]], listing, [row],
-            lambda argv: (calls.append(argv) or fake_result(out="[]")))
+            lambda argv: (calls.append(argv) or fake_result(out="[]")),
+            trusted_agent_ids=[listing[0]["id"]])
         assert result == "PARK" and calls and calls[0][1] == "deny"
+
+
+def test_trusted_agent_allow_and_stale_race(tmp_path):
+    jobdir = tmp_path / "job"
+    create_state(jobdir)
+    listing = fixture("ls-g.json")
+    calls = []
+
+    def invoke(argv):
+        calls.append(argv)
+        if argv[:2] == ["permit", "allow"]:
+            stale = (FIXTURES / "permit-allow-stale.stderr.txt").read_text()
+            return fake_result(rc=1, err=stale)
+        return fake_result(out="[]")
+
+    result, _ = queue.process_permits(
+        jobdir, [listing[0]["id"]], listing,
+        [permit_row("CodexBash", "May I run the exact command?")], invoke,
+        trusted_agent_ids=[listing[0]["id"]])
+    assert result == "CLEAR"
+    assert calls[0][:4] == ["permit", "allow", listing[0]["id"], "req-1"]
+    assert calls[1] == ["permit", "ls", "--json"]
+    assert queue.read_json(jobdir / "state.json")["permit_decisions"][0]["decision"] == "ALLOW"
+
+
+def test_stale_deny_race_is_benign(tmp_path):
+    jobdir = tmp_path / "job"
+    create_state(jobdir)
+    listing = fixture("ls-g.json")
+    calls = []
+
+    def invoke(argv):
+        calls.append(argv)
+        if argv[:2] == ["permit", "deny"]:
+            stale = (FIXTURES / "permit-allow-stale.stderr.txt").read_text()
+            return fake_result(rc=1, err=stale)
+        return fake_result(out="[]")
+
+    result, _ = queue.process_permits(
+        jobdir, [listing[0]["id"]], listing,
+        [permit_row("CodexBash", "write output outside this workspace")], invoke)
+    assert result == "CLEAR" and len(calls) == 2
+
+
+def test_trusted_agent_does_not_bypass_unverified_schema(tmp_path):
+    jobdir = tmp_path / "job"
+    create_state(jobdir)
+    listing = fixture("ls-g.json")
+    row = permit_row("CodexBash", "May I run a command?")
+    row["input"] = {"command": "unknown"}
+    calls = []
+    result, reason = queue.process_permits(
+        jobdir, [listing[0]["id"]], listing, [row],
+        lambda argv: (calls.append(argv) or fake_result()),
+        trusted_agent_ids=[listing[0]["id"]])
+    assert result == "PARK" and "unverified schema" in reason and calls == []
+
+
+def test_captured_daemon_payload_validators():
+    run = fixture("run-completed.json")
+    assert queue.validate_run_result(run)[0]
+    assert queue.validate_run_result(fixture("run-running.json"))[0]
+    assert not queue.validate_run_result(dict(run, extra="unverified"))[0]
+    assert queue.validate_send_result(fixture("send-completed.json"),
+                                      "agent-live-completed")[0]
+    assert queue.validate_wait_result(fixture("wait-idle.json"), "agent-live-running")[0]
+    assert queue.validate_stop_result(fixture("stop-running.json"), "agent-live-running")[0]
+    assert queue.validate_stop_result(fixture("stop-idle.json"), "agent-live-running")[0]
+    permit = fixture("permit-pending.json")[0]
+    assert set(permit) == {"id", "agentId", "agentShortId", "name", "description"}
+    assert queue.classify_permit_record(permit)[0] == "DENY"
+
+
+def test_supervised_run_uses_stdout_json_and_ignores_stderr_banner(tmp_path, monkeypatch):
+    driver_spec = importlib.util.spec_from_file_location(
+        "agentcoder_run_fixture", ROOT / "tools" / "agentcoder" / "agentcoder.py")
+    driver = importlib.util.module_from_spec(driver_spec)
+    driver_spec.loader.exec_module(driver)
+    create_state(tmp_path)
+    job = {"queue_supervised": True, "jobdir": str(tmp_path), "spec": {}}
+    monkeypatch.setattr(driver, "agent_cwd", lambda _job, _id: "/workspace/probe")
+    monkeypatch.setattr(driver, "save_job", lambda _job: None)
+    stdout = json.dumps(fixture("run-completed.json"))
+    stderr = (FIXTURES / "run-blocking.stderr.txt").read_text()
+    driver.record_turn(job, "coder", 0, stdout, stderr)
+    assert job["coder_agent"] == "agent-live-completed"
+    assert queue.read_json(tmp_path / "state.json")["owned_agents"]["agent-live-completed"]
+
+
+def test_supervised_workspace_create_uses_captured_json(tmp_path, monkeypatch):
+    driver_spec = importlib.util.spec_from_file_location(
+        "agentcoder_create_fixture", ROOT / "tools" / "agentcoder" / "agentcoder.py")
+    driver = importlib.util.module_from_spec(driver_spec)
+    driver_spec.loader.exec_module(driver)
+    calls = []
+    monkeypatch.setattr(driver, "run_guarded", lambda argv, **kwargs: (
+        calls.append(argv) or (0, json.dumps(fixture("workspace-create.json")),
+                               "Using workspace wks_fixture\n")))
+    monkeypatch.setattr(driver, "save_job", lambda _job: None)
+    job = {"queue_supervised": True, "task_id": "t", "spec": {"repo": str(tmp_path)}}
+    assert driver.ensure_workspace(job, "coder", "base", "branch") == \
+        fixture("workspace-create.json")["workspaceId"]
+    assert calls and calls[0][-1] == "--json"
+
+
+def test_supervised_send_and_idle_wait_use_captured_json(tmp_path, monkeypatch):
+    driver_spec = importlib.util.spec_from_file_location(
+        "agentcoder_send_wait_fixture", ROOT / "tools" / "agentcoder" / "agentcoder.py")
+    driver = importlib.util.module_from_spec(driver_spec)
+    driver_spec.loader.exec_module(driver)
+    create_state(tmp_path)
+    agent_id = "agent-live-completed"
+    job = {"queue_supervised": True, "jobdir": str(tmp_path), "spec": {},
+           "coder_agent": agent_id}
+    send = dict(fixture("send-completed.json"), agentId=agent_id)
+    monkeypatch.setattr(driver, "run_guarded", lambda *_args, **_kwargs:
+                        (0, json.dumps(send), ""))
+    monkeypatch.setattr(driver, "check_permits", lambda _job: None)
+    driver.send_to(job, "coder_agent", "continue")
+    state = queue.read_json(tmp_path / "state.json")
+    assert next(iter(state["operations"].values()))["status"] == "completed"
+    wait_job = {"queue_supervised": True, "jobdir": str(tmp_path), "spec": {},
+                "coder_agent": "agent-live-running"}
+    monkeypatch.setattr(driver, "run_guarded", lambda *_args, **_kwargs:
+                        (0, json.dumps(fixture("wait-idle.json")), ""))
+    driver.wait_for_agent(wait_job, "coder")
 
 
 def test_foreign_permit_untouched(tmp_path):
@@ -231,7 +360,8 @@ def test_maintenance_stop_intent_survives_restart(tmp_path):
         return listings.pop(0), None
 
     status, _ = queue.maintenance_stop(
-        jobdir, lambda argv: (calls.append(argv) or fake_result()), listing_fn)
+        jobdir, lambda argv: (calls.append(argv) or fake_result(
+            out=json.dumps(fixture("stop-running.json")))), listing_fn)
     assert status == "PAUSED" and calls == [["stop", agent_id, "--json"]]
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps({"task_id": "queue-test"}))
@@ -301,7 +431,7 @@ def test_classifier_mutation_is_caught_in_disposable_copy(tmp_path):
     mutant = source.replace(old, 'if False and REFERENCE_RISKY.search(name + "\\n" + description):', 1)
     probe = """import importlib.util, sys
 spec=importlib.util.spec_from_file_location('mutant',sys.argv[1]); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-row={'agentShortId':'f399385','id':'r1','name':'CodexBash','description':'git push the branch'}
+row={'agentShortId':'f399385','agentId':'f3993852-557c-4a4e-989b-6490584ef5c8','id':'r1','name':'CodexBash','description':'git push the branch'}
 assert m.classify_permit_record(row)[0] == 'DENY'
 """
     result = _run_mutant(tmp_path, mutant, probe)

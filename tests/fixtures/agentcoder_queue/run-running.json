@@ -1,0 +1,7 @@
+{
+  "agentId": "agent-live-running",
+  "status": "running",
+  "provider": "codex",
+  "cwd": "/workspace/probe",
+  "title": "redacted-title"
+}

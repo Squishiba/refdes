@@ -1,22 +1,22 @@
 [
   {
-    "id": "f3993852-557c-4a4e-989b-6490584ef5c8",
-    "shortId": "f399385",
-    "name": "redacted-title",
-    "provider": "claude/claude-sonnet-5-5",
-    "thinking": "high",
+    "id": "agent-live-running",
+    "shortId": "agent-l",
+    "name": "redacted-running",
+    "provider": "codex/gpt-6-luna",
+    "thinking": "medium",
     "status": "running",
-    "cwd": "~/work/refdes",
-    "created": "9 days ago"
+    "cwd": "~/workspace/probe",
+    "created": "just now"
   },
   {
-    "id": "deb6bb3f-a980-446b-b34c-539ccf37c5d2",
-    "shortId": "deb6bb3",
-    "name": "redacted-title",
+    "id": "idle-live-agent",
+    "shortId": "idle-li",
+    "name": "redacted-idle",
     "provider": "codex/gpt-6-luna",
     "thinking": "medium",
     "status": "idle",
-    "cwd": "~/.paseo/worktrees/16msma8v/feat-agentcoder-queue-slice1",
-    "created": "8 minutes ago"
+    "cwd": "~/workspace/probe",
+    "created": "just now"
   }
 ]

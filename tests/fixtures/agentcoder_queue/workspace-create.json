@@ -1,0 +1,7 @@
+{
+  "workspaceId": "wks_fixture",
+  "project": "refdes",
+  "name": "redacted-title",
+  "isolation": "worktree",
+  "cwd": "/workspace/probe"
+}

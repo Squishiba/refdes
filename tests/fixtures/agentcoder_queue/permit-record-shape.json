@@ -1,6 +1,7 @@
 {
-  "agentShortId": "f399385",
-  "id": "request-id-fixture",
-  "name": "external_directory",
-  "description": "read outside the worktree"
+  "id": "permission-exec-redacted",
+  "agentId": "agent-live-running",
+  "agentShortId": "agent-l",
+  "name": "CodexBash",
+  "description": "May I run the exact command to write the requested probe file outside this workspace?"
 }

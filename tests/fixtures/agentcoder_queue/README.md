@@ -1,9 +1,3 @@
-These replay files are reduced from `.scratch/live-fixtures/` captured by the
-orchestrator from the real Paseo daemon. Agent titles and wait activity are
-redacted. The permit
-list capture was empty; `permit-record-shape.json` uses only the four keys
-provided in the orchestrator's capture note and contains synthetic values for
-policy tests. It is not claimed as a captured pending request. No run, send,
-stop, inspect, logs, workspace-create, or non-idle wait response fixture was
-captured; those payload shapes remain unverified and may not authorize an
-automatic recovery action.
+These fixtures are sanitized replays of verbatim orchestrator captures in `.scratch/live-fixtures2/README-findings.txt`. Values such as IDs, titles, paths, and free-text activity are redacted; payload keys and value types are preserved.
+
+The real `run --json` response is one stdout JSON object and writes `Using workspace ...` to stderr. The real `send --json`, idle `wait --json`, stop, workspace-create/archive, inspect, pending-permit, deny, and stale-permit payloads are replayed here. `logs --json` is plain text despite its flag. `permit-ls.json` and `permit-pending.json` replay the captured pending-row shape: it contains no structured command/path, so description text cannot prove scope. The idle stop fixture and stale-permit error preserve the captured zero-stop and `NO_PENDING_PERMISSIONS` cases.

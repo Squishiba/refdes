@@ -5,34 +5,30 @@ adapters remain unverified, so unattended-release readiness is not claimed.
 
 ## Captured evidence and adapter boundary
 
-- Used `.scratch/live-fixtures/README-orchestrator.txt` and the supplied
-  snapshots. `ls-g.json` rows have exactly `id`, `shortId`, `name`, `provider`,
-  `thinking`, `status`, `cwd`, `created`; captured status set is `running`,
-  `idle`, `closed`. `workspace-ls.json` rows have exactly `workspaceId`,
-  `project`, `name`, `isolation`, `cwd`. Captured `wait-idle.json` has exactly
-  `agentId`, `status`, `message`, with status `idle`.
-- `permit-ls.json` is `[]`. The orchestrator supplied the pending row schema
-  `agentShortId`, `id`, `name`, `description`; `permit-record-shape.json` is
-  synthetic policy input using only those keys, not a captured pending record.
-- No run/send/stop response, logs/inspect output, workspace-create response,
-  non-idle wait response, structured tool input/cwd, or provider error signature
-  was captured. These remain unverified; the queue path rejects unknown field
-  sets/statuses, does not infer safe containment from description prose, and
-  parks ambiguous external operations with bounded evidence.
-- The provided `auto-perm-reference.py` risky and safe-scope expressions were
-  ported. Reference outside/risky requests are denied by exact full agent ID
-  (mapped from one exact `agentShortId`) and request ID. Safe-scope prose still
-  lacks the v1 structured input/cwd/target proof and is denied/parked, never
-  auto-allowed. Foreign exact IDs remain untouched.
-- No Paseo or GitHub commands were run in this continuation, per the user's
-  instruction. The orchestrator owns the live pilot and PR.
-- `paseo run --json` output was not among the supplied captures. To avoid
-  guessing its schema, supervised mode now retains that output and parks before
-  interpreting/adopting the new turn. Saved owned full IDs can still reconcile
-  on resume. Workspace creation is also unavailable until its output is
-  captured. This means a fresh supervised launch cannot complete its first
-  role turn yet; the pilot must supply a run-result fixture before that gate can
-  be implemented.
+- Used `.scratch/live-fixtures2/README-findings.txt` first, then the verbatim
+  files. Sanitized fixtures preserve those payload keys/types. Run blocking JSON
+  is `{agentId,status,provider,cwd,title}` on stdout, with `Using workspace ...`
+  on stderr; detached run uses the same keys with status `running`. Send is
+  `{agentId,status,message}`; idle wait is `{agentId,status,message}`. Workspace
+  create/archive, inspect, logs, stop, and permit allow/deny shapes are captured.
+- `logs --json` is plain text. Stop returns `{stoppedCount,agentIds}` and leaves
+  a stopped agent `idle`, so queue maintenance intent is recorded before stop.
+  The pending-permit row is `{id,agentId,agentShortId,name,description}` with no
+  structured command/path. The description is free text and cannot establish
+  containment. `NO_PENDING_PERMISSIONS` after a listing is treated as a benign
+  race only when fresh listing confirms the exact request is gone.
+- Outside-scope and reference-risky evidence denies the exact owned request.
+  Other unclassifiable requests park with bounded raw evidence unless the
+  operator explicitly supplies that exact full ID in `queue.trusted_agents`;
+  this cooperative opt-in allows such requests only after re-list confirms
+  disappearance. Risky/outside evidence always overrides trust. Foreign rows
+  remain untouched.
+- Non-idle/timeout wait, transient-provider error, turn-limit, loop signature,
+  and garbled-finish payloads/signatures were not captured. Those signals remain
+  unverified and park with evidence. The real probe workspace was archived by
+  the orchestrator. The README's `error(?)` listing status was uncertain and is
+  not accepted as a captured status. No Paseo or GitHub command was run by this
+  worker.
 
 ## Implemented
 
@@ -51,9 +47,9 @@ adapters remain unverified, so unattended-release readiness is not claimed.
 - Exact full-ID reconciliation from captured listing fields; missing/malformed
   IDs/statuses park instead of relaunch. Run intents persist before launch;
   saved role IDs adopt on resume. Unresolved run/send intents are never replayed.
-  Supervised roles run serially and reuse prepared workspaces without resetting
-  edits. Workspace creation is refused because its response shape was not
-  captured; operators must pass existing role workspace IDs.
+  Supervised roles run serially, validate/create captured workspace payloads,
+  and reuse prepared workspaces without resetting edits. Fresh completed run,
+  send, idle wait, and workspace-create payload adapters now use captured shapes.
 - `publish` defaults false in supervised mode. Optional plain-command terminal
   hook is bounded to two attempts and cannot erase/suppress the durable event.
 - Task tests include every test name in the first v1 slice row, exact captured
@@ -62,7 +58,7 @@ adapters remain unverified, so unattended-release readiness is not claimed.
 
 ## Verification
 
-- New queue suite: 20 passed with explicit `.scratch/` basetemp.
+- New queue suite: 27 passed with explicit `.scratch/` basetemp.
 - Existing AgentCoder tool/workspace/land suites: 129 passed with explicit
   `.scratch/` basetemp.
 - `py_compile` passed. Scoped `ruff check tools/agentcoder/queue_mode.py
@@ -80,19 +76,20 @@ adapters remain unverified, so unattended-release readiness is not claimed.
 
 ## Remaining unsatisfied
 
-- Real live pilot, including actual run/send/stop/workspace-create payloads and
-  a killed-supervisor-during-turn replay, is delegated to the orchestrator.
-- Fresh supervised launches currently park after retaining `paseo run` output,
-  because that response schema is unknown. The exact captured shapes that remain
-  unverified are run/send/stop responses, logs/inspect output, workspace-create
-  response, and non-idle wait payloads.
+- A supervised end-to-end AgentCoder job and killed-supervisor-during-turn replay
+  remain unrun; the orchestrator captured individual real-daemon command probes.
+- Exact missing evidence to capture: non-idle/timeout `paseo wait --json`; a
+  transient provider error in `logs`/inspect output; a turn-limit signature;
+  repeated loop-signature logs/artifact state; and a garbled final run/report
+  payload. These remain parked rather than inferred.
 - Transient provider signature extraction, idle-artifact/turn-limit detection,
   streamed loop signature sampling, and garbled run/verdict parsing are not
   wired to live Paseo outputs because no corresponding payload/log fixtures were
   supplied. Their transition policies are bounded and tested; unverified live
   signals park rather than trigger a retry.
-- The queue cannot auto-allow any captured permit row: no captured row has the
-  structured cwd/input/target data required by the accepted containment policy.
+- The captured permit row cannot prove containment. Auto-allow is therefore
+  off by default and available only as explicit cooperative trust in an exact
+  full agent ID; no structured request classifier can prove this row in-scope.
 - Multi-process supervisor-kill fencing during a child run, plus full batch
   generation semantics, remain outside this single-job slice implementation.
 

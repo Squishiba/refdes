@@ -36,11 +36,15 @@ The first opt-in supervised entry point stores locked state and retained
 attempt transcripts in `JOBDIR`; terminal state is committed with an event
 before the process exits. `queue wait` reads durable events before waiting and
 rechecks at most once per second. See [the supervised mode guide](../../docs/agentcoder-queue.md)
-for current limits and the pending real-daemon gate. Existing `run`, `resume`,
-and `status` behavior remains the default. Supervised jobs need existing role
-workspaces in `SPEC.json`; `publish` defaults to false and must be explicitly
-true for trusted-driver push/PR creation. Queue policy fields
-`queue.max_nudges` and `queue.job_wall_timeout` default to 2 and 14400 seconds.
+for current limits and the pending supervised end-to-end gate. Existing `run`, `resume`,
+and `status` behavior remains the default. Supervised jobs can reuse explicit
+role workspaces or create them from the captured Paseo response. `publish`
+defaults to false and must be explicitly true for trusted-driver push/PR
+creation. Queue policy fields `queue.max_nudges` and
+`queue.job_wall_timeout` default to 2 and 14400 seconds. Permit requests park
+when their free-text record cannot be classified; `queue.trusted_agents` can
+opt exact full agent IDs into cooperative auto-allow, while outside/risky
+evidence is still denied.
 
 `JOBDIR` defaults to `<repo>/.scratch/agentcoder/<task_id>/` — keep job
 dirs out of tracked paths (in this repo `.scratch/` is gitignored). Exit

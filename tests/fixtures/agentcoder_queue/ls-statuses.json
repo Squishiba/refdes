@@ -1,5 +1,6 @@
 [
-  "closed",
+  "running",
   "idle",
-  "running"
+  "closed",
+  "permission"
 ]

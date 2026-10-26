@@ -429,7 +429,9 @@ def check_permits(job):
         from queue_mode import process_permits
         owned = {str(i) for i in (job.get("coder_agent"), job.get("designer_agent"),
                                   *(job.get("reviewers") or {}).values()) if i}
-        decision, reason = process_permits(job["jobdir"], owned, listing, data)
+        trusted = (job.get("spec", {}).get("queue") or {}).get("trusted_agents", [])
+        decision, reason = process_permits(job["jobdir"], owned, listing, data,
+                                           trusted_agent_ids=trusted)
         if decision != "CLEAR":
             raise Pause(reason)
         return
@@ -463,10 +465,16 @@ def check_permits(job):
 def record_turn(job, role, rc, out, err):
     if rc != 0:
         raise Pause(f"{role} agent turn failed (rc={rc}, quota/usage?): {tail_text(err, 5)}")
-    data = last_json_of(out, f"{role} run result")  # real run --json: running doc, then final
     if job.get("queue_supervised"):
-        raise Pause("paseo run result payload was not captured in the supplied live fixtures; "
-                    f"operation must be reconciled before adoption: {tail_text(out, 20)}")
+        data = json_of(out, f"{role} run result")  # JSON is stdout; workspace banner is stderr
+        if str(Path(__file__).resolve().parent) not in sys.path:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from queue_mode import validate_run_result
+        valid, reason = validate_run_result(data)
+        if not valid:
+            raise Pause(reason)
+    else:
+        data = last_json_of(out, f"{role} run result")
     status = data.get("status")
     if status == "permission":
         raise Pause(f"{role} agent is waiting on a permission prompt; approve/deny it with "
@@ -477,6 +485,10 @@ def record_turn(job, role, rc, out, err):
     if not agent_id:
         raise Pause(f"{role} agent turn reported no agentId: {tail_text(out, 3)}")
     cwd = agent_cwd(job, agent_id)  # derive BEFORE mutating: a Pause leaves the job untouched
+    if job.get("queue_supervised") and os.path.normpath(os.path.expanduser(data["cwd"])) \
+            != os.path.normpath(cwd):
+        raise Pause(f"paseo run cwd disagrees with the exact global listing for {agent_id}: "
+                    f"run={data['cwd']!r} listing={cwd!r}")
     job[f"{role}_agent"] = agent_id
     job[f"{role}_cwd"] = cwd
     save_job(job)  # ids survive a hard crash mid-loop, so resume adopts them
@@ -507,10 +519,24 @@ def send_to(job, agent_key, message):
     rc, out, err = run_guarded(["paseo", "send", agent_id, "--json", message],
                                 timeout=int(job["spec"].get("agent_timeout", 1800)))
     if queue_op:
-        finish_operation(job["jobdir"], queue_op, "uncertain",
-                         {"rc": rc, "stdout": tail_text(out, 30), "stderr": tail_text(err, 10)})
-        raise Pause(f"send acceptance is unverified for {agent_key}; operation {queue_op} "
-                    "is retained as uncertain and will not be replayed")
+        try:
+            data = json_of(out, "send result")
+            from queue_mode import validate_send_result
+            valid, reason = validate_send_result(data, agent_id)
+        except Pause as exc:
+            finish_operation(job["jobdir"], queue_op, "uncertain",
+                             {"rc": rc, "stdout": tail_text(out, 30),
+                              "stderr": tail_text(err, 10), "reason": exc.reason})
+            raise Pause(f"send acceptance is unverified for {agent_key}; operation {queue_op}: "
+                        f"{exc.reason}")
+        if rc != 0 or not valid:
+            finish_operation(job["jobdir"], queue_op, "uncertain",
+                             {"rc": rc, "stdout": tail_text(out, 30),
+                              "stderr": tail_text(err, 10), "reason": reason})
+            raise Pause(f"send acceptance is unverified for {agent_key}; operation {queue_op}: {reason}")
+        finish_operation(job["jobdir"], queue_op, "completed", data, agent_id=agent_id)
+        check_permits(job)
+        return
     if rc != 0:
         raise Pause(f"send to {agent_key} failed (rc={rc}): {tail_text(err, 5)}")
     status = last_json_of(out, "send result").get("status")  # send streams like run
@@ -556,9 +582,6 @@ def ensure_workspace(job, role, base, branch):
             job[f"{role}_workspace_ready"] = True
         save_job(job)
         return ws
-    if job.get("queue_supervised"):
-        raise Pause(f"supervised {role} needs a pre-provisioned workspace id; "
-                    "workspace-create response shape has not been captured")
     rc, out, err = run_guarded(
         ["paseo", "workspace", "create", "--isolation", "worktree", "--mode", "branch-off",
          "--new-branch", branch, "--base", base,
@@ -566,7 +589,13 @@ def ensure_workspace(job, role, base, branch):
         cwd=job["spec"]["repo"])
     if rc != 0:
         raise Pause(f"cannot create the {role} workspace: {tail_text(err, 5) or rc}")
-    ws = json_of(out, "workspace create output").get("workspaceId")
+    workspace = json_of(out, "workspace create output")
+    if job.get("queue_supervised") and (not isinstance(workspace, dict) or
+            set(workspace) != {"workspaceId", "project", "name", "isolation", "cwd"} or
+            any(not isinstance(workspace.get(k), str) or not workspace[k]
+                for k in ("workspaceId", "project", "name", "isolation", "cwd"))):
+        raise Pause(f"unverified workspace-create payload: {tail_text(out, 5)}")
+    ws = workspace.get("workspaceId") if isinstance(workspace, dict) else None
     if not ws:
         raise Pause(f"workspace create returned no workspaceId: {tail_text(out, 3)}")
     job[f"{role}_workspace"] = ws
@@ -740,7 +769,8 @@ def captured_queue_listing(rows):
     return isinstance(rows, list) and all(
         isinstance(row, dict) and set(row) == QUEUE_AGENT_FIELDS
         and all(isinstance(row.get(k), str) and row[k] for k in QUEUE_AGENT_FIELDS)
-        and row["status"] in {"running", "idle", "closed"} for row in rows)
+        and row["status"] in {"running", "idle", "closed", "permission"}
+        for row in rows)
 
 
 def scope_check(job, sha, globs, who):

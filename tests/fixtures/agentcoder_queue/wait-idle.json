@@ -1,5 +1,5 @@
 {
-  "agentId": "deb6bb3f-a980-446b-b34c-539ccf37c5d2",
+  "agentId": "agent-live-running",
   "status": "idle",
-  "message": "Agent is idle.\nLast 5 activity items:\n[redacted activity transcript]"
+  "message": "Agent is idle.\nLast 5 activity items:\n[User] redacted activity\n[Assistant] redacted reply"
 }
