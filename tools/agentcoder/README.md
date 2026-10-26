@@ -42,8 +42,11 @@ and `status` behavior remains the default. Supervised jobs can reuse explicit
 role workspaces or create them from the captured Paseo response. `publish`
 defaults to false and must be explicitly true for trusted-driver push/PR
 creation. Queue policy fields `queue.max_nudges` and
-`queue.job_wall_timeout` default to 2 and 14400 seconds. Permit requests park
-when their free-text record cannot be classified; `queue.trusted_agents` can
+`queue.job_wall_timeout` default to 2 and 14400 seconds.
+`queue.job_wall_timeout` cannot exceed 14400 seconds because the supervised
+child has that hard execution cap; larger values are rejected during validation.
+Permit requests park when their free-text record cannot be classified;
+`queue.trusted_agents` can
 opt exact full agent IDs into cooperative auto-allow, and
 `queue.trust_owned_agents: true` opts this job's spawned agents in. Permit
 descriptions are agent-controlled text, so this opt-in is cooperative trust,

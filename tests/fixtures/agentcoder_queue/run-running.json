@@ -1,5 +1,5 @@
 {
-  "agentId": "agent-live-running",
+  "agentId": "agent-running-001",
   "status": "running",
   "provider": "codex",
   "cwd": "/workspace/probe",

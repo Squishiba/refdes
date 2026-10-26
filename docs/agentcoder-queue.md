@@ -34,6 +34,8 @@ the `workspaces` spec field or create one from the captured workspace response,
 and retain role trees across recovery. Publication
 is disabled unless the spec sets `publish: true`. `queue.max_nudges` defaults to
 2 (maximum 10), and `queue.job_wall_timeout` defaults to 14,400 active seconds.
+It cannot exceed 14,400 seconds because the supervised child has that hard
+execution cap; larger values are rejected during spec validation.
 Deliberate daemon-recovery backoff sleeps are excluded from that budget; child
 execution and ordinary supervision time count. The
 permission path has its own `queue.max_permission_prompts` budget (default 100,

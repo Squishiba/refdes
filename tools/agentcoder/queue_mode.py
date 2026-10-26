@@ -204,8 +204,9 @@ def save_terminal(jobdir, state, status, outcome):
 def notify_terminal(jobdir, event, invoke=None):
     """Best-effort trusted argv hook; durable event is committed before attempts."""
     jobdir = Path(jobdir)
-    state = load_state(jobdir)
-    command = state.get("notification_command")
+    with locked(jobdir / "job.lock"):
+        state = load_state(jobdir)
+        command = state.get("notification_command")
     if command is None:
         return
     if not isinstance(command, list) or not command or not all(
@@ -393,6 +394,9 @@ def _queue_limits(spec):
         raise QueueError("queue.max_nudges must be an integer from 0 through 10")
     if isinstance(wall_timeout, bool) or not isinstance(wall_timeout, int) or wall_timeout < 1:
         raise QueueError("queue.job_wall_timeout must be a positive integer")
+    if wall_timeout > MAX_ACTIVE_SECONDS:
+        raise QueueError(f"queue.job_wall_timeout must not exceed the child hard cap "
+                         f"of {MAX_ACTIVE_SECONDS} seconds")
     return max_nudges, wall_timeout
 
 
@@ -1092,7 +1096,6 @@ def _supervise(spec_path, jobdir, driver_path, sleep_fn=None):
                 print(json.dumps(event))
                 return 0 if state["status"] == "landed" else 2
         else:
-            spec = read_json(spec_path)
             state = {"task_id": spec.get("task_id", jobdir.name), "status": "queued",
                      "event_seq": 0, "outbox": [], "nudges": 0, "retries": 0,
                      "attempts": [], "owned_agents": {}, "report": str(jobdir / "report.md"),
@@ -1305,9 +1308,10 @@ def _supervise(spec_path, jobdir, driver_path, sleep_fn=None):
                     event = save_terminal(jobdir, state, "parked", message)
                     print(json.dumps(event))
                     return 2
-            state["incident_retries"] = 0
-            state["status"] = "running"
             with locked(jobdir / "job.lock"):
+                state = load_state(jobdir)
+                state["incident_retries"] = 0
+                state["status"] = "running"
                 atomic_json(state_path, state)
             continue
         event = save_terminal(jobdir, state, "parked", reason)
@@ -1384,7 +1388,8 @@ def cli(argv, driver_path):
         return None
     if argv[0] == "supervise":
         if len(argv) != 3:
-            print("usage: agentcoder.py supervise SPEC.json JOBDIR")
+            print(json.dumps({"status": "error",
+                              "reason": "usage: agentcoder.py supervise SPEC.json JOBDIR"}))
             return 1
         try:
             return supervise(argv[1], argv[2], driver_path)

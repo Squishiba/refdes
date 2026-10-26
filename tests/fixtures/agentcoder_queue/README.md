@@ -2,7 +2,8 @@
 
 These payload fixtures are sanitized from orchestrator captures. IDs, project
 names, paths, and free-text activity are redacted while payload keys and value
-types are preserved. The task log summarizes the captured shapes and pilot
+types are preserved. The task log
+`in-prog-logs/agentcoder-queue-slice1-20261026.md` summarizes captured shapes and pilot
 findings; ignored scratch paths are not required to interpret these fixtures.
 
 `run-completed.json`, `run-running.json`, and `run-permission.json` preserve
@@ -23,10 +24,11 @@ are unconsumed evidence; `logs --json` returns plain text despite the flag.
 Permit records have `id`, `agentId`, `agentShortId`, `name`, and `description`,
 with no structured command or path. `permit-pending.json`,
 `permit-no-description.json`, and `permit-owned-write.json` are exercised by
-tests. `permit-record-shape.json` and `permit-deny-response.json` are unconsumed
+tests. `permit-deny-response.json` is unconsumed
 evidence. The latter is a `permit deny` response (`requestId`/`result`), not a
 permit listing row; listing rows use `id` and `description`.
-`permit-allow-stale.stderr.txt` is exercised by the stale-race test. The daemon's
+`permit-allow-stale.json` contains the JSON error emitted on stderr and is
+exercised by the stale-race test. The daemon's
 `NO_PENDING_PERMISSIONS` error is stderr-only, so there is no corresponding JSON
 stdout fixture. Duplicate permit listing twins were dropped from this fixture set.
 

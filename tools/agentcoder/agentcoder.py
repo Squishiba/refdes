@@ -695,7 +695,8 @@ def wait_for_agent(job, role, initial_status=None, sleep_fn=None):
         from queue_mode import (QueueError,
                                 clear_permission_wait, load_state, permission_limits,
                                 record_permission_prompt, record_permission_progress,
-                                check_permission_progress, validate_wait_result)
+                                check_permission_progress, validate_wait_result,
+                                wall_elapsed)
         maximum, no_progress_seconds = permission_limits(job["spec"])
         if initial_status == "permission":
             try:
@@ -713,18 +714,32 @@ def wait_for_agent(job, role, initial_status=None, sleep_fn=None):
             remaining_agent_time = deadline - time.monotonic()
             if remaining_agent_time <= 0:
                 raise Pause("agent wait exceeded its total timeout")
-            wait_timeout = min(wait_timeout, max(1, int(remaining_agent_time)))
             current_state = load_state(job["jobdir"])
             try:
                 check_permission_progress(current_state, no_progress_seconds)
             except QueueError as exc:
                 raise Pause(str(exc))
+            budgets = [float(tmo), remaining_agent_time]
+            wall_limit = current_state.get("job_wall_timeout")
+            if isinstance(wall_limit, (int, float)) and not isinstance(wall_limit, bool):
+                remaining_wall_time = float(wall_limit) - wall_elapsed(
+                    current_state, time.time())
+                if remaining_wall_time <= 0:
+                    raise Pause("job wall-time budget exhausted during agent wait")
+                budgets.append(remaining_wall_time)
             started = current_state.get("permission_started_at")
             if started is not None:
                 remaining = no_progress_seconds - (time.time() - float(started))
-                wait_timeout = min(tmo, max(1, int(remaining)))
+                if remaining <= 0:
+                    raise Pause("permission sequence exceeded its no-progress timer")
+                budgets.append(remaining)
+            wait_timeout = min(budgets)
+            if wait_timeout <= 0:
+                raise Pause("agent wait budget exhausted")
         rc, out, err = run_guarded(["paseo", "wait", job[f"{role}_agent"], "--json",
-                                    "--timeout", str(wait_timeout)], timeout=wait_timeout + 5)
+                                    "--timeout", str(wait_timeout)],
+                                   timeout=(wait_timeout if job.get("queue_supervised")
+                                            else wait_timeout + 5))
         data = last_json_of(out, f"{role} wait result")
         if job.get("queue_supervised"):
             if rc != 0:

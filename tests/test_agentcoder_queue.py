@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -175,6 +176,144 @@ def test_supervised_running_waits_back_off_before_retry(tmp_path, monkeypatch):
     assert not responses
 
 
+@pytest.mark.parametrize(("agent_remaining", "wall_remaining", "permission_remaining", "expected"), [
+    (2, 7, 8, 2),
+    (10, 3, 8, 3),
+    (10, 25, 3, 3),
+])
+def test_supervised_wait_is_capped_by_all_active_deadlines(
+        tmp_path, monkeypatch, agent_remaining, wall_remaining,
+        permission_remaining, expected):
+    driver = load_driver("agentcoder_wait_budget_caps")
+    monkeypatch.setitem(sys.modules, "queue_mode", queue)
+    wall_now, monotonic_start = 1000.0, 100.0
+    state = create_state(tmp_path, active_seconds=0,
+                         active_started_at=wall_now - (30 - wall_remaining),
+                         job_wall_timeout=30,
+                         permission_started_at=wall_now - (10 - permission_remaining))
+    queue.atomic_json(tmp_path / "state.json", state)
+    monkeypatch.setattr(queue.time, "time", lambda: wall_now)
+    monkeypatch.setattr(queue, "record_permission_progress", lambda _jobdir: None)
+    monotonic_reads = iter((monotonic_start,
+                            monotonic_start + 10 - agent_remaining))
+    monkeypatch.setattr(driver.time, "monotonic", lambda: next(monotonic_reads))
+    monkeypatch.setattr(driver, "check_permits", lambda _job: None)
+    requested, transport_timeouts = [], []
+
+    def guarded(argv, **kwargs):
+        requested.append(float(argv[-1]))
+        transport_timeouts.append(kwargs["timeout"])
+        return 0, json.dumps({"agentId": "agent-budget", "status": "idle",
+                              "message": "done"}), ""
+
+    monkeypatch.setattr(driver, "run_guarded", guarded)
+    job = {"queue_supervised": True, "jobdir": str(tmp_path),
+           "coder_agent": "agent-budget",
+           "spec": {"agent_timeout": 10, "queue": {
+               "permission_no_progress_seconds": 10}}}
+    driver.wait_for_agent(job, "coder")
+    assert requested == [pytest.approx(expected)]
+    assert transport_timeouts == [pytest.approx(expected)]
+
+
+def test_queue_wall_timeout_cannot_exceed_child_hard_cap():
+    with pytest.raises(queue.QueueError, match="must not exceed"):
+        queue._queue_limits({"queue": {
+            "job_wall_timeout": queue.MAX_ACTIVE_SECONDS + 1}})
+
+
+def test_supervise_usage_error_is_json(capsys):
+    assert queue.cli(["supervise"], ROOT / "tools/agentcoder/agentcoder.py") == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "error"
+
+
+def test_supervisor_reads_spec_once(tmp_path, monkeypatch):
+    spec_path, jobdir = tmp_path / "spec.json", tmp_path / "job"
+    spec_path.write_text(json.dumps({"task_id": "read-once"}), encoding="utf-8")
+    reads = []
+    original_read_json = queue.read_json
+
+    def counted_read(path):
+        if Path(path) == spec_path:
+            reads.append(path)
+        return original_read_json(path)
+
+    monkeypatch.setattr(queue, "read_json", counted_read)
+    monkeypatch.setattr(queue.subprocess, "run",
+                        lambda *_args, **_kwargs: fake_result(rc=2, out="human needed"))
+    assert queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py",
+                           sleep_fn=lambda _seconds: None) == 2
+    assert len(reads) == 1
+
+
+def test_notify_terminal_reads_state_under_job_lock(tmp_path, monkeypatch):
+    jobdir = tmp_path / "job"
+    create_state(jobdir, notification_command=["notify"])
+    real_locked, real_load_state = queue.locked, queue.load_state
+    depth = [0]
+
+    @contextmanager
+    def tracked_lock(path):
+        with real_locked(path):
+            depth[0] += 1
+            try:
+                yield
+            finally:
+                depth[0] -= 1
+
+    def locked_load(path):
+        assert depth[0] > 0
+        return real_load_state(path)
+
+    monkeypatch.setattr(queue, "locked", tracked_lock)
+    monkeypatch.setattr(queue, "load_state", locked_load)
+    queue.notify_terminal(jobdir, {"event_id": "queue-test:1"},
+                          lambda _argv: fake_result())
+
+
+def test_in_loop_daemon_recovery_keeps_reconciled_owned_agents_and_operations(
+        tmp_path, monkeypatch, capsys):
+    spec_path, jobdir = tmp_path / "spec.json", tmp_path / "job"
+    spec_path.write_text(json.dumps({"task_id": "recover-mid-turn",
+                                     "queue": {"job_wall_timeout": 600}}),
+                         encoding="utf-8")
+    state = create_state(jobdir)
+    state.update(spec_path=str(spec_path), job_wall_timeout=600, active_seconds=0,
+                 active_started_at=None)
+    queue.atomic_json(jobdir / "state.json", state)
+    queue.atomic_json(jobdir / "job.json", {})
+    agent = fixture("ls-g.json")[0]
+    listing_calls = []
+
+    def listing():
+        listing_calls.append(True)
+        return ([], None) if len(listing_calls) == 1 else ([agent], None)
+
+    child_calls = []
+
+    def child(*_args, **_kwargs):
+        child_calls.append(True)
+        if len(child_calls) == 1:
+            current = queue.load_state(jobdir)
+            current["owned_agents"][agent["id"]] = {"role": "coder", "status": "recorded"}
+            current["operations"]["run-op"] = {
+                "operation_id": "run-op", "kind": "run", "role": "coder",
+                "request_hash": "hash", "status": "intent"}
+            queue.atomic_json(jobdir / "state.json", current)
+            queue.atomic_json(jobdir / "job.json", {"coder_agent": agent["id"]})
+            return fake_result(rc=1, err="DAEMON_NOT_RUNNING")
+        return fake_result(rc=2, out="human needed")
+
+    monkeypatch.setattr(queue, "_listing_from_cli", listing)
+    monkeypatch.setattr(queue.subprocess, "run", child)
+    assert queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py",
+                           sleep_fn=lambda _seconds: None) == 2
+    saved = queue.load_state(jobdir)
+    assert saved["owned_agents"][agent["id"]]["status"] == "active"
+    assert saved["operations"]["run-op"]["status"] == "adopted"
+    assert saved["reconciliation"]["adopted"][agent["id"]] == "active"
+
+
 def test_supervised_land_refreshes_report_when_publish_is_disabled(tmp_path, monkeypatch):
     driver = load_driver("agentcoder_land_report")
     worktree = tmp_path / "worktree"
@@ -219,8 +358,8 @@ def test_supervised_send_timeout_marks_operation_uncertain(tmp_path, monkeypatch
     assert "timed out" in operation["evidence"]
 
 
-def permit_row(name, description, short="agent-l", rid="req-1",
-               agent_id="agent-live-running"):
+def permit_row(name, description, short="agent-r", rid="req-1",
+               agent_id="agent-running-001"):
     return {"agentShortId": short, "agentId": agent_id, "id": rid,
             "name": name, "description": description}
 
@@ -328,7 +467,7 @@ def test_trusted_agent_allow_and_stale_race(tmp_path):
     def invoke(argv):
         calls.append(argv)
         if argv[:2] == ["permit", "allow"]:
-            stale = (FIXTURES / "permit-allow-stale.stderr.txt").read_text()
+            stale = (FIXTURES / "permit-allow-stale.json").read_text()
             return fake_result(rc=1, err=stale)
         return fake_result(out="[]")
 
@@ -411,7 +550,7 @@ def test_stale_deny_race_is_benign(tmp_path):
     def invoke(argv):
         calls.append(argv)
         if argv[:2] == ["permit", "deny"]:
-            stale = (FIXTURES / "permit-allow-stale.stderr.txt").read_text()
+            stale = (FIXTURES / "permit-allow-stale.json").read_text()
             return fake_result(rc=1, err=stale)
         return fake_result(out="[]")
 
@@ -661,7 +800,7 @@ def test_supervised_send_and_wait_use_shared_queue_validators(tmp_path, monkeypa
     monkeypatch.setattr(driver, "run_guarded", guarded)
     monkeypatch.setattr(driver, "check_permits", lambda _job: None)
     job = {"queue_supervised": True, "jobdir": str(tmp_path),
-           "coder_agent": "agent-live-running", "spec": {"agent_timeout": 30}}
+           "coder_agent": "agent-running-001", "spec": {"agent_timeout": 30}}
     driver.send_to(job, "coder_agent", "continue")
     assert called == {"send": 1, "wait": 1}
 
@@ -679,7 +818,7 @@ def test_completed_send_is_not_replayed_when_same_phase_resumes(tmp_path, monkey
     monkeypatch.setattr(driver, "run_guarded", guarded)
     monkeypatch.setattr(driver, "check_permits", lambda _job: None)
     job = {"queue_supervised": True, "jobdir": str(tmp_path),
-           "coder_agent": "agent-live-completed", "phase": "coder",
+           "coder_agent": "agent-completed-001", "phase": "coder",
            "spec": {"agent_timeout": 30}}
     driver.send_to(job, "coder_agent", "same phase instruction")
     driver.send_to(job, "coder_agent", "same phase instruction")
@@ -729,11 +868,11 @@ def test_run_send_wait_share_permission_response_classification():
     cases = [
         (fixture("run-completed.json"), None,
          {"agentId", "status", "provider", "cwd", "title"}),
-        (fixture("wait-idle.json"), "agent-live-running",
+        (fixture("wait-idle.json"), "agent-running-001",
          {"agentId", "status", "message"}),
         (fixture("run-permission.json"), None,
          {"agentId", "status", "provider", "cwd", "title"}),
-        (fixture("send-permission.json"), "agent-live-running",
+        (fixture("send-permission.json"), "agent-running-001",
          {"agentId", "status", "message"}),
         (fixture("run-running.json"), None,
          {"agentId", "status", "provider", "cwd", "title"}),
@@ -745,7 +884,7 @@ def test_run_send_wait_share_permission_response_classification():
                 "completed", "idle", "permission", "permission", "running", "permission"]
     unknown = dict(fixture("send-permission.json"), status="mystery")
     assert queue.classify_agent_response(
-        unknown, "agent-live-running", {"agentId", "status", "message"})[0] == "unknown"
+        unknown, "agent-running-001", {"agentId", "status", "message"})[0] == "unknown"
 
 
 def test_send_permission_is_accepted_once_then_waits_for_idle(tmp_path, monkeypatch):
@@ -908,11 +1047,11 @@ def test_captured_daemon_payload_validators():
     assert queue.validate_run_result(fixture("run-running.json"))[0]
     assert not queue.validate_run_result(dict(run, extra="unverified"))[0]
     assert queue.validate_send_result(fixture("send-completed.json"),
-                                      "agent-live-completed")[0]
-    assert queue.validate_wait_result(fixture("wait-idle.json"), "agent-live-running")[0]
+                                      "agent-completed-001")[0]
+    assert queue.validate_wait_result(fixture("wait-idle.json"), "agent-running-001")[0]
     assert queue.validate_wait_result(fixture("wait-permission.json"), "agent-permission-001")[0]
-    assert queue.validate_stop_result(fixture("stop-running.json"), "agent-live-running")[0]
-    assert queue.validate_stop_result(fixture("stop-idle.json"), "agent-live-running")[0]
+    assert queue.validate_stop_result(fixture("stop-running.json"), "agent-running-001")[0]
+    assert queue.validate_stop_result(fixture("stop-idle.json"), "agent-running-001")[0]
     permit = fixture("permit-pending.json")[0]
     assert set(permit) == {"id", "agentId", "agentShortId", "name", "description"}
     assert queue.classify_permit_record(permit)[0] == "DENY"
@@ -925,13 +1064,13 @@ def test_supervised_run_uses_stdout_json_and_ignores_stderr_banner(tmp_path, mon
     driver_spec.loader.exec_module(driver)
     create_state(tmp_path)
     job = {"queue_supervised": True, "jobdir": str(tmp_path), "spec": {}}
-    monkeypatch.setattr(driver, "agent_cwd", lambda _job, _id: "/workspace/probe")
+    monkeypatch.setattr(driver, "paseo_ls", lambda: fixture("ls-g.json"))
     monkeypatch.setattr(driver, "save_job", lambda _job: None)
     stdout = json.dumps(fixture("run-completed.json"))
     stderr = (FIXTURES / "run-blocking.stderr.txt").read_text()
     driver.record_turn(job, "coder", 0, stdout, stderr)
-    assert job["coder_agent"] == "agent-live-completed"
-    assert queue.read_json(tmp_path / "state.json")["owned_agents"]["agent-live-completed"]
+    assert job["coder_agent"] == "agent-completed-001"
+    assert queue.read_json(tmp_path / "state.json")["owned_agents"]["agent-completed-001"]
 
 
 def test_supervised_workspace_create_uses_captured_json(tmp_path, monkeypatch):
@@ -956,7 +1095,7 @@ def test_supervised_send_and_idle_wait_use_captured_json(tmp_path, monkeypatch):
     driver = importlib.util.module_from_spec(driver_spec)
     driver_spec.loader.exec_module(driver)
     create_state(tmp_path)
-    agent_id = "agent-live-completed"
+    agent_id = "agent-completed-001"
     job = {"queue_supervised": True, "jobdir": str(tmp_path), "spec": {},
            "coder_agent": agent_id}
     send = dict(fixture("send-completed.json"), agentId=agent_id)
@@ -967,7 +1106,7 @@ def test_supervised_send_and_idle_wait_use_captured_json(tmp_path, monkeypatch):
     state = queue.read_json(tmp_path / "state.json")
     assert next(iter(state["operations"].values()))["status"] == "completed"
     wait_job = {"queue_supervised": True, "jobdir": str(tmp_path), "spec": {},
-                "coder_agent": "agent-live-running"}
+                "coder_agent": "agent-running-001"}
     monkeypatch.setattr(driver, "run_guarded", lambda *_args, **_kwargs:
                         (0, json.dumps(fixture("wait-idle.json")), ""))
     driver.wait_for_agent(wait_job, "coder")

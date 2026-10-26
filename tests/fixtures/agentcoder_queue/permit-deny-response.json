@@ -1,8 +1,8 @@
 [
   {
     "requestId": "permission-exec-redacted",
-    "agentId": "agent-live-running",
-    "agentShortId": "agent-l",
+    "agentId": "agent-running-001",
+    "agentShortId": "agent-r",
     "name": "CodexBash",
     "result": "denied"
   }

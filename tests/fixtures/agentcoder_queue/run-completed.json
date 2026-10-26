@@ -1,5 +1,5 @@
 {
-  "agentId": "agent-live-completed",
+  "agentId": "agent-completed-001",
   "status": "completed",
   "provider": "codex",
   "cwd": "/workspace/probe",

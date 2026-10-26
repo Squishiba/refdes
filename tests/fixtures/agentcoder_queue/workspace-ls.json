@@ -12,5 +12,12 @@
     "name": "redacted",
     "isolation": "worktree",
     "cwd": "/workspace/probe-2"
+  },
+  {
+    "workspaceId": "wks_fixture",
+    "project": "redacted",
+    "name": "redacted-title",
+    "isolation": "worktree",
+    "cwd": "/workspace/probe"
   }
 ]

@@ -1,7 +1,7 @@
 [
   {
-    "id": "agent-live-running",
-    "shortId": "agent-l",
+    "id": "agent-running-001",
+    "shortId": "agent-r",
     "name": "redacted-running",
     "provider": "codex/gpt-6-luna",
     "thinking": "medium",
@@ -10,13 +10,23 @@
     "created": "just now"
   },
   {
-    "id": "idle-live-agent",
-    "shortId": "idle-li",
+    "id": "agent-idle-001",
+    "shortId": "agent-i",
     "name": "redacted-idle",
     "provider": "codex/gpt-6-luna",
     "thinking": "medium",
     "status": "idle",
     "cwd": "~/workspace/probe",
+    "created": "just now"
+  },
+  {
+    "id": "agent-completed-001",
+    "shortId": "agent-c",
+    "name": "redacted-completed",
+    "provider": "codex/gpt-6-luna",
+    "thinking": "medium",
+    "status": "idle",
+    "cwd": "/workspace/probe",
     "created": "just now"
   }
 ]

@@ -5,6 +5,9 @@ the corrected implementation record for that slice. The original planning text i
 where useful, while the permission and pilot sections below describe shipped
 behavior. The full design remains the future target except where mapped here.
 
+This is a DELIVERABLE design record, not a task-progress log, and is exempt from
+the 150-line task-progress-log cap.
+
 | Area | Implemented in PR #376 (unmerged) | Specified for a later slice | Primitive present, not wired |
 | --- | --- | --- | --- |
 | Supervision | Single-job `supervise`, locked atomic state, retained attempts, owned-agent reconciliation/adoption, deliberate maintenance stop, and durable terminal events. | Multi-job scheduler, dependencies, admission caps, cross-queue overlap reservations, status polish, and queue-level publication. | — |
@@ -364,7 +367,8 @@ hardening, not ten rounds of guessed fake fixtures.
 
 The plan below is retained for provenance. The orchestrator reports six live
 supervised pilots; the slice worker ran none. Captured payloads and still-unverified signals
-are summarized above and in the slice task log. Planned structured-request
+are summarized above and in `in-prog-logs/agentcoder-queue-slice1-20261026.md`.
+Planned structured-request
 auto-allow was superseded by the cooperative-trust policy actually shipped.
 
 At the time this script was drafted, this was a plan to implement the queue
