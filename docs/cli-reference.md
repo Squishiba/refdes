@@ -2,14 +2,14 @@
 
 ```
 usage: refdes [-h] [-V] [-c CONFIG] [--no-write]
-              {serve,build,check,revision,release,index,ls,thread,work,id,fetch,audit,init,new,schema,standard,keys,rename,calc-rewrite,stub-tests,former-ids,history} ...
+              {serve,build,check,revision,release,index,ls,thread,work,id,fetch,audit,recover,init,new,schema,standard,keys,rename,calc-rewrite,stub-tests,former-ids,history} ...
 ```
 
 | Global option | Effect |
 |---|---|
 | `-V`, `--version` | Print one line, `refdes <version>`, naming the `refdes` you are actually holding, and exit `0`. Needs no project, no config, and no subcommand. The number is read from the installed package's own metadata, so it cannot disagree with what `pip show refdes` reports; run from a raw checkout with nothing installed, it prints `refdes (version unknown -- not installed as a package)` rather than raising. |
 | `-c`, `--config PATH` | Use this `refdes-project.yaml`. Default: search upward from the current directory. |
-| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `rename`, `calc-rewrite`, `stub-tests`, `standard upgrade`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` and `keys restore` report the full plan and write nothing; commands that fundamentally write (`fetch`, `init`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`) **refuse to run** under `--no-write` and exit 2. `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
+| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `rename`, `calc-rewrite`, `stub-tests`, `standard upgrade`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` and `keys restore` report the full plan and write nothing; commands that fundamentally write (`fetch`, `init`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`, and `recover` while an editor transaction journal is pending) **refuse to run** under `--no-write` and exit 2 (`recover` on a project with no journal reports "nothing to recover" and exits 0). `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
 
 Exit codes: `0` success, `1` errors found, `2` configuration error (including `--no-write` refusal).
 
@@ -55,6 +55,7 @@ what it could not write, or refuses:
 | What is not writable | Command | What it does |
 |---|---|---|
 | `.refdes/` (seal file, membership manifest, `schema.json`) | `build`, `revision`, `release` | An error naming the file and what was therefore not recorded, and **exit 1**. The site is still rendered if its own directory is writable. |
+| `.refdes/` (the save journal) | an editor save (`refdes serve`) | The save is refused: `the save journal could not be written: …; the write landed nowhere`, no journal directory is created and no item file is touched. An unarmed save is the kill-with-no-recovery the journal exists to end, so the journal's own write failure outranks the save. |
 | the `site.out` directory | `build` | Refuses: `error: cannot write the site to <dir> …`, **exit 2**. There is no partial "site written to" to print. |
 | `.refdes/baselines/<name>.yaml` | `revision`, `release` | Refuses: `error: cannot write .refdes/baselines/<name>.yaml (read-only tree?) …`, **exit 2** — with the operating system's own reason in the parenthetical when the reported failure cannot be a read-only tree, as with `id` below. A stamp that did not happen is never reported as one that did. |
 | a baseline's stored-hash format rewrite | `audit`, `former-ids propose` | Names the file and carries on, **exit 0**. A baseline already on disk holds correct content; only its format lags the current hash definition, and the diff is computed in memory either way. |
@@ -1173,6 +1174,55 @@ that is not a PDF — are warned about, in `check`'s own words.
 An import declared with a `version:` reads `pinned to 2026.3`; one declared
 without one reads `unpinned`, and its items still count toward the
 `N items audited (M local)` trailer even though only `M` are local.
+
+---
+
+## `refdes recover`
+
+Restore the project after an interrupted editor save. Every save through
+`refdes serve`'s editor journals the exact bytes it is about to replace in
+`.refdes/editor-transaction/` before touching the file, and clears the
+journal once the save has landed. A process killed between those two points
+leaves the journal behind, and the project may be half-applied: some
+journaled replacements landed, some did not.
+
+While the journal is present, every project-loading command — `check`,
+`build`, `index`, `ls`, `id`, `fetch`, `audit`, `schema`, `rename`, …, and
+`refdes serve` itself (it refuses to open its editor over a half-applied
+project) — writes to stderr
+
+```
+editor transaction 20261026T120000Z-a1b2c3d4e5f60718 is pending: the project may be half-applied. Run 'refdes recover' to restore it before running any other command.
+```
+
+and exits `2` without loading or writing anything. `init` and `recover`
+are the exceptions: `init` creates a project rather than loading one, and
+`recover` is the command that clears the journal.
+
+`refdes recover` restores every journaled file to the bytes the save
+recorded for it before it touched anything — deleting files the save
+created, restoring files it rewrote — verifying each replacement it rolls
+back against the sha256 the manifest recorded (a live file that matches
+neither the recorded original nor the recorded replacement is the
+corruption the hash check exists for), and then clears the journal:
+
+```
+recovered editor transaction 20261026T120000Z-a1b2c3d4e5f60718
+  restored items/reqs.yaml
+the journal is cleared; the project can be loaded again
+```
+
+A project with no journal exits `0` and writes nothing ("nothing to
+recover"). `--no-write` with a journal pending exits `2` (there is no
+read-only recovery). A journal whose manifest is corrupt is refused with
+exit `2` and kept exactly as found.
+
+Journal scope is the item files. The two `.refdes/` control files a save
+can also write — `.refdes/citations.yaml` (an accept's pin) and
+`.refdes/ids.yaml` (a create's reservation) — are not journaled: a kill
+between the accept pair's two writes leaves the pin inert and
+`recover` restores the item half to its complete old state, and a create
+whose ledger write fails rolls its file back without the journal.
 
 ---
 

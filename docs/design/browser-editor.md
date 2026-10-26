@@ -1,8 +1,9 @@
 Status: architecture decided (2026-09-16); v1 scope has since shipped —
 Slices 0–3 are in the tree (serve editor, picker slices A/B/C and P-A/P-B/P-C,
 image upload), as did the VS Code adapter's Slices V−1/V0. The transaction
-journal of item 9 is the known exception: `serve/edit.py` implements the
-design's transaction model "minus the journal, which is a later slice".
+journal of item 9 is now wired: `serve/edit.py` arms and clears
+`.refdes/editor-transaction/` around every save, project-loading commands
+refuse while a journal is pending, and `refdes recover` restores it.
 Remaining work is the “Later” list. See “Decisions” near the end.
 
 # Browser-based editor for refdes

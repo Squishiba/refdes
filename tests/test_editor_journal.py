@@ -138,17 +138,24 @@ def _apply_save(root: Path, entries) -> None:
 # ------------------------------------------------------------------- controls
 
 
-def test_control_serve_edit_has_no_journal_wiring():
-    """Scope rule: this task must not touch the editor's save path (serve/edit.py)."""
+def test_control_serve_edit_is_wired_to_the_journal():
+    """The module task's scope rule (do not touch the save path) was flipped
+    by the wiring task (backlog finding 15a): the save path now calls the
+    module. This pins the wired side of the flip; the behavior itself is
+    pinned by tests/test_editor_journal_wiring.py."""
     source = (REPO / "src" / "refdes" / "serve" / "edit.py").read_text(encoding="utf-8")
-    assert "editor_journal" not in source
-    assert "editor-transaction" not in source
+    assert "editor_journal.begin" in source
+    assert "editor_journal.complete" in source
+    assert "editor-transaction" in source
 
 
-def test_control_cli_has_no_journal_wiring():
-    """Scope rule: this task must not touch cli.py (no `refdes recover` yet)."""
+def test_control_cli_has_the_journal_gate_and_recover():
+    """The cli side of the same flip: `refdes recover` exists and every
+    project-loading command is gated on a pending journal (behavior pinned
+    by tests/test_editor_journal_wiring.py)."""
     source = (REPO / "src" / "refdes" / "cli.py").read_text(encoding="utf-8")
-    assert "editor_journal" not in source
+    assert "editor_journal" in source
+    assert '"recover"' in source
 
 
 def test_control_module_is_stdlib_only():

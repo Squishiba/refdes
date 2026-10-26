@@ -10,8 +10,8 @@ An outcome is one of four dataclasses -- `Applied`, `Conflict`, `Refused`,
 `Invalid` -- each carrying `ok` and a human-readable `message`, so a caller can
 branch on type and still log any result uniformly.
 
-What each save does, in order (the design's transaction model, minus the
-journal, which is a later slice):
+What each save does, in order (the design's transaction model, journal
+included -- see step 7):
 
 1. take the per-project write lock, so two applies in one process cannot
    interleave;
@@ -35,12 +35,20 @@ journal, which is a later slice):
    or body being edited and still present. An unrelated pre-existing error on
    an already-broken item never blocks the repair that is the reason the
    editor exists;
-7. write atomically -- temp file in the same directory, flush, fsync,
-   `os.replace` -- then re-read and confirm the bytes are the planned bytes.
-   Step 3's revision check is the swap's last word: `expected_revision` is
-   threaded into the write and compared against the bytes the replace itself
-   reads, so a file a writer outside the lock moved during step 6's gate is
-   the same `Conflict`, with nothing written;
+7. journal the write and write atomically: before the replace, the target
+   file's exact current bytes are recorded in `.refdes/editor-transaction/`
+   (`editor_journal.begin`, design step "write the journal before the
+   replacements"), the temp file is written in the same directory -- flush,
+   fsync, `os.replace` -- re-read, and confirmed to hold the planned bytes,
+   and the journal is cleared once the save lands
+   (`editor_journal.complete`). Step 3's revision check is the swap's last
+   word: `expected_revision` is threaded into the write and compared against
+   the bytes the replace itself reads, so a file a writer outside the lock
+   moved during step 6's gate is the same `Conflict`, with nothing written.
+   A kill between arming the journal and clearing it leaves the journal
+   visible: every project-loading command then refuses until
+   `refdes recover` restores the journaled files to the bytes recorded there
+   (docs/design/browser-editor.md, acceptance).
 
 One save writes two files. A `set_body` carrying `pin` (docs/design/
 editor-source-picker.md §4 -- the editor's source-value picker accepting a
@@ -92,7 +100,7 @@ from typing import Any
 
 from .. import build as build_mod
 from .. import citations as citations_mod
-from .. import dates, ids, keys, links, loader, patcher, scaffold, seal, textio
+from .. import dates, editor_journal, ids, keys, links, loader, patcher, scaffold, seal, textio
 from ..model import (
     CHECK_VIOLATION,
     ERROR,
@@ -189,11 +197,18 @@ class Applied:
     pinned: tuple = ()
     item_id: str = ""
     handle: str = ""
+    # Set when the save landed and the journal survived `complete()`: the
+    # message says so, because the next project load will refuse until
+    # `refdes recover` clears it (by rolling this save back).
+    journal_warning: str = ""
     ok: bool = True
 
     @property
     def message(self) -> str:
-        return f"applied: {self.plan.describe()}"
+        text = f"applied: {self.plan.describe()}"
+        if self.journal_warning:
+            text += f" -- {self.journal_warning}"
+        return text
 
 
 @dataclass(frozen=True)
@@ -548,6 +563,15 @@ def _apply_locked(config: str, request: EditRequest):
     # a reason to skip this pair (§4). If the body's replace fails the
     # section restores what its own lockfile replace replaced -- under the
     # same lock, seconds after the write, not seconds later in a window.
+    # The journal (design step 6): armed with the file's exact bytes before
+    # the replace runs, cleared after it lands (step 9). A kill between
+    # arming and clearing leaves `.refdes/editor-transaction/` visible, and
+    # every project-loading command refuses until `refdes recover` restores
+    # it. A journal that cannot be armed stops the save before it starts:
+    # an unarmed write is exactly the kill-with-no-recovery this ends.
+    journal_rel = _journal_relpath(before.root, path)
+    journal_warning = None
+    payload = new_text.encode("utf-8")
     try:
         with _disk_write_lock(before.root):
             current_revision = file_revision(path)
@@ -557,21 +581,36 @@ def _apply_locked(config: str, request: EditRequest):
                 reason = _land_lockfile(before, accept)
                 if reason is not None:
                     return Refused(who, ref, reason, path=path)
-            try:
-                failure = _atomic_replace(
-                    path, new_text.encode("utf-8"), request.expected_revision
+            if journal_rel is not None:
+                reason = _journal_arm(
+                    before.root, journal_rel, text.encode("utf-8"), payload
                 )
+                if reason is not None:
+                    _restore_lockfile(accept)
+                    return Refused(who, ref, reason, path=path)
+            try:
+                failure = _atomic_replace(path, payload, request.expected_revision)
             except _Moved as moved:
                 # The file moved after the fast check above, before the
                 # replace read it: the same Conflict the check spells, named
                 # from the bytes this replace saw. The pins -- if this was an
                 # accept -- landed a moment ago under this lock and must go
-                # back with the body that never lands.
+                # back with the body that never lands. The journal armed for
+                # this replace describes a save that lands nowhere: clear it
+                # with the save (a survival is reported by the next load).
                 _restore_lockfile(accept)
+                _journal_clear(before.root)
                 return _conflict(who, ref, path, before, request, moved.current, patch_ref)
             if failure is not None:
                 _restore_lockfile(accept)
-                return Refused(who, ref, failure, path=path)
+                warning = _journal_clear(before.root)
+                return Refused(
+                    who,
+                    ref,
+                    failure if warning is None else f"{failure}; {warning}",
+                    path=path,
+                )
+            journal_warning = _journal_clear(before.root)
     except OSError as exc:
         return Refused(who, ref, f"could not lock {path} for writing: {exc}", path=path)
 
@@ -585,6 +624,7 @@ def _apply_locked(config: str, request: EditRequest):
         pinned=() if accept is None else accept.pinned,
         item_id=item.id,
         handle=resolved.handle,
+        journal_warning=journal_warning,
     )
 
 
@@ -1328,11 +1368,15 @@ class Created:
     path: str
     revision: str
     diagnostics: tuple = ()
+    journal_warning: str = ""
     ok: bool = True
 
     @property
     def message(self) -> str:
-        return f"created: {self.item_id} ({self.type}) in {self.path}"
+        text = f"created: {self.item_id} ({self.type}) in {self.path}"
+        if self.journal_warning:
+            text += f" -- {self.journal_warning}"
+        return text
 
 
 # How many times one `create_item` call plans and attempts its append. A
@@ -1552,8 +1596,19 @@ def _create_locked(config: str, request: CreateRequest):
     if blocking:
         return Invalid(who, new_id, tuple(blocking), path=path)
 
+    # The journal, armed with the destination's exact bytes (None for a new
+    # file) before the write runs, cleared after the id is reserved -- the
+    # same step 6/9 pair `apply_edit`'s final section runs.
+    journal_rel = _journal_relpath(before.root, path)
+    journal_warning = None
+    payload = new_text.encode("utf-8")
+    if journal_rel is not None:
+        reason = _journal_arm(before.root, journal_rel, original, payload)
+        if reason is not None:
+            return Refused(who, new_id, reason, path=path)
+
     if dest["kind"] == "new-md":
-        failure = _atomic_create(path, new_text.encode("utf-8"))
+        failure = _atomic_create(path, payload)
     else:
         # The gate above cannot see writes to the destination's own bytes;
         # the check consumes the replace's own read (see `_atomic_replace`),
@@ -1562,11 +1617,21 @@ def _create_locked(config: str, request: CreateRequest):
         # read-to-swap gap that remains is irreducible on a plain file --
         # see `create_item`'s docstring.
         try:
-            failure = _atomic_replace(path, new_text.encode("utf-8"), planned_revision)
+            failure = _atomic_replace(path, payload, planned_revision)
         except _Moved:
+            # The journal describes a write that lands nowhere; clear it
+            # with the attempt, so the retry's own arm does not find it
+            # pending.
+            _journal_clear(before.root)
             return _DestinationMoved(who, new_id, rel, path)
     if failure is not None:
-        return Refused(who, new_id, failure, path=path)
+        warning = _journal_clear(before.root)
+        return Refused(
+            who,
+            new_id,
+            failure if warning is None else f"{failure}; {warning}",
+            path=path,
+        )
 
     # The reservation is the last step, so nothing is burned unless the
     # item is on disk; a failed reservation rolls the file back so the id
@@ -1575,13 +1640,22 @@ def _create_locked(config: str, request: CreateRequest):
         ids.reserve_id(before, new_id)
     except OSError as exc:
         if _rollback(path, original):
-            return Refused(
-                who,
-                new_id,
+            warning = _journal_clear(before.root)
+            reason = (
                 f"the id ledger could not be written ({exc}); {rel} was rolled back "
-                f"and {new_id} was not reserved",
-                path=path,
+                f"and {new_id} was not reserved"
             )
+            return Refused(
+                who, new_id, reason if warning is None else f"{reason}; {warning}", path=path
+            )
+        # The journal armed for this write is the whole recovery story of a
+        # rollback that could not run: the file stands with the create's
+        # bytes and the journal holds the originals. Say so -- the next
+        # load will refuse until `refdes recover` restores them.
+        kept = (
+            "; the editor transaction journal is kept: run 'refdes recover' "
+            f"to restore {rel}"
+        )
         # Known facts only, in the shape the rollback actually took. For
         # the append shapes the rollback is a restore: a failed restore
         # touches nothing, so the file was left as the restore found it.
@@ -1596,7 +1670,7 @@ def _create_locked(config: str, request: CreateRequest):
                 new_id,
                 f"the id ledger could not be written ({exc}); {new_id} was not "
                 f"reserved, and {rel} was not removed: the file the create "
-                f"wrote stands, the failed rollback touched nothing",
+                f"wrote stands, the failed rollback touched nothing{kept}",
                 path=path,
             )
         return Refused(
@@ -1604,9 +1678,11 @@ def _create_locked(config: str, request: CreateRequest):
             new_id,
             f"the id ledger could not be written ({exc}); {new_id} was not "
             f"reserved, and {rel} could not be restored: the creation's bytes "
-            f"were not rolled back, and the file was left as it was found",
+            f"were not rolled back, and the file was left as it was found{kept}",
             path=path,
         )
+
+    journal_warning = _journal_clear(before.root)
 
     return Created(
         who=who,
@@ -1616,6 +1692,7 @@ def _create_locked(config: str, request: CreateRequest):
         path=path,
         revision=file_revision(path),
         diagnostics=tuple(after.diagnostics),
+        journal_warning=journal_warning,
     )
 
 
@@ -2023,6 +2100,54 @@ def _atomic_create(path: str, payload: bytes) -> str | None:
         return f"could not re-read {path} after the write: {exc}"
     if written != payload:
         return f"the bytes on disk after the write are not the bytes planned for {path}"
+    return None
+
+
+def _journal_relpath(root: str, path: str) -> str | None:
+    """The journal's spelling of `path`: project-relative, or None for a
+    target outside the root (a symlinked item), which is not journaled."""
+    rel = os.path.relpath(path, root).replace("\\", "/")
+    return None if rel == "." or rel.startswith("..") else rel
+
+
+def _journal_arm(root: str, rel: str, original: bytes | None, replacement: bytes) -> str | None:
+    """Arm the transaction journal for one file's write (design step 6:
+    journal before replacing). Returns a refusal reason -- the write lands
+    nowhere when the journal cannot be armed, because an unarmed write is
+    the kill-with-no-recovery the journal exists to end. `None` means the
+    journal is armed and the write may proceed.
+
+    `rel` is a destination this module resolved under the project root
+    (never the `.refdes` control namespace -- `begin` refuses those, and
+    the lockfile/ledger writes have their own documented recovery story).
+    """
+    try:
+        editor_journal.begin(root, [editor_journal.Entry(rel, original, replacement)])
+    except editor_journal.JournalPending as exc:
+        return str(exc)
+    except OSError as exc:
+        return (
+            f"the save journal could not be written: {exc}; the write landed "
+            "nowhere. A leftover .refdes/editor-transaction/ from an earlier "
+            "interrupted save is restored by 'refdes recover'"
+        )
+    return None
+
+
+def _journal_clear(root: str) -> str | None:
+    """Disarm and remove the journal after a save landed (design step 9).
+    Returns a warning on failure: the journal surviving a landed save is
+    the design's visible condition -- every project-loading command
+    refuses until `refdes recover` clears it (by rolling the save back).
+    """
+    try:
+        editor_journal.complete(root)
+    except OSError as exc:
+        return (
+            "the save landed, but the editor transaction journal could not "
+            f"be cleared: {exc}. Run 'refdes recover' to clear it -- it "
+            "restores the journaled files to their pre-save state"
+        )
     return None
 
 
