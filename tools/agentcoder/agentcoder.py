@@ -1076,8 +1076,17 @@ def exit_json(status, reason):
 
 
 def main(argv):
+    # Queue supervision is opt-in; legacy run/resume/status retain their exact
+    # command path and defaults.
+    if str(Path(__file__).resolve().parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from queue_mode import cli as queue_cli
+    queue_result = queue_cli(argv, Path(__file__).resolve())
+    if queue_result is not None:
+        return queue_result
     if not argv:
-        print("usage: agentcoder.py run SPEC.json [JOBDIR] | resume JOBDIR | status JOBDIR")
+        print("usage: agentcoder.py run SPEC.json [JOBDIR] | resume JOBDIR | status JOBDIR | "
+              "supervise SPEC.json JOBDIR | queue wait QDIR [TASK_ID] --after EVENT_ID")
         return EXIT_ERROR
     cmd, arg = argv[0], argv[1] if len(argv) > 1 else ""
     if cmd in ("resume", "status") and not arg:  # never read a stray ./job.json

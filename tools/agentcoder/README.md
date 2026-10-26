@@ -27,7 +27,16 @@ call is the completion signal*. No daemon, no journal, no subscriptions.
 python tools/agentcoder/agentcoder.py run SPEC.json [JOBDIR]
 python tools/agentcoder/agentcoder.py resume JOBDIR
 python tools/agentcoder/agentcoder.py status JOBDIR
+python tools/agentcoder/agentcoder.py supervise SPEC.json JOBDIR
+python tools/agentcoder/agentcoder.py queue wait QDIR [TASK_ID] --after EVENT_ID [--timeout SECONDS]
 ```
+
+The first opt-in supervised entry point stores locked state and retained
+attempt transcripts in `JOBDIR`; terminal state is committed with an event
+before the process exits. `queue wait` reads durable events before waiting and
+rechecks at most once per second. See [the supervised mode guide](../../docs/agentcoder-queue.md)
+for current limits and the pending real-daemon gate. Existing `run`, `resume`,
+and `status` behavior remains the default.
 
 `JOBDIR` defaults to `<repo>/.scratch/agentcoder/<task_id>/` — keep job
 dirs out of tracked paths (in this repo `.scratch/` is gitignored). Exit
