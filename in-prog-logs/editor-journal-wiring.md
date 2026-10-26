@@ -85,3 +85,9 @@ verified as real coverage, not behavior changes): hard-kill shape
 rollback-failure journal survival (the old conditional create test is
 gone), new-file (original=None) journal entry + recover-removes-created,
 Created.journal_warning, fetch in the gate parametrization.
+
+## Review round result
+
+All 12 findings across the two reviews accepted; none rejected (PR comment
+records the acceptance map). Full suite at the fix commit: 4927 passed,
+2 skipped. Ruff on touched files: only the two findings already on main.
