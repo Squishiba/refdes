@@ -186,6 +186,73 @@ def test_trusted_agent_does_not_bypass_unverified_schema(tmp_path):
     assert result == "PARK" and "unverified schema" in reason and calls == []
 
 
+def test_owned_agent_trust_allows_captured_in_workspace_write(tmp_path):
+    jobdir = tmp_path / "job"
+    create_state(jobdir)
+    listing = fixture("ls-g-permission.json")
+    row = fixture("permit-owned-write.json")
+    assert queue.classify_permit_record(row[0])[0] == "UNKNOWN"
+    calls = []
+    no_opt_in, _ = queue.process_permits(
+        jobdir, [listing[0]["id"]], listing, row,
+        lambda argv: (calls.append(argv) or fake_result(out="[]")))
+    assert no_opt_in == "PARK" and calls == []
+    allowed, _ = queue.process_permits(
+        jobdir, [listing[0]["id"]], listing, row,
+        lambda argv: (calls.append(argv) or fake_result(out="[]")),
+        trust_owned_agents=True)
+    assert allowed == "CLEAR"
+    assert calls[0][:4] == ["permit", "allow", listing[0]["id"], row[0]["id"]]
+
+
+def test_owned_trust_still_denies_outside_and_risky_descriptions():
+    rows = [
+        dict(fixture("permit-owned-write.json")[0],
+             description="May I write pkg/mathx.py outside this workspace?"),
+        dict(fixture("permit-owned-write.json")[0], description="May I run curl https://x?"),
+        dict(fixture("permit-owned-write.json")[0], description="May I git push this branch?"),
+        dict(fixture("permit-owned-write.json")[0], description="May I rm -rf a generated file?"),
+    ]
+    for row in rows:
+        decision, _, _ = queue.classify_permit_record(row)
+        assert decision == "DENY"
+
+
+def test_permission_run_records_agent_then_processes_and_waits(tmp_path, monkeypatch):
+    driver_spec = importlib.util.spec_from_file_location(
+        "agentcoder_permission_run_fixture", ROOT / "tools" / "agentcoder" / "agentcoder.py")
+    driver = importlib.util.module_from_spec(driver_spec)
+    driver_spec.loader.exec_module(driver)
+    create_state(tmp_path)
+    permission_run = fixture("run-permission.json")
+    calls = []
+    monkeypatch.setattr(driver, "ensure_workspace", lambda *_args: "wks_fixture")
+    def run_guarded(argv, **_kwargs):
+        if argv[1] == "wait":
+            calls.append("wait-idle")
+            idle = dict(fixture("wait-idle.json"), agentId=permission_run["agentId"])
+            return 0, json.dumps(idle), ""
+        return 0, json.dumps(permission_run), (FIXTURES / "run-blocking.stderr.txt").read_text()
+
+    monkeypatch.setattr(driver, "run_guarded", run_guarded)
+    monkeypatch.setattr(driver, "agent_cwd", lambda _job, _id: permission_run["cwd"])
+    monkeypatch.setattr(driver, "save_job", lambda _job: None)
+    monkeypatch.setattr(driver, "check_permits", lambda _job: calls.append("permissions"))
+    job = {"queue_supervised": True, "jobdir": str(tmp_path), "task_id": "t",
+           "spec": {"repo": str(tmp_path), "agent_timeout": 10}}
+    driver.spawn_agent(job, "coder", "codex/gpt-6-luna", "base", "prompt")
+    assert calls == ["permissions", "wait-idle"]
+    assert job["coder_agent"] == permission_run["agentId"]
+    operation = next(iter(queue.read_json(tmp_path / "state.json")["operations"].values()))
+    assert operation["status"] == "adopted"
+
+
+def test_run_unknown_status_still_parks():
+    run = dict(fixture("run-permission.json"), status="mystery")
+    assert not queue.validate_run_result(run)[0]
+    assert queue.validate_run_result(fixture("run-permission.json"))[0]
+
+
 def test_captured_daemon_payload_validators():
     run = fixture("run-completed.json")
     assert queue.validate_run_result(run)[0]
@@ -264,7 +331,7 @@ def test_foreign_permit_untouched(tmp_path):
     result, _ = queue.process_permits(
         jobdir, [listing[1]["id"]], listing,
         [permit_row("external_directory", "/tmp", short=listing[0]["shortId"])],
-        lambda argv: (calls.append(argv) or fake_result()))
+        lambda argv: (calls.append(argv) or fake_result()), trust_owned_agents=True)
     assert result == "CLEAR" and calls == []
     assert "permit_decisions" not in queue.read_json(jobdir / "state.json")
 
@@ -279,6 +346,10 @@ def test_owned_agent_resume_adopts_exact_ids(tmp_path):
     assert not adopted and owned[0] in uncertain
     adopted, uncertain = queue.reconcile_owned_agents(["missing-full-agent-id"], rows)
     assert not adopted and "do not relaunch" in uncertain["missing-full-agent-id"]
+    permission_listing = fixture("ls-g-permission.json")
+    adopted, uncertain = queue.reconcile_owned_agents(
+        [permission_listing[0]["id"]], permission_listing)
+    assert adopted == {permission_listing[0]["id"]: "active"} and uncertain == {}
     wait = fixture("wait-idle.json")
     assert queue.validate_wait_result(wait, wait["agentId"])[0]
     assert not queue.validate_wait_result(wait, "different-full-id")[0]

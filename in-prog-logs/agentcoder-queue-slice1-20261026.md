@@ -8,7 +8,8 @@ adapters remain unverified, so unattended-release readiness is not claimed.
 - Used `.scratch/live-fixtures2/README-findings.txt` first, then the verbatim
   files. Sanitized fixtures preserve those payload keys/types. Run blocking JSON
   is `{agentId,status,provider,cwd,title}` on stdout, with `Using workspace ...`
-  on stderr; detached run uses the same keys with status `running`. Send is
+  on stderr; detached run uses the same keys with status `running`; permission
+  is another captured run status. Send is
   `{agentId,status,message}`; idle wait is `{agentId,status,message}`. Workspace
   create/archive, inspect, logs, stop, and permit allow/deny shapes are captured.
 - `logs --json` is plain text. Stop returns `{stoppedCount,agentIds}` and leaves
@@ -20,9 +21,11 @@ adapters remain unverified, so unattended-release readiness is not claimed.
 - Outside-scope and reference-risky evidence denies the exact owned request.
   Other unclassifiable requests park with bounded raw evidence unless the
   operator explicitly supplies that exact full ID in `queue.trusted_agents`;
-  this cooperative opt-in allows such requests only after re-list confirms
-  disappearance. Risky/outside evidence always overrides trust. Foreign rows
-  remain untouched.
+  alternatively `queue.trust_owned_agents: true` opts this job's recorded
+  agents in. This cooperative opt-in allows the captured workspace-write text
+  only after re-list confirms disappearance. Descriptions are agent-controlled
+  and provide no containment proof. Outside/risky evidence always overrides
+  trust. Foreign rows remain untouched.
 - Non-idle/timeout wait, transient-provider error, turn-limit, loop signature,
   and garbled-finish payloads/signatures were not captured. Those signals remain
   unverified and park with evidence. The real probe workspace was archived by
@@ -50,6 +53,11 @@ adapters remain unverified, so unattended-release readiness is not claimed.
   Supervised roles run serially, validate/create captured workspace payloads,
   and reuse prepared workspaces without resetting edits. Fresh completed run,
   send, idle wait, and workspace-create payload adapters now use captured shapes.
+- Permission/running run responses persist the exact agent ID and reconcile the
+  spawn operation before checking permits and waiting for the captured idle
+  response. Unknown run statuses still park. Owned-agent trust defaults off;
+  `queue.trust_owned_agents: true` or the retained exact-ID allowlist is an
+  explicit cooperative opt-in, never a containment guarantee.
 - `publish` defaults false in supervised mode. Optional plain-command terminal
   hook is bounded to two attempts and cannot erase/suppress the durable event.
 - Task tests include every test name in the first v1 slice row, exact captured
@@ -58,7 +66,12 @@ adapters remain unverified, so unattended-release readiness is not claimed.
 
 ## Verification
 
-- New queue suite: 27 passed with explicit `.scratch/` basetemp.
+- New queue suite: 31 passed with explicit `.scratch/` basetemp.
+- Round-4 RED check ran three new behavior tests against the old code: the
+  permission run failed at `agentcoder.py:475`, job trust failed with
+  `process_permits() got an unexpected keyword argument 'trust_owned_agents'`,
+  and the risky-description assertion exposed that `rm -rf` text classified as
+  UNKNOWN. The unknown-status control passed.
 - Existing AgentCoder tool/workspace/land suites: 129 passed with explicit
   `.scratch/` basetemp.
 - `py_compile` passed. Scoped `ruff check tools/agentcoder/queue_mode.py
@@ -76,8 +89,9 @@ adapters remain unverified, so unattended-release readiness is not claimed.
 
 ## Remaining unsatisfied
 
-- A supervised end-to-end AgentCoder job and killed-supervisor-during-turn replay
-  remain unrun; the orchestrator captured individual real-daemon command probes.
+- The orchestrator's round-4 supervised pilot ran and exposed the early
+  permission-status run response. This worker did not rerun that live pilot
+  after the fix; killed-supervisor-during-turn replay also remains unrun.
 - Exact missing evidence to capture: non-idle/timeout `paseo wait --json`; a
   transient provider error in `logs`/inspect output; a turn-limit signature;
   repeated loop-signature logs/artifact state; and a garbled final run/report

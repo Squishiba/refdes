@@ -27,9 +27,14 @@ and the full ID must belong to this job. Foreign requests are untouched.
 Evidence of an outside target or risky operation denies the exact request and
 parks the job. The record has no structured command/path, so other requests
 park with bounded evidence. Operators may explicitly opt exact full IDs into
-the cooperative `queue.trusted_agents` list; those agents' otherwise
-unclassified requests may be allowed, after a fresh listing confirms the exact
-request disappeared. Outside/risky evidence always wins over trust.
+the cooperative `queue.trusted_agents` list or set
+`queue.trust_owned_agents: true` to opt all agents spawned and recorded by this
+job into cooperative trust. Their otherwise unclassified requests may be
+allowed after a fresh listing confirms the exact request disappeared. Permit
+descriptions are agent-controlled text, so this opt-in is cooperative trust,
+not containment or proof of the requested effect. Outside/risky evidence always
+wins over trust. Text naming outside-workspace paths, `../`, `/tmp`, `~/`,
+`curl`, `git push`, or `rm` is denied; unknown/unmatched evidence parks.
 
 `queue stop JOBDIR` persists deliberate stop intent before sending exact owned
 IDs to `paseo stop`, then confirms inactivity from a fresh captured listing.
@@ -43,7 +48,8 @@ the stop response and then records fresh listing evidence. An exact
 permission race. Uncertain run/send operations remain durable and are not
 replayed.
 
-The orchestrator supplied real-daemon fixtures for run, send, idle wait, stop,
+The orchestrator supplied real-daemon fixtures for completed and permission
+run results, send, idle wait, stop,
 workspace create/archive, inspect, logs, and permission responses. `logs --json`
 is plain text, and only the captured idle wait is recognized. Non-idle/timeout
 wait responses, transient provider errors, turn limits, loop signatures, and

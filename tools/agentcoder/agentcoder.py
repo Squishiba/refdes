@@ -430,8 +430,11 @@ def check_permits(job):
         owned = {str(i) for i in (job.get("coder_agent"), job.get("designer_agent"),
                                   *(job.get("reviewers") or {}).values()) if i}
         trusted = (job.get("spec", {}).get("queue") or {}).get("trusted_agents", [])
+        trust_owned = (job.get("spec", {}).get("queue") or {}).get(
+            "trust_owned_agents", False)
         decision, reason = process_permits(job["jobdir"], owned, listing, data,
-                                           trusted_agent_ids=trusted)
+                                           trusted_agent_ids=trusted,
+                                           trust_owned_agents=trust_owned)
         if decision != "CLEAR":
             raise Pause(reason)
         return
@@ -477,9 +480,11 @@ def record_turn(job, role, rc, out, err):
         data = last_json_of(out, f"{role} run result")
     status = data.get("status")
     if status == "permission":
-        raise Pause(f"{role} agent is waiting on a permission prompt; approve/deny it with "
-                    "`paseo permit`, then `resume`")
-    if status != "completed":
+        if not job.get("queue_supervised"):
+            raise Pause(f"{role} agent is waiting on a permission prompt; approve/deny it with "
+                        "`paseo permit`, then `resume`")
+    elif status != "completed" and not (
+            job.get("queue_supervised") and status == "running"):
         raise Pause(f"{role} agent turn ended with status {status!r}: {tail_text(out, 5)}")
     agent_id = data.get("agentId")
     if not agent_id:
@@ -491,6 +496,7 @@ def record_turn(job, role, rc, out, err):
                     f"run={data['cwd']!r} listing={cwd!r}")
     job[f"{role}_agent"] = agent_id
     job[f"{role}_cwd"] = cwd
+    job[f"{role}_run_status"] = status
     save_job(job)  # ids survive a hard crash mid-loop, so resume adopts them
     if job.get("queue_supervised"):
         if str(Path(__file__).resolve().parent) not in sys.path:
@@ -500,7 +506,8 @@ def record_turn(job, role, rc, out, err):
         op_id = job.pop("_queue_operation_id", None)
         if op_id:
             from queue_mode import finish_operation
-            finish_operation(job["jobdir"], op_id, "completed",
+            operation_status = "adopted" if status in {"permission", "running"} else "completed"
+            finish_operation(job["jobdir"], op_id, operation_status,
                              {"status": status, "agentId": agent_id}, agent_id=agent_id)
 
 
@@ -633,6 +640,8 @@ def spawn_agent(job, role, model, base, prompt):
                              {"rc": rc, "stdout": tail_text(out, 30), "stderr": tail_text(err, 10),
                               "reason": str(exc)})
         raise
+    if job.get("queue_supervised") and job.get(f"{key}_run_status") in {"permission", "running"}:
+        wait_for_agent(job, key)  # it checks owned permits before waiting for the idle envelope
     return job[f"{key}_cwd"]
 
 
@@ -646,6 +655,8 @@ def _kill_all(procs):
 def wait_for_agent(job, role):
     # rc=0 proves NOTHING: real `paseo wait` exits 0 printing status "error"
     # ("Agent not found") as readily as "idle" -- the JSON status is the signal
+    if job.get("queue_supervised"):
+        check_permits(job)
     tmo = int(job["spec"].get("agent_timeout", 1800))
     rc, out, err = run_guarded(["paseo", "wait", job[f"{role}_agent"], "--json",
                                 "--timeout", str(tmo)], timeout=tmo + 30)  # outlive the CLI
@@ -695,7 +706,8 @@ def do_spawn(job):
         rows = json_of(lout, "paseo global listing")
         if not captured_queue_listing(rows):
             raise Pause(f"unverified global listing row/status; evidence={tail_text(lout, 10)}")
-        live = {row["id"] for row in rows if row["status"] in {"running", "idle"}}
+        live = {row["id"] for row in rows
+                if row["status"] in {"running", "idle", "permission"}}
     else:
         live = live_ids()
     for role in ("coder", "designer"):  # resume: a recorded id that died must respawn

@@ -26,9 +26,10 @@ LOOP_WINDOW_SECONDS = 600
 DENIAL = ("Queue policy denied this request: {reason}. Use only scoped relative paths and "
           "approved commands in your worktree; do not retry the denied operation.")
 REFERENCE_RISKY = re.compile(
-    r"\b(rm\s|delete|remove|unlink|git push|push (to|the branch)|"
+    r"\b(?:delete|remove|unlink|git push|push (?:to|the branch)|"
     r"(?<!direction )merge(?! diffs?)|force|sudo|chmod|chown|curl|wget|ssh|"
-    r"install|reset|checkout\s+main|branch\s+-D|kill|systemctl)\b|"
+    r"install|reset|checkout\s+main|kill|systemctl)\b|\brm\s|"
+    r"\bbranch\s+-D\b|"
     r"/tmp|~/|\.paseo|\.ssh|\.config|/etc/|"
     r"/home/jorb/work/(paseo-pr-review-plugin|refdes)(?!-dev)\b", re.I)
 REFERENCE_SAFE = re.compile(
@@ -299,6 +300,9 @@ def _queue_limits(spec):
                                             for agent_id in trusted) \
             or len(set(trusted)) != len(trusted):
         raise QueueError("queue.trusted_agents must be a list of unique exact full agent IDs")
+    trust_owned = policy.get("trust_owned_agents", False)
+    if not isinstance(trust_owned, bool):
+        raise QueueError("queue.trust_owned_agents must be a JSON boolean")
     if isinstance(max_nudges, bool) or not isinstance(max_nudges, int) or not 0 <= max_nudges <= 10:
         raise QueueError("queue.max_nudges must be an integer from 0 through 10")
     if isinstance(wall_timeout, bool) or not isinstance(wall_timeout, int) or wall_timeout < 1:
@@ -327,7 +331,7 @@ def reconcile_owned_agents(owned_ids, listing):
             uncertain[agent_id] = "owned full ID absent from fresh listing; do not relaunch"
         elif row["shortId"] != agent_id[:7]:
             uncertain[agent_id] = "listing shortId does not match captured full-ID mapping"
-        elif row["status"] == "running":
+        elif row["status"] in {"running", "permission"}:
             result[agent_id] = "active"
         elif row["status"] == "idle":
             result[agent_id] = "idle"
@@ -360,7 +364,7 @@ def validate_run_result(payload, expected_agent_id=None):
     if not all(isinstance(payload.get(k), str) and payload[k]
                for k in fields):
         return False, "paseo run payload has missing/non-text fields: " + bounded_raw(payload)
-    if payload["status"] not in {"completed", "running"}:
+    if payload["status"] not in {"completed", "running", "permission"}:
         return False, "unverified paseo run status: " + bounded_raw(payload)
     if expected_agent_id and payload["agentId"] != expected_agent_id:
         return False, "paseo run agentId does not match exact ID: " + bounded_raw(payload)
@@ -516,7 +520,8 @@ def reconcile_job_agents(jobdir, listing=None):
     return adopted, uncertain
 
 
-def process_permits(jobdir, owned_ids, listing, rows, invoke=None, trusted_agent_ids=()):
+def process_permits(jobdir, owned_ids, listing, rows, invoke=None, trusted_agent_ids=(),
+                    trust_owned_agents=False):
     """Process only exact owned short IDs; unknown/risky evidence parks the job."""
     if not isinstance(rows, list):
         reason = "permit listing is not the captured array shape: " + bounded_raw(rows)
@@ -580,7 +585,8 @@ def process_permits(jobdir, owned_ids, listing, rows, invoke=None, trusted_agent
         # The exact captured shortId maps to one full ID; prefix matching is
         # deliberately forbidden. Ambiguous/foreign rows are never touched.
         full_id = matches[0]
-        trusted = full_id in set(trusted_agent_ids)
+        trusted = full_id in set(trusted_agent_ids) or (
+            trust_owned_agents is True and full_id in owned_ids)
         unverified_schema = decision == "UNKNOWN" and (
                 set(row) != {"agentShortId", "agentId", "id", "name", "description"}
                 or reason in {"permit schema is incomplete", "permit has uncaptured fields"})

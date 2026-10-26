@@ -43,8 +43,11 @@ defaults to false and must be explicitly true for trusted-driver push/PR
 creation. Queue policy fields `queue.max_nudges` and
 `queue.job_wall_timeout` default to 2 and 14400 seconds. Permit requests park
 when their free-text record cannot be classified; `queue.trusted_agents` can
-opt exact full agent IDs into cooperative auto-allow, while outside/risky
-evidence is still denied.
+opt exact full agent IDs into cooperative auto-allow, and
+`queue.trust_owned_agents: true` opts this job's spawned agents in. Permit
+descriptions are agent-controlled text, so this opt-in is cooperative trust,
+not containment. Outside/risky evidence such as outside-workspace paths,
+`curl`, `git push`, or `rm` is still denied.
 
 `JOBDIR` defaults to `<repo>/.scratch/agentcoder/<task_id>/` — keep job
 dirs out of tracked paths (in this repo `.scratch/` is gitignored). Exit
