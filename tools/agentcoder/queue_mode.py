@@ -62,11 +62,22 @@ class QueueError(Exception):
 
 
 def _fsync_dir(path):
-    fd = os.open(str(path), os.O_RDONLY)
+    # Windows does not support opening directories through os.open. Directory
+    # fsync is also unavailable on some POSIX filesystems, so keep it best effort.
+    if sys.platform == "win32":
+        return
+    fd = None
     try:
+        fd = os.open(str(path), os.O_RDONLY)
         os.fsync(fd)
+    except OSError:
+        return
     finally:
-        os.close(fd)
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def atomic_json(path, value):

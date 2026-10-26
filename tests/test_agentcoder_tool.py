@@ -770,6 +770,13 @@ def test_junit_node_falls_back_to_guess(tmp_path):
     assert agentcoder.junit_outcomes(xml, str(tmp_path)) == {"ghost/mod.py::test_z": "PASSED"}
 
 
+def test_path_matches_accepts_native_and_spec_separators(monkeypatch):
+    assert agentcoder.path_matches(r"pkg\mathx.py", "pkg/*.py")
+    assert agentcoder.path_matches("pkg/mathx.py", r"pkg\*.py")
+    monkeypatch.setattr(agentcoder.os, "name", "nt")
+    assert agentcoder.path_matches("Pkg/MathX.py", "pkg/mathx.py")
+
+
 def test_data_files_in_test_globs_are_dropped(tmp_path, monkeypatch):
     # README's `tests/**` also matches the designer's fixture data; pytest exits
     # rc=4 on data files, so the expansion keeps only what pytest can collect

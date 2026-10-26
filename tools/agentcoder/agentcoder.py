@@ -810,7 +810,13 @@ def do_spawn(job):
 def path_matches(p, g):
     if not isinstance(p, str) or not isinstance(g, str):
         return False
+    # Git reports slash-separated paths on every platform, while Python's glob
+    # may return native separators. Specs and saved paths use one canonical form.
+    p = p.replace("\\", "/")
+    g = g.replace("\\", "/")
     g = g.rstrip("/")
+    if os.name == "nt":
+        p, g = p.casefold(), g.casefold()
     plain = not any(ch in g for ch in "*?[")
     return (p == g or p.startswith(g + "/")) if plain else fnmatch.fnmatch(p, g)
 
@@ -915,7 +921,8 @@ def do_test_review(job):
 
 
 def expand_tests(globs, wt):
-    found = sorted({p for g in globs for p in glob.glob(g, root_dir=wt, recursive=True)
+    found = sorted({p.replace(os.sep, "/") for g in globs
+                    for p in glob.glob(g, root_dir=wt, recursive=True)
                     if Path(wt, p).is_dir() or p.endswith(".py")})  # pytest can't take data files
     if not found:
         raise Pause(f"allowed_test_paths {globs} matched nothing in the worktree; "

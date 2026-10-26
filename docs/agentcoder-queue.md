@@ -1,5 +1,8 @@
 # AgentCoder supervised mode
 
+This is developer tooling documentation for the opt-in AgentCoder driver, not a
+user-facing refdes workflow.
+
 `tools/agentcoder/agentcoder.py` retains its existing `run`, `resume`, and
 `status` commands. The opt-in `supervise SPEC.json JOBDIR` entry point stores
 locked JSON state in the job directory, keeps per-invocation output under

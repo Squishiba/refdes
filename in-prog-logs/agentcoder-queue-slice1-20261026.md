@@ -6,8 +6,7 @@ unattended-release readiness is not claimed.
 
 ## Captured evidence and adapter boundary
 
-- Used `.scratch/live-fixtures2/README-findings.txt` first, then the verbatim
-  files. Sanitized fixtures preserve those payload keys/types. Run blocking JSON
+- Sanitized committed fixtures preserve the captured payload keys/types. Run blocking JSON
   is `{agentId,status,provider,cwd,title}` on stdout, with `Using workspace ...`
   on stderr; detached run uses the same keys with status `running`; permission
   is another captured run status. Send is
@@ -19,6 +18,12 @@ unattended-release readiness is not claimed.
   structured command/path. The description is free text and cannot establish
   containment. `NO_PENDING_PERMISSIONS` after a listing is treated as a benign
   race only when fresh listing confirms the exact request is gone.
+- Other captured shapes: `paseo ls -g --json` is a JSON array with each agent
+  row carrying `id`, `shortId`, `name`, `provider`, `thinking`, `status`, `cwd`,
+  and `created`; workspace creation returns `workspaceId`, `project`, `name`,
+  `isolation`, and `cwd`; permit allow/deny is verified by a fresh permit list.
+  Blocking `run --json`, accepted `send --json`, and `wait --json` each return
+  one stdout object; the run workspace banner is stderr text.
 - Outside-scope and reference-risky evidence denies the exact owned request.
   Other unclassifiable requests park with bounded raw evidence unless the
   operator explicitly supplies that exact full ID in `queue.trusted_agents`;
@@ -67,7 +72,7 @@ unattended-release readiness is not claimed.
 
 ## Verification
 
-- New queue suite: 31 passed with explicit `.scratch/` basetemp.
+- Queue suite before round 10: 48 passed with explicit `.scratch/` basetemp.
 - Round-4 RED check ran three new behavior tests against the old code: the
   permission run failed at `agentcoder.py:475`, job trust failed with
   `process_permits() got an unexpected keyword argument 'trust_owned_agents'`,
@@ -109,5 +114,24 @@ Round 9 tests first went RED: permit transport errors raised `UnboundLocalError`
 `a:1` hid unseen `b:1`, and the backoff-clock helper was absent; all regressions
 now pass. `prior_state` already contributed durable owned IDs and is now read via
 `_durable_agent_ids`; README and both specs distinguish shipped behavior from
-legacy/future design. Seven review reports read; queue: 48 passed; legacy: 129.
+legacy/future design. Seven review reports read; queue: 51 passed; legacy: 130.
 Review-log access returned `DAEMON_NOT_RUNNING`; no daemon or GitHub command ran.
+
+Round 10 reproduced the Windows directory-open failure in
+`test_atomic_json_windows_skips_unavailable_directory_open` before the fix.
+Directory fsync now skips Windows and tolerates OS errors; file fsync and POSIX
+directory fsync remain covered. Audit: queue and supervised driver use no
+signals, `killpg`, `getpgid`, chmod, or platform-only `O_*` flags. JSON uses
+UTF-8 text with newline-tolerant readers; exclusive `x` temp creation is
+portable; monotonic timers are platform-supported. Relative spec globs use
+forward-slash matching and `path_matches`; it normalizes separators and folds
+case on Windows (tested with a simulated platform). Resolved filesystem
+containment uses native `os.sep`. No explicit long-path layer exists; those
+filesystem cases cannot be exercised in this Linux run. `os.replace` targets
+are closed before replacement in both state writers; native Windows sharing
+behavior remains unverified here.
+
+Final round-10 verification: queue suite 51 passed; tool/workspace/land suites
+130 passed; py_compile, scoped Ruff `F`, and `git diff --check` passed. The
+four same-PR fixed fragments were consolidated into one added-feature fragment.
+The guide remains in the docs index and is labeled developer tooling.

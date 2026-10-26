@@ -22,6 +22,57 @@ def fixture(name):
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
+def test_atomic_json_windows_skips_unavailable_directory_open(tmp_path, monkeypatch):
+    jobdir = tmp_path / "job"
+    jobdir.mkdir()
+    target = jobdir / "state.json"
+    target.write_text('{"old": true}\n', encoding="utf-8")
+    monkeypatch.setattr(queue.sys, "platform", "win32")
+
+    def unavailable_directory_open(_path, _flags):
+        raise PermissionError(13, "directory handles are unavailable")
+
+    monkeypatch.setattr(queue.os, "open", unavailable_directory_open)
+    queue.atomic_json(target, {"new": True})
+
+    assert json.loads(target.read_text(encoding="utf-8")) == {"new": True}
+    assert not list(jobdir.glob("*.tmp"))
+
+
+def test_atomic_json_fsyncs_directory_on_posix(tmp_path, monkeypatch):
+    jobdir = tmp_path / "job"
+    jobdir.mkdir()
+    calls = []
+    monkeypatch.setattr(queue.sys, "platform", "linux")
+    monkeypatch.setattr(queue.os, "open", lambda path, flags: calls.append(("open", path, flags)) or 47)
+    monkeypatch.setattr(queue.os, "fsync", lambda fd: calls.append(("fsync", fd)))
+    monkeypatch.setattr(queue.os, "close", lambda fd: calls.append(("close", fd)))
+
+    target = jobdir / "state.json"
+    queue.atomic_json(target, {"durable": True})
+
+    assert json.loads(target.read_text(encoding="utf-8")) == {"durable": True}
+    assert calls.count(("open", str(jobdir), os.O_RDONLY)) == 1
+    assert ("fsync", 47) in calls and ("close", 47) in calls
+
+
+def test_atomic_json_tolerates_directory_fsync_oserror(tmp_path, monkeypatch):
+    jobdir = tmp_path / "job"
+    jobdir.mkdir()
+    monkeypatch.setattr(queue.sys, "platform", "linux")
+    monkeypatch.setattr(queue.os, "open", lambda _path, _flags: 47)
+    def fsync(fd):
+        if fd == 47:
+            raise OSError(22, "unsupported")
+
+    monkeypatch.setattr(queue.os, "fsync", fsync)
+    monkeypatch.setattr(queue.os, "close", lambda _fd: None)
+
+    target = jobdir / "state.json"
+    queue.atomic_json(target, {"durable": "file fsync remains"})
+    assert json.loads(target.read_text(encoding="utf-8")) == {"durable": "file fsync remains"}
+
+
 def test_queue_imports_when_posix_lock_module_is_unavailable():
     script = r'''
 import builtins, importlib.util, sys
