@@ -126,3 +126,26 @@ test_scan_two_markers_on_one_line pinning scan + strip of the adjacent
 case, and appended a twin-marker line to the differential fixture's
 marker project (gate PASS: both Navis in the payload at line 13, both
 marker lines consumed from the page; plain project byte-identical).
+
+Round 3 (orchestrator differential, head 56bb74a): behavioural defect.
+A marker alone on its own line inside a paragraph split the paragraph:
+strip_markers removed the marker bytes, leaving an EMPTY line, and a
+blank line is a paragraph break. Old code (markers visible as escaped
+text) kept one paragraph; new code broke it. Fix: strip_markers is now
+structural -- a line of whitespace + markers only is dropped whole,
+terminator with it (CRLF-safe: the per-line `\r` rides along); a marker
+sharing a line with text is removed with the whitespace runs on its
+sides, collapsed to one space where text remains both sides (no double
+space, no leading-space line, no trailing-whitespace hard break). Line
+numbers unchanged: scan runs on the original body, strip is render-local
+(pinned by test_payload_lines_name_the_original_body_lines). Tests first
+(RED with the exact repro, 9 failed): repro + paragraph-join, between
+paragraphs, body start/end, CRLF, list item, table row, blockquote,
+render-level single-<p>. Three pre-existing strip assertions (double
+space, leading space, blank-line residue) updated to the new documented
+rule. docs/markdown.md documents the removal rule. Differential fixture
+gained the exact repro paragraph; its normalizer now drops marker-only
+lines too, mirroring the fix; gate PASS (plain byte-identical, marker
+deltas all explained, payload lines 16/17 name the original lines).
+Targeted 59 passed; full suite 4947 passed, 2 skipped; ruff clean on
+touched lines (one pre-existing E501 left alone).

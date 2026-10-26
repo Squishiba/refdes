@@ -97,7 +97,15 @@ The grammar is closed and strict:
 - a malformed marker (no text, a key-shaped head outside the key alphabet)
   is a warning naming the fix, never quietly swallowed. Its bytes are
   still consumed from the published page, so the text inside it disappears
-  until the fix the warning names is applied.
+  until the fix the warning names is applied;
+- removal is structural, not just byte-deletion: a line consisting only
+  of markers (plus surrounding whitespace) is dropped whole, line
+  terminator with it — a lone marker inside a paragraph never splits it —
+  and a marker sharing a line with text is removed together with the
+  whitespace runs on its sides, collapsed to a single space where text
+  remains on both sides (no double space, no leading-space line). Line
+  numbers in the projection always name the ORIGINAL body lines; markers
+  are stripped only in the render-local copy of the body.
 
 The comment form is the point: any standard Markdown renderer already
 hides the marker, and it cannot trigger an inline calc span under it.

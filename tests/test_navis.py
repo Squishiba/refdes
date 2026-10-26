@@ -82,7 +82,7 @@ def test_scan_two_markers_on_one_line():
     found, bad = navis.scan_body("<!--navi: first--><!--navi: second-->")
     assert bad == []
     assert [(n.text, n.line_offset) for n in found] == [("first", 0), ("second", 0)]
-    assert navis.strip_markers("<!--navi: first--><!--navi: second--> tail") == " tail"
+    assert navis.strip_markers("<!--navi: first--><!--navi: second--> tail") == "tail"
 
 
 def test_scan_keyed_marker():
@@ -224,7 +224,7 @@ def test_strip_markers_removes_only_the_marker():
     body = "before <!--navi: gone--> after\nsecond line\n"
     out = navis.strip_markers(body)
     assert "navi" not in out
-    assert "before  after" in out
+    assert "before after" in out  # surrounding whitespace collapses to one space
     assert "second line" in out
 
 
@@ -238,7 +238,91 @@ def test_strip_markers_keeps_inert_occurrences():
 def test_strip_markers_preserves_bytes_outside_markers():
     body = "Ωµ\r\nunicode ok\n<!--navi: x-->\nend"
     out = navis.strip_markers(body)
-    assert out == "Ωµ\r\nunicode ok\n\nend"
+    assert out == "Ωµ\r\nunicode ok\nend"
+
+
+def test_strip_marker_only_line_joins_the_paragraph():
+    # The exact reviewed repro: a marker alone on its own line inside a
+    # paragraph must not leave a blank line behind (a blank line is a
+    # paragraph break); markers sharing a line with text are removed with
+    # their surrounding whitespace, collapsed to a single space.
+    body = (
+        "Three things drive the power architecture: a 9-36 V input range, a 3V3 rail at\n"
+        "<!--navi: remember to check the thermal pad-->\n"
+        "<!--navi: second--> text <!--navi: third-->"
+    )
+    assert navis.strip_markers(body) == (
+        "Three things drive the power architecture: a 9-36 V input range, a 3V3 rail at\n"
+        "text"
+    )
+
+
+def test_strip_marker_only_line_between_paragraphs_leaves_one_break():
+    out = navis.strip_markers("para one\n\n<!--navi: x-->\n\npara two\n")
+    assert out == "para one\n\n\npara two\n"
+
+
+def test_strip_marker_only_line_at_body_start_and_end():
+    assert navis.strip_markers("<!--navi: x-->\ntext\n") == "text\n"
+    assert navis.strip_markers("text\n<!--navi: x-->\n") == "text\n"
+    assert navis.strip_markers("<!--navi: x-->") == ""
+
+
+def test_strip_marker_only_line_is_crlf_safe():
+    out = navis.strip_markers("a\r\n<!--navi: x-->\r\nb\r\n")
+    assert out == "a\r\nb\r\n"
+    assert navis.strip_markers("a\r\ntext <!--navi: x--> tail\r\n") == "a\r\ntext tail\r\n"
+    # A marker-only line ending in CRLF is a marker-only line.
+    assert navis.strip_markers("a\r\n<!--navi: x-->\r\n") == "a\r\n"
+
+
+def test_strip_marker_only_line_in_list_item():
+    assert navis.strip_markers("- one\n  <!--navi: x-->\n- two\n") == "- one\n- two\n"
+
+
+def test_strip_marker_in_table_row_collapses_to_clean_row():
+    assert navis.strip_markers("| a | <!--navi: x--> b |\n") == "| a | b |\n"
+
+
+def test_strip_marker_only_line_in_blockquote():
+    # The `>` is text on the line, so this is the in-place case, not the
+    # whole-line case; the marker's leading whitespace collapses with it.
+    assert navis.strip_markers("> quoted\n> <!--navi: x-->\n> more\n") == (
+        "> quoted\n>\n> more\n"
+    )
+
+
+def test_render_marker_only_line_does_not_split_paragraph(tmp_path):
+    project = _project(
+        tmp_path,
+        {
+            "note.md": _md(
+                "NOTE-001", "note", "Power",
+                "Three things drive the power architecture: a 9-36 V input range, a 3V3 rail at\n"
+                "<!--navi: remember to check the thermal pad-->\n"
+                "<!--navi: second--> text <!--navi: third-->\n",
+            )
+        },
+    )
+    html = project.item_by_id("NOTE-001").body_html
+    assert "navi" not in html
+    assert html.count("<p>") == 1
+    assert "a 3V3 rail at\ntext" in html
+
+
+def test_payload_lines_name_the_original_body_lines(tmp_path):
+    # Stripping markers for render must not shift reported line numbers:
+    # the scan runs on the ORIGINAL body, render strips a local copy.
+    project = _project(
+        tmp_path,
+        {
+            "note.md": _md(
+                "NOTE-001", "note", "Power",
+                "intro\n<!--navi: one-->\nmid <!--navi: two--> mid\n",
+            )
+        },
+    )
+    assert [navi.line_offset for navi in project.item_by_id("NOTE-001").navis] == [1, 2]
 
 
 # ------------------------------------------------- build integration: Item.navis

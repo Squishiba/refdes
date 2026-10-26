@@ -191,21 +191,59 @@ def scan_body(body: str) -> tuple[list[Navi], list[tuple[int, str]]]:
 
 
 def strip_markers(body: str) -> str:
-    """`body` with every live marker's bytes removed, everything else
-    byte-identical (design §4: the published HTML contains no marker
-    bytes). Occurrences the scan does not treat as markers -- inside
-    fences, indented code, code spans, open comments -- are left exactly
-    as written. A body with no `navi:` prefix at all returns the *same*
-    string object, so a project without Navis cannot render a byte
-    differently because this function ran.
+    """`body` with every live marker's bytes removed, so the published
+    HTML contains no marker bytes (design §4) *and* removing them never
+    re-flows the text around them. A reviewed defect: removing only the
+    marker bytes left a marker alone on its line as an EMPTY line, and a
+    blank line is a paragraph break -- so a marker inside a paragraph
+    split it. The rules, in order of application per line:
+
+    * a line that consists only of whitespace plus markers is dropped
+      whole, line terminator with it, so the text around it stays one
+      paragraph (dropping the line keeps CRLF endings intact -- a CRLF
+      body's per-line `\r` rides along and disappears with the line);
+    * a marker sharing a line with text is removed together with the
+      whitespace runs on its sides, collapsed to a single space where
+      text remains on both sides -- never a double space, never a
+      leading-space line, never a line left with trailing whitespace
+      (which markdown can read as a hard break);
+    * occurrences the scan does not treat as markers -- inside fences,
+      indented code, code spans, open comments -- are left exactly as
+      written, and every other byte is untouched.
+
+    A body with no `navi:` prefix at all returns the *same* string
+    object, so a project without Navis cannot render a byte differently
+    because this function ran.
     """
     if MARKER_OPEN not in body:
         return body
     lines = body.split("\n")
-    for offset, start, end, _inner in reversed(_scan_body_lines(lines)):
-        line = lines[offset]
-        lines[offset] = line[:start] + line[end:]
-    return "\n".join(lines)
+    spans_by_line: dict[int, list[tuple[int, int]]] = {}
+    for offset, start, end, _inner in _scan_body_lines(lines):
+        spans_by_line.setdefault(offset, []).append((start, end))
+    if not spans_by_line:
+        return body
+    kept: list[str] = []
+    for offset, line in enumerate(lines):
+        spans = spans_by_line.get(offset)
+        if not spans:
+            kept.append(line)
+            continue
+        segments = []
+        cursor = 0
+        for start, end in sorted(spans):
+            segments.append(line[cursor:start])
+            cursor = end
+        segments.append(line[cursor:])
+        joined = segments[0]
+        for segment in segments[1:]:
+            joined = joined.rstrip(" \t")
+            rest = segment.lstrip(" \t")
+            joined += (" " if joined and rest else "") + rest
+        if not joined.strip():
+            continue  # whitespace + markers only: drop the whole line
+        kept.append(joined)
+    return "\n".join(kept)
 
 
 def marker_line(item: Item, line_offset: int) -> int:
