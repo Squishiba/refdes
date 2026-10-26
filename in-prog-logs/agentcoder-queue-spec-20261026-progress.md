@@ -23,3 +23,15 @@
 - Validation: source/citation and requirements review; only the two requested
   Markdown files staged and committed. No push, merge or PR creation.
 - Status: specification task complete; queue implementation not started.
+
+- V1 follow-up: reread instructions/current driver and CLI help; daemon listing
+  still unavailable. Kept full spec untouched and wrote a separate scope cut.
+- Applied owner decisions: cooperative soft global/prefix caps, no daemon gate
+  or OS isolation, fail-closed permission classifier, recovery and reliable
+  parent-process completion before scheduler and UI polish.
+- Applied latest simplification: Paseo count only, no launch-lock/recount or
+  corrective parking; metrics are unverified later refinement, not v1 work.
+- Added ordered slices/estimates, live fixture/draft-PR-close pilot outline,
+  overlap/cap mutations, explicit operating limits and upgrade path.
+- Validation: reviewed scope/citations, documentation diff and clean staging;
+  v1 specification complete, implementation and live pilot remain future work.
