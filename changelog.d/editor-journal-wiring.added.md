@@ -19,6 +19,11 @@ recovery). Journal scope is the item files: the accept pair's
 `.refdes/citations.yaml` pin and a create's `.refdes/ids.yaml` reservation
 are outside the journal's control-namespace rule, so a kill between the
 pair's two writes leaves the pin inert and recovery restores the item half
-to its complete old state. A save whose journal cannot be written (an
-unwritable `.refdes/`) is refused with nothing written -- an unarmed save is
-the kill-with-no-recovery the journal exists to end.
+to its complete old state. A save whose journal cannot be armed is refused
+with nothing written -- an unwritable `.refdes/`, a target path the journal
+refuses (a Windows device name, a colon, a path that escapes the root
+through a symlink), a journal left pending from an earlier kill -- an
+unarmed save is the kill-with-no-recovery the journal exists to end. A
+reported write failure clears the journal only when the disk says nothing
+landed; over a write that landed in part, the journal stands and the
+refusal names `refdes recover`.

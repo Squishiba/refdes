@@ -229,13 +229,17 @@ class Conflict:
     diff: str
     ok: bool = False
     kind: str = "conflict"
+    journal_warning: str = ""
 
     @property
     def message(self) -> str:
-        return (
+        text = (
             f"conflict: {self.path} changed since this edit was planned "
             f"(expected {self.expected_revision[:12]}, found {self.current_revision[:12]})"
         )
+        if self.journal_warning:
+            text += f" -- {self.journal_warning}"
+        return text
 
 
 @dataclass(frozen=True)
@@ -599,11 +603,28 @@ def _apply_locked(config: str, request: EditRequest):
                 # this replace describes a save that lands nowhere: clear it
                 # with the save (a survival is reported by the next load).
                 _restore_lockfile(accept)
-                _journal_clear(before.root)
-                return _conflict(who, ref, path, before, request, moved.current, patch_ref)
+                warning = _journal_clear(before.root)
+                return _conflict(
+                    who,
+                    ref,
+                    path,
+                    before,
+                    request,
+                    moved.current,
+                    patch_ref,
+                    journal_warning=warning,
+                )
             if failure is not None:
                 _restore_lockfile(accept)
-                warning = _journal_clear(before.root)
+                # A failure string is not proof that nothing landed: the
+                # classification lives in `_journal_clear_after_failure`.
+                warning = (
+                    _journal_clear_after_failure(
+                        before.root, journal_rel, text.encode("utf-8")
+                    )
+                    if journal_rel is not None
+                    else _journal_clear(before.root)
+                )
                 return Refused(
                     who,
                     ref,
@@ -1019,7 +1040,16 @@ def _resolve_link_op(project: Project, item: Item, op):
     return AddLink(op.verb, composite), None
 
 
-def _conflict(who, ref, path, before, request, current_revision, patch_ref=None) -> Conflict:
+def _conflict(
+    who,
+    ref,
+    path,
+    before,
+    request,
+    current_revision,
+    patch_ref=None,
+    journal_warning: str | None = None,
+) -> Conflict:
     """The disk moved. Show the author their draft against the current file;
     offer nothing that merges.
 
@@ -1043,11 +1073,29 @@ def _conflict(who, ref, path, before, request, current_revision, patch_ref=None)
         with open(path, "rb") as fh:
             text = fh.read().decode("utf-8")
     except (OSError, UnicodeDecodeError):
-        return Conflict(who, ref, path, request.expected_revision, current_revision, None, "")
+        return Conflict(
+            who,
+            ref,
+            path,
+            request.expected_revision,
+            current_revision,
+            None,
+            "",
+            journal_warning=journal_warning or "",
+        )
 
     plan = patcher.plan_patch(text, patch_ref or ref, request.op, path=path)
     if isinstance(plan, Refusal):
-        return Conflict(who, ref, path, request.expected_revision, current_revision, None, "")
+        return Conflict(
+            who,
+            ref,
+            path,
+            request.expected_revision,
+            current_revision,
+            None,
+            "",
+            journal_warning=journal_warning or "",
+        )
     draft = patcher.apply_patch(text, plan)
     rel = os.path.relpath(path, before.root).replace("\\", "/")
     diff = "\n".join(
@@ -1060,7 +1108,14 @@ def _conflict(who, ref, path, before, request, current_revision, patch_ref=None)
         )
     )
     return Conflict(
-        who, ref, path, request.expected_revision, current_revision, plan.original, diff
+        who,
+        ref,
+        path,
+        request.expected_revision,
+        current_revision,
+        plan.original,
+        diff,
+        journal_warning=journal_warning or "",
     )
 
 
@@ -1401,6 +1456,7 @@ class _DestinationMoved:
     new_id: str
     rel: str
     path: str
+    journal_warning: str = ""
 
 
 def create_item(project_root: str, request: CreateRequest, config_path: str | None = None):
@@ -1446,12 +1502,18 @@ def create_item(project_root: str, request: CreateRequest, config_path: str | No
                     if not isinstance(result, _DestinationMoved):
                         return result
                     if attempt + 1 == attempts:
+                        refusal = (
+                            f"{result.rel} kept changing while this creation "
+                            f"was being planned ({attempts} attempts); "
+                            "nothing was written and no id was reserved -- "
+                            "retry the creation"
+                        )
+                        if result.journal_warning:
+                            refusal = f"{refusal}; {result.journal_warning}"
                         return Refused(
                             result.who,
                             result.new_id,
-                            f"{result.rel} kept changing while this creation was "
-                            f"being planned ({attempts} attempts); nothing was "
-                            "written and no id was reserved -- retry the creation",
+                            refusal,
                             path=result.path,
                         )
         except OSError as exc:
@@ -1621,11 +1683,20 @@ def _create_locked(config: str, request: CreateRequest):
         except _Moved:
             # The journal describes a write that lands nowhere; clear it
             # with the attempt, so the retry's own arm does not find it
-            # pending.
-            _journal_clear(before.root)
-            return _DestinationMoved(who, new_id, rel, path)
+            # pending. The clear is best-effort: when it fails the
+            # refusal says so -- the project is gated and `recover` is
+            # the way out.
+            warning = _journal_clear(before.root)
+            return _DestinationMoved(who, new_id, rel, path, warning or "")
     if failure is not None:
-        warning = _journal_clear(before.root)
+        # Same classification as `apply_edit`'s failure branch: a create's
+        # failure string can name a file that linked and then failed its
+        # re-read -- the journal is that file's only undo record.
+        warning = (
+            _journal_clear_after_failure(before.root, journal_rel, original)
+            if journal_rel is not None
+            else _journal_clear(before.root)
+        )
         return Refused(
             who,
             new_id,
@@ -2125,6 +2196,19 @@ def _journal_arm(root: str, rel: str, original: bytes | None, replacement: bytes
         editor_journal.begin(root, [editor_journal.Entry(rel, original, replacement)])
     except editor_journal.JournalPending as exc:
         return str(exc)
+    except ValueError as exc:
+        # `begin` classifies the entry path itself: a Windows device name,
+        # a colon, a backslash, a path that escapes the root through a
+        # symlink. `_journal_relpath` and `_item_path` are lexical, so such
+        # a path reaches the arm -- and an exception past `apply_edit` /
+        # `create_item` breaks their values-only contract (the HTTP face
+        # has no catch-all: it would reach the browser as a dead
+        # connection). Refuse it like every other arm failure: nothing is
+        # written, the project is not gated.
+        return (
+            f"the save journal refused the target path ({exc}); the write "
+            "landed nowhere"
+        )
     except OSError as exc:
         return (
             f"the save journal could not be written: {exc}; the write landed "
@@ -2149,6 +2233,46 @@ def _journal_clear(root: str) -> str | None:
             "restores the journaled files to their pre-save state"
         )
     return None
+
+
+def _journal_kept_warning(rel: str) -> str:
+    return (
+        "the write landed in part and the editor transaction journal is "
+        f"kept: run 'refdes recover' to restore {rel}"
+    )
+
+
+def _journal_clear_after_failure(
+    root: str, rel: str, original: bytes | None
+) -> str | None:
+    """Clear the journal after a write the route reports as failed -- only
+    when the disk says the failure string is honest about landing nothing.
+
+    `_atomic_replace` and `_atomic_create` both document failure branches
+    that return AFTER the write landed (the replace ran, the post-write
+    check failed, the restore did not land: "left as it was found"; the
+    linked file fails its re-read, its bytes disagree). A failure string
+    alone does not say which shape ran, and clearing over a landed write
+    destroys the only record of the old bytes. So classify from the disk:
+    live bytes equal to the journaled original (for a create: the file
+    absent) mean nothing landed and the journal -- a record of a write
+    that does not exist -- goes with the refusal; anything else keeps the
+    journal, and the warning names `refdes recover`.
+    """
+    path = os.path.join(root, rel)
+    try:
+        with open(path, "rb") as fh:
+            live: bytes | None = fh.read()
+    except FileNotFoundError:
+        live = None
+    except OSError:
+        return _journal_kept_warning(rel)
+    if original is None:
+        if live is None:
+            return _journal_clear(root)
+    elif live == original:
+        return _journal_clear(root)
+    return _journal_kept_warning(rel)
 
 
 def _rollback(path: str, original: bytes | None) -> bool:

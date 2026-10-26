@@ -6,10 +6,13 @@ docs/design/browser-editor.md: "If the process is killed between two
 replacements, a visible `.refdes/editor-transaction/` is left behind, and all
 project-loading commands are refused until `refdes recover` restores it."
 
-Every crash test is the same shape: inject a hard stop (an `OSError` rising
-out of the write section, the shape of a kill between the syscall and the
-return) at one journal step, then assert `refdes recover` yields the COMPLETE
-old state -- never a half-apply. The no-crash tests pin the steady state:
+The crash tests come in two shapes and they pin different things. The
+handled shape injects an `OSError` at one journal step: that is a write
+failure the save path CATCHES, and the test pins the refusal -- nothing
+written, the journal kept or cleared as the shape demands. The true-kill
+shape injects a `BaseException` (the hard kill that passes no handler):
+the journal must stand, and `refdes recover` must yield the COMPLETE old
+state -- never a half-apply. The no-crash tests pin the steady state:
 the journal exists exactly during the write and is gone after it, so a
 differential of a normal save is byte-identical to the pre-wiring world.
 
@@ -312,7 +315,7 @@ def test_create_with_a_failing_rollback_leaves_the_journal_for_recover(
     assert editor_journal.pending(str(tmp_path)) is None
 
 
-def test_new_file_create_crash_leaves_a_journal_that_recovers_the_removal(
+def test_a_new_file_create_crash_before_the_link_leaves_an_inert_journal(
     tmp_path, monkeypatch
 ):
     """The `original=None` journal entry (new file, `_atomic_create`): the
@@ -509,7 +512,7 @@ def test_recover_restores_every_journaled_entry(tmp_path, capsys):
     assert editor_journal.pending(str(tmp_path)) is None
 
 
-def test_recover_refuses_an_unreadable_manifest_and_keeps_the_journal(tmp_path, capsys):
+def test_recover_refuses_an_unparseable_manifest_and_keeps_the_journal(tmp_path, capsys):
     """The manifest is published atomically, last: bytes that do not parse
     are damage, not a mid-begin crash, and the journal is the only
     rollback copy. `recover` must refuse with 2, touch nothing, keep the
@@ -752,3 +755,372 @@ def test_concurrent_saves_serialize_and_leave_no_journal(tmp_path):
     assert not (tmp_path / ".refdes" / "editor-transaction").exists()
     assert "draft" in (tmp_path / "items" / "reqs.yaml").read_text()
     assert "Concurrent." in (tmp_path / "items" / "notes.md").read_text()
+
+
+# ------------------------------------------------------- arm refusals (paths)
+#
+# `editor_journal.begin` classifies entry paths that it must never journal:
+# a Windows device name, a colon, a path escaping the root through a
+# symlink. It refuses with `ValueError`, and the wiring must translate that
+# into the same clean 422 refusal every other arm failure gets -- a save
+# that RAISES breaks the values-only contract of `apply_edit`/`create_item`
+# and reaches the browser as a dead connection, not a refusal.
+
+CON_FILE = (
+    "defaults: { type: requirement, board: board-a }\n"
+    "items:\n"
+    "  - id: REQ-099\n"
+    "    text: An item file whose name is a Windows device name.\n"
+)
+
+COLON_MD = (
+    "---\n"
+    "id: REQ-098\n"
+    "type: requirement\n"
+    "board: board-a\n"
+    "text: An item file whose name carries a colon.\n"
+    "---\n"
+)
+
+
+def test_a_device_name_item_file_refuses_the_save_cleanly(tmp_path):
+    make_project(tmp_path)
+    (tmp_path / "items" / "con.yaml").write_text(CON_FILE, encoding="utf-8")
+    client = Api(tmp_path)
+    _status, view = client.get("/api/item/REQ-099")
+    before = content_tree(tmp_path)
+
+    status, payload = save(client, "REQ-099", revision=view["edit"]["file_revision"])
+    assert status == 422, payload
+    assert payload["kind"] == "refused", payload
+    assert "journal" in payload["reason"], payload
+    assert content_tree(tmp_path) == before
+    assert editor_journal.pending(str(tmp_path)) is None
+
+
+def test_a_colon_in_the_item_file_name_refuses_the_save_cleanly(tmp_path):
+    make_project(tmp_path)
+    (tmp_path / "items" / "vin:min.md").write_text(COLON_MD, encoding="utf-8")
+    client = Api(tmp_path)
+    _status, view = client.get("/api/item/REQ-098")
+    before = content_tree(tmp_path)
+
+    status, payload = save(client, "REQ-098", revision=view["edit"]["file_revision"])
+    assert status == 422, payload
+    assert payload["kind"] == "refused", payload
+    assert "journal" in payload["reason"], payload
+    assert content_tree(tmp_path) == before
+    assert editor_journal.pending(str(tmp_path)) is None
+
+
+def test_a_symlinked_items_directory_refuses_the_save_cleanly(tmp_path):
+    """The item file resolves INSIDE the root lexically and OUTSIDE it
+    through a symlinked `items/`: `begin` refuses to journal it, and the
+    save -- which would write through the link, outside the root -- must
+    be refused with nothing written, not raised."""
+    make_project(tmp_path)
+    client = Api(tmp_path)
+    _status, view = client.get("/api/item/REQ-001")
+    before = (tmp_path / "items" / "reqs.yaml").read_bytes()
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    (tmp_path / "items").rename(outside)
+    (tmp_path / "items").symlink_to(outside, target_is_directory=True)
+
+    status, payload = save(client, "REQ-001", revision=view["edit"]["file_revision"])
+    assert status == 422, payload
+    assert payload["kind"] == "refused", payload
+    assert "journal" in payload["reason"], payload
+    assert (outside / "reqs.yaml").read_bytes() == before
+    assert editor_journal.pending(str(tmp_path)) is None
+
+
+def test_a_create_into_a_symlinked_items_directory_refuses_cleanly(tmp_path):
+    make_project(tmp_path)
+    client = Api(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    (tmp_path / "items").rename(outside)
+    (tmp_path / "items").symlink_to(outside, target_is_directory=True)
+    before = content_tree(tmp_path)
+
+    status, payload = client.post(
+        "/api/items/create",
+        {
+            "type": "requirement",
+            "fields": {"text": "Outside the root."},
+            "destination": "items/new-requirements.md",
+        },
+    )
+    assert status == 422, payload
+    assert payload["kind"] == "refused", payload
+    assert "journal" in payload["reason"], payload
+    assert not (outside / "new-requirements.md").exists()
+    assert content_tree(tmp_path) == before
+    assert editor_journal.pending(str(tmp_path)) is None
+
+
+# ------------------------------------------- failure strings that LANDED
+#
+# `_atomic_replace` and `_atomic_create` document failure branches that
+# return AFTER the write landed (the replace ran, the post-write check
+# failed, the restore did not land; the linked file fails its re-read).
+# Those failure strings describe a half-applied save: the journal is the
+# only record of the old bytes and must NOT be cleared. The journal may
+# be cleared on a failure string only when the live bytes say nothing
+# landed -- that classification is what these tests pin.
+
+
+def test_a_write_failure_after_the_write_landed_keeps_the_journal(tmp_path, monkeypatch):
+    make_project(tmp_path)
+    client = Api(tmp_path)
+    _status, view = client.get("/api/item/REQ-001")
+    before = (tmp_path / "items" / "reqs.yaml").read_bytes()
+    real = edit_mod._atomic_replace
+
+    def landed_failure(path, payload, expected=None):
+        real(path, payload, expected)
+        return (
+            f"could not re-read {path} after the write: simulated, the "
+            f"original bytes could not be restored, and {path} was left "
+            "as it was found"
+        )
+
+    monkeypatch.setattr(edit_mod, "_atomic_replace", landed_failure)
+    status, payload = save(client, "REQ-001", revision=view["edit"]["file_revision"])
+    assert status == 422, payload
+    assert payload["kind"] == "refused", payload
+    assert "refdes recover" in payload["reason"], payload
+    assert (tmp_path / "items" / "reqs.yaml").read_bytes() != before, (
+        "the fixture's write did not land"
+    )
+    assert editor_journal.pending(str(tmp_path)) is not None, (
+        "the journal was cleared over a write that landed"
+    )
+
+    assert run_cli(tmp_path, "recover") == 0
+    assert (tmp_path / "items" / "reqs.yaml").read_bytes() == before
+    assert editor_journal.pending(str(tmp_path)) is None
+
+
+def test_a_write_failure_that_restored_the_original_clears_the_journal(
+    tmp_path, monkeypatch
+):
+    """The boundary, pinned: a failure string whose restore DID land is a
+    write that landed nowhere. The live bytes match the journaled
+    original, so clearing is right -- a survival would gate the project
+    on a transaction that needs no recovery."""
+    make_project(tmp_path)
+    client = Api(tmp_path)
+    _status, view = client.get("/api/item/REQ-001")
+    before = (tmp_path / "items" / "reqs.yaml").read_bytes()
+    real = edit_mod._atomic_replace
+
+    def restored_failure(path, payload, expected=None):
+        real(path, payload, expected)
+        real(path, before)
+        return (
+            f"could not re-read {path} after the write: simulated; the "
+            "original bytes were restored"
+        )
+
+    monkeypatch.setattr(edit_mod, "_atomic_replace", restored_failure)
+    status, payload = save(client, "REQ-001", revision=view["edit"]["file_revision"])
+    assert status == 422, payload
+    assert payload["kind"] == "refused", payload
+    assert "refdes recover" not in payload["reason"], payload
+    assert (tmp_path / "items" / "reqs.yaml").read_bytes() == before
+    assert editor_journal.pending(str(tmp_path)) is None
+
+
+def test_a_created_file_failure_after_the_link_landed_keeps_the_journal(
+    tmp_path, monkeypatch
+):
+    make_project(tmp_path)
+    client = Api(tmp_path)
+    target = tmp_path / "items" / "new-requirements.md"
+    real = edit_mod._atomic_create
+
+    def landed_failure(path, payload):
+        real(path, payload)
+        return f"the bytes on disk after the write are not the bytes planned for {path}"
+
+    monkeypatch.setattr(edit_mod, "_atomic_create", landed_failure)
+    status, payload = client.post(
+        "/api/items/create",
+        {
+            "type": "requirement",
+            "fields": {"text": "Half-created."},
+            "destination": "items/new-requirements.md",
+        },
+    )
+    assert status == 422, payload
+    assert payload["kind"] == "refused", payload
+    assert "refdes recover" in payload["reason"], payload
+    assert target.exists(), "the fixture's create did not land"
+    assert editor_journal.pending(str(tmp_path)) is not None, (
+        "the journal was cleared over a create that landed"
+    )
+
+    assert run_cli(tmp_path, "recover") == 0
+    assert not target.exists()
+    assert editor_journal.pending(str(tmp_path)) is None
+
+
+# ------------------------------------ journal-clear failures on refusals
+#
+# The conflict shapes clear a journal that describes a write that landed
+# nowhere -- correct -- but the clear is best-effort: when IT fails, the
+# project is gated and the response must say so (the refusal reports
+# "nothing written" while the next load refuses the whole project).
+
+
+def test_a_conflict_names_a_journal_clear_that_failed(tmp_path, monkeypatch):
+    make_project(tmp_path)
+    client = Api(tmp_path)
+    _status, view = client.get("/api/item/REQ-001")
+
+    def boom(*args, **kwargs):
+        raise OSError(CRASH)
+
+    monkeypatch.setattr(editor_journal, "complete", boom)
+
+    def moved(path, payload, expected=None):
+        raise edit_mod._Moved("0" * 64)
+
+    monkeypatch.setattr(edit_mod, "_atomic_replace", moved)
+    status, payload = save(client, "REQ-001", revision=view["edit"]["file_revision"])
+    assert status == 409, payload
+    assert payload["kind"] == "conflict", payload
+    assert "refdes recover" in payload["message"], payload
+
+
+def test_a_moved_destination_refusal_names_the_journal_clear_failure(
+    tmp_path, monkeypatch
+):
+    make_project(tmp_path)
+    client = Api(tmp_path)
+
+    def boom(*args, **kwargs):
+        raise OSError(CRASH)
+
+    monkeypatch.setattr(editor_journal, "complete", boom)
+    monkeypatch.setattr(edit_mod, "CREATE_DESTINATION_ATTEMPTS", 1)
+
+    def moved(path, payload, expected=None):
+        raise edit_mod._Moved("0" * 64)
+
+    monkeypatch.setattr(edit_mod, "_atomic_replace", moved)
+    status, payload = client.post(
+        "/api/items/create", {"type": "requirement", "fields": {"text": "Journalled."}}
+    )
+    assert status == 422, payload
+    assert payload["kind"] == "refused", payload
+    assert "kept changing" in payload["reason"], payload
+    assert "refdes recover" in payload["reason"], payload
+
+
+# -------------------------------------------------- crash-point matrix
+#
+# The acceptance boundary of docs/design/browser-editor.md, enumerated:
+# every journaled write route (save, accept, create-append,
+# create-new-md) x the two kill points around the write (journal armed
+# and nothing landed / write landed and the journal not yet cleared).
+# In every cell `refdes recover` must yield the COMPLETE old state of
+# every JOURNALED file -- never a half-apply. Journal scope is the item
+# files by design (begin refuses entries inside `.refdes`), so the
+# lockfile pin and the id ledger are outside the matrix's assertion.
+
+MATRIX_ROUTES = ["save", "accept", "create-append", "create-new-md"]
+MATRIX_CRASHES = ["before-write", "after-write-before-clear"]
+
+
+@pytest.mark.parametrize("crash", MATRIX_CRASHES)
+@pytest.mark.parametrize("route", MATRIX_ROUTES)
+def test_crash_point_matrix_recovers_a_complete_state(
+    route, crash, tmp_path, monkeypatch, capsys
+):
+    def boom(*args, **kwargs):
+        raise OSError(CRASH)
+
+    journaled_rel = "items/reqs.yaml"
+    if route == "save":
+        make_project(tmp_path)
+        client = Api(tmp_path)
+        _status, view = client.get("/api/item/REQ-001")
+
+        def drive():
+            return save(
+                client, "REQ-001", revision=view["edit"]["file_revision"]
+            )
+    elif route == "accept":
+        root = make_root(tmp_path)
+        fetch(root)
+        client = Api(root)
+        _status, view = client.get("/api/item/DEC-001")
+        journaled_rel = "items/decisions.yaml"
+
+        def drive():
+            return client.post(
+                "/api/item/DEC-001/edit",
+                {
+                    "op": "set_body",
+                    "text": calc_body(RAIL, EFF),
+                    "pin": pin("eff", name="eff"),
+                    "expected_revision": view["edit"]["file_revision"],
+                },
+            )
+    elif route == "create-append":
+        make_project(tmp_path)
+        client = Api(tmp_path)
+
+        def drive():
+            return client.post(
+                "/api/items/create",
+                {"type": "requirement", "fields": {"text": "Matrix."}},
+            )
+    else:
+        make_project(tmp_path)
+        client = Api(tmp_path)
+
+        def drive():
+            return client.post(
+                "/api/items/create",
+                {
+                    "type": "requirement",
+                    "fields": {"text": "Matrix."},
+                    "destination": "items/new-requirements.md",
+                },
+            )
+
+    journaled = tmp_path / "items" / journaled_rel.split("/")[1]
+    created = tmp_path / "items" / "new-requirements.md"
+    before = journaled.read_bytes() if journaled.is_file() else None
+
+    if crash == "after-write-before-clear":
+        monkeypatch.setattr(editor_journal, "complete", boom)
+        status, _payload = drive()
+        assert status == 200, _payload
+    elif route == "create-new-md":
+        monkeypatch.setattr(edit_mod, "_atomic_create", boom)
+        status, _payload = drive()
+        assert status == 422, _payload
+    elif route == "accept":
+        patch_replace_crash(monkeypatch, at_call=2)
+        status, _payload = drive()
+        assert status == 422, _payload
+    else:
+        patch_replace_crash(monkeypatch)
+        status, _payload = drive()
+        assert status == 422, _payload
+
+    assert editor_journal.pending(str(tmp_path)) is not None, (
+        f"{route} x {crash}: the kill left no journal"
+    )
+
+    assert run_cli(tmp_path, "recover") == 0, capsys.readouterr()
+    assert editor_journal.pending(str(tmp_path)) is None
+    if route == "create-new-md":
+        assert not created.exists(), f"{route} x {crash}: recover left the file"
+    else:
+        assert journaled.read_bytes() == before, (
+            f"{route} x {crash}: the journaled file is not its complete old state"
+        )

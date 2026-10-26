@@ -673,6 +673,26 @@ def test_recover_refuses_a_live_file_that_matches_neither_hash(tmp_path):
     assert _journal(tmp_path).is_dir()
 
 
+def test_recover_refuses_third_content_at_a_created_file_path(tmp_path):
+    """The neither-hash rule covers `existed=False` entries too: the
+    recorded original is absence, so a live file at the created path
+    whose bytes are not the recorded replacement matches neither hash.
+    It is not this transaction's file: recover refuses naming the path
+    and touches nothing."""
+    ej = _ej()
+    root = _project(tmp_path)
+    entries = _entries(ej)
+    ej.begin(root, entries)
+    _apply_save(tmp_path, entries)
+    _write(tmp_path, P3, b"written by a writer outside the transaction\n")
+    with pytest.raises(ej.JournalCorrupt) as exc:
+        ej.recover(root)
+    assert P3 in str(exc.value)
+    assert _read(tmp_path, P3) == b"written by a writer outside the transaction\n"
+    assert _read(tmp_path, P1) == NEW1, "refusal touches nothing: P1 stays as the save left it"
+    assert _journal(tmp_path).is_dir()
+
+
 def test_recover_unsafe_manifest_path_journalcorrupt(tmp_path):
     ej = _ej()
     root = _project(tmp_path)

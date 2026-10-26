@@ -91,3 +91,42 @@ Created.journal_warning, fetch in the gate parametrization.
 All 12 findings across the two reviews accepted; none rejected (PR comment
 records the acceptance map). Full suite at the fix commit: 4927 passed,
 2 skipped. Ruff on touched files: only the two findings already on main.
+
+## Review round 3 (07aa08aa, 420f5453) — RED lines
+
+New RED (8, all failing before the fix):
+- test_a_device_name_item_file_refuses_the_save_cleanly — ValueError
+  escapes _journal_arm (items/con.yaml): save raised, not refused.
+- test_a_colon_in_the_item_file_name_refuses_the_save_cleanly — same,
+  items/vin:min.md.
+- test_a_symlinked_items_directory_refuses_the_save_cleanly — same,
+  lexical-rel path escaping root via symlinked items/.
+- test_a_create_into_a_symlinked_items_directory_refuses_cleanly — same
+  on the create arm.
+- test_a_write_failure_after_the_write_landed_keeps_the_journal — the
+  landed-shape failure string cleared the journal.
+- test_a_created_file_failure_after_the_link_landed_keeps_the_journal —
+  same on the create link path.
+- test_a_conflict_names_a_journal_clear_that_failed — _Moved path
+  swallows the clear warning.
+- test_a_moved_destination_refusal_names_the_journal_clear_failure —
+  _DestinationMoved path swallows it.
+
+Green on first run (pins, not bugs): the boundary test
+(..._restored_the_original_clears_the_journal), the 8-cell
+crash-point matrix, and the module
+test_recover_refuses_third_content_at_a_created_file_path (07aa08aa
+finding 6 is a coverage gap; the verification loop already refused).
+
+## Review round 3 result
+
+07aa08aa (all 6 doc-level findings) and 420f5453 (HIGH arm-ValueError,
+MEDIUM landed-failure clear, LOW swallowed clear-warning) all accepted
+and fixed: arm ValueError -> clean refusal; failure-string clears now
+classify from the disk (`_journal_clear_after_failure`); _Moved /
+_DestinationMoved surface the clear warning. Crash-point matrix added:
+4 routes (save, accept, create-append, create-new-md) x 2 kill points =
+8 cells, green on first run (recover already yields the complete old
+state in every cell). Rename route: the CLI rename command is not a
+journaled route (journal scope is the serve save path) -- not in the
+matrix. Wiring suite 55 passed, module 122.

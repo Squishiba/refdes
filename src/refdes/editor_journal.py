@@ -1,11 +1,12 @@
 """Transaction journal for browser-editor saves.
 
-An editor save replaces several files. Today a crash between two of those
-replacements leaves a half-applied save with no trace on disk (see
+An editor save replaces several files. A crash between two of those
+replacements used to leave a half-applied save with no trace on disk (see
 docs/design/browser-editor.md, "Transaction model"). This module is the
-trace: a journal directory under the project root, written in full BEFORE
-any live file is touched, removed on success, and replayed by ``recover``
-to put the originals back when a save died halfway.
+trace, wired into the save path in ``serve/edit.py``: a journal directory
+under the project root, written in full BEFORE any live file is touched,
+removed on success, and replayed by ``recover`` (``refdes recover``,
+``cli.py``) to put the originals back when a save died halfway.
 
 The posture is: a journal directory on disk means "the project may be
 half-applied", and every consumer refuses to proceed until ``recover`` has
@@ -49,8 +50,8 @@ device-name and trailing-dot/space rules are enforced on every
 platform, but nothing here is Windows-native tested: the Windows
 behavior is a reading of the rules, not a verified one.
 
-Standalone by design: stdlib only, no refdes imports, so the future
-wiring in ``serve/edit.py`` and ``cli.py`` is the only integration point.
+Standalone by design: stdlib only, no refdes imports, so the wiring in
+``serve/edit.py`` and ``cli.py`` is the only integration point.
 """
 
 from __future__ import annotations
@@ -75,10 +76,13 @@ JOURNAL_DIR = ".refdes/editor-transaction"
 _MANIFEST_NAME = "manifest.json"
 _ORIG_DIR_NAME = "orig"
 
-# Returned by _read_manifest_raw for the inert state (manifest missing,
-# or bytes that are not JSON at all). Distinct from every JSON value:
-# a manifest that parses -- to null, a list, a number -- is a readable
-# document saying something impossible, i.e. corruption, not a crash.
+# Returned by _read_manifest_raw for the inert state (the manifest is
+# MISSING). Bytes that exist and do not parse are NOT inert: a published
+# journal is renamed into place whole, so it cannot truncate mid-write,
+# and _read_manifest_raw calls such bytes JournalCorrupt. Distinct from
+# every JSON value: a manifest that parses -- to null, a list, a number
+# -- is a readable document saying something impossible, i.e. corruption,
+# not a crash.
 _NO_MANIFEST = object()
 
 # Leaf comparison in path identity is case-folded on the platforms whose
@@ -328,8 +332,14 @@ def _create_temp(directory: str, name: str) -> tuple[int, str]:
 
 
 def _atomic_write_bytes(path: str, data: bytes) -> None:
+    """Replace `path` with `data` atomically. Every caller -- the staging
+    originals, the staging manifest, and a restore over a live file the
+    verification pass just confirmed -- has a directory that already
+    exists: begin() creates the staging tree before writing it, and a
+    restore only writes where a live regular file is (a missing file is
+    inert, and a file missing where one is recorded is a refusal), so
+    there is nothing to create here and no branch that creates it."""
     directory = os.path.dirname(os.path.abspath(path))
-    os.makedirs(directory, exist_ok=True)
     fd, tmp = _create_temp(directory, os.path.basename(path))
     try:
         with os.fdopen(fd, "wb") as fh:
@@ -849,11 +859,12 @@ def recover(project_root: str) -> list[str]:
     manifest = _read_manifest_raw(journal)
     if manifest is _NO_MANIFEST:
         # begin() writes manifest.json last, from a staging directory it
-        # renames in as one unit: a journal without a manifest (or whose
-        # bytes are not JSON at all) is a crash before any live file was
-        # touched. A manifest that PARSES -- to null, a list, anything
-        # non-object -- is a readable document saying something
-        # impossible, i.e. corruption: JournalCorrupt, journal kept.
+        # renames in as one unit: a journal without a manifest is a crash
+        # before any live file was touched. Bytes that exist and do not
+        # parse are corruption, not inertness (see _read_manifest_raw). A
+        # manifest that PARSES -- to null, a list, anything non-object --
+        # is a readable document saying something impossible, i.e.
+        # corruption: JournalCorrupt, journal kept.
         _disarm_and_gc(project_root)
         return []
     _transaction_id, entries = _manifest_entries(manifest, project_root)
@@ -960,11 +971,10 @@ def recover(project_root: str) -> list[str]:
     # it, so the barrier belongs after the loop, over every entry
     # (entries whose bytes already matched, or whose file is absent,
     # included: a previous pass restored those bytes and its barrier
-    # may be the one that failed). A directory the restore's makedirs
-    # created is itself durable only once its own parent is fsynced, so
-    # the chain runs to the root; the journal is removed at the end of
-    # this run, and a chain that reverted on power loss is the exact
-    # half-applied save again.
+    # may be the one that failed, and a chain that reverted on power
+    # loss is the exact half-applied save again). The chain runs to the
+    # root so a leaf-directory fsync lost by an interrupted earlier
+    # pass is re-run from the leaf through every ancestor.
     root_real = os.path.realpath(project_root)
     synced: set[str] = set()
     for entry in entries:
