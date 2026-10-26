@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from conftest import write_project_config
 
 from refdes import build as build_mod
@@ -690,3 +692,70 @@ def test_index_payload_round_trips(tmp_path):
     )
     round_tripped = json.loads(json.dumps(payload, ensure_ascii=False, default=str))
     assert round_tripped["navis"][0]["text"] == "x Ω"
+
+
+def test_strip_removes_the_live_marker_not_its_inert_twin():
+    # Round-5 review A3: an inert code-span twin of the marker's text on
+    # the same line. A strip that locates markers by TEXT removes the
+    # FIRST occurrence -- the authored code span -- and leaves the live
+    # marker visible. The scan records absolute raw spans, so only the
+    # live marker's bytes go.
+    body = "> `<!--navi: x-->` then <!--navi: x--> real\n"
+    out = navis.strip_markers(body)
+    assert out == "> `<!--navi: x-->` then real\n"
+    assert [n.text for n in navis.scan_body(body)[0]] == ["x"]
+
+
+def test_strip_honours_escaped_backtick():
+    # Round-5 review B: `\`` is a literal backtick, not a code-span
+    # opener; the marker after it is live.
+    body = "write \\` here <!--navi: live--> and `code` later\n"
+    assert [n.text for n in navis.scan_body(body)[0]] == ["live"]
+    assert navis.strip_markers(body) == "write \\` here and `code` later\n"
+
+
+def test_escaped_lt_is_not_a_marker():
+    # Round-5 review C: `\<` is a literal `<`; a marker-shaped run behind
+    # it is authored text, kept byte-identical, and must not become a
+    # Navi (the old strip ate it and left a stray backslash).
+    body = "text \\<!--navi: esc--> tail\n"
+    assert navis.scan_body(body) == ([], [])
+    assert navis.strip_markers(body) == body
+
+
+def test_markers_in_one_table_row_scan_in_document_order():
+    # Round-5 review D2: the row's cells carry two markers; document
+    # order is left to right, not the order the tokenizer's per-cell
+    # offsets sort to.
+    body = "| a | b |\n|---|---|\n| xxxx <!--navi: second--> | <!--navi: first--> y |\n"
+    assert [(n.text, n.line_offset) for n in navis.scan_body(body)[0]] == [
+        ("second", 2),
+        ("first", 2),
+    ]
+
+
+def test_strip_fails_loud_on_an_unmappable_span(monkeypatch):
+    # The mapping layer's guarantee is exact spans; a span that does not
+    # name the marker's bytes is an internal bug, and strip refuses to
+    # guess (a guessed strip corrupts authored text -- the reviewed A3).
+    monkeypatch.setattr(
+        navis, "_live_markers", lambda body: ([(0, 0, 3, "x")], [])
+    )
+    with pytest.raises(navis.NavisMappingError):
+        navis.strip_markers("text <!--navi: x--> tail\n")
+
+
+def test_strip_drops_a_line_left_bare_of_list_bullets():
+    # A marker alone in a list item must not leave an empty bullet
+    # behind: a bare `-` is an empty item, visible authored structure
+    # the marker's removal should not create.
+    body = "- one\n- <!--navi: x-->\n- two\n"
+    assert navis.strip_markers(body) == "- one\n- two\n"
+    html = build_mod._markdown_parser().render(navis.strip_markers(body))
+    assert html.count("<li>") == 2
+
+
+def test_strip_never_inserts_a_space_before_punctuation():
+    assert navis.strip_markers("Use <!--navi: n-->, as noted.") == "Use, as noted."
+    assert navis.strip_markers("Use <!--navi: n--> notes") == "Use notes"
+    assert navis.strip_markers("text<!--navi: n-->.") == "text."

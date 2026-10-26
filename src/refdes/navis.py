@@ -52,12 +52,61 @@ COMMENT_CLOSE = "-->"
 _KEY_SHAPED_RE = re.compile(r"^(\S{11})(?:[ \t]+(.*)|\Z)", re.DOTALL)
 _ALPHABET = frozenset(keys_mod.ALPHABET)
 
-# A line that is left with nothing but blockquote prefixes (plus
-# whitespace) once its markers go is a structural line: the `>` prefixes
-# are container markers, not content -- and a bare `>` line is a blockquote
-# paragraph break, so the residue would split the quoted paragraph. Such a
-# line is dropped whole, terminator with it, like a whitespace-only one.
-_CONTAINER_ONLY_RE = re.compile(r"[ \t]*(?:>[ \t]*)+")
+# A line left with nothing but blockquote prefixes, list markers and
+# whitespace once its markers go is a structural line: those prefixes are
+# container markers, not content -- and a bare `>` line is a blockquote
+# paragraph break while a bare bullet is an empty item, so the residue
+# would change the page. Such a line is dropped whole, terminator with it,
+# like a whitespace-only one.
+_CONTAINER_ONLY_RE = re.compile(r"[ \t]*(?:(?:[>\-*+]|\d{1,9}[.)])[ \t]*)*")
+
+
+class NavisMappingError(RuntimeError):
+    """A live marker whose bytes cannot be named exactly on the raw source
+    line. This is an internal bug, not author input: the scan-mapping
+    layer guarantees every live marker maps to its raw span, and anything
+    it cannot map must fail loud (the reviews of the text-search fallback
+    showed a "best guess" locates the WRONG occurrence -- an inert twin
+    earlier on the same line -- and strips the page's real text).
+    """
+
+
+def _raw_prefix(
+    raw_lines: list[str], cursors: dict[int, int], line: int, content_line: str
+) -> int:
+    """The column where `content_line` (line `line` of an inline token's
+    content) starts on the raw body line.
+
+    Container prefixes (a list bullet, a `>` quote marker, an ATX `#`, a
+    link's `[`, a table cell's pipes) are stripped by the block tokenizer,
+    so the content line sits inside the raw line at some column. The true
+    column is the occurrence that runs to the end of the line (paragraph
+    bodies: the prefix is all that precedes the content), searched from a
+    per-line cursor (a table row hosts several cells, visited left to
+    right); a content line that does not run to the end of the raw line is
+    a cell, taken at its first occurrence from the cursor. An occurrence
+    cannot be found only if the parser changed content bytes -- that is a
+    mapping bug: raise.
+    """
+    raw = raw_lines[line]
+    cursor = cursors.get(line, 0)
+    if not content_line:
+        return cursor
+    idx = raw.find(content_line, cursor)
+    while idx >= 0:
+        end = idx + len(content_line)
+        if not raw[end:].strip(" \t\r"):
+            cursors[line] = end
+            return idx
+        idx = raw.find(content_line, end)
+    idx = raw.find(content_line, cursor)
+    if idx < 0:
+        raise NavisMappingError(
+            f"inline content {content_line!r} is not on raw line {raw!r}: the scan "
+            "cannot name the marker's bytes (internal mapping bug, not author input)"
+        )
+    cursors[line] = idx + len(content_line)
+    return idx
 
 
 def _scan_block(
@@ -76,10 +125,12 @@ def _scan_block(
     never closes belongs to the existing unclosed-comment warning
     (`build.py:1797-1803`), so nothing is reported for it here.
 
+    CommonMark backslash escapes are honoured: a backslash before any
+    ASCII punctuation makes it literal, so ``\\` `` cannot open a code span
+    and ``\\<`` cannot start a comment -- exactly the renderer's reading.
+
     Spans are ``(line, start, end)`` offsets into `content`, whose line
-    offsets index the body's lines (markdown-it hands LF-normalized
-    content; a CRLF body's trailing ``\\r`` sits after every span's end,
-    so the offsets index the raw lines too).
+    offsets index the body's lines.
     """
     found: list[tuple[int, int, int, str]] = []
     warnings: list[tuple[int, str]] = []
@@ -101,6 +152,11 @@ def _scan_block(
             i = close + len(COMMENT_CLOSE)
             in_comment = False
             continue
+        if char == "\\":  # CommonMark: escapes the (punctuation) character
+            if content[i + 1:i + 2] == "\n":
+                line += 1  # a hard break, not a line for the scan to start on
+            i += 2
+            continue
         if content.startswith(MARKER_OPEN, i):
             close = content.find(COMMENT_CLOSE, i + len(MARKER_OPEN))
             if close < 0:
@@ -116,7 +172,6 @@ def _scan_block(
                     )
                 )
             else:
-                # line-relative spans: `strip_markers` slices body lines.
                 line_start = content.rfind("\n", 0, i) + 1
                 found.append((base_line + line, i - line_start, end - line_start, inner))
             line += content.count("\n", i, end)
@@ -149,31 +204,54 @@ def _scan_block(
 
 
 def _live_markers(body: str) -> tuple[list[tuple[int, int, int, str]], list[tuple[int, str]]]:
-    """Every live marker of one body, in source order, as
-    ``(line, start, end, inner)``, plus two-line-marker warnings as
-    ``(line, message)``.
+    """Every live marker of one body, in document order, as
+    ``(line, start, end, inner)`` with the span being the marker's EXACT
+    bytes on the raw body line (absolute columns), plus two-line-marker
+    warnings as ``(line, message)``.
 
     Live means *outside the renderer's inert regions*: `md.parse` (the
     project's own parser, `build._markdown_parser`) tokenizes the body;
     every block that is not an `inline` token -- fenced code, tilde
     fences, indented code, code that lives inside a list item or a
     blockquote, on LF or CRLF source alike -- is inert by construction,
-    and a marker inside an inline token's code spans or open comments is
-    inert by the character rules `inline_calc._scan_comment_line` uses.
-    Offsets are into the body's lines (CRLF bodies: markdown-it
-    normalizes a copy for parsing, and marker spans never reach a line's
-    trailing `\\r`, so the offsets index the raw lines too).
+    and a marker inside an inline token's code spans, open comments, or
+    backslash escapes is inert by the same character rules the renderer
+    uses. The content-relative spans are mapped to raw columns through
+    `_raw_prefix` (container prefixes), so a marker in a blockquote, a
+    list item, a table cell, a link label, or an ATX heading is located
+    at its absolute (line, column) -- never by a text search that can hit
+    an inert twin of the same text earlier on the line. A body line's
+    trailing ``\\r`` (CRLF) sits after every span's end, so absolute
+    columns index the raw lines too.
     """
     from .build import _markdown_parser  # lazy: build imports this module
 
+    raw_lines = body.split("\n")
     found: list[tuple[int, int, int, str]] = []
     warnings: list[tuple[int, str]] = []
+    cursors: dict[int, int] = {}
     for token in _markdown_parser().parse(body):
         if token.type != "inline" or token.map is None:
             continue
         block_found, block_warnings = _scan_block(token.content, token.map[0])
-        found.extend(block_found)
         warnings.extend(block_warnings)
+        if not block_found:
+            continue
+        prefixes = [
+            _raw_prefix(raw_lines, cursors, token.map[0] + j, content_line)
+            for j, content_line in enumerate(token.content.split("\n"))
+        ]
+        for line, start, _end, inner in block_found:
+            prefix = prefixes[line - token.map[0]]
+            marker = f"{MARKER_OPEN}{inner}{COMMENT_CLOSE}"
+            abs_start = prefix + start
+            raw_line = raw_lines[line]
+            if raw_line[abs_start:abs_start + len(marker)] != marker:
+                raise NavisMappingError(
+                    f"marker {marker!r} not at column {abs_start} of {raw_line!r}: "
+                    "the scan cannot name the marker's bytes (internal mapping bug)"
+                )
+            found.append((line, abs_start, abs_start + len(marker), inner))
     found.sort(key=lambda marker: (marker[0], marker[1]))
     warnings.sort()
     return found, warnings
@@ -227,27 +305,46 @@ def scan_body(body: str) -> tuple[list[Navi], list[tuple[int, str]]]:
     return navis, bad
 
 
+def _ws_chunks(text: str) -> list[tuple[str, str]]:
+    """`text` split into maximal runs of (``ws``, spaces/tabs) and
+    (``tx``, everything else), for `strip_markers`' run collapse."""
+    chunks: list[tuple[str, str]] = []
+    current = ""
+    kind = ""
+    for char in text:
+        next_kind = "ws" if char in " \t" else "tx"
+        if next_kind != kind:
+            if current:
+                chunks.append((kind, current))
+            current, kind = char, next_kind
+        else:
+            current += char
+    if current:
+        chunks.append((kind, current))
+    return chunks
+
+
 def strip_markers(body: str) -> str:
     """`body` with every live marker's bytes removed, so the published
     HTML contains no marker bytes (design §4) *and* removing them never
     re-flows the text around them. A reviewed defect: removing only the
     marker bytes left a marker alone on its line as an EMPTY line, and a
     blank line is a paragraph break -- so a marker inside a paragraph
-    split it. The rules, in order of application per line:
+    split it. The removal works on the spans `_live_markers` recorded:
+    the marker's EXACT bytes on the raw line are cut out, and a
+    whitespace run is collapsed to one space only where the marker
+    stood inside it (never before punctuation, never concatenating
+    words that had no room between them). The rules, per line:
 
-    * a line that consists only of whitespace, blockquote prefixes and
-      markers is dropped whole, line terminator with it -- the text
-      around it stays one paragraph, in plain text and inside a quote
-      (a leftover `>` is itself a blockquote paragraph break; CRLF
-      bodies: a per-line `\r` rides along and disappears with the line);
-    * a marker sharing a line with text is removed together with the
-      whitespace runs on its sides, collapsed to a single space where
-      text remains on both sides -- never a double space, never a
-      leading-space line, never a line left with trailing whitespace
-      (which markdown can read as a hard break);
+    * a line that consists only of whitespace, blockquote prefixes, list
+      markers and markers is dropped whole, line terminator with it --
+      the text around it stays one paragraph, in plain text and inside a
+      quote (a leftover `>` is itself a blockquote paragraph break, a
+      leftover bullet an empty item; CRLF bodies: a per-line `\r` rides
+      along and disappears with the line);
     * occurrences the scan does not treat as markers -- inside fences,
-      indented code, code spans, open comments -- are left exactly as
-      written, and every other byte is untouched.
+      indented code, code spans, open comments, behind backslash escapes
+      -- are left exactly as written, and every other byte is untouched.
 
     A body with no `navi:` prefix at all returns the *same* string
     object, so a project without Navis cannot render a byte differently
@@ -256,51 +353,54 @@ def strip_markers(body: str) -> str:
     if MARKER_OPEN not in body:
         return body
     lines = body.split("\n")
-    by_line: dict[int, list[tuple[int, int, str]]] = {}
+    by_line: dict[int, list[tuple[int, int]]] = {}
     for offset, start, end, inner in _live_markers(body)[0]:
-        by_line.setdefault(offset, []).append((start, end, inner))
+        marker = f"{MARKER_OPEN}{inner}{COMMENT_CLOSE}"
+        if lines[offset][start:end] != marker:  # the scan guarantees this
+            raise NavisMappingError(
+                f"marker {marker!r} not at {offset}:{start}-{end} of {lines[offset]!r}"
+            )
+        by_line.setdefault(offset, []).append((start, end))
     if not by_line:
         return body
     kept: list[str] = []
     for offset, line in enumerate(lines):
-        items = by_line.get(offset)
-        if not items:
-            kept.append(line)
-            continue
-        # The scan spans index the inline token's content, which is the
-        # body line minus its container prefix (a list bullet, a `>`, a
-        # table cell's pipes). Use the span when it names the marker's
-        # bytes on the raw line; otherwise locate those bytes by text --
-        # the scan's order is the line's left-to-right order.
-        spans: list[tuple[int, int]] = []
-        cursor = 0
-        for start, end, inner in items:
-            marker = f"{MARKER_OPEN}{inner}{COMMENT_CLOSE}"
-            if line[start:end] == marker:
-                spans.append((start, end))
-                cursor = end
-                continue
-            idx = line.find(marker, cursor)
-            if idx < 0:
-                idx = line.find(marker)
-            if idx < 0:
-                continue  # cannot name the bytes on the raw line: leave them
-            spans.append((idx, idx + len(marker)))
-            cursor = idx + len(marker)
+        spans = by_line.get(offset)
         if not spans:
             kept.append(line)
             continue
-        segments = []
+        # Cut the validated spans out of the line, then collapse every
+        # maximal run of whitespace+markers that carries a marker: to a
+        # single space where it sits between whitespace on both sides,
+        # to nothing where it touches text (a marker glued to
+        # punctuation closes up; words with room between them keep it).
+        tokens: list[tuple[str, str]] = []
         pos = 0
         for start, end in sorted(spans):
-            segments.append(line[pos:start])
+            tokens.extend(_ws_chunks(line[pos:start]))
+            tokens.append(("mk", ""))
             pos = end
-        segments.append(line[pos:])
-        joined = segments[0]
-        for segment in segments[1:]:
-            joined = joined.rstrip(" \t")
-            rest = segment.lstrip(" \t")
-            joined += (" " if joined and rest else "") + rest
+        tokens.extend(_ws_chunks(line[pos:]))
+        pieces: list[str] = []
+        i = 0
+        while i < len(tokens):
+            kind, text = tokens[i]
+            if kind != "mk":
+                pieces.append(text)
+                i += 1
+                continue
+            k = 0
+            while k < i and tokens[i - 1 - k][0] == "ws":
+                k += 1
+            hi = i
+            while hi + 1 < len(tokens) and tokens[hi + 1][0] in ("ws", "mk"):
+                hi += 1
+            left_ws = k > 0
+            right_ws = tokens[hi][0] == "ws"
+            del pieces[len(pieces) - k:]  # the ws before the run rides back in
+            pieces.append(" " if left_ws and right_ws else "")
+            i = hi + 1
+        joined = "".join(pieces)
         if not joined.strip() or _CONTAINER_ONLY_RE.fullmatch(joined.rstrip("\r")):
             continue  # markers (+whitespace/container prefixes) only: drop the line
         kept.append(joined)

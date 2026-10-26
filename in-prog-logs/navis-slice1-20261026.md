@@ -122,3 +122,20 @@ Branch rebased onto origin/main; sole conflict docs/cli-reference.md usage
 banner, resolved keeping both sides (main's `recover`, branch's
 `navis`). Diff scope re-verified (slice-1 files only); full suite green
 post-rebase.
+
+## Round 6: mapping layer (review round)
+
+Reviewer reproduced A3 (strip empties an inert code-span twin, leaves
+the live marker), B (escaped backtick opens a phantom code span), C
+(`\<` escaped marker stripped, stray backslash left), D2 (two markers
+in one table row scan in tokenizer order). One root cause:
+text-search fallback + content-relative columns. Fix: `_scan_block`
+honours backslash escapes; `_live_markers` maps content offsets to
+absolute raw (line, col) through `_raw_prefix` (per-line cursors,
+paragraph-then-cell matching) and validates each span's bytes;
+`strip_markers` cuts the validated spans and collapses maximal
+whitespace+marker runs (one space only between words, nothing before
+punctuation); a mapping failure raises `NavisMappingError` (fail loud,
+never guess). Bare bullets/`>`/ordered prefixes left on a line drop
+with it. Matrix 210 -> 270 cells (A3/B/C/D2 contexts, inert-twin
+placements, text-order assertions); full suite and gate green.
