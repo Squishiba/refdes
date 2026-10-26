@@ -17,6 +17,7 @@ from . import citations as citations_mod
 from . import diagram as diagram_mod
 from . import dates as dates_mod
 from . import docs_url as docs_url_mod
+from . import editor_journal
 from . import former_ids as former_ids_mod
 from . import get_version, model, standards, textio
 from . import history as history_mod
@@ -99,6 +100,45 @@ def _refuse_no_write(command: str, what: str) -> int:
     print(
         f"--no-write: {command} writes {what}; refusing to run it under "
         "--no-write. Drop --no-write to run it for real.",
+        file=sys.stderr,
+    )
+    return 2
+
+
+# `init` builds a project directory that does not exist yet and never loads
+# one, so a journal cannot be its journal. `recover` is the command that
+# clears the journal: gating it on the journal is gating it on itself.
+_JOURNAL_EXEMPT_COMMANDS = frozenset({"init", "recover"})
+
+
+def _refuse_pending_journal(args) -> int | None:
+    """Gate every project-loading command on the editor transaction journal
+    (docs/design/browser-editor.md, acceptance: "all project-loading
+    commands are refused until `refdes recover` restores it").
+
+    Lives in `main`, before the load and the write lock, so it covers every
+    command -- `serve` included, which must not open its editor over a
+    half-applied project. A directory with no project to find has no
+    journal to check: the command's own no-project error speaks, unchanged
+    (which is what keeps `init`-adjacent flows and `-c` pointing at nothing
+    saying what they always said)."""
+    if args.command in _JOURNAL_EXEMPT_COMMANDS:
+        return None
+    from .schema import find_config
+
+    try:
+        config = args.config or find_config()
+    except SchemaError:
+        return None
+    transaction_id = editor_journal.pending(
+        os.path.dirname(os.path.abspath(config))
+    )
+    if transaction_id is None:
+        return None
+    print(
+        f"editor transaction {transaction_id} is pending: the project may be "
+        "half-applied. Run 'refdes recover' to restore it before running any "
+        "other command.",
         file=sys.stderr,
     )
     return 2
@@ -2100,6 +2140,63 @@ def cmd_audit(args) -> int:
     return 1 if (load_errors or project_wide) else 0
 
 
+def cmd_recover(args) -> int:
+    from .schema import find_config
+
+    config = args.config or find_config()
+    root = os.path.dirname(os.path.abspath(config))
+    transaction_id = editor_journal.pending(root)
+    if transaction_id is None:
+        print("no editor transaction journal: nothing to recover")
+        return 0
+    if not _writes_allowed(args):
+        return _refuse_no_write(
+            "recover",
+            "the journal (.refdes/editor-transaction/) and every file it "
+            "journaled -- there is no read-only recovery",
+        )
+    journal_dir = os.path.join(root, editor_journal.JOURNAL_DIR)
+    inert_journal = os.path.isdir(journal_dir) and not os.path.isfile(
+        os.path.join(journal_dir, "manifest.json")
+    )
+    try:
+        restored = editor_journal.recover(root)
+    except editor_journal.JournalCorrupt as exc:
+        print(f"recover refused: {exc}", file=sys.stderr)
+        print(
+            "nothing was changed and the journal is kept. A corrupt manifest "
+            "means the journal's own record of the interrupted save cannot be "
+            "trusted -- compare the live files against the manifest by hand.",
+            file=sys.stderr,
+        )
+        return 2
+    if transaction_id == "unknown" and inert_journal:
+        # The inert shape: begin renames the journal in AFTER publishing
+        # its manifest, so a directory without one recorded no transaction
+        # and touched no live file. Say what was removed, not a recovery
+        # of a transaction named "unknown".
+        print(
+            "removed the journal directory left by a save that died before it "
+            "recorded anything: the journal is cleared; the project can be "
+            "loaded again"
+        )
+        return 0
+    print(f"recovered editor transaction {transaction_id}")
+    if restored:
+        for rel in restored:
+            if rel == editor_journal.JOURNAL_DIR:
+                print(f"  removed the squatter on the journal path: {rel}")
+            else:
+                print(f"  restored {rel}")
+    else:
+        print(
+            "  the live files already matched the journal: nothing was "
+            "rewritten"
+        )
+    print("the journal is cleared; the project can be loaded again")
+    return 0
+
+
 def cmd_init(args) -> int:
     if args.no_write:
         return _refuse_no_write(
@@ -3288,6 +3385,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_audit.set_defaults(func=cmd_audit)
 
+    p_recover = sub.add_parser(
+        "recover",
+        help="restore the project after an interrupted editor save "
+        "(.refdes/editor-transaction/)",
+        description="Restore the files an editor save was journaling when it died. "
+        "While a `.refdes/editor-transaction/` journal is present, every "
+        "project-loading command refuses (exit 2) -- the project may be "
+        "half-applied, with some journaled replacements landed and some not. "
+        "This restores every journaled file to the bytes the save recorded "
+        "for it before touching anything (deleting files the save created, "
+        "restoring files it rewrote), verifies the replacements it is rolling "
+        "back against the recorded hashes, and clears the journal. A journal "
+        "whose manifest is corrupt is refused with nothing changed (exit 2); "
+        "the corrupt journal is kept. A clean project exits 0 and writes "
+        "nothing.",
+    )
+    p_recover.set_defaults(func=cmd_recover)
+
     p_init = sub.add_parser(
         "init",
         help="write a minimal refdes-project.yaml that points at the standard",
@@ -3647,6 +3762,9 @@ def main(argv: list[str] | None = None) -> int:
     _hide_command(sub, "revise")
 
     args = parser.parse_args(argv)
+    refused = _refuse_pending_journal(args)
+    if refused is not None:
+        return refused
     try:
         # Take the lock before loading: the load itself can rewrite sources,
         # and ID planning must see the ledger left by the previous process.
@@ -3658,6 +3776,13 @@ def main(argv: list[str] | None = None) -> int:
 
         config = args.config or find_config()
         with project_write_lock(os.path.dirname(os.path.abspath(config))):
+            # The gate ran before the lock: a journal armed in that
+            # window is refused here, before this command loads --
+            # and before its own write section finds it as a
+            # JournalPending mid-save.
+            refused = _refuse_pending_journal(args)
+            if refused is not None:
+                return refused
             return args.func(args)
     except SchemaError as exc:
         print(f"configuration error: {exc}", file=sys.stderr)
