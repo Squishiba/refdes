@@ -54,7 +54,7 @@ permit row has `{id,agentId,agentShortId,name,description}` and no structured
 command/path. Non-idle/timeout wait, transient provider error, turn-limit, loop,
 and garbled-finish signals remain uncaptured and park with evidence.
 
-### Target v1 guarantees and shipped extent
+### Target v1 guarantees and shipped extent — NOT SHIPPED in #376
 
 The table separates this PR's implementation from the broader v1 target.
 
@@ -88,7 +88,7 @@ NOT given in v1:
 - No orchestrator wake through an LLM notification. Process wake-up and optional
   plain-command hooks must be connected by the caller; neither merges PRs.
 
-### Operating rules compensating for missing guarantees
+### Operating rules compensating for missing guarantees — NOT SHIPPED in #376
 
 Use trusted workers and reviewed contract/check commands on a dedicated checkout.
 Keep credentials and sensitive unrelated work out of worker environments. Require
@@ -119,13 +119,12 @@ shared. Missing dependencies park setup, never trigger a network install.
 
 ## 2. Recovery and permission policy
 
-Adopt the failure matrix, fixed continuation/loop/verdict/replacement templates
-and role-blindness restrictions of full spec §5. In v1 these are mandatory:
-
-This matrix records bounded policy transitions, not all live detectors. In PR
-#376 only daemon-unreachable recovery is automatically recognized by the
-supervisor. Transient provider errors, idle/turn-limit, loop, and garbled-finish
-signals without captured payloads park with evidence.
+The full spec §5 defines a failure matrix and fixed continuation/loop/verdict/
+replacement templates plus role-blindness restrictions. This is the intended
+policy, not a v1 shipped requirement. In PR #376 only daemon-unreachable recovery
+is automatically recognized by the supervisor. Transient provider errors,
+idle/turn-limit, loop, and garbled-finish signals without captured payloads park
+with evidence.
 
 | Mode | v1 detection / bounded action |
 | --- | --- |
@@ -175,7 +174,7 @@ Uncaptured shapes and unknown permission signals stay fail-closed. The original
 structured-path/OS-broker classifier proposed in full-spec §5 was not shipped;
 its policy prose remains historical future design, not this PR's contract.
 
-### Deferred proposal: optional Sol analysis (not shipped)
+### Deferred proposal: optional Sol analysis (not shipped) — NOT SHIPPED in #376
 
 Sol stays human-by-default, opt-in per entry: one read-only
 `codex/gpt-6.1-sol` analysis, admitted like any other turn, bounded to 1800s.
@@ -275,7 +274,7 @@ its cap; otherwise dispatch. All matching configured prefixes apply. Ready role
 turns are evaluated one at a time using this policy; do not launch a paired batch
 using one old count. There is no capacity reservation or post-launch correction.
 
-### Qwen admission guard (soft performance policy)
+### Qwen admission guard (soft performance policy) — NOT SHIPPED in #376
 
 The whole v1 Qwen check is: obtain `paseo ls -g --json`, count live active agents
 matching the configured provider/model prefix `opencode/qwenlocal/`, and do not
@@ -304,7 +303,7 @@ signal may only tighten admission, never relax the Paseo-based decision; missing
 or unreachable metrics would fall back to Paseo and log the source. No metrics
 client, source-fallback tests or metrics release gate is included in v1.
 
-### Overlap and landing: conservative, deliberately small
+### Overlap and landing: conservative, deliberately small — NOT SHIPPED in #376
 
 Use full spec §4's logical footprint: code union tests union shared_paths union
 cases_file and exact per-role progress logs. Existing broad log exemption becomes
