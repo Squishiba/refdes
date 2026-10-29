@@ -93,9 +93,27 @@ refocus-apply made mechanical (focus is a flush trigger, §3.1), the
 ~130 µs/span figure replaced by the measured 150-350 µs order,
 superseded log bullets marked, and the "What I did" cites above
 updated to current main; this section compressed to a paragraph per
-AGENTS.md.
+AGENTS.md. (Round 5's log/deliverable edits were left uncommitted when
+that session closed; this session committed them as-is after reading
+them through — coherent, kept.) Round 6 (2026-10-29, owner decision):
+§6.5's reference-syntax sub-question answered (Form A) — recorded as
+§6.5a with the two-step `ITEM.$field` examples, the sigil-free check
+(`calc.py` :1105/:1114-1122/:1151, `inline_calc.py:30/:67` at base
+78c8954), the own-item non-cycle rule (bare own-id cycle verified
+2026-10-29 by `refdes --no-write -c refdes-project.yaml check` on a
+scratch copy, message at `build.py:1980`), the saved-target read
+rule, and §6 item 5; the collision sub-question opened with the
+bare-resolves-to-calc + WARNING proposal (error alternative
+rejected — no calc sigil); unit/missing/hash sub-questions stay open
+with drafting proposals inline. Slices §4/§5 updated: fields stay
+accepted-and-unused until the new follow-up slice G1 ("field
+references in calc spans", `calc.py` + `build.py`, ~80-120 lines
+guess). Branch rebased onto origin/main (7 commits ahead of
+`78c8954`), conflict-free; the doc stays verified against its stated
+base 78c8954 (new cites read there), not re-baselined.
 
 ## Status
 
-Rounds 1-5 done, pushed. Held: §6.5 grammar question for Jared;
-slices unstarted by design. Docs-only; suite green on head.
+Rounds 1-6 done, pushed. Held: §6.5 policy sub-questions for Jared
+(unit/missing/hash + the new collision proposal); slices unstarted by
+design. Docs-only; suite green on head.

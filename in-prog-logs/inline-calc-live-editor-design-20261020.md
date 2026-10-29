@@ -186,7 +186,8 @@ changes for this design):**
 ## 2. Decisions this design adopts (from the parked direction)
 
 Inheriting §"Live editor updates" of inline-calc-later.md (the owner
-decisions of 2026-10-25, §6, are folded into the sections they change):
+decisions of 2026-10-25 and 2026-10-29, §6, are folded into the
+sections they change):
 
 1. Evaluation happens **only in Python** (owner D3) — the browser sends
    body text and receives computed ranges/text; it never learns the
@@ -237,11 +238,12 @@ decisions of 2026-10-25, §6, are folded into the sections they change):
   Not the file, not the draft after Save.
 - Draft *fields* are inputs by owner decision (§6.4): the request shape
   carries a `fields` bag (§3.3) and the preview pass accepts it (§3.4).
-  What is *not* decided is how a span names a field — that is the
-  grammar question in §6.5. Today nothing field-derived feeds the calc
-  pass (verified: `_run_item_calcs` reads `item.body` only,
-  `build.py:1785/1797/1840-1844`), so until `docs/design/inline-calc.md`
-  answers §6.5 the bag is carried and unused. The client already holds
+  How a span names a field **is** decided (Jared, 2026-10-29, §6.5a:
+  the cross-item dotted form, with an optional `$` sigil). What is not
+  *landed* is the field reference itself: today nothing field-derived
+  feeds the calc pass (verified: `_run_item_calcs` reads `item.body`
+  only, `build.py:1785/1797/1840-1844`), so until the field-reference
+  slice (§4, item G1) lands the bag is carried and unused. The client already holds
   exactly what the bag needs: the draft's field edits live in
   `draft.fields` (a plain object of scalar values, `drafts.js:21`,
   `setDraftField` :236-241; collections/null are not editable,
@@ -279,9 +281,10 @@ Request: `{"text": "<current draft body>",
   `fields` object verbatim (`drafts.js:21`).
 - **Unknown keys are ignored, as part of the contract**: the route
   extracts exactly its known keys, the `_apply_edit` posture
-  (`api.py:1087-1116`). This is what lets the §6.5 grammar decision grow
-  the request later (e.g. a field-reference mode flag) without a
-  browser/serve version lockstep. Until §6.5 lands, `fields` is
+  (`api.py:1087-1116`). This is what lets the field-reference slice
+  (§4, item G1) grow the request later (e.g. a field-reference mode
+  flag) without a browser/serve version lockstep. Until that slice
+  lands, `fields` is
   validated and carried; the preview pass accepts and does not consult
   it (§3.4).
 - 404 unknown handle (same `_find_item` posture as every item route).
@@ -347,9 +350,10 @@ def preview_inline_spans(project, item, body_text, fields=None) -> list[dict]:
 ```
 
 - `fields` is the §3.3 bag, keyword-only and optional: the pass
-  **accepts it from day one** so the §6.5 grammar decision needs no
-  signature change, and **ignores it** until that decision says how a
-  span names a field (with §3.2's verified fact as the floor: today's
+  **accepts it from day one** so the field-reference slice (§4, item
+  G1) needs no signature change, and **ignores it** until that slice
+  lands (the reference syntax is decided — §6.5a; with §3.2's verified
+  fact as the floor: today's
   arithmetic reads body text + snapshot envs + lockfile, nothing else).
 - Mirrors `_run_item_calcs`'s pass shape: `env` seeded with
   `_make_calc_resolver(project, _key_index(project))` and
@@ -596,13 +600,14 @@ blur-applied fill" claim is retired with the blur-time apply.
 
 | # | Work | File(s) | Size |
 |---|---|---|---|
-| B1 | `preview_inline_spans(project, item, body_text, fields=None)` — read-only per-item pass; `fields` accepted, unused until §6.5 | `src/refdes/build.py` | ~80 lines |
+| B1 | `preview_inline_spans(project, item, body_text, fields=None)` — read-only per-item pass; `fields` accepted, unused until G1 (the §6.5a syntax is decided; the reference itself is not yet implemented) | `src/refdes/build.py` | ~80 lines |
 | B2 | result-slot range from the parse (`parse_span` returns content-relative cut column; `triggered_spans` unchanged) | `src/refdes/inline_calc.py` | ~15 lines (`code_span_ranges` is in main, :124 — dependency retired) |
-| B3 | `POST /api/item/<ref>/calc` route + guards + `fields` bag validation (shape only; §6.5 owns semantics) | `src/refdes/serve/api.py` | ~60 lines |
+| B3 | `POST /api/item/<ref>/calc` route + guards + `fields` bag validation (shape only; G1 owns semantics) | `src/refdes/serve/api.py` | ~60 lines |
 | F1 | `{signal}` support in `api()` | `src/refdes/serve/static/api.js` | ~3 lines |
 | F2 | `live-calc.js`: debounce, blur/focus flush (evaluate + panel only, never applies unfocused — §3.5 focus rule; the focus flush is what lands a display-only response's fills after refocus), abort, supersede, panel (incl. truncated footer), auto-fill on stale rows only (caret-skip inclusive of result-range boundaries) + user toggle (localStorage, default ON) + idempotent Fill, Case A/B apply paths (§3.5) | new static module | ~200 lines |
 | F3 | wiring: construct/teardown in `createEditor`, panel mount, save-in-flight flag | `src/refdes/serve/static/editor.js`, `item.js` | ~25 lines |
 | D1 | docs pass (below) | `docs/design/inline-calc-later.md` status, `docs/design/browser-editor.md` §"Editing and previewing bodies" pointer, `docs/math.md` editor sentence, `changelog.d/*.added.md` | — |
+| G1 | **Follow-up slice (post-A/B/C): field references in calc spans** per §6.5a — the `ITEM.$field` dotted reference in the grammar and resolver, the own-item non-cycle rule, the saved-target read, and the §6.5 policy answers (unit/missing/hash) landing here | `src/refdes/calc.py` (`CROSS_REF_RE` :1114 + the cross-ref resolver it feeds, :1499), `src/refdes/build.py` (cycle rule :1980 + hash path — the `calc_refs`-shaped hook, :2318) | ~80–120 lines (guess; the hash-path half hinges on the §6.5 hash answer) |
 
 Deliberate non-goals for v1: live preview of `{{name}}` substitution,
 rendered-fragment preview of unsaved bodies (the rest of
@@ -624,7 +629,8 @@ saves (orthogonal: the live layer writes no files, §3.8).
   dependency-order `run_calcs`, `build.py:1937`) + `source()` refusal
   message parity; 200-span truncation; **fields inertness**: a call with
   a `fields` bag returns exactly the call without it (the §3.4
-  accepted-and-unused contract, pinned until §6.5 answers);
+  accepted-and-unused contract, pinned until the field-reference slice
+  (§4, item G1) lands);
   **no-mutation**: env/diag snapshot of `project` compared before/after
   ten preview calls.
 - Tests `tests/test_serve_calc_preview.py` (HTTP, `serve_support.Client`
@@ -697,18 +703,23 @@ saves (orthogonal: the live layer writes no files, §3.8).
 - Acceptance: docs-verified per AGENTS.md (every claim re-run against the
   commands it names).
 
-## 6. Decisions (Jared, 2026-10-25)
+## 6. Decisions (Jared, 2026-10-25; item 5 on 2026-10-29)
 
 The first draft's four open questions are answered; each answer is
 folded into the section it changes, and the section list is the
-follow-up map. The answers open exactly **one new question** (§6.5) —
-the grammar half of decision 4. **Provenance (review 96ae35f,
+follow-up map. The answers opened exactly **one new question** (§6.5) —
+the grammar half of decision 4 — which the owner answered on
+2026-10-29 (item 5; recorded with its rationale in §6.5a). The
+policy sub-questions §6.5 raised alongside it (unit handling,
+missing/empty fields, hash/on_change) stay open, plus the collision
+sub-question §6.5a opens. **Provenance (review 96ae35f,
 finding 2):** the four answers were given by the owner in session on
 2026-10-25 as replies to the first review round's open questions;
 this section, mirrored in the PR's round-2 comment, is the **first
 tree record** of them — no pre-existing doc carries them. If a
 record outside this branch is preferred, transcribe §6.1-§6.4 into
-`docs/design/inline-calc.md` as owner decisions.
+`docs/design/inline-calc.md` as owner decisions (the same offer covers
+item 5 / §6.5a).
 
 1. **Auto-fill on typing AND the manual Fill button, toggleable.**
    Folded into §3.5: the toggle is a checkbox in the panel header,
@@ -752,11 +763,36 @@ record outside this branch is preferred, transcribe §6.1-§6.4 into
    compatibility — NOT the inline-calc grammar.** What a field
    reference looks like inside a span is a grammar/language decision
    owned by `docs/design/inline-calc.md` (§"1. Source form and
-   trigger", :63). Until it lands, the bag is carried and the pass
-   ignores it; §6.5 is that decision, and it is the one thing this
-   design now needs from the owner.
+   trigger", :63) — **that decision landed**: the owner answered on
+   2026-10-29 as item 5 below (recorded in §6.5a). Until the
+   field-reference slice (§4, item G1) implements it, the bag is
+   carried and the pass ignores it; the §6.5 policy sub-questions are
+   what this design now needs from the owner.
+5. **Field-reference grammar — Form A (2026-10-29).** Item fields are
+   referenced with the same dotted shape as a cross-item calc value
+   (`ITEM.name`), with an **optional `$` sigil** (`ITEM.$field`) that
+   explicitly names the item field; a bare `ITEM.name` keeps its
+   present calc-value meaning, so no existing project changes meaning.
+   An own-item `$` reference (`LOG-PWR-002.$rds_on` inside
+   LOG-PWR-002) is allowed and is not a calc-reference cycle; a bare
+   own-id reference to a calc value stays a cycle error. Cross-item
+   field references read the **saved** target (the §3.2 limit); only
+   the edited item's own fields come from the editor's `fields` bag.
+   Recorded with its examples, sigil rationale and the open collision
+   sub-question in §6.5a. **Provenance:** answered by the owner
+   in-session 2026-10-29 as the reply to §6.5's reference-syntax
+   sub-question; §6.5a is the first tree record of it (same status as
+   §6.1-§6.4 above).
 
-### 6.5 New open question for Jared: the field-reference grammar
+### 6.5 Field references in calc spans: syntax decided, policy open
+
+The reference-syntax sub-question of this section was answered by the
+owner on 2026-10-29; §6.5a records it. What remains open are the
+policy sub-questions below (unit handling, missing/empty fields,
+hash/on_change) plus the collision sub-question §6.5a opens — each
+carries the drafting proposal inline, which the owner may adopt or
+override. The §4 item G1 slice is where any of it gets implemented;
+none of it is implemented today.
 
 Verified starting points (main @ 78c8954, read 2026-10-26):
 
@@ -780,18 +816,69 @@ Verified starting points (main @ 78c8954, read 2026-10-26):
   `lifecycle.py:825`/registered :908, #345 `c3073c6`) fails a release on
   any stale stored result.
 
-Sub-questions:
+#### 6.5a Decision: reference syntax — Form A (Jared, 2026-10-29)
 
-- **Reference syntax.** How does a span name a field? Bare
-  `status` collides with the calc-name namespace (`CALC_NAME_RE`,
-  `inline_calc.py:67`, used by `parse_span` :318 — a bare name is a
-  calc variable). A qualified `item.status` form must not collide
-  with the `ITEM.NAME` cross-item grammar (items are the owners of
-  that namespace). A sigil (`$status`, `%status`)? Whatever the
-  answer, it must compose with the trigger grammar
-  `name := rhs [| unit] = result` (`docs/design/inline-calc.md` §1,
-  `inline_calc.py:306`) and stay inside the AST-whitelist evaluator
-  (D3).
+1. **Fields ride the cross-item dotted form.** A span names a field
+   with the same shape it uses for another item's calc value:
+   `ITEM.name`. The dotted RHS must be the *whole* right-hand side
+   of the assignment — CROSS_REF_RE: "the whole right-hand side is
+   one dotted reference into another item", with an optional pipe
+   unit (`calc.py:1106-1114`) — so field use inside larger
+   arithmetic is two steps: read the field into a name, then do
+   arithmetic on that name:
+
+   ```
+   Rds := CMP-PWR-001.$rds_on | mohm = 18 mohm
+   P_loss := I_load * I_load * Rds | mW = 25.92 mW
+   ```
+
+   (Both are ordinary `name := rhs [| unit] = result` spans,
+   `inline_calc.py:306`; fence lines share the RHS matcher,
+   `calc.py:1499`.)
+2. **An optional sigil disambiguates: `ITEM.$field` explicitly names
+   the item FIELD.** A bare `ITEM.name` keeps its present meaning
+   (a calc value — bare names are calc variables, `CALC_NAME_RE`,
+   `inline_calc.py:67`, used by `parse_span` :318), so no existing
+   project changes meaning. The sigil is never required except to
+   reach a field that shares its name with a calc value (the
+   collision sub-question below).
+3. **`$` is chosen because it is free in the grammar** (checked
+   against base): `#` is the comment character (first unquoted `#`,
+   `calc.py:1151`, :1189), `|` the unit separator (`PIPE_UNIT_RE`
+   :1105), `@` the composite key (CROSS_REF_RE's target half,
+   :1115-1116), `.` the reference dot — exactly one, a dotted
+   reference with two or more is rejected as block-qualified
+   (`BLOCK_QUALIFIED_REF_RE`, :1122), so a dot sigil is out — `=`
+   the span result delimiter, `:` part of `:=` (`NAME_ASSIGN_RE`,
+   `inline_calc.py:30`), `+ - * / ^` the operators. `~` as an
+   explicit calc sigil was considered and rejected by the owner
+   ("feels odd"): there is **no calc sigil**.
+4. **Own-item fields are not a cycle.** An item's own display id
+   with the `$` form — `LOG-PWR-002.$rds_on` inside LOG-PWR-002 —
+   must be allowed and must **not** be a calc-reference cycle.
+   Today a bare own-id reference is one (verified 2026-10-29:
+   `DEC-PWR-001.x` inside DEC-PWR-001 reports
+   `calc reference cycle: DEC-PWR-001 -> DEC-PWR-001` from
+   `refdes --no-write -c refdes-project.yaml check` on a scratch
+   copy; the message is built at `build.py:1980`). A bare own-id
+   reference to a calc value stays a cycle error.
+5. **Read rule.** Cross-item field references read the **saved**
+   target, exactly like cross-item calc refs (§3.2's limit); only
+   the edited item's own fields come from the editor's `fields` bag
+   (§3.3). Fields are static, so the dependency scan gains no new
+   order edges beyond the self case (the live-layer bullet below).
+
+Sub-questions (open, for Jared):
+
+- **Collision (opened by decision 2).** A bare `ITEM.name` where
+  the target item has **both** a calc value and a field of that
+  name. **Proposal:** bare resolves to the **calc value** (today's
+  behaviour) and the checker emits a WARNING naming both and the
+  `$` spelling — because a calc added later could otherwise
+  silently shadow a field a span used to read. The alternative
+  (error on collision) was rejected in the 2026-10-29 discussion:
+  with no calc sigil (decision 3), it would leave the calc value
+  unspellable.
 - **Unit handling of field values.** Field values are YAML scalars of
   arbitrary shape (`status: approved`, `limit: 5 V`, free text). Does
   a referenced value parse as a quantity (the `calc.parse_quantity`
@@ -799,12 +886,20 @@ Sub-questions:
   parse-stage (like "stored result missing", `inline_calc.py:351`) or
   eval-stage (like a unit assertion)? Are `| V` assertions against
   enum fields a parse error, an eval error, or meaningless-and-rejected?
+  **Proposed default (drafting, for the owner to confirm):** a
+  non-quantity referenced field is an **eval-stage error naming the
+  field** (the unit-assertion shape, not the parse-stage shape — the
+  field reference itself parsed fine; it is the value that fails).
 - **Missing/empty field behavior.** Reference to a field the item's
   type does not declare: eval error naming the field (the unknown-name
   shape)? Field declared but empty/null: error, or skip the span as
   unevaluable? Note the editor's bag carries scalars only —
   collections/null are not editable (`api.py:1100-1102`) — so
   list-valued fields (`checks:`) are out of the v1 bag by shape.
+  **Proposed default:** an error naming the field and the item's
+  declared fields, at both ends (undeclared and empty/null) — the
+  unknown-name shape extended with the declaration list, so the
+  author sees what *is* referencable.
 - **Hash / stale consequences.** A field edit is already a content
   change for invalidate-mode fields, so save-time revision/conflict
   machinery sees it and the release gate sees the stale stored result
@@ -824,6 +919,16 @@ Sub-questions:
     those modes can silently move a computed result with **no hash
     change** — is the release gate's coverage the answer, or must
     referenced fields be forced to `invalidate`?
+  **Proposed default:** accept the no-hash-change case and rely on
+  the release gate (`inline_calc_results`, `lifecycle.py:825`,
+  registered :908) — it fires on exactly the stale stored result a
+  field-driven move produces, so correctness has a verdict gate
+  without a hash change; **do not bump HASH_FORMAT when G1 lands**
+  (the format-7 path stays on the table if hash consumers are later
+  judged to need field-driven moves). For the mode bullet, the
+  forced-`invalidate` alternative (referenced fields pinned to
+  `invalidate` mode) is on the list; the proposal is to rely on the
+  gate and not force it.
 - **Live-layer consequences (listed for completeness, none blocking).**
   The bag is this item's own draft, read locally — §3.2's "a target's
   unsaved draft is not visible" limit does not apply to fields, so the
