@@ -358,13 +358,22 @@ own history: the item page's history disclosure renders one row per
 baseline that contains the item, showing the captured text (see
 `docs/output.md`, "An item page").
 
-The store's rules apply unchanged: content is stored once and deduped by
-hash, an identical re-stamp writes nothing (the stamp itself refuses as
-"already stamped"), `--no-write` writes nothing, a gate-failed `release`
-writes nothing, and the writer takes the project write lock like every
-other history writer. Events live under `.refdes/history/`, outside every
-hashed and sealed surface — writing them changes no content hash, no seal,
-and no baseline digest.
+The baseline file is written first and is the gate artifact, so a store
+write failure only **warns** — the stamp stands, and the warning says to
+re-stamp under a new name to record the snapshots. The store's rules apply
+unchanged: content is stored once and deduped by hash, `--no-write` writes
+nothing, a gate-failed `release` writes nothing, and the writer takes the
+project write lock like every other history writer. A re-stamp of an
+existing name with identical content returns "unchanged" and writes
+nothing — no events, not even a refreshed `stamped_at` — and a re-stamp
+whose content *differs* is the existing "already stamped … with different
+content" conflict. The identical re-stamp deliberately never backfills
+missing events: it proves the *hashed* state matches the baseline, not
+that the `timeline`/`ignore` fields (excluded from the hash) still do, so
+a backfill could attribute today's text to the old baseline. To record
+snapshots for such a baseline, re-stamp under a new name. Events live
+under `.refdes/history/`, outside every hashed and sealed surface —
+writing them changes no content hash, no seal, and no baseline digest.
 
 ## The diff: what changed, and since when
 

@@ -169,7 +169,10 @@ not change the shapes they verified.
   `draft.revision || edit.file_revision || item.revision` — the
   item's **file** revision, the same string space as the
   `expected_revision` a save sends (:236,:251; server-side computed
-  `src/refdes/serve/api.py:769-770`, served at :825, checked at :1087-1089), advanced
+  `src/refdes/serve/api.py:769-770`, served at :825; the route at
+  :1087-1089 only extracts and type-checks it — the comparison lives in
+  `edit_mod.apply_edit`, to which :1128 passes it, at
+  `src/refdes/serve/edit.py:459`), advanced
   by each save response (:238-239). That value — not `openRevision` —
   is what §3.6's revision guard keys on.
 - No browser automation: JS is checked statically
@@ -334,6 +337,10 @@ Request: `{"text": "<current draft body>",
 - 403 `{"error": <edit_state reason>}` when `edit_state(...)` says the
   body is not editable (sealed entry, imported item) — mirrors the
   "stop the false affordance" rule at `src/refdes/serve/static/editor.js:45-53`.
+  This 403 is deliberate for this READ-ONLY route: the write route maps
+  `Refused` to 422 and reserves 403 for `--no-write`
+  (`src/refdes/serve/api.py:1079-1083`) — do not copy the edit route's
+  mapping here.
 
 Response 200:
 
@@ -353,7 +360,9 @@ Response 200:
       "status": "ok" | "stale" | "error",
       "computed": "4.436 V",        // format_value(value, sigfigs); "" for
                                     // parse/eval errors
-      "message": ""                 // the R12 diagnostic text verbatim;
+      "message": ""                 // the inline-calc diagnostic text
+                                    // verbatim (the messages from
+                                    // #333/#341);
                                     // "" when status == "ok"
     }
   ],
@@ -586,7 +595,9 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
    captures the form's revision — the editor closure's `revision`
    (`src/refdes/serve/static/editor.js:39`), read through a one-line `getRevision()` accessor
    the F3 wiring exposes — and on response, discard when
-   `payload.revision !== getRevision()`. Both strings live in the
+   `payload.revision !== getRevision()`. The revision guard discards
+   exactly as silently as the text-snapshot case: **no apply, no panel
+   update**; the next debounce/flush re-requests. Both strings live in the
    form's own string space (§3.3): a rebuild under the form, a save
    elsewhere, or this form's own save (which advanced the closure's
    `revision`, `src/refdes/serve/static/editor.js:238-239`, behind an in-flight request —
@@ -640,7 +651,8 @@ blur-applied fill" claim is retired with the blur-time apply.
   `` `Vnew := 1 F * 2 `` yields no span at all — silence, which is right:
   the trigger is declared intent only once the span closes).
 - Eval errors (unknown name, `| V` unit mismatch, cycle, `source()`
-  refusal) → span row carries the R12 message, text untouched.
+  refusal) → span row carries the inline-calc message (from #333/#341),
+  text untouched.
 - "Unsafe" has no new surface: D3's AST-whitelist evaluator is the only
   code that runs; the route reads its known keys from one JSON object,
   evaluates nothing else, writes nothing, and stands behind the
@@ -796,9 +808,11 @@ journal's story (#381 — the live layer rides saves unchanged,
    (the stale-gate regression pin); (12) revision guard (§3.6): type,
    then let a **second tab** (or the CLI) save the same item and the
    2 s poll rebuild land — the calc response computed against the old
-   model arrives and is **discarded**: the panel refreshes, the body
+   model arrives and is **discarded silently: no apply, no panel
+   update** — the body
    text never mutates, and after the form re-renders on the new model
-   the next keystroke re-evaluates and fills apply normally; the
+   the next debounce/flush re-requests against it and fills apply
+   normally; the
    normal single-tab case (save through the form, poll quiet) must
    show fills applying **after** the save — proving the guard
    discards nothing when nothing moved; (13) a span **below line 0**
@@ -1140,8 +1154,10 @@ for text in cases:
    has not been evaluated yet …` (a record of that tree, d620ab5:
    main's F12-5 gap — retired by #347, §1; on today's main this probe's
    cross-item span resolves through the scheduler); diagnostics carry
-   `file:line` + `item_id`
-   (`api._diagnostics_for` posture, `src/refdes/serve/api.py:123-139`).
+   `file:line` (with `level`/`message`/`code` — `item_id` is the
+   filter key, not a payload field: `api._diagnostics_for` selects on
+   `d.item_id` and emits level/message/file/line/code,
+   `src/refdes/serve/api.py:123-137`).
 2. `probe_live.py` (same dir):
    - `code_spans` content-only confirmed (no offsets — positional view is
      #347's `code_span_ranges`);

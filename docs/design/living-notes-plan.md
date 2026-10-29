@@ -535,12 +535,19 @@ huge), sabotage matrix in the log.
 
 ## Phase H9 — baseline snapshot events and the site history disclosure (optional)
 
-**Landed.** Snapshot events are written by `stamp()` on the success path
-(`write=True` only, gate-failed releases write nothing), one per keyed local
-item, kind = baseline kind, fingerprint = baseline name; the item page's
+**Landed (narrower by accepted design change).** Snapshot events are
+written by `stamp()` on the success path (`write=True` only, gate-failed
+releases write nothing), one per keyed local item, kind = baseline kind,
+fingerprint = baseline name; the item page's
 `<section class="history-disclosure">` renders one row per containing
-baseline and is absent when there is nothing to show. **Not built (deferred):**
-the baseline selector — the disclosure lists the baselines inline.
+baseline — rows ordered by `stamped_at`, newest open — and is absent when
+there is nothing to show. **Not built (deferred):** the baseline selector.
+The disclosure lists the baselines inline instead, and that is the
+accepted scope for this phase: rows are chronological with the newest
+open, so the phase's question — "what did this item say at rev-B?" — is
+one click from the page's own history section, with no new control to
+build, style, or keep honest. A selector for projects whose baseline
+lists grow long is a site-panel follow-up.
 **Adds.** `revision`/`release` write `baseline` events into the same store, and
 the item page gains a history disclosure showing captured content and the
 edited-after-captured marker.
