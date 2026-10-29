@@ -186,12 +186,16 @@ A reference whose name half starts with `$` names one of the target's declared
 Rds = DEC-001.$rds_on | mohm
 ```
 
-The field value must be a quantity (`18 mohm`, `12 V ± 5%`); it is read
-exactly as saved, with the same pipe-unit re-expression as any reference line,
-and the same form works in an inline span: `Rds := DEC-001.$rds_on | mohm =
-18 mohm`. The whole right-hand side must be the reference: a field spliced
-into a larger arithmetic (`P = DEC-001.$rds_on * 2`) is an error naming the
-two-step form (reference on one line, arithmetic on the next).
+The field value must be a plain quantity (`18 mohm`, `5 V`); a tolerance in
+the field value (`12 V ± 5%`) is not a quantity and is a loud error naming
+the field, in this version. A tolerance belongs on a calc line: read the
+field on one line (`v = DEC-001.$V_in | V`), give the name its tolerance on
+the next (`w = v ± 5%`). The value is read exactly as saved, with the same
+pipe-unit re-expression as any reference line, and the same form works in an
+inline span: `Rds := DEC-001.$rds_on | mohm = 18 mohm`. The whole right-hand
+side must be the reference: a field spliced into a larger arithmetic
+(`P = DEC-001.$rds_on * 2`) is an error naming the two-step form (reference
+on one line, arithmetic on the next).
 
 The read is the saved item, not its evaluated calc env, so a field reference
 creates no dependency edge: the target's calc never runs "for" the reference,

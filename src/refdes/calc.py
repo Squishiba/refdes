@@ -1115,7 +1115,8 @@ CROSS_REF_RE = re.compile(
     r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
     r"\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)$"
 )
-# The field-reference sibling (docs/design/... inline-calc field refs, G1):
+# The field-reference sibling (in-prog-logs/inline-calc-live-editor-design-20261020.md
+# §6.5a):
 # `Rds = DEC-PWR-001.$rds_on` names one *field* of the target item, `$` being
 # what distinguishes it from `DEC-PWR-001.rds_on`, the target's calc value.
 # The target half is identical to CROSS_REF_RE's (bare display id, bare key,
@@ -1284,7 +1285,10 @@ SOURCE_RESOLVER_KEY = "__refdes_calc_source_resolver__"
 # sees the collision, the outcome loop owns the diagnostic, so the message
 # reaches the referring line through `CalcOutcome.warning` like every other
 # calc warning. The list is drained per line (the length before the resolver
-# runs is the drain mark), never shared between items.
+# runs is the drain mark), never shared between items. Protocol: a resolver
+# appends immediately before returning its value -- the collision check runs
+# on the found value, so an append with no value is a resolver bug; the drain
+# rides the error outcomes too, so even that shape loses no message.
 CALC_WARNINGS_KEY = "__refdes_calc_warnings__"
 
 
@@ -1506,12 +1510,27 @@ def evaluate_block(
             parts = ref.split(".")
             plain = f"{parts[0]}.{parts[-1]}"
             dropped = "".join(f".{part}" for part in parts[1:-1])
+            if "$" in ref:
+                # A field-reference shape with block segments spliced in
+                # (`DEC-001.losses.$rds_on`): the working spelling keeps the
+                # `$` and drops the middle, so the plain/`ITEM.NAME` calc-value
+                # wording below would point at the wrong form.
+                suggestion = f"{parts[0]}.{parts[-1]}"
+                message = (
+                    f"cross-item reference {ref!r} names a block -- a field "
+                    f"is named by ITEM.$field, and {suggestion} already names "
+                    f"it uniquely. Drop '{dropped}'."
+                )
+            else:
+                message = (
+                    f"cross-item reference {ref!r} names a block -- a calc "
+                    f"value is named by ITEM.NAME, and {plain} already names "
+                    f"it uniquely. Drop '{dropped}'."
+                )
             outcomes.append(
                 CalcOutcome(
                     name, expression, comment, None,
-                    f"cross-item reference {ref!r} names a block -- a calc "
-                    f"value is named by ITEM.NAME, and {plain} already names "
-                    f"it uniquely. Drop '{dropped}'.",
+                    message,
                     annotation, unit_style=unit_style, line=line_number,
                 )
             )
@@ -1551,6 +1570,14 @@ def evaluate_block(
                 continue
             sink = env.get(CALC_WARNINGS_KEY)
             mark = len(sink) if isinstance(sink, list) else 0
+
+            def drained() -> str | None:
+                return (
+                    "; ".join(sink[mark:])
+                    if isinstance(sink, list) and len(sink) > mark
+                    else None
+                )
+
             try:
                 value = resolver(reference)
                 if annotation:
@@ -1559,23 +1586,21 @@ def evaluate_block(
                 outcomes.append(
                     CalcOutcome(name, expression, comment, None, str(exc),
                                 annotation, unit_style=unit_style,
-                                line=line_number, reference=reference)
+                                line=line_number, reference=reference,
+                                warning=drained())
                 )
                 continue
             except Exception as exc:  # noqa: BLE001 -- resolver may surface pint errors too
                 outcomes.append(
                     CalcOutcome(name, expression, comment, None, str(exc),
                                 annotation, unit_style=unit_style,
-                                line=line_number, reference=reference)
+                                line=line_number, reference=reference,
+                                warning=drained())
                 )
                 continue
             env[name] = value
             origins[name] = line_number
-            ref_warning = (
-                "; ".join(sink[mark:])
-                if isinstance(sink, list) and len(sink) > mark
-                else None
-            )
+            ref_warning = drained()
             outcomes.append(
                 CalcOutcome(name, expression, comment, value, None, annotation,
                             ref_warning, unit_style=unit_style, line=line_number,

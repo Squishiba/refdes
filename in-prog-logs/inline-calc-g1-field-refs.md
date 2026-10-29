@@ -1,6 +1,7 @@
 # Live inline-calc G1: `ITEM.$field` field references (2026-10-29)
 
-Implemented slice G1 of docs/design/inline-calc-live-editor.md: a calc
+Implemented slice G1 of the live inline-calc design
+(in-prog-logs/inline-calc-live-editor-design-20261020.md §6.5a/§6.5b): a calc
 reference whose name half starts with `$` reads one of the target's declared
 FIELDS (saved front-matter value, parsed as a quantity) instead of a calc
 value. Fence lines and inline spans; batch build/check path only (no
@@ -69,8 +70,26 @@ serve/JS, no live preview pass — those are later slices).
 - `ruff check` on all touched files: identical findings to baseline (20
   pre-existing, on untouched lines; nothing added).
 
-## Notes / leftovers
+## Review round (PR #387, CHANGES REQUESTED, batched)
 
+No correctness bugs; fixed in one batch: (1) docs claimed a field value may
+carry `± tolerance` — false, the read is bare `parse_quantity`; docs now say
+plain quantity, tolerance goes on a following calc line (`v = ITEM.$V_in`
+then `w = v ± 5%`, verified in a probe), plus a test pinning the
+not-a-quantity error for a tolerance field value. (2) Renamed the
+mis-named happy-path test (it asserted the `5 V` resolve; now asserts both
+computed values). (3) The `docs/design/... inline-calc field refs, G1` cite
+in calc.py (and this log) was dangling — design lives at
+in-prog-logs/inline-calc-live-editor-design-20261020.md §6.5a, cites fixed.
+(4) Warning-sink protocol comment now states the append-before-return
+constraint, and the drain rides the error outcomes too, so no message can
+be lost on any path. (5) Block-qualified `$` shapes get their own message
+naming `ITEM.$field` and the working `DEC-001.$rds_on` spelling. (6)
+`_calc_ref_rewrites` docstring now covers the `$` field refs it rewrites.
+(7) Bare-key item half (`KEY.$field`) resolve test added. Suite 5090
+passed/2 skipped; touched-file ruff unchanged vs baseline.
+
+## Notes / leftovers
 - Unit display quirk (pre-existing): `mohm` normalizes to `mΩ` in computed
   output, so tests assert `18 m\u03a9` for results while stored spans may
   use `mohm`.

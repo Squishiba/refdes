@@ -1075,13 +1075,16 @@ def _calc_ref_rewrites(
 ) -> set[str]:
     """Rewrite bare calc-reference targets inside one item's line span, and
     refresh stale composite display halves, in place. Operates only on the
-    target half of a `name = TARGET.NAME` line (pipe unit stripped first), so
-    ordinary expressions and comments are never touched. Returns the *old
-    target strings* actually rewritten -- what the caller attributes back to
-    the item so in-memory state follows only real file changes.
+    target half of a `name = TARGET.NAME` line -- a field-reference line
+    `name = TARGET.$FIELD` too, the `$` on the name half left untouched --
+    (pipe unit stripped first), so ordinary expressions and comments are
+    never touched. Returns the *old target strings* actually rewritten --
+    what the caller attributes back to the item so in-memory state follows
+    only real file changes.
 
     With ``include_inline``, the target half of an inline calc span's
-    cross-item reference (`TARGET.NAME` as the span's whole right-hand side)
+    cross-item reference (`TARGET.NAME` or `TARGET.$FIELD` as the span's
+    whole right-hand side)
     gets the same treatment: a span sitting in prose outside any fence, its
     content replaced in place so the author's surrounding text, the stored
     result and the line count all survive exactly. Fence lines stay the

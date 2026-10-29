@@ -148,12 +148,15 @@ def test_block_qualified_field_reference_is_rejected(tmp_path):
     project = _load(tmp_path, write=False)
     errors = [d for d in project.errors if "names a block" in d.message]
     assert errors, project.errors
+    # The suggestion names the field form, not the calc-value spelling.
+    assert "ITEM.$field" in errors[0].message
+    assert "DEC-001.$rds_on" in errors[0].message
 
 
 # ------------------------------------------------------------ field errors
 
 
-def test_nonquantity_field_is_an_eval_error_naming_the_field(tmp_path):
+def test_quantity_fields_resolve(tmp_path):
     _write_items(
         tmp_path,
         {
@@ -164,10 +167,28 @@ def test_nonquantity_field_is_an_eval_error_naming_the_field(tmp_path):
         },
     )
     project = _load(tmp_path, write=False)
-    # `limit: 5 V` is a quantity; it resolves. Prove the happy path stays
-    # quiet while the error path below owns the loud half.
     assert not project.errors
-    assert project.item_by_id("DEC-002").calc_values["S"] == "5 V"
+    b = project.item_by_id("DEC-002")
+    assert b.calc_values["S"] == "5 V"
+    assert b.calc_values["N"] == "18 m\u03a9"
+
+
+def test_tolerance_in_field_value_is_not_a_quantity(tmp_path):
+    # The field read is `parse_quantity` (the bare-quantity parse), not the
+    # assignment parse -- the `±` split only lives on calc lines, so a
+    # tolerance in the field value is the same loud not-a-quantity error.
+    _write_items(
+        tmp_path,
+        {
+            "a.md": _item_md("DEC-001", "A resistor.\n", {"V_in": "12 V ± 5%"}),
+            "b.md": _item_md("DEC-002", "```calc\nv = DEC-001.$V_in\n```\n"),
+        },
+    )
+    project = _load(tmp_path, write=False)
+    errors = [d for d in project.errors if "not a quantity" in d.message]
+    assert errors, project.errors
+    assert "'V_in'" in errors[0].message
+    assert "DEC-001" in errors[0].message
 
 
 def test_text_field_is_an_eval_error_naming_the_field(tmp_path):
@@ -453,6 +474,29 @@ def test_bare_and_composite_field_reference_hashes_match(tmp_path):
     # The target half of a field reference hashes to the same token as every
     # other reference: bare and composite spellings are hash-identical.
     assert project.item_by_id("DEC-002").content_hash == composite_hash
+
+
+def test_bare_key_item_half_resolves(tmp_path):
+    _write_items(
+        tmp_path,
+        {
+            "a.md": RESISTOR,
+            "b.md": _item_md("DEC-002", "```calc\nRds = DEC-001.$rds_on | mohm\n```\n"),
+        },
+    )
+    _load(tmp_path, write=True)
+    a_text = (tmp_path / "items" / "a.md").read_text(encoding="utf-8")
+    key = re.search(r"^key: (\S+)$", a_text, re.MULTILINE).group(1)
+    b_file = tmp_path / "items" / "b.md"
+    b_file.write_text(
+        b_file.read_text(encoding="utf-8").replace(
+            f"DEC-001@{key}.$rds_on", f"{key}.$rds_on"
+        ),
+        encoding="utf-8",
+    )
+    project = _load(tmp_path, write=False)
+    assert not project.errors
+    assert project.item_by_id("DEC-002").calc_values["Rds"] == "18 m\u03a9"
 
 
 def test_no_write_resolves_field_reference_and_changes_nothing(tmp_path):
