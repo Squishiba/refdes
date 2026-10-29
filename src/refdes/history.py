@@ -71,6 +71,7 @@ from . import seal as seal_mod
 from . import textio
 from .model import Item, SchemaError
 from .parse import read_store_text, yaml_safe_load
+from .write_lock import project_write_lock
 
 HISTORY_FORMAT = 1
 
@@ -1001,6 +1002,126 @@ def capture(root: str, item: Item, *, occurred_at: object = None) -> FollowCaptu
         True,
         None if object_existed else object_file,
     )
+
+
+class BaselineEvents(NamedTuple):
+    """What one baseline stamping wrote: events created, snapshot objects
+    created, objects reused (content-addressed, so an item unchanged between
+    baselines shares its object with every other capture of that state),
+    items skipped for having no surrogate key, and events found already
+    present (the idempotence pass: a re-run of the same stamp)."""
+
+    events: int
+    objects: int
+    reused: int
+    skipped: int
+    events_reused: int
+
+
+def baseline_events(
+    project, kind: str, name: str, occurred_at: object = None
+) -> BaselineEvents:
+    """One event per local item, written when a `revision`/`release` baseline
+    is stamped (plan §H9; docs/design/living-notes.md §4).
+
+    The event kind is the baseline's kind -- ``revision`` and ``release`` are
+    members of ``EVENT_KINDS`` from H1, so the phase fills kinds the store has
+    always reserved and adds no format. The baseline name is the event's
+    ``fingerprint``, the discriminator for a writer with no successor to name:
+    re-running the same stamp (a rebuild, a retry after a failed write)
+    regenerates the same derived ids and writes nothing new -- §2 case five's
+    idempotence by the same mechanism as every other event, and two different
+    baselines of one item are two events, so "what did this say at rev-B?"
+    resolves to rev-B's snapshot.
+
+    Items with no surrogate key -- a project that never adopted keys -- are
+    skipped: events are addressed by key, and a display id is not one (§3).
+    A legacy project gets the disclosure panel's "rich content unavailable"
+    row; the phase invents no keys in order to have something to record.
+
+    The writer takes the project's write lock (the convention of ``ids.py``'s
+    ledger writers): reentrant under ``cli.main``'s outer lock, self-protecting
+    from any other caller. A partial failure rolls the whole call back --
+    every event it created, then every object it created. "Created by this
+    call" is decided by testing existence *before* the write: ``save_object``
+    is content-addressed and returns the path of a reused file too, so a
+    rollback that trusted its return value would delete snapshot objects
+    older baselines' events still reference. Existence-first means removal can
+    only undo this call's own writes -- leaving no baseline whose event set
+    covers only some of its items, and destroying none it did not write.
+    """
+    if kind not in ("revision", "release"):
+        raise HistoryError(
+            f"baseline events record a revision/release stamp, not {kind!r}"
+        )
+    root = str(project.root)
+    created_events: list[str] = []
+    created_objects: list[str] = []
+    events = new_objects = reused_objects = reused = skipped = 0
+    try:
+        with project_write_lock(root):
+            for item in project.local_items:
+                if not item.key:
+                    skipped += 1
+                    continue
+                digest = semantic_digest(item)
+                eid = event_id(kind, item.key, "", fingerprint=name)
+                event_path = os.path.join(events_dir(root), f"{eid}.yaml")
+                if os.path.exists(event_path):
+                    # Adoption is only allowed where append_event would allow
+                    # the same replay it guards against itself: an existing
+                    # event for this (kind, key, baseline) that promises a
+                    # DIFFERENT object is history the store refuses to
+                    # rewrite. Silently reusing it would make the baseline
+                    # report a snapshot the stamped item never said.
+                    existing = _read_store_file(event_path, "event file")
+                    if not isinstance(existing, dict):
+                        raise HistoryError(f"{event_path}: existing event is not a YAML mapping")
+                    if (existing.get("object") or "") != digest:
+                        raise HistoryError(
+                            f"baseline {name!r} already captured {item.key} against "
+                            f"object {existing.get('object') or 'nothing'}, not {digest}: "
+                            "the item changed after the baseline was stamped; the store "
+                            "keeps the captured snapshot and refuses to rewrite it"
+                        )
+                    reused += 1
+                    continue
+                path = object_path(root, digest)
+                # Decided by existence BEFORE the write: save_object is
+                # content-addressed and returns the path of a reused file
+                # too, so only files found absent here are this call's own
+                # writes, and the rollback below removes exactly those.
+                existed = os.path.exists(path)
+                save_object(root, item)
+                if existed:
+                    reused_objects += 1
+                else:
+                    created_objects.append(path)
+                    new_objects += 1
+                append_event(
+                    root,
+                    kind,
+                    item.key,
+                    digest,
+                    fingerprint=name,
+                    reason=f"{kind} baseline {name}",
+                    occurred_at=occurred_at if occurred_at is not None else _utc_now(),
+                )
+                created_events.append(event_path)
+                events += 1
+    except Exception:
+        for path in reversed(created_events):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        for path in reversed(created_objects):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        raise
+    return BaselineEvents(events, new_objects, reused_objects, skipped, reused)
 
 
 class RedactionResult(NamedTuple):

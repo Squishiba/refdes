@@ -1073,6 +1073,33 @@ def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOu
             path=baseline_path(project, name), item_count=len(items_map),
             gate_results=gate_results, refusal=exc.rel, refusal_cause=exc.cause,
         )
+    # Living notes H9: snapshot events beside the baseline (plan §H9;
+    # docs/design/living-notes.md §4) -- one per keyed item, so the site
+    # disclosure answers "what did this item say at `name`?" from the store.
+    # The baseline file is the gate artifact and is already on disk: a store
+    # failure must not claim the stamp did not happen (it did), and the
+    # writer's rollback means it cannot leave a baseline whose events cover
+    # only some of its items -- so a swallowed failure warns, loudly, and
+    # the stamp stands. A failed snapshot write is deliberately NOT retried
+    # on a re-stamp: the re-stamp returns "unchanged" on a matching content
+    # hash and never reaches this line, and backfilling there would snapshot
+    # the OLD baseline with TODAY's content the moment an unhashed
+    # (`timeline`/`ignore`) field diverged -- the exact fabrication this
+    # phase exists to prevent. The warning says so; to record snapshots for
+    # that baseline, re-stamp under a new name. `write=False` never reaches
+    # this line.
+    try:
+        history_mod.baseline_events(project, kind, name, occurred_at=stamped_at)
+    except (history_mod.HistoryError, OSError) as exc:
+        project.warn(
+            f"stamped {kind} baseline {name!r}, but its history snapshot "
+            f"events were not written: {exc} -- the baseline file is "
+            "complete; re-running this stamp records nothing (the name is "
+            "stamped, and a re-stamp never backfills: it would snapshot the "
+            "old baseline with today's content), so re-stamp under a new "
+            "name to record the snapshots",
+            file=os.path.relpath(path, project.root).replace("\\", "/"),
+        )
     return StampOutcome(
         kind=kind, name=name, status="stamped", path=path, item_count=len(items_map),
         stamped_at=stamped_at, stamped_by=stamped_by, gate_results=gate_results,

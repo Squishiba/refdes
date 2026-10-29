@@ -17,6 +17,7 @@ import pytest
 from conftest import write_project_config
 
 from refdes import cli as cli_mod
+from refdes import history as history_mod
 
 # The fixture project: boards registry, an append-only log type (seals), a
 # keyless item, a bare link to a keyed target, a citation, and -- after
@@ -235,14 +236,21 @@ def test_no_write_does_not_capture_follows_history(tmp_path, capsys):
 
     assert _run_no_write(config, ["check"]) == 0
     assert not any(_changed(before, root).values())
-    assert not (root / ".refdes" / "history").exists()
+    # (Living notes H9 removed this test's pre-H9 `not history.exists()`
+    # precondition: the fixture's writable `revision rev-a` now stamps
+    # per-item baseline snapshot events, so the store legitimately exists
+    # here. The byte-identity of the whole tree above -- store included --
+    # is the assertion `--no-write` must satisfy.)
 
     # The same load without the gate anchors the edge and captures: one
-    # event, announced on stderr, nothing else in the store.
+    # event, announced on stderr. Living notes H9: the fixture's writable
+    # `revision rev-a` now also writes per-item baseline snapshot events
+    # (kind `revision`), so the H2 assertion counts only the anchor's own
+    # kind -- the H9 writer adds no `followed` event.
     assert cli_mod.main(["-c", config, "check"]) == 0
     err = capsys.readouterr().err
     assert "captured LOG-001: LOG-002 now follows it" in err
-    events = list((root / ".refdes" / "history" / "events").glob("*.yaml"))
+    events = [e for e in history_mod.load_events(str(root)) if e.get("kind") == "followed"]
     assert len(events) == 1
 
 

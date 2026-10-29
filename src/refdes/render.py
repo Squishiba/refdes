@@ -18,6 +18,7 @@ from . import citations as citations_mod
 from . import dates
 from . import history as history_mod
 from . import ids as ids_mod
+from . import lifecycle as lifecycle_mod
 from . import nav as nav_mod
 from . import task_pane as task_pane_mod
 from . import theme as theme_mod
@@ -352,6 +353,131 @@ def _flat_value(value) -> str:
     if isinstance(value, (list, tuple)):
         return "; ".join(_flat_value(val) for val in value)
     return str(value)
+
+
+# --------------------------------------------------- baseline history (H9)
+
+
+BASELINE_EVENT_KINDS = ("revision", "release")
+
+
+def baseline_snapshots(project: Project) -> dict:
+    """(kind, baseline name) -> {item key -> snapshot event}, read once per
+    render (plan §H9's one store read per `render_site`, the capture_index
+    rule). An unreadable store yields the empty index: the disclosures are
+    simply absent -- render carries no store diagnostic of its own (the
+    store's own commands report it), and a page never fails over the store.
+    """
+    try:
+        events = history_mod.load_events(str(project.root))
+    except (history_mod.HistoryError, OSError):
+        return {}
+    index: dict = {}
+    for event in events:
+        if event.get("kind") not in BASELINE_EVENT_KINDS:
+            continue
+        name = str(event.get("fingerprint") or "")
+        if not name:
+            continue
+        index.setdefault((str(event["kind"]), name), {})[str(event["item_key"])] = event
+    return index
+
+
+def _in_baseline(baseline, item: Item) -> bool:
+    """Whether a baseline's compact items map carries ``item`` -- by surrogate
+    key (the adopted shape, and the legacy shape's stored `key`), falling back
+    to the display id, which is all a pre-keys baseline recorded. The display
+    id is safe to match on for attribution: ids.py allocates each id once and
+    the ledger never reuses it, so a display id that names a live item names
+    that item -- a reused-id attribution is not reachable here.
+    """
+    for record_id, entry in baseline.items.items():
+        if item.key and str(entry.get("key") or "") == item.key:
+            return True
+        if item.id and (record_id == item.id or str(entry.get("id") or "") == item.id):
+            return True
+    return False
+
+
+def history_disclosure(
+    item: Item,
+    project: Project,
+    *,
+    baselines: list | None = None,
+    snapshots: dict | None = None,
+    objects: dict | None = None,
+) -> dict | None:
+    """The History disclosure for an item's page, or None when there is
+    nothing to show (plan §H9's absent, not empty, rule -- the thread panel's
+    pattern, and what keeps an unstamped project's site byte-identical).
+
+    One row per stamped baseline that recorded this item, ordered by the
+    baseline's ``stamped_at`` (ties broken by name) -- chronological, not
+    filename order, so the row opened by default is always the newest
+    stamp:
+
+    * ``captured``: the snapshot event's object body -- what the item said at
+      that baseline, quoted from the store, never from the live file.
+      ``edited`` is the H3 marker: the live item's semantic digest no longer
+      matches the snapshot.
+    * ``legacy``: the baseline has no snapshot in the store -- it predates
+      snapshot events, its snapshot write failed at stamp time, or the
+      snapshot is no longer there (redaction, store corruption). The row
+      says no snapshot was recorded and quotes no text -- dressing current
+      content up as history is the specific fabrication §H9's
+      Verified-against line forbids, and it is the phase's reason to exist.
+
+    A baseline that never recorded this item (stamped before it existed) gets
+    no row; an item no baseline recorded gets no panel. The builder reads the
+    store and the baselines directory and writes nothing, ever.
+    """
+    if baselines is None:
+        baselines = lifecycle_mod.list_baselines(project)
+    if not baselines:
+        return None
+    if snapshots is None:
+        snapshots = baseline_snapshots(project)
+    if objects is None:
+        objects = {}
+    current = history_mod.semantic_digest(item) if item.key else ""
+    rows: list[dict] = []
+    for baseline in sorted(baselines, key=lambda b: (b.stamped_at, b.name)):
+        event = (
+            snapshots.get((baseline.kind, baseline.name), {}).get(item.key)
+            if item.key
+            else None
+        )
+        if event is not None:
+            digest = str(event.get("object") or "")
+            if digest not in objects:
+                try:
+                    objects[digest] = history_mod.load_object(str(project.root), digest)
+                except (history_mod.HistoryError, OSError):
+                    objects[digest] = None
+            obj = objects[digest]
+            if obj is None:
+                rows.append(
+                    {"name": baseline.name, "kind": baseline.kind,
+                     "state": "legacy", "body": "", "edited": False}
+                )
+                continue
+            rows.append(
+                {
+                    "name": baseline.name,
+                    "kind": baseline.kind,
+                    "state": "captured",
+                    "body": str(obj.get("body") or ""),
+                    "edited": digest != current,
+                }
+            )
+        elif _in_baseline(baseline, item):
+            rows.append(
+                {"name": baseline.name, "kind": baseline.kind,
+                 "state": "legacy", "body": "", "edited": False}
+            )
+    if not rows:
+        return None
+    return {"rows": rows}
 
 
 def thread_view(
@@ -1167,6 +1293,23 @@ def render_site(project: Project, draft: bool = False) -> str:
         )
         task_panes = task_pane_mod.panes_by_entry(thread_rows)
     env.globals["task_pane"] = lambda item: task_panes.get(task_pane_mod.label(item))
+    # Living notes H9: the disclosure's inputs, hoisted to one read per
+    # render on the same rule as capture_index above (and gated on
+    # `project.items` for the same C6 reason): one directory scan of the
+    # stamped baselines, one pass over the event store, one lazy object
+    # cache shared by every item page. The panel writes nothing.
+    history_baselines: list = []
+    history_objects: dict = {}
+    history_snapshots: dict = {}
+    if project.items:
+        history_baselines = lifecycle_mod.list_baselines(project)
+        if history_baselines:
+            history_snapshots = baseline_snapshots(project)
+    env.globals["history_disclosure"] = lambda item: history_disclosure(
+        item, project,
+        baselines=history_baselines, snapshots=history_snapshots,
+        objects=history_objects,
+    )
     taskpane_assets = bool(task_panes)
     env.globals["taskpane_assets"] = taskpane_assets
     env.globals["part_anchor"] = _part_anchor

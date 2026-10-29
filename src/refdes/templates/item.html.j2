@@ -150,6 +150,40 @@
 {% if item.body_html %}
 <div class="body">{{ figured(item.body_html) | safe }}</div>
 {% endif %}
+{%- set history = history_disclosure(item) -%}
+{%- if history %}
+{# Living notes H9 (docs/design/living-notes-plan.md §H9): the history
+   disclosure. `history_disclosure(item)` is None -- no markup at all, the
+   thread panel's absent-not-empty pattern -- on every page with nothing to
+   show, so an unstamped project's site stays byte-identical (tests/test_
+   theme.py pins the built page bytes; the strip markers around the tags
+   below make this block emit exactly the text nodes the original emitted
+   when there is no disclosure). Each row is one stamped baseline that
+   recorded this item: the captured body the snapshot events stored (what
+   the item *said* at that baseline, from the store -- never re-quoted from
+   the live file), the H3 edited-after-captured marker when the live item
+   has since moved, and for a baseline with no snapshot in the store --
+   stamped before the events feature, a stamp whose snapshot write
+   failed, or a snapshot later redacted -- a plain statement that none
+   is here: the phase's reason
+   to exist is that the page never dresses current text up as history.
+   Existing CSS classes only: tests/test_style_tokens.py pins the
+   stylesheet's selector set. #}
+<section class="history-disclosure">
+  <h2>History</h2>
+  {% for row in history.rows %}
+  <details class="fields"{% if loop.last %} open{% endif %}>
+    <summary class="small">{{ row.name }} <span class="muted">({{ row.kind }})</span></summary>
+    {% if row.state == 'captured' %}
+    {% if row.edited %}<p class="small muted">edited after captured</p>{% endif %}
+    <pre class="small">{{ row.body }}</pre>
+    {% else %}
+    <p class="small muted">No snapshot was recorded for this baseline: it was stamped before the history store existed, its snapshot write failed (see the stamp's warning), or the snapshot was later redacted. The page records only hashes for it.</p>
+    {% endif %}
+  </details>
+  {% endfor %}
+</section>
+{% endif %}
 
 {% if item.fields.get('options') %}
 <section class="options" id="field-options">

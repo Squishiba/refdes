@@ -300,6 +300,17 @@ The print stylesheet hides all of this.
 - Coverage strip for requirements and bounds
 - Field table, with each field's `on_change` mode shown
 - Rendered body, with calc blocks as evaluated tables and IDs autolinked
+- History disclosure (`<section class="history-disclosure">`): one row
+  per stamped baseline that contains the item — newest open, the rest
+  collapsed — showing what the history store
+  captured for it at that stamp — an item's text at `rev-b`, not its current
+  text restated. Baselines with no snapshot in the store (stamped before the
+  store existed, a stamp whose snapshot write failed, or a snapshot later
+  redacted) say so plainly
+  ("No snapshot was recorded for this baseline") and never
+  invent text. Items with a live capture show the edited-after-captured marker.
+  The whole section is absent when there is nothing to show, so a project with
+  no stamps renders exactly the page it rendered before this feature
 - Options-considered panel for entries carrying `options:`, chosen and rejected
 - Checks table with pass/fail and the worst-case detail
 - Citations table for any `citations`-typed field — pinned/kept state, rev, page, part number. The page is the authored `page:`, or the page a `section:` resolved to at fetch time
