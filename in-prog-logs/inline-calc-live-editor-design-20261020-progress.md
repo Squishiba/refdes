@@ -111,9 +111,29 @@ references in calc spans", `calc.py` + `build.py`, ~80-120 lines
 guess). Branch rebased onto origin/main (7 commits ahead of
 `78c8954`), conflict-free; the doc stays verified against its stated
 base 78c8954 (new cites read there), not re-baselined.
+Round 7 (2026-10-29, reviewer: doc stale against main): rebased onto
+origin/main `aec4dec`; baseline refreshed 78c8954→aec4dec with an
+explicit re-verification record. Journal facts re-read at aec4dec:
+#381 (`92ae18d`) wired the journal — `serve/edit.py:103` imports it,
+`begin` :2196 / `complete` :2228 per save, CLI loads refuse while
+pending (`cli.py:133`, exempt `init`/`recover` :111), `refdes
+recover` exists (help run from the tree), browser-editor.md Status
+line confirms. §3.8 reworked: wired state; live layer needs nothing
+from it (api.py: no journal import, no writes — grep); the
+pending-journal refusal of CLI/save (panel keeps rendering from the
+in-memory snapshot) named. "later slice wires the journal (a §4
+non-goal)" rewritten. Cite sweep: `git diff 78c8954..origin/main --
+src` shows only cli.py/editor_journal.py/serve/edit.py/sources.py/
+serve/sources.py changed (the agentcoder-queue PRs touch no cited
+file), so the only moved cites were `serve/edit.py:500`→`:518` (two
+sites) and the #367/#381 bullets; browser-editor.md shifted +1 (its
+Status line) → :425-427→:426-428, :429-431→:430-432 (three sites),
+re-read at aec4dec. No cite was left unverifiable. Slice B checklist
+(10) fixed: now (1)-(9) incl. (6) per browser (localStorage is
+per-browser storage) and (11) as stated next (no forward reference).
 
 ## Status
 
-Rounds 1-6 done, pushed. Held: §6.5 policy sub-questions for Jared
-(unit/missing/hash + the new collision proposal); slices unstarted by
+Rounds 1-7 done, pushed. Held: §6.5 policy sub-questions for Jared
+(unit/missing/hash + the collision proposal); slices unstarted by
 design. Docs-only; suite green on head.

@@ -9,25 +9,37 @@ spans. The deferred-direction note it implements is
 `docs/design/inline-calc-later.md` §"Live editor updates" (lines 21–31);
 the owner decisions it inherits are D1/D2/D3 of
 `docs/design/inline-calc.md:16-23`. Explicitly out: solving/E-series,
-calculators/pins/library, the form panel, `inline-calc fill`, wiring the
-landed editor-journal module into saves (#367 — the live layer writes no
-files), any non-editor optimization.
+calculators/pins/library, the form panel, `inline-calc fill`, anything
+in the (now-wired, #381) editor journal's story — the live layer
+writes no files (§3.8) — and any non-editor optimization.
 
-Sequencing premise: this design is written against **main @ 78c8954 —
+Sequencing premise: this design is written against **main @ aec4dec —
 main @ 1d6d325 (the R12-F1..F3 grammar work, PR #351) plus everything
 merged since: slice 2 / HASH_FORMAT 6 (PR #347, `ba6d153`), the
-inline-calc release gate (PR #345, `c3073c6`), the standalone editor
-transaction journal (PR #367, `3c9035b` — library-only, not wired into
-saves), and the serve path scrubbing (PR #372, `27c4fda`)**. Every fact
-in §1 and every `file:line` citation below was re-verified against that
-main on 2026-10-26 (§1 lists what each landed PR changed). The live
+inline-calc release gate (PR #345, `c3073c6`), the editor transaction
+journal (PR #367, `3c9035b`, library; wired into saves by PR #381,
+`92ae18d`), the serve path scrubbing (PR #372, `27c4fda`), and the
+XLSX defined-names picker (PR #380, `7486c99`)**. Every fact in §1 and
+every `file:line` citation below was re-verified against main @
+78c8954 on 2026-10-26 and re-checked against aec4dec on 2026-10-29:
+between the two bases only `cli.py`, `editor_journal.py`,
+`serve/edit.py`, `sources.py` and `serve/sources.py` changed in `src`
+(the #381 journal wiring, #380 picker, #376 agentcoder queue — the
+last outside this design's surface), and the only citations into
+those files moved: `serve/edit.py:500` → `:518` (the `load_readonly`
+overlay call) and the #367 journal facts (§1, §3.8). §1 lists what
+each landed PR changed. The live
 layer reads the grammar's *outputs* (parse results, diagnostics text),
 never re-implements the grammar, so future grammar work propagates to it
 without editing this design.
 
 ## 1. Baseline: what current code already supports (all verified)
 
-Every line cited was read at main @ 78c8954 on 2026-10-26; the §7 probes
+Every line cited was read at main @ 78c8954 on 2026-10-26; on
+2026-10-29 every citation into a file that changed since (the
+`serve/edit.py` overlay call, now `:518`) was re-read at main @
+aec4dec, and the rest were confirmed unchanged in `src` between the
+two bases; the §7 probes
 were run on the pre-#351 tree d620ab5 (a historical record — §7 flags
 the one probe result #347 has since retired) and the grammar fixes do
 not change the shapes they verified.
@@ -105,13 +117,14 @@ not change the shapes they verified.
 - `src/refdes/loader.py:load_readonly(config, overlay={path: text})`
   (:192-223) — builds a whole project with in-memory file text. It is the
   machinery the editor's save path judges candidates with
-  (`serve/edit.py:500`), and it is the fallback mechanism for live eval —
+  (`serve/edit.py:518` at aec4dec, `:500` at 78c8954), and it is the
+  fallback mechanism for live eval —
   full-build floor: 0.23 s @ 20 items, 0.42 s @ 100, 2.02 s @ 400, 19.1 s
   @ 1500 (`docs/performance.md:44-52`). That rules it out per keystroke at
   400+ items; see §3.
 - The preview pane serves the **saved** snapshot only
   (`src/refdes/serve/preview.py:77-92`; iframe in
-  `src/refdes/serve/static/item.js:205-218`); `docs/design/browser-editor.md:429-431`
+  `src/refdes/serve/static/item.js:205-218`); `docs/design/browser-editor.md:430-432`
   describes a debounced *unsaved* preview request — **it is not
   implemented**: the `/edit` route takes body text only to save it, and
   no route in `api.handle` evaluates unsaved text for preview. The live
@@ -121,7 +134,7 @@ not change the shapes they verified.
 **Browser editor (main):**
 
 - One plain `<textarea>` for the body, one draft, one Save
-  (`docs/design/browser-editor.md:425-427`): `editor.js` `bodyControl`
+  (`docs/design/browser-editor.md:426-428`): `editor.js` `bodyControl`
   (:190-211) binds every `input` through `writeBody` →
   `setDraftBody(handle, area.value)` (drafts.js:243) and stashes the
   commit on the node as `area._refdesCommit` (:208) — the existing hook any
@@ -149,8 +162,9 @@ not change the shapes they verified.
   (inline-calc-later.md Q8: "test undo in supported browsers; retain
   manual Fill fallback"), recorded in the implementation PR's log.
 
-**Landed since the first draft (all in main @ 78c8954 now — what each
-changes for this design):**
+**Landed since the first draft (main @ 78c8954, plus #381 landed
+since the baseline refresh to aec4dec — what each changes for this
+design):**
 
 - **PR #347 (`ba6d153`, slice 2 / HASH_FORMAT 6):** `code_span_ranges`
   (:124), `span_cross_ref` (:270) and `span_source_call` (:287) are in
@@ -173,11 +187,21 @@ changes for this design):**
   keeps predicting "gate green" — no design change, one more consumer
   this layer's vocabulary must not drift from.
 - **PR #367 (`3c9035b`, editor journal):** `src/refdes/editor_journal.py`
-  is landed **library-only** — begin/complete/recover for crash-safe
-  save transactions, explicitly *not wired into `serve/edit.py` or the
-  CLI* (verified: no `editor_journal` import anywhere under `src/refdes/`
-  except the module itself). §3.8 spells out why the live layer's
-  save/undo assumptions are unchanged.
+  landed library-only (begin/complete/recover for crash-safe save
+  transactions) and is **now wired into saves** — see #381; §3.8 is
+  reworked to the wired state.
+- **PR #381 (`92ae18d`, journal wired):** verified at aec4dec —
+  `serve/edit.py` imports `editor_journal` (:103) and arms/clears
+  `.refdes/editor-transaction/` around every editor save
+  (`begin` :2196, `complete` :2228; an unarmed write lands nowhere);
+  every project-loading CLI command refuses while a journal is
+  pending (`cli.py:133`; exempt set `init`/`recover` :111), and
+  `refdes recover` restores the journaled files (help run 2026-10-29
+  from this tree). The serve snapshot machinery (`state.py`,
+  `api.py`) does not consult the journal — the live layer's
+  read-only surface is untouched by the wiring (§3.8), and
+  `docs/design/browser-editor.md`'s Status line records the wired
+  state.
 - **PR #372 (`27c4fda`, serve scrubbing):** write-route responses are
   scrubbed to project-relative paths at the `handle()` choke-point
   (above). The calc route carries no paths; contract satisfied by
@@ -379,7 +403,7 @@ def preview_inline_spans(project, item, body_text, fields=None) -> list[dict]:
   "target's own calc failed" message propagates (`build.py:1619-1620`).
 
 Why not `load_readonly(overlay=...)` per request: mechanism exists
-(`loader.py:192-223`, `serve/edit.py:500`) and is the right fidelity
+(`loader.py:192-223`, `serve/edit.py:518` at aec4dec) and is the right fidelity
 reference — it is 0.23 s @ 20 items and 2.02 s @ 400
 (`docs/performance.md:44-52`), so it cannot run on a 400 ms debounce
 beyond toy projects. The narrow pass costs one item's calcs (~0.1–5 ms,
@@ -579,18 +603,30 @@ blur-applied fill" claim is retired with the blur-time apply.
 - Save in flight → no apply (§3.1); after Save the draft is cleared
   (`drafts.js dropAppliedOp` :310-326) and the form re-renders on the new
   revision; the next evaluation runs against the new snapshot.
-- **The editor journal (#367) changes nothing in this section.**
-  `src/refdes/editor_journal.py` landed as a *library only* —
-  begin/complete/recover for crash-safe multi-file save transactions —
-  and is not wired into `serve/edit.py` or the CLI (verified by grep:
-  no importer under `src/refdes/` outside the module; its commit
-  `3c9035b` says so in the message). The journal journals the
-  server-side *file writes* of a save; the live layer writes no file,
-  makes exactly one read-only request (§3.3), and its undo stack is the
-  browser-native one — bullets 1–3 are untouched by it. When a later
-  slice wires the journal in (a §4 non-goal here), auto-fill needs no
-  change: it composes draft text, and the journal journals whatever the
-  eventual Save writes.
+- **The editor journal is wired (#381) — and the live layer needs
+  nothing from it.** Verified at aec4dec: `serve/edit.py` journals
+  every editor save (import :103, `begin` :2196, `complete` :2228 —
+  a write whose journal cannot be armed lands nowhere), every
+  project-loading CLI command refuses while a journal is pending
+  (`cli.py:133`, exempt `init`/`recover` :111), and `refdes recover`
+  restores it (help run 2026-10-29 from this tree). The journal
+  journals the server-side *file writes* of a save; the live layer
+  writes no file, makes exactly one read-only request (§3.3), and
+  its undo stack is the browser-native one — bullets 1–3 are
+  untouched. `serve/api.py` imports nothing from `editor_journal`
+  and writes no file (grep-verified at aec4dec), so the proposed
+  calc route joins that posture by construction: the Save that
+  carries an auto-filled draft is journaled exactly as today's
+  saves are. One consequence worth naming: a save that dies
+  mid-write leaves a pending journal, and while it is pending the
+  CLI loading commands and new serve save attempts are refused
+  (`JournalPending` → refusal, `edit.py:2197`) until `refdes
+  recover` — the live panel keeps rendering from the in-memory
+  snapshot (the serve snapshot machinery does not consult the
+  journal: no `editor_journal` import in `serve/` outside
+  `edit.py`, grep-verified). That fits the design's own posture —
+  the panel is display, `check`/`build` are the verdict, and the
+  verdict gate is exactly what a pending journal stops.
 - Discard draft / item switch → abort in-flight request, drop panel state
   (module teardown lives beside `createEditor`'s rebuild; re-renders carry
   the textarea over via `data-edit-key`, `editor.js:199`, so the module
@@ -611,10 +647,11 @@ blur-applied fill" claim is retired with the blur-time apply.
 
 Deliberate non-goals for v1: live preview of `{{name}}` substitution,
 rendered-fragment preview of unsaved bodies (the rest of
-browser-editor.md:429-431 — its own design), live fence diagnostics
+browser-editor.md:430-432 — its own design), live fence diagnostics
 (the 422-on-save owns fences), iframe refresh on drafts, multi-item
-live eval, collaborative locking, wiring the landed #367 journal into
-saves (orthogonal: the live layer writes no files, §3.8).
+live eval, collaborative locking, anything in the wired editor
+journal's story (#381 — the live layer rides saves unchanged,
+§3.8).
 
 ## 5. PR slices (each lands green on the full suite; A → B → C order)
 
@@ -683,8 +720,10 @@ saves (orthogonal: the live layer writes no files, §3.8).
    (§3.6); (9) Ctrl+Z undoes an applied fill as one native step;
    Case B (force `insertText` false in devtools): the `.value` splice
    fills, the no-undo panel line shows, auto-fill self-disables for
-   the session (§3.5); (10) Firefox + Chromium both pass (1)-(5),
-   (7)-(9) and (11); (11) an ok-within-window literal
+   the session (§3.5); (10) Firefox + Chromium both pass (1)-(9) —
+   (6) included, its `localStorage` toggle is per-browser storage,
+   so it is checked in each — and (11) as stated next; (11) an
+   ok-within-window literal
    (`Vout := 2.218 V * 2 = 4.4 V`, computed `4.436 V`, §3.5's probe):
    the row renders, **the body bytes never change** under auto-fill ON
    (the stale-gate regression pin).
@@ -794,7 +833,9 @@ carries the drafting proposal inline, which the owner may adopt or
 override. The §4 item G1 slice is where any of it gets implemented;
 none of it is implemented today.
 
-Verified starting points (main @ 78c8954, read 2026-10-26):
+Verified starting points (main @ 78c8954, read 2026-10-26; the files
+cited here — `build.py`, `model.py`, `lifecycle.py` — are unchanged
+through aec4dec, so the lines hold):
 
 - The calc pass reads **only `item.body`** — fences and spans
   (`build.py:1785/1797/1840-1844`); no field value enters any
