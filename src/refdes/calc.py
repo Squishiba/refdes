@@ -1115,13 +1115,25 @@ CROSS_REF_RE = re.compile(
     r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
     r"\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)$"
 )
-# A dotted reference with a block half spliced in: `DEC-PWR-001.losses.P_diss`.
-# Rejected, never resolved (docs/design/named-calc-blocks.md §4.2, §7): a calc
-# value is named by ITEM.NAME and that is already unique per item. CROSS_REF_RE
-# allows exactly one dot, so any dotted reference with two or more is this.
+# The field-reference sibling (docs/design/... inline-calc field refs, G1):
+# `Rds = DEC-PWR-001.$rds_on` names one *field* of the target item, `$` being
+# what distinguishes it from `DEC-PWR-001.rds_on`, the target's calc value.
+# The target half is identical to CROSS_REF_RE's (bare display id, bare key,
+# `DISPLAY-ID@key` composite); the name half is a field name. Like CROSS_REF_RE
+# it matches only the whole right-hand side (pipe unit split off first).
+FIELD_REF_RE = re.compile(
+    r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
+    r"\.\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)$"
+)
+# A dotted reference with a block half spliced in: `DEC-PWR-001.losses.P_diss`,
+# and the same shape with `$` segments: `DEC-PWR-001.losses.$rds_on`. Rejected,
+# never resolved (docs/design/named-calc-blocks.md §4.2, §7): a calc value is
+# named by ITEM.NAME and that is already unique per item. CROSS_REF_RE and
+# FIELD_REF_RE allow exactly one dot, so any dotted reference with two or more
+# is this.
 BLOCK_QUALIFIED_REF_RE = re.compile(
     r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
-    r"(?:\.[A-Za-z_][A-Za-z0-9_]*){2,}$"
+    r"(?:\.\$?[A-Za-z_][A-Za-z0-9_]*){2,}$"
 )
 # `eff = source("analysis/power-budget.csv", "tps62913_half_load_eff") | 1`
 # (docs/design/calc-sources.md §1): the whole right-hand side is one call with
@@ -1241,7 +1253,8 @@ class CalcOutcome:
     # a sealed append-only entry -- which cannot be edited without resealing
     # -- downgrades to a warning instead of failing the build.
     retired: bool = False
-    # Set on a cross-item reference line (`V_in = DEC-PWR-001.V_in`): the
+    # Set on a cross-item reference line (`V_in = DEC-PWR-001.V_in`) or a
+    # field-reference line (`Rds = DEC-PWR-001.$rds_on`): the
     # reference text exactly as authored. The value itself is resolved by the
     # caller -- evaluation order across items is a build-level concern, so
     # `evaluate_block` hands the reference to the resolver installed in the
@@ -1265,6 +1278,14 @@ RESOLVER_KEY = "__refdes_calc_resolver__"
 # the message to report. Absent, a source() line is an error rather than a
 # guess -- evaluation never opens the cited file (docs/design/calc-sources.md §5).
 SOURCE_RESOLVER_KEY = "__refdes_calc_source_resolver__"
+# Key under which the caller installs a list the resolver may append warning
+# messages to -- the collision warning (a bare reference whose target has
+# both a calc value and a field of that name) is the first use: the resolver
+# sees the collision, the outcome loop owns the diagnostic, so the message
+# reaches the referring line through `CalcOutcome.warning` like every other
+# calc warning. The list is drained per line (the length before the resolver
+# runs is the drain mark), never shared between items.
+CALC_WARNINGS_KEY = "__refdes_calc_warnings__"
 
 
 def assigned_names(source: str) -> set[str]:
@@ -1496,9 +1517,12 @@ def evaluate_block(
             )
             continue
 
-        ref_match = CROSS_REF_RE.match(expression.strip())
+        rhs = expression.strip()
+        ref_match = CROSS_REF_RE.match(rhs)
+        if ref_match is None:
+            ref_match = FIELD_REF_RE.match(rhs)
         if ref_match:
-            reference = expression.strip()
+            reference = rhs
             if name in origins:
                 first_line = origins[name]
                 first_where = f"line {first_line}" if first_line is not None else "earlier in this item"
@@ -1525,6 +1549,8 @@ def evaluate_block(
                                 line=line_number, reference=reference)
                 )
                 continue
+            sink = env.get(CALC_WARNINGS_KEY)
+            mark = len(sink) if isinstance(sink, list) else 0
             try:
                 value = resolver(reference)
                 if annotation:
@@ -1545,10 +1571,33 @@ def evaluate_block(
                 continue
             env[name] = value
             origins[name] = line_number
+            ref_warning = (
+                "; ".join(sink[mark:])
+                if isinstance(sink, list) and len(sink) > mark
+                else None
+            )
             outcomes.append(
                 CalcOutcome(name, expression, comment, value, None, annotation,
-                            None, unit_style=unit_style, line=line_number,
+                            ref_warning, unit_style=unit_style, line=line_number,
                             reference=reference)
+            )
+            continue
+
+        if "$" in rhs:
+            # A field reference spliced into arithmetic: `x = A.$v * 2`. The
+            # reference form is the whole right-hand side (like a cross-item
+            # reference), never an operand -- the `$` token has no meaning in
+            # the expression language, so this is the author's spelling, not
+            # a parse accident. Name the working two-step form.
+            outcomes.append(
+                CalcOutcome(
+                    name, expression, comment, None,
+                    f"field reference {rhs!r} must be the whole right-hand "
+                    f"side -- read it into a name first "
+                    f"(`{name} = ITEM.$field`), then use the name in the "
+                    f"arithmetic",
+                    annotation, unit_style=unit_style, line=line_number,
+                )
             )
             continue
 
