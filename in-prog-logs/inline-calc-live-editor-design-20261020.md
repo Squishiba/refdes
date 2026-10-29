@@ -26,7 +26,7 @@ between the two bases only `cli.py`, `editor_journal.py`,
 `serve/edit.py`, `sources.py` and `serve/sources.py` changed in `src`
 (the #381 journal wiring, #380 picker, #376 agentcoder queue — the
 last outside this design's surface), and the only citations into
-those files moved: `serve/edit.py:500` → `:518` (the `load_readonly`
+those files moved: `src/refdes/serve/edit.py:500` → `:518` (the `load_readonly`
 overlay call) and the #367 journal facts (§1, §3.8). §1 lists what
 each landed PR changed. The live
 layer reads the grammar's *outputs* (parse results, diagnostics text),
@@ -102,7 +102,8 @@ not change the shapes they verified.
   imported / body-editable flags + reasons). The precedent for the new
   route is `_source_propose` (:946-977): *"composed and checked here so
   the browser never assembles the text and never learns the grammar"*.
-  The request-key posture to copy is `_apply_edit` (:1087-1116): it
+  The request-key posture to copy is `_apply_edit` (:1073; its
+  key extraction :1087-1116): it
   extracts exactly its known keys from the JSON body and ignores the
   rest — the established unknown-key forward compatibility. Since #372
   (`27c4fda`) `handle()` also scrubs the write routes' responses to
@@ -117,11 +118,17 @@ not change the shapes they verified.
 - `src/refdes/loader.py:load_readonly(config, overlay={path: text})`
   (:192-223) — builds a whole project with in-memory file text. It is the
   machinery the editor's save path judges candidates with
-  (`serve/edit.py:518` at aec4dec, `:500` at 78c8954), and it is the
-  fallback mechanism for live eval —
-  full-build floor: 0.23 s @ 20 items, 0.42 s @ 100, 2.02 s @ 400, 19.1 s
-  @ 1500 (`docs/performance.md:44-52`). That rules it out per keystroke at
-  400+ items; see §3.
+  (`src/refdes/serve/edit.py:518` at aec4dec, `:500` at 78c8954), and it is the
+   fallback mechanism for live eval — its cost measured directly for
+   this doc (median of 3 `time.perf_counter` runs around one
+   `load_readonly(overlay=...)` call, single-file generated projects,
+   2026-10-29): **0.03 s @ 20 items, 0.33 s @ 400**. The
+   `docs/performance.md:44-52` figures (0.23 s @ 20, 0.42 @ 100,
+   2.02 s @ 400, 19.1 s @ 1500) are the **whole** `POST
+   /api/item/<ref>/edit` handler the overlay reload is one component
+   of (model reload + write + full preview render before answering,
+   `docs/performance.md:18-24,97-103`). Either way: hundreds of ms
+   per request at 400 items — ruled out per keystroke; see §3.
 - The preview pane serves the **saved** snapshot only
   (`src/refdes/serve/preview.py:77-92`; iframe in
   `src/refdes/serve/static/item.js:205-218`); `docs/design/browser-editor.md:430-432`
@@ -136,7 +143,7 @@ not change the shapes they verified.
 - One plain `<textarea>` for the body, one draft, one Save
   (`docs/design/browser-editor.md:426-428`): `editor.js` `bodyControl`
   (:190-211) binds every `input` through `writeBody` →
-  `setDraftBody(handle, area.value)` (drafts.js:243) and stashes the
+  `setDraftBody(handle, area.value)` (src/refdes/serve/static/drafts.js:243) and stashes the
   commit on the node as `area._refdesCommit` (:208) — the existing hook any
   insertion helper must call (see `insertIntoBody` :102-118, which uses it
   :116).
@@ -146,10 +153,10 @@ not change the shapes they verified.
   `docs/design/inline-calc-later.md:27-31` flags: try
   `document.execCommand('insertText')`, browser-test undo, keep a manual
   Fill fallback. `document.execCommand('copy')` already ships in
-  `editor.js:316` (guarded), so the API use is precedented.
-- `api.js:5-22` — the single fetch wrapper; **no `AbortController`/signal
+  `src/refdes/serve/static/editor.js:316` (guarded), so the API use is precedented.
+- `src/refdes/serve/static/api.js:5-22` — the single fetch wrapper; **no `AbortController`/signal
   support** (new, ~3 additive lines).
-- `app.js:81,83-84,98,107-121,128` — a 2 s poll of `/api/revision`
+- `src/refdes/serve/static/app.js:81,83-84,98,107-121,128` — a 2 s poll of `/api/revision`
   (:109): git badge, stale/load-error banner, and a **serial** change
   re-renders clean views via a `refdes:rebuilt` event (:112-114,125;
   poll loop `setInterval` :128).
@@ -158,16 +165,16 @@ not change the shapes they verified.
   (:83) have **zero callers in `src/` and `tests/`** (grep at
   aec4dec), and the one read (:98) sits behind a `!== null` guard, so
   that banner line is dormant. The revision the item form holds and
-  saves is the editor closure's `revision` (`editor.js:39`:
+  saves is the editor closure's `revision` (`src/refdes/serve/static/editor.js:39`:
   `draft.revision || edit.file_revision || item.revision` — the
   item's **file** revision, the same string space as the
   `expected_revision` a save sends (:236,:251; server-side computed
-  `api.py:769-770`, served at :825, checked at :1087-1089), advanced
+  `src/refdes/serve/api.py:769-770`, served at :825, checked at :1087-1089), advanced
   by each save response (:238-239). That value — not `openRevision` —
   is what §3.6's revision guard keys on.
 - No browser automation: JS is checked statically
   (`tests/test_serve_static.py`: no inline scripts, `script-src 'self'` CSP
-  `security.py:71-73`, every imported module must exist), HTTP contracts
+  `src/refdes/serve/security.py:71-73`, every imported module must exist), HTTP contracts
   are tested against a live `EditorApp` (`tests/serve_support.py`,
   `tests/test_serve_edit_http.py`, `tests/test_serve_editor_e2e.py`).
   Undo/caret behavior therefore ships with a **manual browser checklist**
@@ -183,13 +190,13 @@ design):**
   `inline_calc.py` — the live route's replacement ranges build on
   `code_span_ranges` with no branch dependency left. The cross-item span
   dependency edges are landed (`run_calcs`' scheduler,
-  `build.py:1941-1948`, docstring), and F12-5's "has not been evaluated
+  `src/refdes/build.py:1941-1948`, docstring), and F12-5's "has not been evaluated
   yet" error
-  is gone (`build.py:1622-1627` records the retirement) — the live route
+  is gone (`src/refdes/build.py:1622-1627` records the retirement) — the live route
   resolves cross-item refs and `source()` from the snapshot exactly as a
   build will, today. Spans now enter `calc_hash_for` (:2390, arithmetic
   only — the stored result excluded), the dependency scans, and the
-  content hash (`HASH_FORMAT = 6`, `build.py:2260`); see §6.5 for the
+  content hash (`HASH_FORMAT = 6`, `src/refdes/build.py:2260`); see §6.5 for the
   hash consequences of the fields decision.
 - **PR #345 (`c3073c6`, release gate):** the gate's
   `inline_calc_results` rule (`src/refdes/lifecycle.py:825`, registered
@@ -207,7 +214,7 @@ design):**
   `.refdes/editor-transaction/` around every editor save
   (`begin` :2196, `complete` :2228; an unarmed write lands nowhere);
   every project-loading CLI command refuses while a journal is
-  pending (`cli.py:133`; exempt set `init`/`recover` :111), and
+  pending (`src/refdes/cli.py:133`; exempt set `init`/`recover` :111), and
   `refdes recover` restores the journaled files (help run 2026-10-29
   from this tree). The serve snapshot machinery (`state.py`,
   `api.py`) does not consult the journal — the live layer's
@@ -246,7 +253,7 @@ sections they change):
 ### 3.1 When evaluation happens
 
 - Trigger: the body textarea's existing `input` path
-  (`editor.js:203-209`). A new `live-calc.js` module schedules a request
+  (`src/refdes/serve/static/editor.js:203-209`). A new `live-calc.js` module schedules a request
   debounced **400 ms** after the last keystroke (constant, tunable —
   owner-confirmed 2026-10-25, §6.2), **and `blur`/`focus` on the
   textarea flush the pending schedule immediately** (§6.2; focus is a
@@ -278,12 +285,12 @@ sections they change):
   the cross-item dotted form, with an optional `$` sigil). What is not
   *landed* is the field reference itself: today nothing field-derived
   feeds the calc pass (verified: `_run_item_calcs` reads `item.body`
-  only, `build.py:1785/1797/1840-1844`), so until the field-reference
+  only, `src/refdes/build.py:1785/1797/1840-1844`), so until the field-reference
   slice (§4, item G1) lands the bag is carried and unused. The client already holds
   exactly what the bag needs: the draft's field edits live in
-  `draft.fields` (a plain object of scalar values, `drafts.js:21`,
+  `draft.fields` (a plain object of scalar values, `src/refdes/serve/static/drafts.js:21`,
   `setDraftField` :236-241; collections/null are not editable,
-  `api.py:1100-1102`).
+  `src/refdes/serve/api.py:1100-1102`).
 - Cross-item references and `source()` resolve against the **current
   serve snapshot** — the same `item._env` caches and lockfile records a
   build uses on today's main (the #347 scheduler and fetch-pinning are
@@ -303,8 +310,8 @@ sections they change):
 ### 3.3 Route contract (new)
 
 `POST /api/item/<handle>/calc` — JSON, token, Origin, 1 MiB cap: all
-inherited from `server.py:783-818`. Registered in `api.handle` beside the
-`/edit` branch (`api.py:49-53`).
+inherited from `src/refdes/serve/server.py:783-818`. Registered in `api.handle` beside the
+`/edit` branch (`src/refdes/serve/api.py:49-53`).
 
 Request: `{"text": "<current draft body>",
 "fields": {"<draft field name>": <scalar>, …}}`.
@@ -313,11 +320,11 @@ Request: `{"text": "<current draft body>",
   missing/non-string text; 400 for a `fields` value that is not a JSON
   object. `fields` is optional — absent means "no draft field edits",
   i.e. the saved item's fields. Values are scalars, mirroring the
-  `set_field` scalar rule (`api.py:1100-1102`); the bag is the draft's
-  `fields` object verbatim (`drafts.js:21`).
+  `set_field` scalar rule (`src/refdes/serve/api.py:1100-1102`); the bag is the draft's
+  `fields` object verbatim (`src/refdes/serve/static/drafts.js:21`).
 - **Unknown keys are ignored, as part of the contract**: the route
   extracts exactly its known keys, the `_apply_edit` posture
-  (`api.py:1087-1116`). This is what lets the field-reference slice
+  (`src/refdes/serve/api.py:1087-1116`). This is what lets the field-reference slice
   (§4, item G1) grow the request later (e.g. a field-reference mode
   flag) without a browser/serve version lockstep. Until that slice
   lands, `fields` is
@@ -326,7 +333,7 @@ Request: `{"text": "<current draft body>",
 - 404 unknown handle (same `_find_item` posture as every item route).
 - 403 `{"error": <edit_state reason>}` when `edit_state(...)` says the
   body is not editable (sealed entry, imported item) — mirrors the
-  "stop the false affordance" rule at `editor.js:45-53`.
+  "stop the false affordance" rule at `src/refdes/serve/static/editor.js:45-53`.
 
 Response 200:
 
@@ -369,8 +376,8 @@ Response 200:
 - `"revision"` lets the browser discard responses computed against an old
   model (§3.6): **the item's file revision** the snapshot computed on —
   the same string space as the form's `expected_revision` (computed
-  `api.py:769-770`, served :825, checked :1087-1089) — not the
-  project-wide `/api/revision` `revision` (`state.py:305`), which the
+  `src/refdes/serve/api.py:769-770`, served :825, checked :1087-1089) — not the
+  project-wide `/api/revision` `revision` (`src/refdes/serve/state.py:305`), which the
   form does not hold.
 - Guard: the server evaluates at most the first 200 triggered spans of
   the body, in source order, and **omits the rest**; the response then
@@ -398,31 +405,37 @@ def preview_inline_spans(project, item, body_text, fields=None) -> list[dict]:
 - Mirrors `_run_item_calcs`'s pass shape: `env` seeded with
   `_make_calc_resolver(project, _key_index(project))` and
   `_make_source_resolver(project, item, records, {}, [])` (main's
-  signature, `build.py:1644-1650`) using the snapshot's memoized
+  signature, `src/refdes/build.py:1644-1650`) using the snapshot's memoized
   `project._source_lock` (read-only: `citations.locked_source_value`,
   same as a build); events =
   `calc.extract_blocks_with_lines(body_text)` + `inline_calc.triggered_spans(body_text)`
-  sorted by offset (same as `build.py:1838-1846`).
+  sorted by offset (same as `src/refdes/build.py:1838-1846`).
 - Per span: parse → eval → `format_value(value, project.sigfigs)` →
   `compare_stored`; status/message per §3.3. Positions:
-  `code_span_ranges` (main, `inline_calc.py:124`) for `start/end`;
+  `code_span_ranges` (main, `src/refdes/inline_calc.py:124`) for `start/end`;
   **new, small**: `parse_span`/a helper exposing the result-slot column
   range (the cut position is already computed inside `parse_span` (the
-  `readings[0]` cut, `inline_calc.py:347`), just not returned).
+  `readings[0]` cut, `src/refdes/inline_calc.py:347`), just not returned).
 - **What it must not touch**: `project.diagnostics`, `item.calc_values`,
   `item._source_uses`, lockfiles, disk. Locals for `origins`/`env`/
   `resolved`/`uses`; a test proves the snapshot is unchanged after
   requests (§5 slice A).
 - The resolver reads target `item._env` — present for every local item
-  after any build (the scheduler caches it, `build.py:1752-1756`
+  after any build (the scheduler caches it, `src/refdes/build.py:1752-1756`
   docstring, written :1933); for a target that failed calc, the existing
-  "target's own calc failed" message propagates (`build.py:1619-1620`).
+  "target's own calc failed" message propagates (`src/refdes/build.py:1619-1620`).
 
 Why not `load_readonly(overlay=...)` per request: mechanism exists
-(`loader.py:192-223`, `serve/edit.py:518` at aec4dec) and is the right fidelity
-reference — it is 0.23 s @ 20 items and 2.02 s @ 400
-(`docs/performance.md:44-52`), so it cannot run on a 400 ms debounce
-beyond toy projects. The narrow pass costs one item's calcs (~0.1–5 ms,
+(`src/refdes/loader.py:192-223`, `src/refdes/serve/edit.py:518` at aec4dec) and is the right fidelity
+reference. Measured directly for this doc (median of 3
+`time.perf_counter` runs around one overlay load, single-file generated
+projects, 2026-10-29): **0.03 s @ 20 items, 0.33 s @ 400** — and the
+`docs/performance.md:44-52` figures (0.23 s @ 20, 2.02 s @ 400) are the
+whole POST /edit handler the overlay reload is one component of
+(model reload + write + full preview render, `docs/performance.md:18-24,
+:97-103`), not the overlay alone. Either way it cannot run on a 400 ms
+debounce beyond toy projects. The narrow pass costs one item's calcs
+(~0.1–5 ms,
 §7). The e2e test uses the overlay as the **oracle**: the panel's computed
 text must equal what the overlay-build reports as the diagnostic's
 computed value (§5 slice A) — narrow pass fidelity pinned by test.
@@ -432,7 +445,7 @@ computed value (§5 slice A) — narrow pass fidelity pinned by test.
 New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
 (one import, one construction in `createEditor`, panel mounted by
 `item.js` beside the textarea where the image/source pickers mount,
-`item.js:176-190` — panel placement decided 2026-10-25, §6.3):
+`src/refdes/serve/static/item.js:176-190` — panel placement decided 2026-10-25, §6.3):
 
 - **Panel** (`.live-calc` under the textarea): one row per span —
   `NAME` + status chip + computed value; stale rows read exactly
@@ -459,14 +472,14 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
   failed §3.6's guards. After the edits:
   call `area._refdesCommit()` once — the draft, dirty flag, sessionStorage
   mirror, revision gate, and conflict screen all behave exactly as for
-  typed text (`editor.js:96-101`'s comment is the contract).
+  typed text (`src/refdes/serve/static/editor.js:96-101`'s comment is the contract).
 - **Focus rule (review 6a6db80, finding 1)**: auto-fill's text
   mutation runs **only while the textarea is focused**.
   `document.execCommand('insertText')` acts on the focused editing
   host — unfocused it is a silent no-op (§3.8's undo argument then
   degrades to a `.value` write, which native undo does not cover),
   so a blur-time apply would have to call `focus()` first, as
-  `insertIntoBody` does (`editor.js:102-118`, focus at :115). That
+  `insertIntoBody` does (`src/refdes/serve/static/editor.js:102-118`, focus at :115). That
   alternative (refocus-then-insert) is **rejected**: blur names the
   element the author *chose next* (Save, a Fill button, a picker),
   and stealing it mid-flow is worse than a fill that lands when the
@@ -484,7 +497,10 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
 - **Why the gate is `stale` and not `computed != stored` (review
   96ae35f, finding 1)**: the checker *accepts* within-window literals —
   `compare_stored` returns `None` when the stored nominal is inside its
-  rounding window (`inline_calc.py:597`, window logic :555-594).
+  rounding window (`src/refdes/inline_calc.py:597`, acceptance window inside the
+  comparison :635-658; :555-594 is the stale-**message** widening —
+  `_PLAIN_NUMBER_RE`/`_half_of_place`/`_stale_message`, not the
+  window).
   Verified 2026-10-26 (in-tree; §7 inlines the reproduction):
   `` `Vout := 2.218 V * 2 = 4.4 V` `` is status **ok**
   with computed `4.436 V` — a `computed != stored` rule spanning ok
@@ -504,8 +520,9 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
   that; (c) the serve stack has no per-user identity (single local
   launch token), so the browser is the only per-user scope the editor
   has. `localStorage` (the static JS's first use of it), not the drafts'
-  `sessionStorage` mirror (`drafts.js:3`): a preference should outlive
-  the tab, an unsaved body should not. The CSP (`security.py:71-73`)
+  `sessionStorage` mirror (`src/refdes/serve/static/drafts.js:3`): a preference should outlive
+  the tab, an unsaved body should not. The CSP
+  (`src/refdes/serve/security.py:71-73`)
   does not touch storage access. **Default: ON** — this design's
   original recommendation (§6.1); flipping it is a one-line constant in
   `live-calc.js`. **Fill with auto-fill ON**: Fill buttons stay on
@@ -525,7 +542,7 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
   browser): the single native-undo-protected edit of §3.8. **Case
   B** — `insertText` returns false (undo-unsafe browser, detected
   once per session): the apply uses an `insertIntoBody`-style
-  `.value` splice (`editor.js:102-118`), which is **not**
+  `.value` splice (`src/refdes/serve/static/editor.js:102-118`), which is **not**
   native-undo-protected — the panel shows one honest standing line
   while Case B is active ("native undo may not cover these fills"),
   auto-fill disables itself for the session and says so (its
@@ -550,12 +567,12 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
    `area.value !== sent`, discard (typing beat the network — no apply, no
    panel update). Plus the **revision guard**: the request closure
    captures the form's revision — the editor closure's `revision`
-   (`editor.js:39`), read through a one-line `getRevision()` accessor
+   (`src/refdes/serve/static/editor.js:39`), read through a one-line `getRevision()` accessor
    the F3 wiring exposes — and on response, discard when
    `payload.revision !== getRevision()`. Both strings live in the
    form's own string space (§3.3): a rebuild under the form, a save
    elsewhere, or this form's own save (which advanced the closure's
-   `revision`, `editor.js:238-239`, behind an in-flight request —
+   `revision`, `src/refdes/serve/static/editor.js:238-239`, behind an in-flight request —
    §3.1's save-in-flight skip keeps this form's own saves from
    *firing* requests, not from racing an already-in-flight response)
    move one and not the other, so the guard fires; the next keystroke
@@ -628,15 +645,18 @@ blur-applied fill" claim is retired with the blur-time apply.
   `insertText` edit fires `input` → existing `writeBody` → draft), so
   there is **one** draft, one Save, one revision check — the live layer
   adds no state to `drafts.js` (draft schema untouched).
-- Save in flight → no apply (§3.1); after Save the draft is cleared
-  (`drafts.js dropAppliedOp` :310-326) and the form re-renders on the new
+- Save in flight → no apply (§3.1); after Save each applied op is
+  dropped in the save loop (`dropAppliedOp`, `src/refdes/serve/static/drafts.js:310-326`, called
+  per op at `src/refdes/serve/static/editor.js:242`) and the draft is cleared (`clearDraft`,
+  `src/refdes/serve/static/drafts.js:328`, called at `src/refdes/serve/static/editor.js:252`), and the form re-renders
+  on the new
   revision; the next evaluation runs against the new snapshot.
 - **The editor journal is wired (#381) — and the live layer needs
   nothing from it.** Verified at aec4dec: `serve/edit.py` journals
   every editor save (import :103, `begin` :2196, `complete` :2228 —
   a write whose journal cannot be armed lands nowhere), every
   project-loading CLI command refuses while a journal is pending
-  (`cli.py:133`, exempt `init`/`recover` :111), and `refdes recover`
+  (`src/refdes/cli.py:133`, exempt `init`/`recover` :111), and `refdes recover`
   restores it (help run 2026-10-29 from this tree). The journal
   journals the server-side *file writes* of a save; the live layer
   writes no file, makes exactly one read-only request (§3.3), and
@@ -648,7 +668,7 @@ blur-applied fill" claim is retired with the blur-time apply.
   saves are. One consequence worth naming: a save that dies
   mid-write leaves a pending journal, and while it is pending the
   CLI loading commands and new serve save attempts are refused
-  (`JournalPending` → refusal, `edit.py:2197`) until `refdes
+  (`JournalPending` → refusal, `src/refdes/serve/edit.py:2197`) until `refdes
   recover` — the live panel keeps rendering from the in-memory
   snapshot (the serve snapshot machinery does not consult the
   journal: no `editor_journal` import in `serve/` outside
@@ -657,7 +677,7 @@ blur-applied fill" claim is retired with the blur-time apply.
   verdict gate is exactly what a pending journal stops.
 - Discard draft / item switch → abort in-flight request, drop panel state
   (module teardown lives beside `createEditor`'s rebuild; re-renders carry
-  the textarea over via `data-edit-key`, `editor.js:199`, so the module
+  the textarea over via `data-edit-key`, `src/refdes/serve/static/editor.js:199`, so the module
   binds once per textarea and re-arms on `bodyControl`).
 
 ## 4. New work, itemized (everything else above is existing support)
@@ -669,13 +689,13 @@ blur-applied fill" claim is retired with the blur-time apply.
 | B3 | `POST /api/item/<ref>/calc` route + guards + `fields` bag validation (shape only; G1 owns semantics) | `src/refdes/serve/api.py` | ~60 lines |
 | F1 | `{signal}` support in `api()` | `src/refdes/serve/static/api.js` | ~3 lines |
 | F2 | `live-calc.js`: debounce, blur/focus flush (evaluate + panel only, never applies unfocused — §3.5 focus rule; the focus flush is what lands a display-only response's fills after refocus), abort, supersede, panel (incl. truncated footer), auto-fill on stale rows only (caret-skip inclusive of result-range boundaries) + user toggle (localStorage, default ON) + idempotent Fill, Case A/B apply paths (§3.5) | new static module | ~200 lines |
-| F3 | wiring: construct/teardown in `createEditor`, panel mount, save-in-flight flag, and a `getRevision()` accessor returning the editor closure's `revision` (`editor.js:39`/:238-239) — §3.6's revision guard reads it (never `app.js`'s unassigned `openRevision`, §1) | `src/refdes/serve/static/editor.js`, `item.js` | ~28 lines |
+| F3 | wiring: construct/teardown in `createEditor`, panel mount, save-in-flight flag, and a `getRevision()` accessor returning the editor closure's `revision` (`src/refdes/serve/static/editor.js:39`/:238-239) — §3.6's revision guard reads it (never `app.js`'s unassigned `openRevision`, §1) | `src/refdes/serve/static/editor.js`, `item.js` | ~28 lines |
 | D1 | docs pass (below) | `docs/design/inline-calc-later.md` status, `docs/design/browser-editor.md` §"Editing and previewing bodies" pointer, `docs/math.md` editor sentence, `changelog.d/*.added.md` | — |
 | G1 | **Follow-up slice (post-A/B/C): field references in calc spans** per §6.5a/§6.5b — the `ITEM.$field` dotted reference in the grammar and resolver, the own-item non-cycle rule, the saved-target read, and the decided policy: bare-collision resolves to the calc value **with a WARNING naming both and `ITEM.$name`**, a non-quantity field value (or unit assertion against one) is an **eval-stage error naming the field**, undeclared/empty fields **error naming the field and listing the item's declared fields**, and **no hash change** (decided: no HASH_FORMAT bump — the release gate owns the stale-result verdict) | `src/refdes/calc.py` (`CROSS_REF_RE` :1114 + the cross-ref resolver it feeds, :1499; the quantity check rides `parse_quantity` :589), `src/refdes/build.py` (cycle rule :1980 — the self-`$` exemption; reference resolution reading saved fields; collision-warning emission through the pass's existing diagnostics path). The hash definitions do not move (§6.5b decision 4) | ~80–120 lines (guess) |
 
 Deliberate non-goals for v1: live preview of `{{name}}` substitution,
 rendered-fragment preview of unsaved bodies (the rest of
-browser-editor.md:430-432 — its own design), live fence diagnostics
+docs/design/browser-editor.md:430-432 — its own design), live fence diagnostics
 (the 422-on-save owns fences), iframe refresh on drafts, multi-item
 live eval, collaborative locking, anything in the wired editor
 journal's story (#381 — the live layer rides saves unchanged,
@@ -691,7 +711,7 @@ journal's story (#381 — the live layer rides saves unchanged,
   correct for spans on multi-span lines, tab-flanked `=` delimiters, and
   a span after a fence whose offset shifts lines (fence name used by the
   span evaluates); duplicate-name live error; cross-item ref (main's
-  dependency-order `run_calcs`, `build.py:1937`) + `source()` refusal
+  dependency-order `run_calcs`, `src/refdes/build.py:1937`) + `source()` refusal
   message parity; 200-span truncation; **fields inertness**: a call with
   a `fields` bag returns exactly the call without it (the §3.4
   accepted-and-unused contract, pinned until the field-reference slice
@@ -706,9 +726,9 @@ journal's story (#381 — the live layer rides saves unchanged,
   ignored** (the §3.3 forward-compat contract — today's `fields` was
   once an unknown key too); `snapshot_tree` byte-identity (the
   `test_no_write.py` posture); response `revision` equals the item's
-  `file_revision` as GET `/api/item/<ref>` serves it (`api.py:825`) —
+  `file_revision` as GET `/api/item/<ref>` serves it (`src/refdes/serve/api.py:825`) —
   the form's revision space (§3.6 guard 2), **not** the
-  project-wide `/api/revision` `revision` (`state.py:305`).
+  project-wide `/api/revision` `revision` (`src/refdes/serve/state.py:305`).
 - **Oracle test** (the fidelity pin): for each status, build
   `loader.load_readonly(overlay={item_path: text})` and assert the full
   build reports the same computed/stale message for the span the route
@@ -797,7 +817,7 @@ grammar §6.5a, policy §6.5b; **nothing in it exists until it lands**)
   inside LOG-PWR-002 evaluates (§6.5a 4);
   `bare_own_id_calc_ref_still_cycle` — bare self-reference keeps
   today's `calc reference cycle` error (verified at the base: the
-  message is built at `build.py:1980`);
+  message is built at `src/refdes/build.py:1980`);
   `field_edit_moves_result_hash_unchanged` — editing a referenced
   field moves the computed value, leaves `calc_hash` and the content
   hash unchanged (no bump — §6.5b 4), and the release gate's
@@ -832,7 +852,7 @@ items 5-6 / §6.5a-§6.5b).
    spells out (interaction preference, not project fact; no per-user
    identity in the serve stack). Default **ON** = this design's
    original recommendation (the parked direction,
-    inline-calc-later.md:23-26); flipping the default is a one-line
+    docs/design/inline-calc-later.md:23-26); flipping the default is a one-line
    constant in `live-calc.js`. Auto-fill fires on `stale` rows only,
    not on every `computed != stored` difference (the checker accepts
    within-window literals; §3.5's gate bullet, a review-round-3 fix).
@@ -856,11 +876,11 @@ items 5-6 / §6.5a-§6.5b).
    (§3.5 focus rule; refocus-then-insert considered and rejected
    there, with the `insertIntoBody` precedent).
 3. **Panel directly under the body textarea**, beside the image/source
-   pickers (`item.js:176-190`), not in the Edit-bar — as proposed;
+   pickers (`src/refdes/serve/static/item.js:176-190`), not in the Edit-bar — as proposed;
    recorded in §3.5.
 4. **Item fields ARE calc inputs.** Folded into §3.2 (inputs
    decision + what today's pass provably reads), §3.3 (request shape:
-   the draft's `fields` bag verbatim — `drafts.js:21`/`:236-241`;
+   the draft's `fields` bag verbatim — `src/refdes/serve/static/drafts.js:21`/`:236-241`;
    scalar rule; the unknown-key-ignoring posture pinned as the
    forward-compat contract), §3.4 (the preview-pass signature takes
    `fields=None` from day one; item B1/B3). **Scope of this change:
@@ -922,23 +942,23 @@ cited here — `build.py`, `model.py`, `lifecycle.py` — are unchanged
 through aec4dec, so the lines hold):
 
 - The calc pass reads **only `item.body`** — fences and spans
-  (`build.py:1785/1797/1840-1844`); no field value enters any
+  (`src/refdes/build.py:1785/1797/1840-1844`); no field value enters any
   evaluation today.
 - The **content hash** payload includes every field whose `on_change`
-  mode is `invalidate` (`build.py:2296-2303`; modes
-  `model.py:23-26`, default `invalidate` `model.py:181`, item/schema/
-  project precedence `model.py:688-694`) plus the
+  mode is `invalidate` (`src/refdes/build.py:2296-2303`; modes
+  `src/refdes/model.py:23-26`, default `invalidate` `src/refdes/model.py:181`, item/schema/
+  project precedence `src/refdes/model.py:688-694`) plus the
   whitespace-normalized **body** (:2362-2363). HASH_FORMAT 6
-  (`build.py:2260`, landed with #347) put span arithmetic and span
+  (`src/refdes/build.py:2260`, landed with #347) put span arithmetic and span
   cross-item references into the hashes; resolved cross-item *values*
-  entered at HASH_FORMAT 4 as `calc_refs` (`build.py:2318`).
+  entered at HASH_FORMAT 4 as `calc_refs` (`src/refdes/build.py:2318`).
 - **`calc_hash_for`** (:2390-2431) hashes only body arithmetic
   (fences + spans, stored results excluded); its docstring names "a
   result changing because an upstream value moved, with this item's
   own block untouched" as a question the probe deliberately does not
   answer.
 - The **release gate** (the `inline_calc_results` rule,
-  `lifecycle.py:825`/registered :908, #345 `c3073c6`) fails a release on
+  `src/refdes/lifecycle.py:825`/registered :908, #345 `c3073c6`) fails a release on
   any stale stored result.
 
 #### 6.5a Decision: reference syntax — Form A (Jared, 2026-10-29)
@@ -948,7 +968,7 @@ through aec4dec, so the lines hold):
    `ITEM.name`. The dotted RHS must be the *whole* right-hand side
    of the assignment — CROSS_REF_RE: "the whole right-hand side is
    one dotted reference into another item", with an optional pipe
-   unit (`calc.py:1106-1114`) — so field use inside larger
+   unit (`src/refdes/calc.py:1106-1114`) — so field use inside larger
    arithmetic is two steps: read the field into a name, then do
    arithmetic on that name:
 
@@ -958,24 +978,24 @@ through aec4dec, so the lines hold):
    ```
 
    (Both are ordinary `name := rhs [| unit] = result` spans,
-   `inline_calc.py:306`; fence lines share the RHS matcher,
-   `calc.py:1499`.)
+   `src/refdes/inline_calc.py:306`; fence lines share the RHS matcher,
+   `src/refdes/calc.py:1499`.)
 2. **An optional sigil disambiguates: `ITEM.$field` explicitly names
    the item FIELD.** A bare `ITEM.name` keeps its present meaning
    (a calc value — bare names are calc variables, `CALC_NAME_RE`,
-   `inline_calc.py:67`, used by `parse_span` :318), so no existing
+   `src/refdes/inline_calc.py:67`, used by `parse_span` :318), so no existing
    project changes meaning. The sigil is never required except to
    reach a field that shares its name with a calc value (the
    collision case — decided, §6.5b).
 3. **`$` is chosen because it is free in the grammar** (checked
-   against base): `#` is the comment character (first unquoted `#`,
-   `calc.py:1151`, :1189), `|` the unit separator (`PIPE_UNIT_RE`
+   against base): `#` is the comment character (first unquoted `#`
+   partitions in `split_comment`, `src/refdes/calc.py:1150-1163`), `|` the unit separator (`PIPE_UNIT_RE`
    :1105), `@` the composite key (CROSS_REF_RE's target half,
    :1115-1116), `.` the reference dot — exactly one, a dotted
    reference with two or more is rejected as block-qualified
    (`BLOCK_QUALIFIED_REF_RE`, :1122), so a dot sigil is out — `=`
    the span result delimiter, `:` part of `:=` (`NAME_ASSIGN_RE`,
-   `inline_calc.py:30`), `+ - * / ^` the operators. `~` as an
+   `src/refdes/inline_calc.py:30`), `+ - * / ^` the operators. `~` as an
    explicit calc sigil was considered and rejected by the owner
    ("feels odd"): there is **no calc sigil**.
 4. **Own-item fields are not a cycle.** An item's own display id
@@ -985,7 +1005,7 @@ through aec4dec, so the lines hold):
    `DEC-PWR-001.x` inside DEC-PWR-001 reports
    `calc reference cycle: DEC-PWR-001 -> DEC-PWR-001` from
    `refdes --no-write -c refdes-project.yaml check` on a scratch
-   copy; the message is built at `build.py:1980`). A bare own-id
+   copy; the message is built at `src/refdes/build.py:1980`). A bare own-id
    reference to a calc value stays a cycle error.
 5. **Read rule.** Cross-item field references read the **saved**
    target, exactly like cross-item calc refs (§3.2's limit); only
@@ -1010,11 +1030,11 @@ the question text stays as the record of the decision's scope.
 2. **Unit handling of field values.** Field values are YAML scalars
    of arbitrary shape (`status: approved`, `limit: 5 V`, free text).
    A referenced value is parsed as a quantity (the
-   `calc.parse_quantity` shape, `calc.py:589`); a **non-quantity**
+   `calc.parse_quantity` shape, `src/refdes/calc.py:589`); a **non-quantity**
    value — and any `| V`-style unit assertion against one — is an
    **eval-stage error naming the field** (the unit-assertion shape,
    not the parse-stage shape of "stored result missing",
-   `inline_calc.py:351`: the field reference itself parsed fine; it
+   `src/refdes/inline_calc.py:351`: the field reference itself parsed fine; it
    is the value that fails).
 3. **Missing/empty field behavior.** A field the item's type does
    **not declare**, and a field declared but **empty/null**, are
@@ -1022,22 +1042,22 @@ the question text stays as the record of the decision's scope.
    fields** (the unknown-name shape extended with the declaration
    list, so the author sees what *is* referencable). The bag's shape
    note stands: the editor carries scalars only — collections/null
-   are not editable (`api.py:1100-1102`) — so list-valued fields
+   are not editable (`src/refdes/serve/api.py:1100-1102`) — so list-valued fields
    (`checks:`) stay out of the v1 bag.
 4. **Hash / stale consequences.** Rely on the **release gate**
-   (`inline_calc_results`, `lifecycle.py:825`, registered :908): a
+   (`inline_calc_results`, `src/refdes/lifecycle.py:825`, registered :908): a
    field edit may move a referencing span's computed value while
    `calc_hash` stays fixed (the arithmetic-only probe,
-   `build.py:2390`) — **accepted**; the gate fires on exactly the
+   `src/refdes/build.py:2390`) — **accepted**; the gate fires on exactly the
    stale stored result a field-driven move produces, so correctness
    has a verdict gate without a hash change. **No HASH_FORMAT bump
-   when G1 lands** (HASH_FORMAT stays 6, `build.py:2260`); the
+   when G1 lands** (HASH_FORMAT stays 6, `src/refdes/build.py:2260`); the
    format-7 path — field values entering the content hash the way
    resolved cross-item values entered at format 4 (`calc_refs`,
-   `build.py:2318`), with #347's gated-bump precedent — stays
+   `src/refdes/build.py:2318`), with #347's gated-bump precedent — stays
    available later if hash consumers are judged to need
    field-driven moves. Fields in `on_change: timeline`/`ignore`
-   mode — invisible to the content hash (`build.py:2298-2299`) —
+   mode — invisible to the content hash (`src/refdes/build.py:2298-2299`) —
    are **not** forced to `invalidate`.
 - **Live-layer consequences (listed for completeness, none
   blocking).** The bag is this item's own draft, read locally —
@@ -1100,7 +1120,7 @@ for text in cases:
    main's F12-5 gap — retired by #347, §1; on today's main this probe's
    cross-item span resolves through the scheduler); diagnostics carry
    `file:line` + `item_id`
-   (`api._diagnostics_for` posture, `api.py:123-139`).
+   (`api._diagnostics_for` posture, `src/refdes/serve/api.py:123-139`).
 2. `probe_live.py` (same dir):
    - `code_spans` content-only confirmed (no offsets — positional view is
      #347's `code_span_ranges`);

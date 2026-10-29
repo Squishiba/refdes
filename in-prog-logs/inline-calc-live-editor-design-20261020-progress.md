@@ -127,8 +127,23 @@ slice A test re-keyed, checklist (12) proves discard-when-moved /
 no-discard-normal; F2 focus cite :114→:115; F3 refresh cite
 :267-291→:265-290.
 
+Round 9 (2026-10-29, reviewer 99669501, ~126 cites verified, 6
+defects): (1) the performance.md:44-52 figures are the **whole**
+POST /edit handler (its def: :18-24, :97-103), not the overlay
+reload — §1/§3.4 reworded, plus a direct measurement of
+`load_readonly(overlay=...)` (perf_counter medians of 3,
+`.scratch/overlay-measure/measure_overlay.py`): 0.03 s @ 20,
+0.33 s @ 400; the seconds-scale conclusion stands. (2) window cite
+→ `compare_stored`'s comparison :635-658 (:555-594 is the
+stale-message widening). (3) `_apply_edit` def is api.py:1073.
+(4-5) bare `security.py` prefixed; post-save draft clear is
+clearDraft (drafts.js:328, editor.js:252), dropAppliedOp drops per
+op (:242). (6) first-unquoted-# is split_comment calc.py:1150-1163
+(:1189 is the spelling function). Whole-doc: every bare
+filename:line cite now carries its src/tests/docs path.
+
 ## Status
 
-Rounds 1-8 done, pushed. Nothing in §6 is open; slices unstarted
+Rounds 1-9 done, pushed. Nothing in §6 is open; slices unstarted
 by design. Docs-only; suite green on head. PR body refresh is the
 reviewer's.
