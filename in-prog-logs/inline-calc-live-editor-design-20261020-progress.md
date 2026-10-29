@@ -7,16 +7,18 @@ type". Docs-only; no product code. Deliverable:
 
 ## What I did
 
-- Read the governing docs: `docs/design/inline-calc.md` (D1/D2/D3 at
-  :9-16), `docs/design/inline-calc-later.md` §"Live editor updates"
-  (:20-31 — the parked direction this design implements),
+- Read the governing docs: `docs/design/inline-calc.md` (D1/D2/D3;
+  :16-23 on current main), `docs/design/inline-calc-later.md`
+  §"Live editor updates" (:20-31 — the parked direction this design
+  implements),
   `docs/design/browser-editor.md` (:425-431 plain textarea + the
   unimplemented unsaved-preview proposal, :686-687 debounce/supersede).
 - Read the code the design touches: `inline_calc.py` (grammar,
   `parse_span`, `compare_stored`), `build.py`
-  (`_run_inline_span` :1651 — mutates `project.diagnostics` +
-  `item.calc_values` :1704, so the live route needs its own read-only
-  pass; `_run_item_calcs` :1719 event pass), `calc.py` (AST-whitelist
+  (`_run_inline_span` — mutates `project.diagnostics` +
+  `item.calc_values`, so the live route needs its own read-only
+  pass; `_run_item_calcs` event pass; current-main lines :1683/
+  :1736/:1752), `calc.py` (AST-whitelist
   evaluator), the serve stack (`api.py` route registry + gates,
   `server.py` token/Origin/1 MiB, `state.py` snapshot/revision), the
   editor JS (`editor.js` insert helpers write `area.value` directly —
@@ -34,7 +36,9 @@ type". Docs-only; no product code. Deliverable:
   points at `/home/jorb/work/refdes`, a different checkout; that bit me
   once, then I switched). Confirmed: the three main-branch check
   messages verbatim; half-typed span → "stored result missing" at parse
-  stage; unclosed span → silent; ~130 µs/span evaluator cost; the
+   stage; unclosed span → silent; per-span cost of the order of
+   150-350 µs (measured 158/200/358 µs for evaluate / +format /
+   +compare); the
   fill round-trip (replacing the stored literal with `format_value`
   output makes `compare_stored` return None — this is what makes
   auto-fill stable); `load_readonly` overlay floor 0.011 s toy project,
@@ -46,104 +50,52 @@ type". Docs-only; no product code. Deliverable:
   `live-calc.js` with debounce/abort/supersede/caret-skip,
   execCommand-undo with Fill fallback, three PR slices, open questions).
 - Re-verified every file:line citation in the deliverable against the
-  tree (AGENTS.md rule); corrected two (`_make_calc_resolver` :1525 →
-  :1538, `run_calcs` by_key :1921 → :1915).
+  tree (AGENTS.md rule); corrected two (the :1525→:1538 and
+  by_key :1921→:1915 fixes were against the pre-#347 tree; those
+  symbols are at :1588/:1957 on current main, cited as such in the
+  deliverable).
 
-## Key design choices (flagged as open questions in the deliverable)
+## Key design choices (as first drafted — all superseded by the §6 decisions, recorded below)
 
 - Auto-fill the stored-result slot on pause (caret-inside skip,
   last-to-first, `execCommand('insertText')`, Fill-button fallback) —
   follows the parked direction; Fill-only is the fallback answer.
 - 400 ms debounce, `":="` client pre-gate, AbortController +
   text-snapshot + revision triple guard on responses.
-- v1 = body spans only: no fences panel, no fields bag, no iframe
-  refresh (D2), no browser grammar (D3).
+- v1 = body spans only: no fences panel, no fields bag (superseded:
+  decision (4) makes fields inputs, carried in a `fields` bag), no
+  iframe refresh (D2), no browser grammar (D3).
 
-## Review round 1 (CHANGES REQUESTED)
+## Review rounds (summary; reviewer-agent ids are labels, not commits)
 
-Fixed broken internal §-references; updated the sequencing premise to
-main `1d6d325` (#351 merged) with shifted cites re-checked; rephrased
-"no route accepts body text" (the edit route does — none *evaluates*
-unsaved text). Design proposal unchanged.
-
-## Review round 2 (2026-10-26): owner decisions + baseline refresh
-
-Task (Jared's answers, 2026-10-25): record the decisions in §6, fold
-each into the affected sections, bring the baseline to current main.
-
-- Rebased the branch onto origin/main (78c8954) — conflict-free (the
-  branch touches only its two in-prog-logs files); pushed
-  `--force-with-lease`; confirmed 1d6d325 is an ancestor.
-- Re-verified every §1 fact and every file:line cite against current
-  main (line-number shifts from #347+ across inline_calc.py/build.py/
-  api.py; §3.4's resolver call shape fixed to main's 5-arg
-  `_make_source_resolver`; moved cites fixed in serve/edit.py,
-  performance.md, inline-calc.md, item.js, app.js, drafts.js). The
-  round-3 reviewer independently re-verified this list — all matched.
-- §1 "Branch dependencies" section rewritten as "Landed since the
-  first draft": #347 `ba6d153` (code_span_ranges :124, F12-5 retired
-  — build.py:1622-1627, HASH_FORMAT 6 at :2260), #345 `c3073c6`
-  (release gate `release_gate.inline_calc_results`), #367 `3c9035b`
-  (`editor_journal.py`, library-only, no importer — grep-verified),
-  #372 `27c4fda` (path scrubbing at the `handle()` choke-point).
-- §6 became "Decisions (Jared, 2026-10-25)": (1) auto-fill + Fill
-  behind a localStorage toggle, default ON, Fill idempotent, off loses
-  no diagnostic; (2) 400 ms + blur flush (§3.1/§3.6); (3) panel under
-  the textarea; (4) fields ARE inputs — request `fields` bag +
-  preview-pass `fields=None` + unknown-key forward compat (§3.2-§3.4),
-  grammar out of scope. New §6.5 open question (the field-reference
-  grammar) grounded in verified facts: calc reads only `item.body`;
-  content hash = invalidate-mode fields + body; `calc_hash_for` is
-  body-arithmetic-only; draft field shape + scalar rule cited. §3.8
-  journal verdict: #367 unwired → live-layer assumptions unchanged.
-- Slices: A adds fields-inertness + `fields`-bag + unknown-key tests;
-  B's checklist grew (6)-(10); work table B3 ~60, F2 ~200 lines; §7
-  flags the F12-5 probe record as historical.
-
-## Review round 3 (2026-10-26): 96ae35f CHANGES REQUESTED
-
-(13c70b5 approved: full suite on head 4888 passed / 2 skipped; CI
-green incl. Windows — nothing to fix.)
-
-- F1 (high, probe-confirmed defect): auto-fill keyed on
-  `computed != stored` across ok+stale spans rewrote within-window
-  literals the checker accepts (`compare_stored` → None,
-  `inline_calc.py:597`; `Vout := 2.218 V * 2 = 4.4 V` is ok at
-  computed `4.436 V`). Gate is now `status == "stale"` (§3.5, §6.1,
-  F2 row); checklist (11) = byte-identical regression pin.
-- F2: §6 provenance paragraph (in-session answers 2026-10-25; §6 is
-  the first tree record; transcription into inline-calc.md offered).
-- F3: `truncated` schema key (sibling of `spans`, omitted when not
-  cut) + guard: source order, excess omitted, panel footer line.
-- F4: release-gate cites → `lifecycle.py:825`/:908; §7 reproducibility
-  paragraph. Rejected: `docs/math.md`/`changelog.d/` exist (ls) —
-  slice C accurate. F5: PR body reconciled (`gh pr edit` aborts on
-  the projects-classic GraphQL deprecation; `gh api PATCH` works).
-
-## Review round 4 (2026-10-26): 6a6db80 CHANGES REQUESTED
-
-- F1 (high): blur-time apply needs the focused host
-  (`execCommand('insertText')`; `insertIntoBody` focuses first,
-  `editor.js:102-118`) — as written, blur fills no-op or splice.
-  Per the owner's exact answer ("evaluate on blur", not
-  apply-on-blur): blur flushes + refreshes the panel + arms Fill
-  rows, **never applies text, never calls focus()**; applies only
-  while focused (§3.1, §3.5 focus-rule bullet — refocus-then-insert
-  rejected; §3.6, §6.2); checklist (8)/(9) rewritten.
-- F2: caret-skip defined inclusive, `result_start <= caret <=
-  result_end` — pausing after a partly-typed `= 5` never overwrites
-  (§3.5, §3.8, checklist (3); the old "unfocused *and* caret-in-span"
-  clause is subsumed by the focus rule).
-- F3: Fill fallback = one path per case: Case A `insertText`
-  (undo-protected) / Case B `.value` splice (**not**
-  undo-protected, panel says so, entered only after `insertText`
-  proves false in the session; §3.5, §3.8).
-- F4: §7 inlines a runnable reproduction of the ok/stale/parse/
-  unclosed claims + fill round-trip (verified from the tree).
-  Citation fixes: `run_calcs` edges cited as docstring :1941-1948;
-  footer states AGENTS.md's deliverable-report exemption.
+Round 1 (reviewer agent, CHANGES REQUESTED): fixed broken internal
+§-references, refreshed the sequencing premise to main `1d6d325` with
+shifted cites re-checked, and rephrased "no route accepts body text"
+(the edit route does — none *evaluates* unsaved text). Round 2:
+recorded the owner's 2026-10-25 answers as §6 Decisions (toggle +
+default-ON auto-fill, 400 ms + blur flush, panel placement, fields
+as inputs) and rebased to main `78c8954`, re-verifying every §1 fact
+and file:line cite (all shifts from #347+). Round 3 (reviewer agent
+96ae35f CHANGES REQUESTED; 13c70b5 approved with a full-suite run):
+auto-fill re-gated to `status == "stale"` after a probe-confirmed
+defect (the old rule rewrote checker-accepted within-window
+literals — `inline_calc.py:597`), plus the `truncated` response key,
+§6 provenance, and `lifecycle.py:825`/:908 release-gate cites.
+Round 4 (reviewer agent 6a6db80 CHANGES REQUESTED): blur now
+evaluates only — refreshes the panel, arms Fill rows, never applies
+text and never steals focus (applies only while focused;
+refocus-then-insert rejected per `editor.js:102-118` analysis);
+caret-skip defined inclusive of result-range boundaries; Fill
+fallback split into Case A `insertText` (undo-protected) / Case B
+`.value` splice (not); §7 inlined runnable reproductions of the
+behavioural claims. Round 5 (reviewer agents 644f695d/02c3d871):
+refocus-apply made mechanical (focus is a flush trigger, §3.1), the
+~130 µs/span figure replaced by the measured 150-350 µs order,
+superseded log bullets marked, and the "What I did" cites above
+updated to current main; this section compressed to a paragraph per
+AGENTS.md.
 
 ## Status
 
-Rounds 3+4 done, pushed. Held: §6.5 grammar question for Jared;
+Rounds 1-5 done, pushed. Held: §6.5 grammar question for Jared;
 slices unstarted by design. Docs-only; suite green on head.

@@ -74,7 +74,8 @@ not change the shapes they verified.
   walk (`_eval_node` :604ff), no `eval`/`exec` anywhere (grep-verified);
   `parse_quantity` (:589), `evaluate_assignment` (:693), `format_value`
   (:981), `evaluate_block` (:1301). Evaluation of a span RHS is
-  microsecond-scale (§7 probe 2: ~130 µs/span warm).
+  microsecond-scale (§7 probe 2: of the order of 150-350 µs per
+  span, measured 158/200/358 µs for evaluate / +format / +compare).
 
 **Serve stack (main):**
 
@@ -210,10 +211,12 @@ decisions of 2026-10-25, §6, are folded into the sections they change):
 - Trigger: the body textarea's existing `input` path
   (`editor.js:203-209`). A new `live-calc.js` module schedules a request
   debounced **400 ms** after the last keystroke (constant, tunable —
-  owner-confirmed 2026-10-25, §6.2), **and a `blur` on the textarea
-  flushes the pending schedule immediately** (§6.2): blur is a trigger
-  for the same scheduled request, not a second request type — the
-  flush goes through the identical closure and guards. Exactly one
+  owner-confirmed 2026-10-25, §6.2), **and `blur`/`focus` on the
+  textarea flush the pending schedule immediately** (§6.2; focus is a
+  trigger too — review 02c3d871 finding: the refocus-then-apply
+  promise below is mechanical, not aspirational): a flush is a trigger
+  for the same scheduled request, not a second request type — it goes
+  through the identical closure and guards. Exactly one
   difference: a response landing while the textarea is **unfocused**
   is display-only — panel, chips, computed values, armed Fill rows;
   it never mutates text and never calls `focus()` (the §3.5 focus
@@ -332,7 +335,8 @@ Response 200:
   of `spans` — omitted, not `false`, when nothing was cut). A truncated
   response is rendered with one panel footer line ("showing the first
   200 spans"); the §3.6 supersede guards apply to it unchanged. Per-span
-  cost is ~0.13 ms (§7), so a request is bounded tens of ms regardless.
+  cost is 0.15-0.35 ms (§7), so a request is bounded tens of ms
+  regardless.
 
 ### 3.4 Backend: the narrow preview pass (new, small)
 
@@ -428,8 +432,10 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
   consent. The owner's answer "evaluate on `blur` as well"
   (2026-10-25, §6.2) is honored exactly: blur **evaluates** — flushes
   the request, refreshes the panel, arms the Fill rows — it just
-  never applies text while unfocused. A response arriving after the
-  author refocuses (text unchanged, §3.6 guards passed) applies
+  never applies text while unfocused. Refocus is the trigger that
+  makes the apply real: the textarea's `focus` event flushes the
+  pending schedule (§3.1), so after the author returns the request
+  fires focused and — text unchanged, §3.6 guards passed — applies
   under the normal focused-typing rules.
 - **Why the gate is `stale` and not `computed != stored` (review
   96ae35f, finding 1)**: the checker *accepts* within-window literals —
@@ -520,9 +526,13 @@ computed values refresh, Fill rows arm, **no text mutates and no
 `focus()` is called** (focus stays on the element the author moved to
 — Save, a Fill button, a picker). The refocus-then-insert alternative
 is rejected in §3.5's focus-rule bullet, with the `insertIntoBody`
-precedent and why it does not transfer. If the author refocuses with
-the text unchanged, the response applies under the normal focused
-rules, caret-skip included. The caret rule (§3.5 skip, inclusive of
+precedent and why it does not transfer. Refocus is a trigger of its
+own (§3.1): the `focus` event flushes the pending schedule, so with
+the text unchanged the request fires focused and applies under the
+normal focused rules, caret-skip included — the checklist's
+"refocus → fills apply" is this flush, not a stored-response apply
+path (none exists: unfocused responses are display-only and are not
+replayed from memory). The caret rule (§3.5 skip, inclusive of
 both boundaries) reads `selectionStart/selectionEnd` from the textarea
 element **at apply time**, and a textarea keeps its selection after
 losing focus in both Chromium and Firefox — so the skip decision for
@@ -590,7 +600,7 @@ blur-applied fill" claim is retired with the blur-time apply.
 | B2 | result-slot range from the parse (`parse_span` returns content-relative cut column; `triggered_spans` unchanged) | `src/refdes/inline_calc.py` | ~15 lines (`code_span_ranges` is in main, :124 — dependency retired) |
 | B3 | `POST /api/item/<ref>/calc` route + guards + `fields` bag validation (shape only; §6.5 owns semantics) | `src/refdes/serve/api.py` | ~60 lines |
 | F1 | `{signal}` support in `api()` | `src/refdes/serve/static/api.js` | ~3 lines |
-| F2 | `live-calc.js`: debounce, blur flush (evaluate + panel only, never applies unfocused — §3.5 focus rule), abort, supersede, panel (incl. truncated footer), auto-fill on stale rows only (caret-skip inclusive of result-range boundaries) + user toggle (localStorage, default ON) + idempotent Fill, Case A/B apply paths (§3.5) | new static module | ~200 lines |
+| F2 | `live-calc.js`: debounce, blur/focus flush (evaluate + panel only, never applies unfocused — §3.5 focus rule; the focus flush is what lands a display-only response's fills after refocus), abort, supersede, panel (incl. truncated footer), auto-fill on stale rows only (caret-skip inclusive of result-range boundaries) + user toggle (localStorage, default ON) + idempotent Fill, Case A/B apply paths (§3.5) | new static module | ~200 lines |
 | F3 | wiring: construct/teardown in `createEditor`, panel mount, save-in-flight flag | `src/refdes/serve/static/editor.js`, `item.js` | ~25 lines |
 | D1 | docs pass (below) | `docs/design/inline-calc-later.md` status, `docs/design/browser-editor.md` §"Editing and previewing bodies" pointer, `docs/math.md` editor sentence, `changelog.d/*.added.md` | — |
 
@@ -661,8 +671,8 @@ saves (orthogonal: the live layer writes no files, §3.8).
    auto-filled span is a no-op (idempotent, §3.5); (8) blur
    mid-debounce → request fires immediately: panel refreshes and Fill
    rows arm, **no text mutates, focus stays on the blur target**
-   (§3.5 focus rule); refocus with the text unchanged → the pending
-   fills apply; blur with the caret parked in a result range → that
+   (§3.5 focus rule); refocus with the text unchanged → the `focus`
+   flush (§3.1) re-fires the request focused and the fills apply; blur with the caret parked in a result range → that
    span stays skipped at apply time and its Fill row stays offered
    (§3.6); (9) Ctrl+Z undoes an applied fill as one native step;
    Case B (force `insertText` false in devtools): the `.value` splice
@@ -717,7 +727,9 @@ record outside this branch is preferred, transcribe §6.1-§6.4 into
    presentation-only and independent of the toggle. Slice B grows the
    toggle (item F2) and its tests (§5 slice B, checklist (6)-(7)).
 2. **Debounce 400 ms, and evaluate on `blur` as well.** Folded into
-   §3.1 (blur flushes the pending schedule through the same closure),
+   §3.1 (blur/focus flush the pending schedule through the same
+   closure; the focus flush is what makes the refocus-then-apply
+   promise mechanical — review 02c3d871),
    §3.6 (blur is born under both stale-response guards: text-snapshot
    supersede compares the unchanged `area.value`, the revision guard
    is unchanged, and the flush supersedes any in-flight request via
@@ -832,10 +844,12 @@ from the worktree (`PYTHONPATH=src python -m refdes.cli`, d620ab5):
 the scratch dirs named here are gitignored and not part of the PR, so
 the behavioural claims are **inlined below** — run from the checkout
 with `PYTHONPATH=src python`; a reviewer re-ran them 2026-10-26 and
-all four outcomes reproduced. The **timings** (~130 µs/span, 0.011 s
-overlay floor) were measured on the 2026-10-20 machine and are
-indicative; §3.4's scaling argument leans on the committed
-`docs/performance.md:44-52` table, not on them.
+all four outcomes reproduced. The **timings** (per-span cost of the
+order of 150-350 µs depending on what is included — measured
+158/200/358 µs for `evaluate_block` / +`format_value` / +`compare_stored`
+on a 2026-10-26 review run; original drafting mean ~130 µs — and the
+0.011 s overlay floor) are indicative; §3.4's scaling argument leans
+on the committed `docs/performance.md:44-52` table, not on them.
 
 ```python
 # §3.5/§3.7 claims, from the tree (PYTHONPATH=src python):
