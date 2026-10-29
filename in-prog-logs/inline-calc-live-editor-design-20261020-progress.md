@@ -97,43 +97,38 @@ AGENTS.md. (Round 5's log/deliverable edits were left uncommitted when
 that session closed; this session committed them as-is after reading
 them through — coherent, kept.) Round 6 (2026-10-29, owner decision):
 §6.5's reference-syntax sub-question answered (Form A) — recorded as
-§6.5a with the two-step `ITEM.$field` examples, the sigil-free check
-(`calc.py` :1105/:1114-1122/:1151, `inline_calc.py:30/:67` at base
-78c8954), the own-item non-cycle rule (bare own-id cycle verified
-2026-10-29 by `refdes --no-write -c refdes-project.yaml check` on a
-scratch copy, message at `build.py:1980`), the saved-target read
-rule, and §6 item 5; the collision sub-question opened with the
-bare-resolves-to-calc + WARNING proposal (error alternative
-rejected — no calc sigil); unit/missing/hash sub-questions stay open
-with drafting proposals inline. Slices §4/§5 updated: fields stay
-accepted-and-unused until the new follow-up slice G1 ("field
-references in calc spans", `calc.py` + `build.py`, ~80-120 lines
-guess). Branch rebased onto origin/main (7 commits ahead of
-`78c8954`), conflict-free; the doc stays verified against its stated
-base 78c8954 (new cites read there), not re-baselined.
-Round 7 (2026-10-29, reviewer: doc stale against main): rebased onto
-origin/main `aec4dec`; baseline refreshed 78c8954→aec4dec with an
-explicit re-verification record. Journal facts re-read at aec4dec:
-#381 (`92ae18d`) wired the journal — `serve/edit.py:103` imports it,
-`begin` :2196 / `complete` :2228 per save, CLI loads refuse while
-pending (`cli.py:133`, exempt `init`/`recover` :111), `refdes
-recover` exists (help run from the tree), browser-editor.md Status
-line confirms. §3.8 reworked: wired state; live layer needs nothing
-from it (api.py: no journal import, no writes — grep); the
-pending-journal refusal of CLI/save (panel keeps rendering from the
-in-memory snapshot) named. "later slice wires the journal (a §4
-non-goal)" rewritten. Cite sweep: `git diff 78c8954..origin/main --
-src` shows only cli.py/editor_journal.py/serve/edit.py/sources.py/
-serve/sources.py changed (the agentcoder-queue PRs touch no cited
-file), so the only moved cites were `serve/edit.py:500`→`:518` (two
-sites) and the #367/#381 bullets; browser-editor.md shifted +1 (its
-Status line) → :425-427→:426-428, :429-431→:430-432 (three sites),
-re-read at aec4dec. No cite was left unverifiable. Slice B checklist
-(10) fixed: now (1)-(9) incl. (6) per browser (localStorage is
-per-browser storage) and (11) as stated next (no forward reference).
+§6.5a (two-step `ITEM.$field` grammar, sigil-free check cites,
+own-item non-cycle rule with the bare own-id cycle verified by a
+scratch `check` run, saved-target read, §6 item 5); collision
+opened as a sub-question with a drafting proposal; unit/missing/
+hash stayed open with proposals inline; new follow-up slice G1.
+Round 7 (2026-10-29, reviewer): rebased onto `aec4dec`, baseline
+refreshed 78c8954→aec4dec; journal facts re-read at aec4dec (#381
+wired: edit.py :103/:2196/:2228, cli.py :133/:111, recover help
+run); §3.8 reworked to wired state; cite sweep found only
+`serve/edit.py:500`→`:518` and browser-editor.md +1 shifts, all
+re-read; slice B checklist (10) fixed. Round 8 (2026-10-29, owner):
+all four §6.5 policy sub-questions answered — proposals adopted
+**unchanged** (collision → calc value + WARNING naming both and
+`$`; field value parsed as quantity, non-quantity/unit-assertion
+→ eval-stage error naming the field; undeclared/empty → error
+listing declared fields; no HASH_FORMAT bump, release gate owns
+the stale verdict, no forced invalidate). Recorded as §6.5b under
+the questions they settle; §6.5 retitled decided; §6 item 6 +
+intro/items 4-5 updates; §4 G1 row (hash path no longer a
+dependency); §5 G1 test spec + acceptance. Reviewer 09b53f5e
+follow-up (same push): F1 — app.js `openRevision` is never
+assigned (setter has zero callers, grep at aec4dec; §1 baseline
+claim corrected); the revision guard now keys off the form's own
+revision (`editor.js:39` closure, same space as `expected_revision`
+at api.py:769-770/:825/:1087-1089), §3.3 response echoes the
+item's file revision, F3 gains a `getRevision()` accessor, §5
+slice A test re-keyed, checklist (12) proves discard-when-moved /
+no-discard-normal; F2 focus cite :114→:115; F3 refresh cite
+:267-291→:265-290.
 
 ## Status
 
-Rounds 1-7 done, pushed. Held: §6.5 policy sub-questions for Jared
-(unit/missing/hash + the collision proposal); slices unstarted by
-design. Docs-only; suite green on head.
+Rounds 1-8 done, pushed. Nothing in §6 is open; slices unstarted
+by design. Docs-only; suite green on head. PR body refresh is the
+reviewer's.

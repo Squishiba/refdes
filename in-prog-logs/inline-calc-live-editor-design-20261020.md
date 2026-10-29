@@ -112,7 +112,7 @@ not change the shapes they verified.
   satisfies that contract by construction.
 - `src/refdes/serve/state.py` — one in-memory `Snapshot(project, revision,
   …)` per process (`Snapshot` :144), rebuilt whole under `ProjectState._lock`
-  on disk change (`refresh` :267-291); `snapshot` (:245-248) is a stable
+  on disk change (`refresh` :265-290); `snapshot` (:245-248) is a stable
   read for one request.
 - `src/refdes/loader.py:load_readonly(config, overlay={path: text})`
   (:192-223) — builds a whole project with in-memory file text. It is the
@@ -149,10 +149,22 @@ not change the shapes they verified.
   `editor.js:316` (guarded), so the API use is precedented.
 - `api.js:5-22` — the single fetch wrapper; **no `AbortController`/signal
   support** (new, ~3 additive lines).
-- `app.js:81,93-104,107-121,128` — a 2 s poll of `/api/revision` keeps
-  `openRevision` current; a revision change re-renders clean views. That
-  is the live layer's staleness signal for "the server model moved under
-  the form".
+- `app.js:81,83-84,98,107-121,128` — a 2 s poll of `/api/revision`
+  (:109): git badge, stale/load-error banner, and a **serial** change
+  re-renders clean views via a `refdes:rebuilt` event (:112-114,125;
+  poll loop `setInterval` :128).
+  It keeps **no** revision current for the form: `openRevision` (:81)
+  is never assigned — `setOpenRevision` (:84) and `currentRevision`
+  (:83) have **zero callers in `src/` and `tests/`** (grep at
+  aec4dec), and the one read (:98) sits behind a `!== null` guard, so
+  that banner line is dormant. The revision the item form holds and
+  saves is the editor closure's `revision` (`editor.js:39`:
+  `draft.revision || edit.file_revision || item.revision` — the
+  item's **file** revision, the same string space as the
+  `expected_revision` a save sends (:236,:251; server-side computed
+  `api.py:769-770`, served at :825, checked at :1087-1089), advanced
+  by each save response (:238-239). That value — not `openRevision` —
+  is what §3.6's revision guard keys on.
 - No browser automation: JS is checked statically
   (`tests/test_serve_static.py`: no inline scripts, `script-src 'self'` CSP
   `security.py:71-73`, every imported module must exist), HTTP contracts
@@ -320,7 +332,7 @@ Response 200:
 
 ```json
 {
-  "revision": "<snapshot.revision>",
+  "revision": "<the item's file revision the snapshot computed>",
   "spans": [
     {
       "line": 4,                    // 0-indexed line in `text`
@@ -355,7 +367,11 @@ Response 200:
 - `result_start/-end` is absent when the span has no parseable result
   slot; auto-fill and Fill are then unavailable for that span.
 - `"revision"` lets the browser discard responses computed against an old
-  model (§3.6).
+  model (§3.6): **the item's file revision** the snapshot computed on —
+  the same string space as the form's `expected_revision` (computed
+  `api.py:769-770`, served :825, checked :1087-1089) — not the
+  project-wide `/api/revision` `revision` (`state.py:305`), which the
+  form does not hold.
 - Guard: the server evaluates at most the first 200 triggered spans of
   the body, in source order, and **omits the rest**; the response then
   carries top-level `"truncated": true` (the schema key above, sibling
@@ -450,7 +466,7 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
   host — unfocused it is a silent no-op (§3.8's undo argument then
   degrades to a `.value` write, which native undo does not cover),
   so a blur-time apply would have to call `focus()` first, as
-  `insertIntoBody` does (`editor.js:102-118`, focus at :114). That
+  `insertIntoBody` does (`editor.js:102-118`, focus at :115). That
   alternative (refocus-then-insert) is **rejected**: blur names the
   element the author *chose next* (Save, a Fill button, a picker),
   and stealing it mid-flow is worse than a fill that lands when the
@@ -532,10 +548,21 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
 2. **Text-snapshot supersede (authoritative)**: the request closure
    captures the exact string sent; on response, if
    `area.value !== sent`, discard (typing beat the network — no apply, no
-   panel update). Plus: discard when `payload.revision !== openRevision`
-   (the poll moved the model: the server computed against a snapshot the
-   form no longer holds; the next keystroke re-evaluates against the new
-   one).
+   panel update). Plus the **revision guard**: the request closure
+   captures the form's revision — the editor closure's `revision`
+   (`editor.js:39`), read through a one-line `getRevision()` accessor
+   the F3 wiring exposes — and on response, discard when
+   `payload.revision !== getRevision()`. Both strings live in the
+   form's own string space (§3.3): a rebuild under the form, a save
+   elsewhere, or this form's own save (which advanced the closure's
+   `revision`, `editor.js:238-239`, behind an in-flight request —
+   §3.1's save-in-flight skip keeps this form's own saves from
+   *firing* requests, not from racing an already-in-flight response)
+   move one and not the other, so the guard fires; the next keystroke
+   re-evaluates against the new model. The guard is deliberately
+   **not** keyed on `app.js`'s `openRevision`: that variable is
+   never assigned (§1), and `string !== null` would discard **every**
+   response.
 
 Guard 2 is the correctness one (JS is single-threaded; a late response
 *applied to newer text* is the damage to make impossible); AbortController
@@ -545,7 +572,8 @@ is bandwidth/latency hygiene.
 scheduled closure, so it is born under both guards like any keystroke
 request — no blur-specific bypass exists. Blur does not change
 `area.value`, so the text-snapshot compare is against the same string;
-the revision guard is unchanged; and a flush that lands while an older
+the revision guard is unchanged (blur does not move the form's revision);
+and a flush that lands while an older
 request is in flight supersedes it through guard 1 exactly as fast
 typing does. **What a blur-fired response does (review 6a6db80,
 finding 1):** the §3.5 focus rule decides — while the textarea is
@@ -641,9 +669,9 @@ blur-applied fill" claim is retired with the blur-time apply.
 | B3 | `POST /api/item/<ref>/calc` route + guards + `fields` bag validation (shape only; G1 owns semantics) | `src/refdes/serve/api.py` | ~60 lines |
 | F1 | `{signal}` support in `api()` | `src/refdes/serve/static/api.js` | ~3 lines |
 | F2 | `live-calc.js`: debounce, blur/focus flush (evaluate + panel only, never applies unfocused — §3.5 focus rule; the focus flush is what lands a display-only response's fills after refocus), abort, supersede, panel (incl. truncated footer), auto-fill on stale rows only (caret-skip inclusive of result-range boundaries) + user toggle (localStorage, default ON) + idempotent Fill, Case A/B apply paths (§3.5) | new static module | ~200 lines |
-| F3 | wiring: construct/teardown in `createEditor`, panel mount, save-in-flight flag | `src/refdes/serve/static/editor.js`, `item.js` | ~25 lines |
+| F3 | wiring: construct/teardown in `createEditor`, panel mount, save-in-flight flag, and a `getRevision()` accessor returning the editor closure's `revision` (`editor.js:39`/:238-239) — §3.6's revision guard reads it (never `app.js`'s unassigned `openRevision`, §1) | `src/refdes/serve/static/editor.js`, `item.js` | ~28 lines |
 | D1 | docs pass (below) | `docs/design/inline-calc-later.md` status, `docs/design/browser-editor.md` §"Editing and previewing bodies" pointer, `docs/math.md` editor sentence, `changelog.d/*.added.md` | — |
-| G1 | **Follow-up slice (post-A/B/C): field references in calc spans** per §6.5a — the `ITEM.$field` dotted reference in the grammar and resolver, the own-item non-cycle rule, the saved-target read, and the §6.5 policy answers (unit/missing/hash) landing here | `src/refdes/calc.py` (`CROSS_REF_RE` :1114 + the cross-ref resolver it feeds, :1499), `src/refdes/build.py` (cycle rule :1980 + hash path — the `calc_refs`-shaped hook, :2318) | ~80–120 lines (guess; the hash-path half hinges on the §6.5 hash answer) |
+| G1 | **Follow-up slice (post-A/B/C): field references in calc spans** per §6.5a/§6.5b — the `ITEM.$field` dotted reference in the grammar and resolver, the own-item non-cycle rule, the saved-target read, and the decided policy: bare-collision resolves to the calc value **with a WARNING naming both and `ITEM.$name`**, a non-quantity field value (or unit assertion against one) is an **eval-stage error naming the field**, undeclared/empty fields **error naming the field and listing the item's declared fields**, and **no hash change** (decided: no HASH_FORMAT bump — the release gate owns the stale-result verdict) | `src/refdes/calc.py` (`CROSS_REF_RE` :1114 + the cross-ref resolver it feeds, :1499; the quantity check rides `parse_quantity` :589), `src/refdes/build.py` (cycle rule :1980 — the self-`$` exemption; reference resolution reading saved fields; collision-warning emission through the pass's existing diagnostics path). The hash definitions do not move (§6.5b decision 4) | ~80–120 lines (guess) |
 
 Deliberate non-goals for v1: live preview of `{{name}}` substitution,
 rendered-fragment preview of unsaved bodies (the rest of
@@ -677,8 +705,10 @@ journal's story (#381 — the live layer rides saves unchanged,
   spans; non-object `fields` is the 400; an **unknown request key is
   ignored** (the §3.3 forward-compat contract — today's `fields` was
   once an unknown key too); `snapshot_tree` byte-identity (the
-  `test_no_write.py` posture); response `revision` equals
-  `/api/revision.revision`.
+  `test_no_write.py` posture); response `revision` equals the item's
+  `file_revision` as GET `/api/item/<ref>` serves it (`api.py:825`) —
+  the form's revision space (§3.6 guard 2), **not** the
+  project-wide `/api/revision` `revision` (`state.py:305`).
 - **Oracle test** (the fidelity pin): for each status, build
   `loader.load_readonly(overlay={item_path: text})` and assert the full
   build reports the same computed/stale message for the span the route
@@ -726,7 +756,15 @@ journal's story (#381 — the live layer rides saves unchanged,
    ok-within-window literal
    (`Vout := 2.218 V * 2 = 4.4 V`, computed `4.436 V`, §3.5's probe):
    the row renders, **the body bytes never change** under auto-fill ON
-   (the stale-gate regression pin).
+   (the stale-gate regression pin); (12) revision guard (§3.6): type,
+   then let a **second tab** (or the CLI) save the same item and the
+   2 s poll rebuild land — the calc response computed against the old
+   model arrives and is **discarded**: the panel refreshes, the body
+   text never mutates, and after the form re-renders on the new model
+   the next keystroke re-evaluates and fills apply normally; the
+   normal single-tab case (save through the form, poll quiet) must
+   show fills applying **after** the save — proving the guard
+   discards nothing when nothing moved.
 - Acceptance: checklist green; save/conflict flow tests
   (`test_serve_edit_http*`) untouched; no draft-schema change.
 
@@ -742,23 +780,50 @@ journal's story (#381 — the live layer rides saves unchanged,
 - Acceptance: docs-verified per AGENTS.md (every claim re-run against the
   commands it names).
 
-## 6. Decisions (Jared, 2026-10-25; item 5 on 2026-10-29)
+**Slice G1 — field references in calc spans** (follow-up, post-A/B/C;
+grammar §6.5a, policy §6.5b; **nothing in it exists until it lands**)
+
+- Tests `tests/test_calc_field_refs.py` (unit, on the `check` path):
+  `collision_warns_and_resolves_to_calc` — target carries both a calc
+  value and a field `name`: a bare `TARGET.name` span evaluates the
+  **calc value** and one WARNING names both and the `TARGET.$name`
+  spelling (§6.5b 1); `nonquantity_field_eval_error` — referencing
+  `status: approved` is an eval-stage error naming the field, not a
+  parse-stage message (§6.5b 2); `unit_assertion_on_nonquantity` —
+  `| V` against an enum field, same eval-stage shape (§6.5b 2);
+  `undeclared_field_lists_declared` / `empty_field_lists_declared` —
+  each error names the field and lists the item type's declared
+  fields (§6.5b 3); `own_id_dollar_not_cycle` — `LOG-PWR-002.$rds_on`
+  inside LOG-PWR-002 evaluates (§6.5a 4);
+  `bare_own_id_calc_ref_still_cycle` — bare self-reference keeps
+  today's `calc reference cycle` error (verified at the base: the
+  message is built at `build.py:1980`);
+  `field_edit_moves_result_hash_unchanged` — editing a referenced
+  field moves the computed value, leaves `calc_hash` and the content
+  hash unchanged (no bump — §6.5b 4), and the release gate's
+  `inline_calc_results` rule reports the stale stored result.
+- Acceptance: projects with **no** field references are byte-for-byte
+  unchanged in `check`/`build`/hashes; HASH_FORMAT stays 6; the §3.3
+  unknown-key posture carries the forward compat (slice A's test).
+
+## 6. Decisions (Jared, 2026-10-25; items 5-6 on 2026-10-29)
 
 The first draft's four open questions are answered; each answer is
 folded into the section it changes, and the section list is the
-follow-up map. The answers opened exactly **one new question** (§6.5) —
-the grammar half of decision 4 — which the owner answered on
-2026-10-29 (item 5; recorded with its rationale in §6.5a). The
-policy sub-questions §6.5 raised alongside it (unit handling,
-missing/empty fields, hash/on_change) stay open, plus the collision
-sub-question §6.5a opens. **Provenance (review 96ae35f,
+follow-up map. The answers opened exactly **one new question** (§6.5)
+— the grammar half of decision 4. The owner answered all of it on
+2026-10-29: the reference syntax is item 5 (§6.5a), and the four
+policy questions (collision, unit handling, missing/empty,
+hash/on_change) are item 6 (§6.5b — the drafted proposals adopted
+unchanged). Nothing in §6.5 is open; §4 item G1 is implementation.
+**Provenance (review 96ae35f,
 finding 2):** the four answers were given by the owner in session on
 2026-10-25 as replies to the first review round's open questions;
 this section, mirrored in the PR's round-2 comment, is the **first
 tree record** of them — no pre-existing doc carries them. If a
 record outside this branch is preferred, transcribe §6.1-§6.4 into
 `docs/design/inline-calc.md` as owner decisions (the same offer covers
-item 5 / §6.5a).
+items 5-6 / §6.5a-§6.5b).
 
 1. **Auto-fill on typing AND the manual Fill button, toggleable.**
    Folded into §3.5: the toggle is a checkbox in the panel header,
@@ -782,7 +847,8 @@ item 5 / §6.5a).
    promise mechanical — review 02c3d871),
    §3.6 (blur is born under both stale-response guards: text-snapshot
    supersede compares the unchanged `area.value`, the revision guard
-   is unchanged, and the flush supersedes any in-flight request via
+   is unchanged (the form's own revision is untouched by blur), and
+   the flush supersedes any in-flight request via
    guard 1). Scope of "evaluate", fixed in review round 4
    (6a6db80 finding 1): the answer commits to **evaluation**, not to
    applying — a blur-fired response refreshes the panel and arms the
@@ -803,10 +869,11 @@ item 5 / §6.5a).
    reference looks like inside a span is a grammar/language decision
    owned by `docs/design/inline-calc.md` (§"1. Source form and
    trigger", :63) — **that decision landed**: the owner answered on
-   2026-10-29 as item 5 below (recorded in §6.5a). Until the
-   field-reference slice (§4, item G1) implements it, the bag is
-   carried and the pass ignores it; the §6.5 policy sub-questions are
-   what this design now needs from the owner.
+   2026-10-29 as item 5 below (recorded in §6.5a), with the policy
+   answers as item 6 (§6.5b). Until the
+   field-reference slice (§4, item G1) implements them, the bag is
+   carried and the pass ignores it; what the design needs now is
+   implementation, not answers.
 5. **Field-reference grammar — Form A (2026-10-29).** Item fields are
    referenced with the same dotted shape as a cross-item calc value
    (`ITEM.name`), with an **optional `$` sigil** (`ITEM.$field`) that
@@ -817,21 +884,38 @@ item 5 / §6.5a).
    own-id reference to a calc value stays a cycle error. Cross-item
    field references read the **saved** target (the §3.2 limit); only
    the edited item's own fields come from the editor's `fields` bag.
-   Recorded with its examples, sigil rationale and the open collision
-   sub-question in §6.5a. **Provenance:** answered by the owner
-   in-session 2026-10-29 as the reply to §6.5's reference-syntax
-   sub-question; §6.5a is the first tree record of it (same status as
-   §6.1-§6.4 above).
+    Recorded with its examples, sigil rationale in §6.5a; the
+    collision case it opens is decided in §6.5b (item 6).
+    **Provenance:** answered by the owner
+    in-session 2026-10-29 as the reply to §6.5's reference-syntax
+    sub-question; §6.5a is the first tree record of it (same status as
+    §6.1-§6.4 above).
+6. **Field-reference policy (2026-10-29).** The four open §6.5
+   policy questions are answered — the drafted proposals adopted
+   **unchanged**: (i) a bare `ITEM.name` collision resolves to the
+   **calc value** with a checker **WARNING naming both and the
+   `ITEM.$name` spelling** (error-on-collision rejected); (ii) a
+   referenced field value is parsed as a quantity, and a non-quantity
+   value (or a unit assertion against one) is an **eval-stage error
+   naming the field**; (iii) an undeclared field and a
+   declared-but-empty/null field both **error naming the field and
+   listing the item's declared fields**; (iv) **no HASH_FORMAT
+   bump** — a field-driven computed-value move with `calc_hash`
+   fixed is accepted and covered by the release gate
+   (`inline_calc_results`), and `timeline`/`ignore` fields are
+   **not** forced to `invalidate`. Recorded with the questions they
+   settle in §6.5b. **Provenance:** answered by the owner in-session
+   2026-10-29; §6.5b is the first tree record of them (same status
+   as items 1-5).
 
-### 6.5 Field references in calc spans: syntax decided, policy open
+### 6.5 Field references in calc spans: decided (2026-10-29)
 
-The reference-syntax sub-question of this section was answered by the
-owner on 2026-10-29; §6.5a records it. What remains open are the
-policy sub-questions below (unit handling, missing/empty fields,
-hash/on_change) plus the collision sub-question §6.5a opens — each
-carries the drafting proposal inline, which the owner may adopt or
-override. The §4 item G1 slice is where any of it gets implemented;
-none of it is implemented today.
+Every question in this section was answered by the owner on
+2026-10-29: the reference syntax (§6.5a) and the four policy
+questions — collision, unit handling, missing/empty fields,
+hash/on_change (§6.5b, the drafted proposals adopted **unchanged**).
+Nothing in §6.5 is open; none of it is implemented today — the §4
+item G1 slice is where it lands, with the tests §5 names for it.
 
 Verified starting points (main @ 78c8954, read 2026-10-26; the files
 cited here — `build.py`, `model.py`, `lifecycle.py` — are unchanged
@@ -882,7 +966,7 @@ through aec4dec, so the lines hold):
    `inline_calc.py:67`, used by `parse_span` :318), so no existing
    project changes meaning. The sigil is never required except to
    reach a field that shares its name with a calc value (the
-   collision sub-question below).
+   collision case — decided, §6.5b).
 3. **`$` is chosen because it is free in the grammar** (checked
    against base): `#` is the comment character (first unquoted `#`,
    `calc.py:1151`, :1189), `|` the unit separator (`PIPE_UNIT_RE`
@@ -909,75 +993,61 @@ through aec4dec, so the lines hold):
    (§3.3). Fields are static, so the dependency scan gains no new
    order edges beyond the self case (the live-layer bullet below).
 
-Sub-questions (open, for Jared):
+#### 6.5b Decisions: policy (Jared, 2026-10-29)
 
-- **Collision (opened by decision 2).** A bare `ITEM.name` where
-  the target item has **both** a calc value and a field of that
-  name. **Proposal:** bare resolves to the **calc value** (today's
-  behaviour) and the checker emits a WARNING naming both and the
-  `$` spelling — because a calc added later could otherwise
-  silently shadow a field a span used to read. The alternative
-  (error on collision) was rejected in the 2026-10-29 discussion:
-  with no calc sigil (decision 3), it would leave the calc value
-  unspellable.
-- **Unit handling of field values.** Field values are YAML scalars of
-  arbitrary shape (`status: approved`, `limit: 5 V`, free text). Does
-  a referenced value parse as a quantity (the `calc.parse_quantity`
-  shape, `calc.py:589`)? Message for a non-quantity referenced field:
-  parse-stage (like "stored result missing", `inline_calc.py:351`) or
-  eval-stage (like a unit assertion)? Are `| V` assertions against
-  enum fields a parse error, an eval error, or meaningless-and-rejected?
-  **Proposed default (drafting, for the owner to confirm):** a
-  non-quantity referenced field is an **eval-stage error naming the
-  field** (the unit-assertion shape, not the parse-stage shape — the
-  field reference itself parsed fine; it is the value that fails).
-- **Missing/empty field behavior.** Reference to a field the item's
-  type does not declare: eval error naming the field (the unknown-name
-  shape)? Field declared but empty/null: error, or skip the span as
-  unevaluable? Note the editor's bag carries scalars only —
-  collections/null are not editable (`api.py:1100-1102`) — so
-  list-valued fields (`checks:`) are out of the v1 bag by shape.
-  **Proposed default:** an error naming the field and the item's
-  declared fields, at both ends (undeclared and empty/null) — the
-  unknown-name shape extended with the declaration list, so the
-  author sees what *is* referencable.
-- **Hash / stale consequences.** A field edit is already a content
-  change for invalidate-mode fields, so save-time revision/conflict
-  machinery sees it and the release gate sees the stale stored result
-  — the live panel carries the same messages, so the UX closes over
-  the whole loop. The open calls:
-  - a field edit moves a referencing span's **computed value** while
-    `calc_hash` stays fixed (arithmetic-only probe, :2390) — the exact
-    "upstream value moved" pattern the probe names as not-its-question:
-    accept that, or is a referenced field an arithmetic *input* that
-    belongs in the content hash the way resolved cross-item values
-    entered at format 4 (`calc_refs`, :2318) — which would mean
-    HASH_FORMAT 7 (the #347 precedent for the cost: a gated bump —
-    reconstruction of earlier formats keeps working, no recorded hash,
-    baseline entry or seal moves, per `ba6d153`'s own message);
-  - fields in `on_change: timeline`/`ignore` mode are invisible to
-    the content hash (`build.py:2298-2299`): a referenced field in
-    those modes can silently move a computed result with **no hash
-    change** — is the release gate's coverage the answer, or must
-    referenced fields be forced to `invalidate`?
-  **Proposed default:** accept the no-hash-change case and rely on
-  the release gate (`inline_calc_results`, `lifecycle.py:825`,
-  registered :908) — it fires on exactly the stale stored result a
-  field-driven move produces, so correctness has a verdict gate
-  without a hash change; **do not bump HASH_FORMAT when G1 lands**
-  (the format-7 path stays on the table if hash consumers are later
-  judged to need field-driven moves). For the mode bullet, the
-  forced-`invalidate` alternative (referenced fields pinned to
-  `invalidate` mode) is on the list; the proposal is to rely on the
-  gate and not force it.
-- **Live-layer consequences (listed for completeness, none blocking).**
-  The bag is this item's own draft, read locally — §3.2's "a target's
-  unsaved draft is not visible" limit does not apply to fields, so the
-  panel can show field-driven results for unsaved field edits while
-  `check`-at-save stays the verdict. Fields are local, so the
-  dependency scan needs **no** new cross-item edges; if the hash
-  answer is "fields are arithmetic input", only the hash definitions
-  move, not the scheduler.
+The owner adopted all four drafted proposals **unchanged** on
+2026-10-29. Each decision is recorded under the question it settles —
+the question text stays as the record of the decision's scope.
+
+1. **Collision (the case §6.5a decision 2 opens).** A bare
+   `ITEM.name` where the target item has **both** a calc value and a
+   field of that name resolves to the **calc value** (today's
+   behaviour), and the checker emits a **WARNING naming both and the
+   `$` spelling** (`ITEM.$name`) — because a calc added later could
+   otherwise silently shadow a field a span used to read.
+   Error-on-collision stays **rejected**: with no calc sigil
+   (§6.5a decision 3) it would leave the calc value unspellable.
+2. **Unit handling of field values.** Field values are YAML scalars
+   of arbitrary shape (`status: approved`, `limit: 5 V`, free text).
+   A referenced value is parsed as a quantity (the
+   `calc.parse_quantity` shape, `calc.py:589`); a **non-quantity**
+   value — and any `| V`-style unit assertion against one — is an
+   **eval-stage error naming the field** (the unit-assertion shape,
+   not the parse-stage shape of "stored result missing",
+   `inline_calc.py:351`: the field reference itself parsed fine; it
+   is the value that fails).
+3. **Missing/empty field behavior.** A field the item's type does
+   **not declare**, and a field declared but **empty/null**, are
+   both an **error naming the field and listing the item's declared
+   fields** (the unknown-name shape extended with the declaration
+   list, so the author sees what *is* referencable). The bag's shape
+   note stands: the editor carries scalars only — collections/null
+   are not editable (`api.py:1100-1102`) — so list-valued fields
+   (`checks:`) stay out of the v1 bag.
+4. **Hash / stale consequences.** Rely on the **release gate**
+   (`inline_calc_results`, `lifecycle.py:825`, registered :908): a
+   field edit may move a referencing span's computed value while
+   `calc_hash` stays fixed (the arithmetic-only probe,
+   `build.py:2390`) — **accepted**; the gate fires on exactly the
+   stale stored result a field-driven move produces, so correctness
+   has a verdict gate without a hash change. **No HASH_FORMAT bump
+   when G1 lands** (HASH_FORMAT stays 6, `build.py:2260`); the
+   format-7 path — field values entering the content hash the way
+   resolved cross-item values entered at format 4 (`calc_refs`,
+   `build.py:2318`), with #347's gated-bump precedent — stays
+   available later if hash consumers are judged to need
+   field-driven moves. Fields in `on_change: timeline`/`ignore`
+   mode — invisible to the content hash (`build.py:2298-2299`) —
+   are **not** forced to `invalidate`.
+- **Live-layer consequences (listed for completeness, none
+  blocking).** The bag is this item's own draft, read locally —
+  §3.2's "a target's unsaved draft is not visible" limit does not
+  apply to fields, so the panel can show field-driven results for
+  unsaved field edits while `check`-at-save stays the verdict.
+  Fields are local, so the dependency scan needs **no** new
+  cross-item edges; with the hash decision taken (§6.5b decision
+  4: no bump), neither the hash definitions nor the scheduler move
+  at all.
 
 ## 7. Probes (verification record)
 
