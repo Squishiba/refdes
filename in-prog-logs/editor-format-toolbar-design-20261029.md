@@ -187,15 +187,42 @@ string and options confirmed in this session's probe):
   `name = expr | unit` (math.md:8-19). Fence grammar is strict — a
   half-typed fence is a build **error**, so a fence skeleton must
   always leave fences balanced.
-- Inline calc span: `` `name := expr | unit = result` `` (math.md
-  §Inline calc; trigger: a single-backtick span containing a non-quoted
-  `:=`; the text before `:=` must be a calc name). A triggered span
-  that fails to parse is a build error; a stored block whose result is
-  missing is the warning the live panel shows (math.md, design §3.7) —
-  so the span skeleton has a real decision (open question Q4).
+- Inline calc span (docs/design/inline-calc.md §1, lines 63-98, read
+  this session): trigger = a single-backtick code span containing an
+  unquoted `:=`, in a local item body outside fences; once triggered a
+  malformed span is an error at its source line and **cannot fall back
+  to ordinary code** (inline-calc.md:67-68). Span grammar:
+  `"`" name wsp ":=" wsp rhs [wsp "|" wsp unit] wsp "=" wsp result "`"`
+  with `name = [A-Za-z_][A-Za-z0-9_]*` (inline-calc.md:75-83 — wider
+  than the fence line-name grammar, uppercase allowed). §2's landed
+  severity table (inline-calc.md:145-149): missing `= result`,
+  malformed span, evaluation failure, incompatible unit = **Error**,
+  file:line, with the example message
+  `inline calc Vout: stored result missing; write '= <quantity>'`.
   `{{name}}` / `{{name | unit}}` are values (math.md:59-65);
   unresolved values stay as written with a warning
   (markdown.md:312-313) — a `{{}}` skeleton is safe to insert.
+- **The save gate turns a new build error into a refused save**
+  (measured end-to-end this session, see §C/§H): the candidate is
+  loaded with the edit overlaid (edit.py:517-520),
+  `_blocking_diagnostics` diffs the candidate's error set against the
+  pre-save snapshot's (edit.py:1178-1202, `_errors` at 1134-1144), and
+  any **new** error — plus pre-existing errors attributed to the
+  edited body (edit.py:1170-1174) — returns `Invalid`
+  (edit.py:548-550), which the HTTP layer answers as **422
+  `kind:"invalid"` with the diagnostics in the payload**
+  (api.py:1238-1246). Nothing lands on disk. A failing engineering
+  check (`CHECK_VIOLATION`) is excluded from the gate
+  (edit.py:1141). The live-calc preview route evaluates the author's
+  unsaved draft: fences are evaluated for the environment only and
+  **fence diagnostics are not panel rows — "the save-time 422 owns
+  fences"** (build.py:2141-2147); span rows carry
+  `{line, start, end, name, status: ok|stale|error, computed,
+  message}` and **no result-slot range when the span has no
+  `= result`** (build.py:2184-2196), so auto-fill and Fill are
+  unavailable for such rows (live-calc.js:244 skips
+  `status !== 'stale'`; Fill renders only on stale rows with a
+  result slot, live-calc.js renderRows).
 - Navi marker (PR #382, in review): `<!--navi:KEY text-->`, one line,
   `-->` forbidden in the text, keyless marker minted on the next
   writable load — **verified from in-prog-logs/navis-design-20261025.md
@@ -343,7 +370,7 @@ are browser-native, and they are per-platform:
 | Key | Action | Browser collision (to verify in F.2) |
 |---|---|---|
 | Ctrl/Cmd+B | bold | Chrome: bookmarks-bar toggle — page-preventable, verify |
-| Ctrl/Cmd+I | italic | Chrome: DevTools — reserved in some builds; bind, and **drop if the browser test shows it can't win** |
+| Ctrl/Cmd+I | italic | Chrome: DevTools — **DECIDED (Jared, §H-3): bind it**; the slice's real-browser test must check it, and the binding drops only if real Chromium shows the browser reserves it — and the test result is documented (F.2) |
 | Ctrl/Cmd+K | link | Chrome/FF: focus search/omnibox — page-preventable (Gmail precedent) |
 | Alt+Shift+5 | strike | free (Word convention) |
 | Ctrl/Cmd+Alt+C | code fence | free (Gmail code-block convention) |
@@ -399,8 +426,8 @@ docs/math.md (§A).
 |---|---|---|
 | Reference `[[ID]]` | `[[ID]]` at caret; with sel → `[[ID\|sel]]` (markdown.md:69-75) | Picker, cheap: popover list from `GET /api/items`, the same fetch + `PICKER_LIMIT` + filter-box code links.js already has (links.js:44-47); display ids (`row.id \|\| row.handle`) — **display half**, never `@key` composites (docs/design/keys.md; body refs are plain display ids). This is the v1 checklist item 5 helper (browser-editor.md:1155+). |
 | Figure `[[fig:]]` | skeleton with caret inside the brackets; with sel, sel becomes the id | Cheap skeleton. A real picker would scan the body for image `{id="..."}` suffixes (client-side regex; cross-item figure refs only resolve in combined documents, markdown.md:274-278) — slice-2 follow-up, not v1. |
-| Calc fence | ```` ```calc\n\n``` ```` caret on the empty inner line | Cheap. Skeleton is bare `calc` (legal per math.md:41-45; `id="name"` is optional and its grammar is strict, math.md:53-62 — the author types it). Fences stay balanced by construction. |
-| Inline span | skeleton `` `name := expr | unit = result` ``, sel `name` | Cheap skeleton, **grammar decision**: a half-typed triggered span is a build **error** (math.md, §A); a valid example (`x := 1 V * 2 | V = 2 V`, sel `x`) keeps every intermediate state check/build-clean. Recommendation is the valid skeleton; open question Q4 keeps Jared's veto. |
+| Calc fence | skeleton ```` ```calc\nname = expr | V\n``` ````, sel `name` | Cheap. **DECIDED (Jared, §H-4): the skeleton fails the build in the same spirit as the span** — the unfilled skeleton cannot be saved forgotten. Verified message: `calc 'name': unknown name 'expr'`, an ERROR at the body's source line (measured: `refdes --no-write -c refdes-project.yaml check` on a scratch project, §H-4). The author renames `name`, replaces `expr`. The panel shows no row for it (fences are panel-silent; the save-time 422 owns fences, build.py:2141-2147). An empty fence was the alternative (build-clean) — rejected for the same reason Jared rejected the valid span: a clean unfilled skeleton is a forgotten skeleton. |
+| Inline span | skeleton `` `name := 0 | V` `` (no `= result`), sel `name`, caret after `V` | Cheap. **DECIDED (Jared, §H-4): placeholder-that-fails-the-build** — the author cannot forget to fill it. Skeleton chosen as the *cleanest teaching failure*: it triggers the span grammar (unquoted `:=`, valid name), and the checker's first complaint is the completion instruction, verified verbatim: `inline calc name := 0 | V: stored result missing; write '= <quantity>'` (ERROR at the body line; measured §H-4). While typing, the live-calc panel shows a row with status chip **error**, the span text as name, and that message (route payload measured §H-4); **no auto-fill and no Fill** for it (status `error`, no result slot — live-calc.js:244, build.py:2185-2189), exactly Jared's "no auto-fill because it is not `stale`". Completing `= <quantity>` moves the row to stale/ok under the normal panel rules. The valid-example recommendation (`x := 1 V * 2 | V = 2 V`) was **not taken**. |
 | Value `{{name}}` | `{{}}` caret inside; with sel, sel becomes the name | Cheap. Unresolved names stay as written with a warning (markdown.md:312-313) — safe. A suggest-popover fed by the live-calc rows (which already carry `name`, live-calc.js:142) is the natural slice-3 upgrade. |
 | Image | — | **No new picker**: the Images panel already exists below the textarea (images.js); a bar button that opens/focuses it reuses the server-composed lines (api.py:1487,1545-1546) and upload path. Building a second image UI is a non-goal. |
 | Source | — | Same: focus the existing Sources panel (sourcepicker.js). Accept-and-save stays its own flow (editor.js:161-166). |
@@ -429,29 +456,24 @@ not project), different failure mode.
 - **Line height**: three steps — compact 1.35 / normal 1.5
   (current) / loose 1.7.
 
-No free-form font-family string in v1: the CSSOM path is CSP-safe
-(§A probe), and an arbitrary string can only name locally installed
-fonts (no network, per-property sanitizing by the CSS parser), so the
-risk is cosmetic — but three stacks + size is the 90% case and keeps
-the popover a popover. Open question Q2 if Jared wants his own stack.
+No free-form font-family string: **DECIDED (Jared, §H-2) — three fixed
+stacks only, plus size and line-height controls.** (The CSSOM path is
+CSP-safe, §A probe, and an arbitrary stack can only name locally
+installed fonts, so a free-form field is a cosmetic-risk affordance the
+decision explicitly declines; the popover stays a popover.)
 
 ### Where the setting lives: localStorage, not project config
 
-Recommendation: **localStorage, per-user browser**, key
-`refdes.editor.font`, JSON `{family, size, lineHeight}`, validated on
-read (bad payload → defaults), storage failures degrade to
-defaults in-memory (the live-calc fallback pattern).
-
-Why not `refdes-project.yaml` (verified cost, §A): the `editor:`
-block needs a `_KNOWN_SETTINGS` entry (schema.py:65-73) +
-configcheck validation + docs/schema-reference.md + schema tests +
-exposure to the editor through the revision payload + serve snapshot
-plumbing — a full PR of project-wide surface for a preference that
-is per-*person*. The project-config rationale is already written:
-yaml settings are shared project facts reviewed in PRs; UI
-preferences are per-user; the editor has no per-user identity
-(inline-calc design §6.1, lines 866-966). The font is that same
-shape. Open question Q1 asks Jared to confirm.
+**DECIDED (Jared, §H-1): a browser preference only** — localStorage,
+key `refdes.editor.font`, JSON `{family, size, lineHeight}`, validated
+on read (bad payload → defaults), storage failures degrade to defaults
+in-memory (the live-calc fallback pattern). The same class as
+`refdes.live-calc.autofill` (live-calc.js:17) — which is exactly the
+precedent Jared cited. **No `refdes-project.yaml` change is in this
+feature's scope** (verbatim §H-1), so the schema work that option
+would cost (a `_KNOWN_SETTINGS` entry at schema.py:65-73, configcheck
+validation, docs/schema-reference.md, schema tests, revision-payload
+plumbing — §A) is not scheduled by anything in this design.
 
 ### How it applies (CSP-constrained, §A probe)
 
@@ -493,8 +515,8 @@ shape. Open question Q1 asks Jared to confirm.
 |---|---|---|---|
 | 0 | this doc | design only | — |
 | 1 | `editor-format-bar` | formatbar.js: shared Case A/B mutator, core row (bold/italic/strike/code/heading/list/numbered/quote/link/table/HR), shortcuts, a11y, read-only inert, isSaving gate; converts `insertIntoBody` to the shared mutator (fixes the latent §B panel gap); node-driven tests | **#388 merged** (shared textarea contract + `isSaving()` accessor; the file itself has no import dependency on live-calc.js) |
-| 2 | `editor-refdes-buttons` | refdes row: `[[ID]]` picker (GET /api/items), calc-fence/inline-span/`{{}}` skeletons, image/source panel-focus buttons; tests | slice 1 |
-| 3 | `editor-font-setting` | font popover, localStorage store, CSS custom properties, tests | nothing (can land parallel with 1-2) |
+| 2 | `editor-refdes-buttons` | refdes row: `[[ID]]` picker (GET /api/items, all items + type-ahead filter — §H-5), calc-fence/inline-span/`{{}}` skeletons (span/fence skeletons per §H-4, exact texts in §C), image/source panel-focus buttons; tests | slice 1 |
+| 3 | `editor-font-setting` | font popover (three stacks + size + line-height, §H-2), localStorage store (browser-only, §H-1 — no schema/serve changes in this slice), CSS custom properties, tests | nothing (can land parallel with 1-2) |
 | 4 | `docs` | new user-facing `docs/browser-editor.md` (the editor has **no user doc** today — §A), index.md nav entry; update docs/design/browser-editor.md v1 item 5 → done; a formatting/font section in docs/markdown.md pointers | 1-3 landed |
 | follow-up | `editor-navi-button` | the Navi marker button | **#382 merged** (grammar) + slice 2 |
 
@@ -538,6 +560,34 @@ true (Case A) / false (Case B), asserting:
   to its "wired into the editor" checks (test_serve_static.py:118-128
   pattern).
 
+**Skeleton-detection tests (slice 2, §H-4)** — python, plain pytest
+(the posture of the inline-calc checker tests):
+
+- `tests/test_editor_skeletons.py`: a project whose body is exactly
+  the span skeleton text, run through the real loader/build, asserts
+  one error whose message is
+  `inline calc name := 0 | V: stored result missing; write '= <quantity>'`
+  at the body's source line; and for the fence skeleton,
+  `calc 'name': unknown name 'expr'`. These pin the exact strings the
+  buttons insert, so a skeleton-text change fails a test (the exact
+  messages above were measured this session against
+  `refdes --no-write -c refdes-project.yaml check` on a scratch
+  project).
+- Save-gate pin (`test_serve_edit_http.py`/`serve_support.Client`
+  posture, verified live this session): `POST /api/item/<ref>/edit`
+  with `op:"set_body"` carrying a **newly introduced** span skeleton
+  → **422 `kind:"invalid"`** with that diagnostic, file bytes
+  unchanged (edit.py:548-550, api.py:1238-1246); completing the span
+  with a real `= <quantity>` saves. (Note measured nuance: a span
+  that already existed pre-edit with the identical diagnostic key is
+  *not* a new error — the gate is delta-based.)
+- Panel-row pin (`test_serve_calc_preview.py` posture):
+  `POST /api/item/<ref>/calc` with the skeleton draft returns the
+  span row with `status: "error"`, the message above, and **no
+  `result_start`/`result_end`** keys (measured; build.py:2184-2199) —
+  which is what keeps auto-fill and Fill away from it
+  (live-calc.js:244).
+
 ### F.2 Real-browser checklist (the recipe is real, not a wish)
 
 Environment verified this session: `/usr/bin/chromium` 153.0.8010.52
@@ -553,18 +603,27 @@ node):
 
 - [ ] Ctrl+Z one step per insert (type text → click Bold → single
       Ctrl+Z restores pre-click text exactly).
-- [ ] Ctrl+B/I/K: the formatting fires and **no** bookmarks bar /
-      DevTools / omnibox steals it (drop any binding the browser
-      wins in this column).
+- [ ] Ctrl+B/K: the formatting fires and **no** bookmarks bar /
+      omnibox steals it (drop any binding the browser wins in this
+      column).
+- [ ] **Ctrl+I (required by §H-3):** fires the italic insert in real
+      Chromium; if Chromium reserves it (DevTools opens despite
+      `preventDefault`), drop the binding and record the observed
+      outcome in the PR — §H-3 requires the check and the documented
+      result, not a guess.
 - [ ] focus stays on the textarea after a mouse click on a button
       (`document.activeElement`); Enter/Space activation returns
       focus to it.
 - [ ] Case A proven in Chromium: `execCommand('insertText')` returns
       true on a focused textarea (live-calc runs on the same
       assumption; verify, don't assume).
-- [ ] with the #388 panel running: insert a calc fence → panel shows
-      the fence's rows on the next debounce; insert mid-save →
-      nothing lands (and the bar visibly no-ops).
+- [ ] with the #388 panel running: insert the inline-span skeleton →
+      panel shows its `error` row with the "stored result missing"
+      message and no Fill; insert a calc-fence skeleton → panel shows
+      **no fence row** (fences are panel-silent, build.py:2141-2147 —
+      the save-time 422 owns fences; this is the measured contract,
+      not a gap); insert mid-save → nothing lands (and the bar
+      visibly no-ops).
 - [ ] font popover: family/size/line-height changes →
       `getComputedStyle(textarea)` updates, persists across reload
       + item switch; corrupt `refdes.editor.font` payload → editor
@@ -587,8 +646,10 @@ node):
   HTML, callouts (not in the renderer's supported set,
   docs/markdown.md).
 - Fonts on the preview iframe / published site / preview pane;
-  project-level font config (Q1 records the veto); free-form font
-  stacks in v1 (Q2).
+  project-level font config (**DECIDED out, §H-1**: no
+  `refdes-project.yaml` change in this feature); free-form font
+  stacks (**DECIDED out, §H-2**: three fixed stacks only); task-list
+  buttons (renderer fact, above).
 - A body field on the create form (there is none today, §A) —
   teaching the create form a body is its own design.
 - A second image/source picker (reuse the existing panels).
@@ -597,26 +658,94 @@ node):
 
 ---
 
-## H. Open questions for Jared (recommendations first)
+## H. Decisions (Jared, 2026-10-29, on PR #389's open questions)
 
-1. **Font scope.** Recommendation: localStorage per-user only (Q-cost
-   in §D). Add an `editor:` block to `refdes-project.yaml` as a later
-   project-wide default that localStorage overrides? (My read: not
-   worth a schema PR for a personal preference, but the veto is
-   yours.)
-2. **Font families.** Three fixed stacks (mono/sans/serif) in v1,
-   per §D — or do you want a free-form stack field?
-3. **Ctrl+I italic.** Chrome may reserve it for DevTools on some
-   builds. Recommendation: bind it, drop it if the F.2 checklist
-   shows the browser wins.
-4. **Inline-span skeleton.** Recommendation: insert a *valid* span
-   (`x := 1 V * 2 | V = 2 V`) so the build never goes red on a fresh
-   skeleton — vs a placeholder skeleton that reads as a TODO but
-   fails `check`/`build` until fixed. Your call which failure mode
-   is better for authors.
-5. **`[[ID]]` picker scope.** Recommendation: all items + a filter
-   box (the links.js convention, links.js:44-47). Pre-filtering to
-   the item's board/workspace in v1?
+1. **Font scope — DECIDED: browser preference only.** localStorage,
+   like `refdes.live-calc.autofill` (live-calc.js:17 — the precedent
+   Jared cited). **No project-level default and no
+   `refdes-project.yaml` change in this feature** (verbatim decision);
+   folded into §D. The schema-surface cost recorded there stands as
+   the rationale for the choice.
+2. **Font families — DECIDED: three fixed stacks** (monospace /
+   system sans / serif) plus size and line-height controls; no
+   free-form stack. Folded into §D.
+3. **Ctrl+I — DECIDED: bind it**, and the slice's real-browser test
+   must check it (§F.2); the binding drops **only** if real Chromium
+   shows the browser reserves it, and that outcome must be documented
+   in the PR. Folded into §B/§F.2.
+4. **Skeletons — DECIDED: placeholder-that-fails-the-build.** Jared
+   chose the span skeleton that fails the build "so the author cannot
+   forget to fill it in"; the design's recommendation (a valid example
+   span) was **not taken**. Everything below was measured this session
+   on a scratch project (`.scratch/editor-toolbar-design/spanproj`,
+   run with `PYTHONPATH=src` +
+   `refdes --no-write -c refdes-project.yaml check`) and against the
+   live editor endpoints (`EditorApp` + token, `op:"set_body"`):
+
+   - **Exact span skeleton: `` `name := 0 | V` ``** (no `= result`
+     part), `name` selected on insert. It triggers the span grammar
+     (unquoted `:=`, valid name, inline-calc.md:66-83), and the
+     checker's measured message is
+     `ERROR items/a.yaml:3 [DEC-001] — inline calc name := 0 | V: stored result missing; write '= <quantity>'`
+     — an ERROR **at the body's source line**, naming the span and
+     spelling the exact fix. (The `expr | unit`-style placeholders
+     produce the same class of message — the result check runs first —
+     so the simplest skeleton wins; `0` parses as a valid RHS and
+     introduces no second complaint.)
+   - **Panel while typing:** `POST /api/item/<ref>/calc` on the
+     skeleton draft returns
+     `{name: "name := 0 | V", status: "error", computed: "",
+     message: "inline calc name := 0 | V: stored result missing;
+     write '= <quantity>'"}` with **no `result_start`/`result_end`**
+     (measured; build.py:2184-2199) — the row renders as an
+     error-chip line with the message; auto-fill skips it
+     (`status !== 'stale'`, live-calc.js:244) and Fill is absent
+     (stale-rows-only, live-calc.js renderRows). No auto-fill,
+     exactly as Jared specified.
+   - **Save: BLOCKED.** With the skeleton **newly introduced**, the
+     real save endpoint answered **422 `kind:"invalid"`** carrying
+     that exact diagnostic (measured against a live `EditorApp`;
+     mechanism: new error vs the pre-save snapshot,
+     `_blocking_diagnostics` edit.py:1178-1202 → `Invalid`
+     edit.py:548-550 → 422 with diagnostics api.py:1238-1246).
+     **Nothing lands on disk** — the file kept its previous bytes
+     (verified), and the draft survives client-side (`clearDraft` runs
+     only on success, editor.js:252). Completing the span (`= <real
+     quantity>`) saves cleanly. Nuance measured too: the gate is
+     delta-based — a span that already existed in the file with the
+     identical diagnostic key is *not* new, and that save applies
+     (the diagnostics come back in the 200 payload,
+     api.py:1225).
+   - **Calc fence skeleton — decided for consistency: the
+     placeholder-line fence** ```` ```calc\nname = expr | V\n``` ````,
+     `name` selected; measured message
+     `ERROR items/c.yaml:3 [DEC-003] — calc 'name': unknown name 'expr'`
+     at the body line, and it blocks the save the same way (422
+     measured). The build-clean empty fence was the alternative and is
+     rejected for the reason Jared gave for the span: a clean unfilled
+     skeleton is a forgotten skeleton. Same teaching shape in both
+     buttons: the editor refuses the save and says exactly what to
+     write.
+   - **Risk note for Jared (save-blocked, in one paragraph):** with
+     these skeletons the user-visible consequence is **blocked save**,
+     never "saved with a build error": the item's body op is refused
+     with the completion instruction in the message, the file is
+     untouched, the draft survives, and the author fixes one line. My
+     reading: this is the right trade. It matches the project's
+     existing posture ("a body the author cannot save is a body this
+     route does not evaluate", api.py:798-799) and the gate is
+     delta-based, so pre-existing red does not lock the editor. The
+     sharp edge is scope: the refusal lands on the **whole body op**,
+     so an unrelated prose fix in the same body is also refused while
+     an unfilled skeleton sits in it — the recovery is typing the
+     result, and the skeleton is one button away from being deleted.
+     I'd accept that; it is the same "finish what the tool inserted"
+     pressure Jared asked for, and it fails toward a clean repo, which
+     is what the editor has always guarded.
+5. **`[[ID]]` picker scope — NOT ASKED; default taken: all items with
+   a type-ahead filter** (the links.js convention, links.js:44-47),
+   as recommended in the open-questions version of this section.
+   Folded into §C/§E.
 
 ---
 
@@ -635,3 +764,22 @@ task checkboxes do NOT), env (chromium/node/firefox cache), CSP +
 `test_serve_static` constraints. No source/test changes (docs-only,
 per brief). Work finished; the deliverable is this file; PR opened
 with it.
+
+2026-10-29 (round 2): Jared answered the open questions on the PR
+(§H-1..4 decided, §H-5 default taken) — §H retitled Decisions, all
+five folded into §A/§B/§C/§D/§E/§F/§G, hedging removed. New
+measurements this round (all in the doc): skeleton span
+`` `name := 0 | V` `` and skeleton fence ```` ```calc\nname = expr |
+V\n``` ```` messages from a real `refdes --no-write ... check` run on
+a scratch project; live calc-preview route row (status `error`, no
+result slot); and the **save-path test-drive** (live `EditorApp`,
+real token, `op:"set_body"`): newly-introduced skeleton → 422
+`kind:"invalid"` with the diagnostic, file bytes unchanged; pre-existing
+identical key → applies (delta-gate nuance, documented). Gate code
+read: edit.py:548-550/1178-1202, api.py:1238-1246; preview row schema
+build.py:2184-2199; fences panel-silent build.py:2141-2147; span
+grammar docs/design/inline-calc.md §1-§2 (the user-facing twin of
+docs/math.md — the doc now cites it for the span). Citation fix:
+live-calc.js auto-fill gate is line 244. Scratch project kept at
+`.scratch/editor-toolbar-design/spanproj/`. Docs-only again; one
+push.
