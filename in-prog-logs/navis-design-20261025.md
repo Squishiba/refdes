@@ -1,6 +1,11 @@
 Status: Design proposal. Owner decisions of 2026-10-25 are recorded as binding
-(§2). Nothing is implemented; every claim about current behavior below names
-the file (and command, where run) it was verified against.
+(§2). Slice 1 (§13) is implemented: the marker grammar, the body scan into
+`Item.navis` with malformed-marker diagnostics, the read-only
+`refdes navis ls/all/show`, the `index` payload key, and marker consumption
+on render. Slices 2-4 (key minting, archive, site panel) are not. Every
+claim about current behavior below names the file (and command, where run)
+it was verified against; `build.py`/`cli.py`/`render.py` line cites reflect
+the slice-1 code.
 
 # Navis — project-wide flying notes
 
@@ -68,19 +73,19 @@ Inventory of inline syntax a marker must not collide with (all verified in
 
 | Syntax | Definition |
 | --- | --- |
-| `[[ID]]`, `[[ID#field]]`, `[[ID#calc:name]]`, `[[ID\|label]]` | `EXPLICIT_REF_RE` `build.py:69-72`; `CALC_FRAGMENT_PREFIX` `build.py:76` |
-| `[[fig:…]]`, `[[cite:…]]` | `build.py:3280-3311`, `CITATION_ID_RE` `build.py:189` |
-| bare ids `REQ-PWR-002` | `BARE_REF_RE` `build.py:78` |
-| `{{name}}`, `{{name \| unit}}` (item bodies) | `INLINE_VALUE_RE` `build.py:82-84` |
+| `[[ID]]`, `[[ID#field]]`, `[[ID#calc:name]]`, `[[ID\|label]]` | `EXPLICIT_REF_RE` `build.py:70-73`; `CALC_FRAGMENT_PREFIX` `build.py:77` |
+| `[[fig:…]]`, `[[cite:…]]` | `build.py:3281-3312`, `CITATION_ID_RE` `build.py:190` |
+| bare ids `REQ-PWR-002` | `BARE_REF_RE` `build.py:79` |
+| `{{name}}`, `{{name \| unit}}` (item bodies) | `INLINE_VALUE_RE` `build.py:83-85` |
 | `{{index}}`… block directives (**pages only**, not items) | `blocks.py:1-63` |
 | inline calc span: single backtick with unquoted `:=`, outside fences **and outside HTML comments** | `inline_calc.py:1-4,48-59,519` |
 | ` ```calc ` fences | `CALC_BLOCK_RE` `calc.py:993` |
-| images/figures with `{width=…}` attrs | `FIGURE_RE` `build.py:155-168` |
+| images/figures with `{width=…}` attrs | `FIGURE_RE` `build.py:156-169` |
 
 Rendering facts, verified:
 
 - The Markdown engine is `MarkdownIt("gfm-like", {"html": False,
-  "linkify": False})` — **html off** (`build.py:2694`), and markdown-it with
+  "linkify": False})` — **html off** (`build.py:2695`), and markdown-it with
   `html:false` *escapes*
   HTML comments to visible text (`<!--x-->` renders as
   `&lt;!--x--&gt;`) — checked by running
@@ -91,7 +96,7 @@ Rendering facts, verified:
   unless the pipeline consumes it** — and the pipeline must scan bodies for
   markers anyway, so the design makes consumption part of the scan.
 - Inline calc deliberately skips HTML comments (`inline_calc.py:1-4,48-53`)
-  and warns on unclosed ones (`build.py:1797-1803`).
+  and warns on unclosed ones (`build.py:1798-1804`).
 
 **Options for the marker form:**
 
@@ -99,11 +104,11 @@ Rendering facts, verified:
 | --- | --- |
 | A. Single-backtick code span, e.g. `` `navi: text` `` | Visible in rendered output (not inert); collides with inline calc whenever the Navi text contains `:=` (triggered span → hard error, `docs/design/inline-calc.md` §1); multi-backtick author escape hatch gets confusing. |
 | B. `[[navi: text]]` link-style | Text containing `|`, `]]`, `#`, or `:` breaks the closed link grammar; unknown `a:b` namespaces are reported typos today, so this is a grammar extension with a collision surface. |
-| C. **HTML comment marker** `<!--navi:KEY text-->` | Invisible in renderers that pass raw HTML through (GitHub, VS Code preview — they consume comments); on this project's `html: false` renderer it shows as escaped visible text (the probe above), so the scan must consume it — the design's own inertness requirement, not a free property; cannot trigger inline calc (comments suppress spans, verified above); no collision with any syntax in the table; fenced code contains it as literal text (scan must skip fences — same scan `inline_calc.triggered_spans` already does); `-->` is forbidden in Navi text (it terminates the comment) and unclosed-comment diagnostics already exist (`build.py:1797-1803`). |
+| C. **HTML comment marker** `<!--navi:KEY text-->` | Invisible in renderers that pass raw HTML through (GitHub, VS Code preview — they consume comments); on this project's `html: false` renderer it shows as escaped visible text (the probe above), so the scan must consume it — the design's own inertness requirement, not a free property; cannot trigger inline calc (comments suppress spans, verified above); no collision with any syntax in the table; fenced code contains it as literal text (scan must skip fences — same scan `inline_calc.triggered_spans` already does); `-->` is forbidden in Navi text (it terminates the comment) and unclosed-comment diagnostics already exist (`build.py:1798-1804`). |
 
 **Recommendation: C.** Concrete grammar (a closed family, reported on typo —
 the codebase's stated policy that silently-ignored author intent is the
-failure, `build.py:66-68`):
+failure, `build.py:67-69`):
 
 ```text
 navi_marker = "<!--navi:" [ key wsp ] text "-->"      # one line only
@@ -117,13 +122,15 @@ text        = any text, single line, not containing "-->"
   the kind of byte-equality trap `textio` exists to avoid), keeps line
   reporting exact (a marker line is `item.body_line + offset`, the
   `inline_calc` line-reporting pattern), and keeps the panel row a sentence.
+  A `<!--navi:` that closes on a later line is a warning naming the
+  opening line (`navis.scan_body` over `analyze_navis`, `navis.py:1120,1163`), not a silently-ignored Navi.
 - Author writes `<!--navi: remember X-->`; the tool mints the key into the
   marker on the next writable load (§5, §7.2). Malformed `navi:` comment
   (bad key length/alphabet, empty text) is a warning diagnostic at the line
   (model.Diagnostic, `src/refdes/model.py:144-156`), never swallowed.
 - Consumption: the body scan strips markers before `md.render` (exactly the
   way calc fences are swapped for pass-through placeholder tokens before
-  render, `build.py:3155-3157,3955`); published HTML therefore contains no
+  render, `build.py:3156-3158,3960-3961`); published HTML therefore contains no
   marker bytes.
 
 ## 5. Stable identity
@@ -190,9 +197,9 @@ for the active list; the record's snapshot is the archive).
 Verified against the code:
 
 - The content hash includes the **body only when the body's `on_change`
-  mode is `invalidate`** (`src/refdes/build.py:2309-2313`,
+  mode is `invalidate`** (`src/refdes/build.py:2310-2314`,
   `item.on_change_for("body", spec, spec.body_on_change)`; current
-  `HASH_FORMAT = 6`, `build.py:2260`).
+  `HASH_FORMAT = 6`, `build.py:2261`).
 - A `log`-family item is `append_only` with `sealing == SEALING_HISTORY`
   under the capture model (`src/refdes/seal.py:384,621`); build-sealed
   append-only items exist for `SEALING_BUILD` types (`seal.py:418,476`).
@@ -211,7 +218,7 @@ by item kind (all verified as above):
   the one documented hint `refdes build --reseal <board>`
   (`src/refdes/seal.py:69-74`).
 - Body mode `log`/`ignore`: hash-neutral (hash includes body only under
-  `invalidate`, `build.py:2309`).
+  `invalidate`, `build.py:2310`).
 - A history-captured item: the digest no longer matches the capture →
   "edited after captured" — **visible, never fatal** (decided,
   `docs/design/living-notes.md` §3 decision 2;
@@ -223,7 +230,7 @@ The author writes the marker keyless; the first **writable load** mints the
 key into the marker — the same class of write as hand-authored `follows:`
 anchoring in the writable-load path (`links.plan_follows_anchor()` /
 `anchor_follows()`, `src/refdes/links.py:685,822`, called from `load_tree()`
-at `src/refdes/loader.py:149`, reached from `_load()` at `src/refdes/cli.py:58` with
+at `src/refdes/loader.py:149`, reached from `_load()` at `src/refdes/cli.py:60` with
 `write=not (args.no_write or dry_run)`, `docs/design/living-notes.md` §2).
 It is announced, never silent (same rule as capture, living-notes §2.5: a
 writable command prints a line naming the write). Consequence stated
@@ -234,14 +241,14 @@ way they add any text, in an edit they intend to reseal/accept.
 ### 7.3 Archive/restore touch no body, ever — the hard invariant
 
 Archive/restore write only under `.refdes/navis/`: no item file byte changes
-→ no content hash change (`build.py:2263`), no seal mismatch (`seal.py:432`
+→ no content hash change (`build.py:2264`), no seal mismatch (`seal.py:432`
 compares hashes of append-only items), no history event and no
 edited-after-captured flip (`history.py:799`, read-only under
 `capture_index`), no editor file-revision bump (the editor's
 `expected_revision` tracks the item file). A test suite must pin this
 invariant (archive a Navi, assert item bytes/hashes byte-identical).
 `--no-write` refuses archive/restore through `_refuse_no_write()`
-(`src/refdes/cli.py:94-101`); in `refdes serve`, the API layer already
+(`src/refdes/cli.py:97-108`); in `refdes serve`, the API layer already
 returns 403 on writes under `--no-write` (`src/refdes/serve/api.py:1082-1083`).
 
 ## 8. Compression format
@@ -282,7 +289,7 @@ an edited Navi (active rows read live text).
 The source is the containing item: panel row links to the item's site page
 (today's item pages are per item, `src/refdes/templates/item.html.j2`).
 Identity resolution is by item key (the `index` payload already carries
-`key` and `source: {file, line}` per item, `src/refdes/render.py:734,756`),
+`key` and `source: {file, line}` per item, `src/refdes/render.py:743,765`),
 never by display id (renames: `DISPLAY-ID@key` precedent,
 `docs/design/keys.md:84`). CLI rows print
 `DISPLAY-ID (file:line)`. A fragment anchor to the marker line is deferred:
@@ -290,21 +297,36 @@ markers are consumed at render, so there is no in-page anchor target in v1.
 
 ## 11. Project-wide index, panel placement, CLI parity
 
-**Build path.** Markers are discovered in the body scan (regex over item
-bodies outside fences — `inline_calc.triggered_spans` precedent,
-`src/refdes/inline_calc.py:519`; linear in body size, the same cost class
-inline calc already pays). The projection is computed **once per build /
+**Build path.** Markers are discovered by a scan driven by the renderer
+itself: one cached `analyze_navis(body)` per body value — a dedicated
+instrumented MarkdownIt instance (the production parser's own config plus
+provenance wrappers, so the production renderer is never decorated) walks
+each inline token's children against exact source ranges and a lexical
+machine (inline_calc's contract) turns the live ranges into markers
+(`src/refdes/navis.py`). The scan, the render-local strip and the
+projection all consume that one immutable `Analysis`, whose spans are
+exact raw byte ranges validated against the raw line. A marker is inert
+exactly where the published page renders it as literal text -- fences
+(including inside blockquotes), indented code, code spans spanning lines,
+open comments (a plain `<!--` keeps its ownership across blank lines,
+headings and fences, the body-wide contract; an unclosed `<!--navi:` does
+not) -- and linear in body size, the same cost class inline calc already
+pays. A marker that *closes* on a later line of its own block is a
+warning naming the opening line; an unclosed one stays the
+existing unclosed-comment diagnostic's. Nothing raises out of a build:
+a body whose provenance cannot be replayed fails closed as a diagnostic
+with the source byte-intact. The projection is computed **once per build /
 once per render** — the standing rule for task-pane data
-(`render.py:1136-1148`, "one projection per render", PR #197 review P4) —
+(`render.py:1145-1157`, "one projection per render", PR #197 review P4) —
 and merged with the `.refdes/navis/` record set (active = markers minus
 archived keys; archived = records). `refdes index` gains a `navis` key
-following the "absent key, not null" convention (`render.py:640-642`).
+following the "absent key, not null" convention (`render.py:641-643`).
 
 **Panels.**
 - *Published site:* the `taskpane_assets` pattern is the template —
   per-project asset pair written only when the render has Navis, so a
   project without Navis publishes byte-identical output
-  (`src/refdes/render.py:1026-1050`); assets included from `base.html.j2`
+  (`src/refdes/render.py:1035-1059`); assets included from `base.html.j2`
   (as taskpane css/js are, `base.html.j2:10,66`); the panel data is embedded
   server-side (no fetch — the task pane "fetches nothing" contract,
   `templates/taskpane/taskpane.js:1-13`). The site panel is **read-only**
@@ -331,7 +353,7 @@ following the "absent key, not null" convention (`render.py:640-642`).
 
 **CLI parity (semantic reachability — AGENTS.md rule).** New
 `refdes navis` family, noun-verb style matching `keys adopt` /
-`history capture` (`src/refdes/cli.py:3424-3441,3573-3625`):
+`history capture` (`src/refdes/cli.py:3670-3685,3819-3844`):
 
 ```console
 refdes navis ls             # active Navis project-wide
@@ -384,17 +406,17 @@ of the same projection, never a second implementation (the task pane's
    `index` payload `navis` key (absent-key convention). Site output
    byte-identical (markers consumed, panel not yet emitted).
 2. **Key minting on writable load.** `<!--navi:` → `<!--navi:key …` in
-   `_load(write=True)` (`cli.py:58` gate), announced line
+   `_load(write=True)` (`cli.py:60` gate), announced line
    (`anchor_follows` precedent, `links.py:685,822`); short-key resolution
    (6-char prefix) in CLI; corruption lint via
    `keys.malformed_key_message()`-style validation (`keys.py:131`).
 3. **Archive store + archive/restore.** gzip records under
    `.refdes/navis/`, per-project lock, `--no-write` refusal
-   (`cli.py:94-101`), §9 state table incl. `navis.archived_orphan`,
+   (`cli.py:97-108`), §9 state table incl. `navis.archived_orphan`,
    journal-dir refusal (§12), byte-identity invariant tests (§7.3).
-4. **Site panel.** Projection once-per-render (`render.py:1136-1148`
+4. **Site panel.** Projection once-per-render (`render.py:1145-1157`
    pattern), `navis_assets` gate byte-identical for Navis-free projects
-   (`render.py:1026-1050` pattern), `base.html.j2` include, read-only panel
+   (`render.py:1035-1059` pattern), `base.html.j2` include, read-only panel
    + Show-all, z-index stack above task pane.
 5. **Serve.** `GET /api/navis`, `POST …/archive`, `POST …/restore`
    (token-gated `server.py:783-786`, 403 under `--no-write`
