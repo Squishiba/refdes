@@ -1732,18 +1732,23 @@ def _make_calc_resolver(
             )
         if warnings is not None:
             spec = project.types.get(target.type)
-            current = (target.fields or {}).get(name)
             if (
                 spec is not None
                 and name in spec.fields
-                and spec.fields[name].type not in NON_SCALAR_FIELD_TYPES
-                and current is not None
-                and str(current).strip()
+                and name in (target.fields or {})
             ):
+                # The decided policy warns whenever BOTH exist -- empty,
+                # null and list-valued fields included. The `$` spelling is
+                # only suggested where it can actually read the field.
+                scalar = spec.fields[name].type not in NON_SCALAR_FIELD_TYPES
+                hint = (
+                    " -- write " + f"{display}.$" + f"{name} to read the field"
+                    if scalar
+                    else " -- this field is list-valued, so no reference reads it"
+                )
                 warnings.append(
                     f"{display} has both a calc value {name!r} and a field "
-                    f"{name!r}; the reference reads the calc value -- write "
-                    f"{display}.$" + f"{name} to read the field"
+                    f"{name!r}; the reference reads the calc value{hint}"
                 )
         return value
 
@@ -1874,12 +1879,28 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
     source_resolved: dict[tuple[str, str], tuple[str, str | None]] = {}
     item._source_uses = []
     calc_warnings: list[str] = []
+
+    def field_fields(target_str: str) -> list[str]:
+        # The declared, identifier-style field names of a reference target --
+        # what the non-identifier field-name error lists (calc.py
+        # FIELD_FIELDS_KEY). Best effort: an unresolvable target lists nothing.
+        target = resolve_link_target(by_key, project, target_str)
+        spec = project.types.get(target.type) if target is not None else None
+        if spec is None:
+            return []
+        return sorted(
+            name
+            for name in spec.fields
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
+        )
+
     env: dict[str, calc.Value] = {
         calc.RESOLVER_KEY: _make_calc_resolver(project, by_key, calc_warnings),
         calc.SOURCE_RESOLVER_KEY: _make_source_resolver(
             project, item, records, source_resolved, item._source_uses
         ),
         calc.CALC_WARNINGS_KEY: calc_warnings,
+        calc.FIELD_FIELDS_KEY: field_fields,
     }
     # name -> line first assigned, threaded across every block of this item
     # exactly like `env` -- what lets evaluate_block catch a name reused in
@@ -2042,6 +2063,7 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
     del env[calc.RESOLVER_KEY]
     del env[calc.SOURCE_RESOLVER_KEY]
     del env[calc.CALC_WARNINGS_KEY]
+    del env[calc.FIELD_FIELDS_KEY]
     item._env = env  # retained for check evaluation and cross-item references
     item._calc_failed = failed
 

@@ -1126,6 +1126,15 @@ FIELD_REF_RE = re.compile(
     r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
     r"\.\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)$"
 )
+# The same shape with a name half that is not an identifier: `DEC-001.$rds-on`
+# (a declared field whose schema key allows characters the reference grammar
+# does not). Never resolves -- the grammar is deliberately not widened -- so
+# the whole-right-hand-side `$` shape gets a message naming the field name
+# and the identifier rule, not the arithmetic shape blame.
+FIELD_REF_SHAPE_RE = re.compile(
+    r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
+    r"\.\$(?P<name>[^$.\s]*)$"
+)
 # A dotted reference with a block half spliced in: `DEC-PWR-001.losses.P_diss`,
 # and the same shape with `$` segments: `DEC-PWR-001.losses.$rds_on`. Rejected,
 # never resolved (docs/design/named-calc-blocks.md §4.2, §7): a calc value is
@@ -1290,6 +1299,11 @@ SOURCE_RESOLVER_KEY = "__refdes_calc_source_resolver__"
 # on the found value, so an append with no value is a resolver bug; the drain
 # rides the error outcomes too, so even that shape loses no message.
 CALC_WARNINGS_KEY = "__refdes_calc_warnings__"
+# Key under which the caller installs a callable taking a reference target
+# string and returning the target type's declared, identifier-style field
+# names (sorted), for the non-identifier field-name error's listing. Best
+# effort: absent or raising, the message just omits the listing.
+FIELD_FIELDS_KEY = "__refdes_calc_field_fields__"
 
 
 def assigned_names(source: str) -> set[str]:
@@ -1571,7 +1585,7 @@ def evaluate_block(
             sink = env.get(CALC_WARNINGS_KEY)
             mark = len(sink) if isinstance(sink, list) else 0
 
-            def drained() -> str | None:
+            def drained(sink: list, mark: int) -> str | None:
                 return (
                     "; ".join(sink[mark:])
                     if isinstance(sink, list) and len(sink) > mark
@@ -1587,7 +1601,7 @@ def evaluate_block(
                     CalcOutcome(name, expression, comment, None, str(exc),
                                 annotation, unit_style=unit_style,
                                 line=line_number, reference=reference,
-                                warning=drained())
+                                warning=drained(sink, mark))
                 )
                 continue
             except Exception as exc:  # noqa: BLE001 -- resolver may surface pint errors too
@@ -1595,12 +1609,12 @@ def evaluate_block(
                     CalcOutcome(name, expression, comment, None, str(exc),
                                 annotation, unit_style=unit_style,
                                 line=line_number, reference=reference,
-                                warning=drained())
+                                warning=drained(sink, mark))
                 )
                 continue
             env[name] = value
             origins[name] = line_number
-            ref_warning = drained()
+            ref_warning = drained(sink, mark)
             outcomes.append(
                 CalcOutcome(name, expression, comment, value, None, annotation,
                             ref_warning, unit_style=unit_style, line=line_number,
@@ -1609,6 +1623,38 @@ def evaluate_block(
             continue
 
         if "$" in rhs:
+            shape = FIELD_REF_SHAPE_RE.match(rhs)
+            if shape:
+                # The whole right-hand side IS a `$` reference, but the field
+                # name is not identifier-style (a hyphen, a leading digit):
+                # the grammar is deliberately not widened, so blame the name
+                # and the rule -- not the arithmetic shape, which is what the
+                # generic message below would say. Listing the names that DO
+                # qualify is the caller's job (it knows the schema).
+                listing = ""
+                fields_of = env.get(FIELD_FIELDS_KEY)
+                if callable(fields_of):
+                    try:
+                        declared = fields_of(shape.group("target"))
+                    except Exception:  # noqa: BLE001 -- listing is best effort
+                        declared = None
+                    if declared:
+                        listing = (
+                            "; the item type declares: "
+                            + ", ".join(declared)
+                        )
+                outcomes.append(
+                    CalcOutcome(
+                        name, expression, comment, None,
+                        f"field name {shape.group('name')!r} cannot be "
+                        "referenced with $: calc field references need an "
+                        "identifier-style name ([A-Za-z_][A-Za-z0-9_]*), "
+                        f"which {shape.group('name')!r} is not{listing}",
+                        annotation, unit_style=unit_style,
+                        line=line_number,
+                    )
+                )
+                continue
             # A field reference spliced into arithmetic: `x = A.$v * 2`. The
             # reference form is the whole right-hand side (like a cross-item
             # reference), never an operand -- the `$` token has no meaning in

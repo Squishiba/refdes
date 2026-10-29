@@ -32,6 +32,8 @@ BASIC_CONFIG = (
     "      V_in: { type: text }\n"
     "      blank: { type: text }\n"
     "      tags: { type: list }\n"
+    "      rds-on: { type: text }\n"
+    "      2stage: { type: text }\n"
 )
 
 
@@ -135,6 +137,44 @@ def test_dollar_in_larger_arithmetic_is_a_clear_error(tmp_path):
     assert "ITEM.$field" in errors[0].message
 
 
+def test_hyphenated_field_name_gets_its_own_error(tmp_path):
+    # The schema key `rds-on` is legal; the reference grammar's name half is
+    # identifier-only. The error names the field and the rule -- it does NOT
+    # blame the shape ("must be the whole right-hand side") -- and lists the
+    # declared names that DO qualify.
+    _write_items(
+        tmp_path,
+        {
+            "a.md": _item_md("DEC-001", "A resistor.\n", {"rds-on": "18 mohm"}),
+            "b.md": _item_md("DEC-002", "```calc\nQ = DEC-001.$rds-on\n```\n"),
+        },
+    )
+    project = _load(tmp_path, write=False)
+    errors = [d for d in project.errors if "cannot be referenced with $" in d.message]
+    assert errors, project.errors
+    assert "'rds-on'" in errors[0].message
+    assert "identifier-style" in errors[0].message
+    assert "the item type declares: V_in, blank, limit, rds_on, tags" in (
+        errors[0].message
+    )
+    assert "whole right-hand side" not in errors[0].message
+
+
+def test_leading_digit_field_name_gets_its_own_error(tmp_path):
+    _write_items(
+        tmp_path,
+        {
+            "a.md": _item_md("DEC-001", "A resistor.\n", {"2stage": "5 V"}),
+            "b.md": _item_md("DEC-002", "```calc\nQ = DEC-001.$2stage\n```\n"),
+        },
+    )
+    project = _load(tmp_path, write=False)
+    errors = [d for d in project.errors if "cannot be referenced with $" in d.message]
+    assert errors, project.errors
+    assert "'2stage'" in errors[0].message
+    assert "whole right-hand side" not in errors[0].message
+
+
 def test_block_qualified_field_reference_is_rejected(tmp_path):
     _write_items(
         tmp_path,
@@ -217,7 +257,7 @@ def test_undeclared_field_lists_declared_fields(tmp_path):
     project = _load(tmp_path, write=False)
     errors = [d for d in project.errors if "has no field 'nope'" in d.message]
     assert errors, project.errors
-    assert "it declares: V_in, blank, limit, rds_on, tags" in errors[0].message
+    assert "it declares: 2stage, V_in, blank, limit, rds-on, rds_on, tags" in errors[0].message
 
 
 def test_empty_field_lists_declared_fields(tmp_path):
@@ -231,7 +271,7 @@ def test_empty_field_lists_declared_fields(tmp_path):
     project = _load(tmp_path, write=False)
     errors = [d for d in project.errors if "field 'blank' is empty" in d.message]
     assert errors, project.errors
-    assert "it declares: V_in, blank, limit, rds_on, tags" in errors[0].message
+    assert "it declares: 2stage, V_in, blank, limit, rds-on, rds_on, tags" in errors[0].message
 
 
 def test_list_valued_field_is_out_of_scope(tmp_path):
@@ -284,6 +324,47 @@ def test_collision_warns_and_resolves_to_calc(tmp_path):
     warnings = [d for d in project.warnings if "both a calc value" in d.message]
     assert warnings, project.warnings
     assert "$V_in" in warnings[0].message
+
+
+def test_collision_with_empty_field_warns(tmp_path):
+    # The decided policy warns whenever BOTH exist -- an empty string, a
+    # null, a list included -- because the bare reference silently resolves
+    # to the calc value in every case.
+    for label, saved in (("empty", '""'), ("null", "")):
+        _write_items(
+            tmp_path,
+            {
+                "a.md": _item_md(
+                    "DEC-001", "```calc\nblank = 12 V\n```\n", {"blank": saved}
+                ),
+                "b.md": _item_md("DEC-002", "```calc\nW = DEC-001.blank\n```\n"),
+            },
+        )
+        project = _load(tmp_path, write=False)
+        assert not project.errors, (label, project.errors)
+        assert project.item_by_id("DEC-002").calc_values["W"] == "12 V"
+        warnings = [d for d in project.warnings if "both a calc value" in d.message]
+        assert warnings, (label, project.warnings)
+        assert "$blank" in warnings[0].message, (label, warnings[0].message)
+
+
+def test_collision_with_list_field_warns(tmp_path):
+    _write_items(
+        tmp_path,
+        {
+            "a.md": _item_md(
+                "DEC-001", "```calc\ntags = 12 V\n```\n", {"tags": "[alpha, beta]"}
+            ),
+            "b.md": _item_md("DEC-002", "```calc\nW = DEC-001.tags\n```\n"),
+        },
+    )
+    project = _load(tmp_path, write=False)
+    assert not project.errors, project.errors
+    assert project.item_by_id("DEC-002").calc_values["W"] == "12 V"
+    warnings = [d for d in project.warnings if "both a calc value" in d.message]
+    assert warnings, project.warnings
+    assert "list-valued" in warnings[0].message
+    assert "$tags" not in warnings[0].message
 
 
 def test_explicit_dollar_reads_the_field_and_is_silent(tmp_path):
@@ -531,8 +612,7 @@ def test_calc_rewrite_preserves_field_reference_lines(tmp_path):
             "a.md": RESISTOR,
             "b.md": _item_md(
                 "DEC-002",
-                "```calc\nRds = DEC-001.$rds_on | mohm\nP : mW = Rds * 0\n```\n"
-                .replace("Rds * 0", "1 V * 2 A"),
+                "```calc\nRds = DEC-001.$rds_on | mohm\nP : mW = 1 V * 2 A\n```\n"
             ),
         },
     )

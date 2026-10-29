@@ -200,9 +200,11 @@ on one line, arithmetic on the next).
 The read is the saved item, not its evaluated calc env, so a field reference
 creates no dependency edge: the target's calc never runs "for" the reference,
 two items may read each other's fields, and `X.$field` inside `X` itself is
-legal (a bare self-reference keeps its cycle error). Field values never enter
-any hash, so editing the field moves the computed result — and, for a span,
-the stale-result warning — not the referring item's content hash.
+legal (a bare self-reference keeps its cycle error). The field's value is
+not part of the referring item's hash: editing the field moves the computed
+result — and, for a span, the stale-result warning — not the referring
+item's content hash (the target item's own hash moves with the edit exactly
+as it does for any field edit).
 
 Bare `DEC-001.name` keeps meaning the calc value. When the target has *both*
 a calc value and a field named `name`, the reference resolves to the calc

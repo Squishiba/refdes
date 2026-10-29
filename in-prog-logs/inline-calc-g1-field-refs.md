@@ -89,6 +89,23 @@ naming `ITEM.$field` and the working `DEC-001.$rds_on` spelling. (6)
 (7) Bare-key item half (`KEY.$field`) resolve test added. Suite 5090
 passed/2 skipped; touched-file ruff unchanged vs baseline.
 
+## Review round 2 (PR #387, final round, batched)
+
+(1) Non-identifier field names (`$rds-on`, `$2stage`) got their own error
+(field name + identifier rule + the qualifying declared fields, via a new
+FIELD_FIELDS_KEY callable); grammar NOT widened; hyphen and leading-digit
+tests pin it. (2) The `drained` closure took loop vars (5 new B023);
+it now takes them as parameters — per-file ruff counts re-measured and
+stated in the PR body: build 0/0, calc 15/15, inline_calc 4/4, links 1/1
+(worktree/baseline). (3) Collision warning now fires whenever the target
+has both a calc value and a set field of that name — empty string, null,
+list-valued included (list gets its own hint: no reference reads it);
+tests pin each. (4) Hash wording in docs/math.md and the changelog
+narrowed: the field's value is not part of the REFERRING item's hash;
+the target's own hash moves with the edit as for any field. (5) The
+calc-rewrite test spells its retired-form line directly. Suite 5094
+passed / 2 skipped.
+
 ## Notes / leftovers
 - Unit display quirk (pre-existing): `mohm` normalizes to `mΩ` in computed
   output, so tests assert `18 m\u03a9` for results while stored spans may
