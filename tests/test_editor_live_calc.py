@@ -1,0 +1,736 @@
+"""The live inline-calc layer in the browser editor, driven under node
+(in-prog-logs/inline-calc-live-editor-design-20261020.md §3.1-§3.8, slice B).
+
+Same posture as ``test_editor_link_undo.py`` / ``test_editor_draft_mirror.py``:
+no browser, the REAL served modules under node -- the real ``editor.js``
+wiring (which builds the real ``live-calc.js`` controller and binds it to the
+body textarea through ``bodyControl``) over ``api.js``, ``drafts.js`` and
+stubs for DOM/sessionStorage/localStorage/fetch/timers. The fetch stub
+resolves each ``/calc`` call on demand, so a response lands exactly when the
+scenario needs it (mid-typing, unfocused, with a foreign revision); the fake
+timer queue pins the 400 ms debounce without real waiting.
+
+Scenarios, one node process:
+
+- debounce: a keystroke schedules one request 400 ms later; a second
+  keystroke resets it (§3.1); the request carries the textarea text and the
+  draft's ``fields`` bag (§3.3).
+- supersede: typing after a request fires discards the response silently --
+  no panel update, no text change -- and the next debounce re-requests (§3.6).
+- revision guard: a payload whose ``revision`` is not the form's own is
+  discarded silently; the matching one applies (§3.6, never ``openRevision``).
+- abort: the superseding request aborts the in-flight one (§3.6 guard 1).
+- blur evaluates only: blur flushes the pending request; the response
+  refreshes the panel and arms Fill, mutates no text, steals no focus (§3.1,
+  §3.5 focus rule); refocus re-fires the flush and the fills apply (§3.6).
+- caret skip is inclusive of both result-range boundaries (§3.5).
+- line-relative columns convert to document offsets -- a span below line 0
+  fills its own range, not line 0's (§3.3).
+- last-to-first application keeps earlier ranges valid (§3.5).
+- the caret shifts only by applied ranges that END before it (§3.5).
+- Case B: insertText false -> the .value splice fills, the no-undo line
+  shows, auto-fill self-disables for the session, Fill keeps working (§3.5).
+- the auto-fill toggle persists in localStorage and gates exactly the text
+  mutation: OFF renders rows and Fill still works (§3.5, §6.1).
+- an ok-within-window literal (``4.4 V`` vs computed ``4.436 V``) is never
+  rewritten under auto-fill ON (§3.5's stale gate -- the D1 pin).
+- no request while a save round-trip is in flight (§3.1), and the post-save
+  form revision passes the guard.
+- Fill is idempotent: a second click on an applied span mutates nothing (§3.5).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+
+import pytest
+
+STATIC = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "refdes", "serve", "static"
+)
+
+NODE = shutil.which("node")
+
+# One node spawn for all scenarios; generous for a cold process start on a
+# shared runner (see the timeout note in test_vscode_extension.py for why
+# 10 s is not one).
+NODE_TIMEOUT_S = 120
+
+HARNESS = r"""
+const STATIC = __STATIC__;
+const url = (name) => `file://${STATIC}/${name}`;
+
+// ---------- storage stubs
+const sessionStore = new Map();
+globalThis.sessionStorage = {
+  getItem: (k) => (sessionStore.has(k) ? sessionStore.get(k) : null),
+  setItem: (k, v) => sessionStore.set(k, String(v)),
+  removeItem: (k) => sessionStore.delete(k),
+};
+const localStore = new Map();
+globalThis.localStorage = {
+  getItem: (k) => (localStore.has(k) ? localStore.get(k) : null),
+  setItem: (k, v) => localStore.set(k, String(v)),
+  removeItem: (k) => localStore.delete(k),
+};
+
+// ---------- fake DOM
+let focusCalls = 0;
+let EXEC_FAILS = false;
+
+class FakeNode {
+  constructor(tag) {
+    this.tagName = tag.toUpperCase();
+    this.children = [];
+    this.attrs = {};
+    this.listeners = {};
+    this._text = '';
+    this.value = '';
+    this.dataset = {};
+    this.disabled = false;
+    this.hidden = false;
+    this.checked = false;
+    this.type = '';
+    this.selectionStart = 0;
+    this.selectionEnd = 0;
+  }
+  set className(v) { this._cls = v; }
+  get className() { return this._cls || ''; }
+  set textContent(v) { this._text = String(v); this.children = []; }
+  get textContent() {
+    return this.children.length
+      ? this.children.map((c) => c.textContent).join('')
+      : this._text;
+  }
+  appendChild(child) { child._parent = this; this.children.push(child); return child; }
+  remove() {
+    const parent = this._parent;
+    if (parent) parent.children = parent.children.filter((c) => c !== this);
+  }
+  setAttribute(name, value) { this.attrs[name] = value; }
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+  removeEventListener(type, fn) {
+    this.listeners[type] = (this.listeners[type] || []).filter((f) => f !== fn);
+  }
+  dispatch(type) { for (const fn of this.listeners[type] || []) fn({}); }
+  click() { this.dispatch('click'); }
+  setSelectionRange(s, e) { this.selectionStart = s; this.selectionEnd = e; }
+  focus() { globalThis.document.activeElement = this; focusCalls += 1; }
+  select() {}
+}
+
+function hasCls(node, cls) {
+  const tokens = (node.className || '').split(/\s+/);
+  return cls.split(/\s+/).every((c) => tokens.includes(c));
+}
+
+function findAll(node, cls) {
+  const out = [];
+  if (node && hasCls(node, cls)) out.push(node);
+  if (!node) return out;
+  for (const child of node.children) out.push(...findAll(child, cls));
+  return out;
+}
+
+function find(node, cls) { return findAll(node, cls)[0] || null; }
+
+globalThis.document = {
+  createElement: (tag) => new FakeNode(tag),
+  querySelector: (sel) => (sel.includes('refdes-token') ? { content: 'tok' } : null),
+  activeElement: null,
+  execCommand: (name, ui, text) => {
+    if (name !== 'insertText' || EXEC_FAILS) return false;
+    const a = globalThis.document.activeElement;
+    if (!a || a.tagName !== 'TEXTAREA') return false;
+    const s = Math.min(a.selectionStart, a.value.length);
+    const e = Math.min(Math.max(a.selectionEnd, s), a.value.length);
+    a.value = a.value.slice(0, s) + text + a.value.slice(e);
+    a.selectionStart = a.selectionEnd = s + text.length;
+    return true;
+  },
+};
+globalThis.window = { addEventListener: () => {} };
+
+// ---------- fake timers (the debounce is pinned, never real-waited)
+let now = 0;
+let timerSeq = 0;
+const timers = new Map();
+globalThis.setTimeout = (fn, ms) => {
+  const id = ++timerSeq;
+  timers.set(id, { at: now + ms, fn });
+  return id;
+};
+globalThis.clearTimeout = (id) => { timers.delete(id); };
+
+const flushMicro = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
+async function advance(ms) {
+  now += ms;
+  for (;;) {
+    const due = [...timers.entries()].filter(([, t]) => t.at <= now).sort((a, b) => a[1].at - b[1].at);
+    if (!due.length) break;
+    for (const [id, t] of due) {
+      timers.delete(id);
+      t.fn();
+      await flushMicro();
+    }
+  }
+  await flushMicro();
+}
+
+// ---------- fetch: /calc resolves on demand, /edit is scripted per scenario
+const calcCalls = [];
+let editSettle = null;
+globalThis.fetch = async (path, init) => {
+  if (path.includes('/calc')) {
+    const call = { path, body: JSON.parse(init.body), signal: init && init.signal, settle: null };
+    call.promise = new Promise((resolve, reject) => { call.settle = { resolve, reject }; });
+    if (call.signal) call.signal.addEventListener('abort', () => call.settle.reject(new Error('AbortError')));
+    calcCalls.push(call);
+    return call.promise;
+  }
+  if (path.includes('/edit')) {
+    editPosts.push(init && init.body ? JSON.parse(init.body) : null);
+    return new Promise((resolve) => { editSettle = (payload, ok) => resolve(
+      { ok, status: ok ? 200 : 422, statusText: 'OK', json: async () => payload });
+    });
+  }
+  if (path.startsWith('/api/items')) {
+    return { ok: true, status: 200, statusText: 'OK', json: async () => ({ items: [] }) };
+  }
+  return { ok: true, status: 200, statusText: 'OK', json: async () => ({}) };
+};
+const editPosts = [];
+
+const settleCalc = async (call, payload, ok = true, status = 200) => {
+  call.settle.resolve({ ok, status, statusText: 'OK', json: async () => payload });
+  await flushMicro();
+};
+const settleEdit = async (payload, ok = true) => {
+  const settle = editSettle;
+  editSettle = null;
+  settle(payload, ok);
+  await flushMicro();
+};
+
+const { createEditor } = await import(url('editor.js'));
+const drafts = await import(url('drafts.js'));
+
+function editItem(handle) {
+  return {
+    id: handle,
+    revision: 'rev-0',
+    edit: { editable: true, file_revision: 'rev-0', fields: {}, body: { editable: true }, links: {} },
+  };
+}
+
+// opening the editor runs bodyControl -> live-calc attach -> the open flush
+// (design §3.1: an opened item with stale spans shows the panel immediately)
+function openEditor(handle, body) {
+  const editor = createEditor(editItem(handle), handle, () => {}, () => {});
+  const area = editor.bodyControl(body, null);
+  const calls = () => calcCalls.filter((c) => c.path.includes(encodeURIComponent(handle)));
+  const panel = editor.liveCalcPanel;
+  return {
+    editor, area, panel, calls,
+    rowCount: () => findAll(panel, 'live-calc-row').length,
+    fills: () => findAll(panel, 'live-calc-fill'),
+    type: (text) => { area.value = text; area.dispatch('input'); },
+    focus: () => { globalThis.document.activeElement = area; area.dispatch('focus'); },
+    blur: () => { globalThis.document.activeElement = null; area.dispatch('blur'); },
+  };
+}
+
+// a stale span over the first occurrence of `stored` on `line` of `text`
+function spanOn(text, stored, computed, name = 'Vbad', line = 0) {
+  const col = text.split('\n')[line].indexOf(stored);
+  return {
+    line,
+    start: 0, end: text.split('\n')[line].length,
+    result_start: col, result_end: col + stored.length,
+    name, status: 'stale', computed,
+    message: `inline calc ${name}: stored result says ${stored}, now computes ${computed}`,
+  };
+}
+const payload = (spans, revision = 'rev-0') => ({ revision, spans });
+
+const results = {};
+const T1 = 'Rail `Vbad := 2 V * 2 = 5 V`';
+const T1_FILLED = 'Rail `Vbad := 2 V * 2 = 4 V`';
+
+// -- debounce: one request 400 ms after the last keystroke; the second
+//    keystroke resets; the request carries the text and the fields bag (§3.1, §3.3)
+{
+  const h = 'DEC-DB';
+  const ed = openEditor(h, T1);
+  const openReq = ed.calls();
+  await settleCalc(openReq[0], payload([]));
+  ed.type(T1 + ' x');
+  await flushMicro();
+  const firedOnKeystroke = ed.calls().length;
+  await advance(399);
+  const at399 = ed.calls().length;
+  await advance(2);
+  const at401 = ed.calls().length;
+  ed.type(T1 + ' xy');
+  await advance(200);
+  ed.type(T1 + ' xyz');
+  await advance(250);
+  const midReset = ed.calls().length;
+  await advance(200);
+  const afterReset = ed.calls().length;
+  const sent = ed.calls()[2].body;
+  results.debounce = {
+    firedOnKeystroke, at399, at401, midReset, afterReset,
+    sentText: sent.text, sentFields: sent.fields,
+  };
+  drafts.clearDraft(h);
+}
+
+// -- supersede guard: typing beats the network; the response is discarded
+//    silently (no panel update) and the next debounce re-requests (§3.6)
+{
+  const h = 'DEC-SUP';
+  const ed = openEditor(h, T1);
+  await settleCalc(ed.calls()[0], payload([]));
+  ed.type(T1 + ' tail');
+  await advance(401);
+  const inflight = ed.calls()[1];
+  ed.type(T1 + ' tail typed');
+  await settleCalc(inflight, payload([spanOn(T1 + ' tail', '5 V', '4 V')]));
+  results.supersede = {
+    panelHidden: ed.panel.hidden,
+    rowCount: ed.rowCount(),
+    textKept: ed.area.value === T1 + ' tail typed',
+  };
+  await advance(401);
+  await settleCalc(ed.calls()[2], payload([spanOn(T1 + ' tail typed', '5 V', '4 V')]));
+  results.supersede.reRequestedRows = ed.rowCount();
+  drafts.clearDraft(h);
+}
+
+// -- revision guard: a response computed against an old model is discarded
+//    silently; the form's own revision passes and renders (§3.6)
+{
+  const h = 'DEC-REV';
+  const ed = openEditor(h, T1);
+  await settleCalc(ed.calls()[0], payload([spanOn(T1, '5 V', '4 V')], 'rev-9'));
+  const guarded = { hidden: ed.panel.hidden, rows: ed.rowCount(), text: ed.area.value };
+  ed.type(T1 + '.');
+  await advance(401);
+  await settleCalc(ed.calls()[1], payload([spanOn(T1 + '.', '5 V', '4 V')]));
+  results.revisionGuard = {
+    ...guarded,
+    matchedHidden: ed.panel.hidden,
+    matchedRows: ed.rowCount(),
+  };
+  drafts.clearDraft(h);
+}
+
+// -- abort: the superseding request aborts the in-flight one (§3.6 guard 1)
+{
+  const h = 'DEC-ABT';
+  const ed = openEditor(h, T1);
+  const first = ed.calls()[0];
+  ed.focus(); // the focus flush is a trigger: it supersedes the open flush
+  results.abort = {
+    secondFired: ed.calls().length === 2,
+    firstAborted: first.signal.aborted === true,
+  };
+  drafts.clearDraft(h);
+}
+
+// -- blur evaluates only; refocus re-fires and applies (§3.1, §3.5, §3.6)
+{
+  const h = 'DEC-BLUR';
+  const ed = openEditor(h, T1);
+  await settleCalc(ed.calls()[0], payload([]));
+  ed.focus();
+  await settleCalc(ed.calls()[1], payload([]));
+  ed.type(T1);
+  const focusCallsBefore = focusCalls;
+  ed.blur(); // mid-debounce: flush the pending request through the same closure
+  const firedOnBlur = ed.calls().length === 3;
+  await settleCalc(ed.calls()[2], payload([spanOn(T1, '5 V', '4 V')]));
+  const blurPhase = {
+    firedOnBlur,
+    panelRows: ed.rowCount(),
+    fillArmed: ed.fills().length,
+    textUnchanged: ed.area.value === T1,
+    focusStolen: focusCalls > focusCallsBefore,
+    activeUnfocused: globalThis.document.activeElement === null,
+  };
+  ed.focus(); // refocus: the focus flush re-fires; text unchanged, guards pass
+  const refired = ed.calls().length === 4;
+  await settleCalc(ed.calls()[3], payload([spanOn(T1, '5 V', '4 V')]));
+  results.blurFocus = { ...blurPhase, refired, filled: ed.area.value === T1_FILLED };
+  drafts.clearDraft(h);
+}
+
+// -- caret skip is inclusive of BOTH result-range boundaries (§3.5)
+{
+  const RES = T1.indexOf('5 V');
+  const cases = {};
+  for (const [label, at] of [['start', RES], ['end', RES + 3], ['inside', RES + 1], ['outside', 0]]) {
+    const h = `DEC-CARET-${label}`;
+    const ed = openEditor(h, T1);
+    await settleCalc(ed.calls()[0], payload([]));
+    ed.area.setSelectionRange(at, at);
+    ed.focus();
+    await settleCalc(ed.calls()[1], payload([spanOn(T1, '5 V', '4 V')]));
+    cases[label] = {
+      text: ed.area.value,
+      caret: ed.area.selectionStart,
+      rows: ed.rowCount(),
+    };
+    drafts.clearDraft(h);
+  }
+  results.caret = cases;
+}
+
+// -- a span below line 0 (a fence above it) fills its own result range:
+//    the line/column -> document-offset conversion (§3.3)
+{
+  const h = 'DEC-LINE';
+  const text = '```calc\nV_in = 3.3 V\n```\n\nRail `Vbad := 2 V * 2 = 5 V`\n';
+  const ed = openEditor(h, text);
+  await settleCalc(ed.calls()[0], payload([]));
+  ed.area.setSelectionRange(0, 0);
+  ed.focus();
+  await settleCalc(ed.calls()[1], payload([spanOn(text, '5 V', '4 V', 'Vbad', 4)]));
+  const lines = ed.area.value.split('\n');
+  results.lineOffset = {
+    fenceKept: lines[0] === '```calc' && lines[1] === 'V_in = 3.3 V' && lines[2] === '```',
+    filledLine: lines[4],
+    whole: ed.area.value,
+  };
+  drafts.clearDraft(h);
+}
+
+// -- two stale spans on one line apply last-to-first, so the earlier
+//    offsets stay valid in the same pass (§3.5)
+{
+  const h = 'DEC-LAST';
+  const text = 'A `V1 := 2 V * 2 = 5 V` B `V2 := 3 V * 2 = 9 V`';
+  const ed = openEditor(h, text);
+  await settleCalc(ed.calls()[0], payload([]));
+  ed.area.setSelectionRange(0, 0);
+  ed.focus();
+  await settleCalc(ed.calls()[1], payload([
+    spanOn(text, '5 V', '40 V', 'V1'),
+    spanOn(text, '9 V', '6 V', 'V2'),
+  ]));
+  results.lastToFirst = {
+    whole: ed.area.value,
+    want: 'A `V1 := 2 V * 2 = 40 V` B `V2 := 3 V * 2 = 6 V`',
+  };
+  drafts.clearDraft(h);
+}
+
+// -- the caret shifts only by applied ranges that END before it: V1 (range
+//    ends before the caret, delta +1) shifts; V2 (range after the caret)
+//    contributes zero (§3.5)
+{
+  const h = 'DEC-SHIFT';
+  const text = 'A `V1 := 2 V * 2 = 5 V` B `V2 := 3 V * 2 = 9 V`';
+  const caret0 = text.indexOf(' B');
+  const ed = openEditor(h, text);
+  await settleCalc(ed.calls()[0], payload([]));
+  ed.area.setSelectionRange(caret0, caret0);
+  ed.focus();
+  await settleCalc(ed.calls()[1], payload([
+    spanOn(text, '5 V', '44 V', 'V1'),
+    spanOn(text, '9 V', '66 V', 'V2'),
+  ]));
+  results.caretShift = { caret0, caret: ed.area.selectionStart, whole: ed.area.value };
+  drafts.clearDraft(h);
+}
+
+// -- Case B: insertText proven false -> splice fills, the no-undo line
+//    shows, auto-fill self-disables for the session, Fill keeps working (§3.5)
+{
+  const h = 'DEC-CASEB';
+  EXEC_FAILS = true;
+  const ed = openEditor(h, T1);
+  await settleCalc(ed.calls()[0], payload([]));
+  ed.focus();
+  await settleCalc(ed.calls()[1], payload([spanOn(T1, '5 V', '4 V')]));
+  const spliced = ed.area.value === T1_FILLED;
+  const notes = findAll(ed.panel, 'live-calc-note');
+  const warn = notes.find((n) => hasCls(n, 'warn'));
+  const noUndoLine = Boolean(warn) && warn.hidden === false;
+  // auto-fill is off for the session: the next stale response renders rows
+  // and mutates nothing
+  ed.type(T1_FILLED);
+  await advance(401);
+  await settleCalc(ed.calls()[2], payload([spanOn(T1_FILLED, '4 V', '8 V')]));
+  const selfDisabled = { text: ed.area.value, rows: ed.rowCount() };
+  // Fill (the author's own click) applies through the splice
+  ed.fills()[0].click();
+  results.caseB = {
+    spliced, noUndoLine,
+    selfDisabledText: selfDisabled.text,
+    selfDisabledRows: selfDisabled.rows,
+    fillWorks: ed.area.value === 'Rail `Vbad := 2 V * 2 = 8 V`',
+  };
+  EXEC_FAILS = false;
+  drafts.clearDraft(h);
+}
+
+// -- an ok-within-window literal is never rewritten under auto-fill ON:
+//    status ok, computed 4.436 V, stored 4.4 V stays byte-for-byte (§3.5)
+{
+  const h = 'DEC-OKWIN';
+  const text = 'Rail `Vout := 2.218 V * 2 = 4.4 V`';
+  const ed = openEditor(h, text);
+  await settleCalc(ed.calls()[0], payload([]));
+  ed.area.setSelectionRange(0, 0);
+  ed.focus();
+  const okSpan = spanOn(text, '4.4 V', '4.436 V', 'Vout');
+  okSpan.status = 'ok';
+  okSpan.message = '';
+  await settleCalc(ed.calls()[1], payload([okSpan]));
+  results.okWithinWindow = {
+    textUnchanged: ed.area.value === text,
+    rows: ed.rowCount(),
+    fillButtons: ed.fills().length,
+  };
+  drafts.clearDraft(h);
+}
+
+// -- a save in flight: no calc request; after the save the form's advanced
+//    revision passes the guard and the panel renders (§3.1, §3.6)
+{
+  const h = 'DEC-SAVE';
+  const ed = openEditor(h, T1);
+  await settleCalc(ed.calls()[0], payload([]));
+  ed.focus(); // focus flush: request #2, settles clean
+  await settleCalc(ed.calls()[1], payload([]));
+  ed.type(T1); // the keystroke dirties the draft; the debounce is pending
+  ed.editor.node; // (the save button lives in the editor block)
+  const save = find(ed.editor.node, 'save');
+  save.disabled = false;
+  save.click(); // saveAll: the in-flight flag goes up before the round-trip
+  await flushMicro();
+  await advance(900); // past the debounce: the flag must have suppressed it
+  const duringSave = ed.calls().length; // open + focus flush, nothing more
+  await settleEdit({ revision: 'rev-1' });
+  ed.focus(); // the post-save re-render re-arms: the focus flush re-requests
+  const afterSave = ed.calls().length === 3;
+  const text = ed.calls()[2].body.text;
+  await settleCalc(ed.calls()[2], payload([spanOn(text, '5 V', '4 V')], 'rev-1'));
+  results.saveInFlight = {
+    duringSave, afterSave,
+    panelHidden: ed.panel.hidden,
+    filled: ed.area.value === T1_FILLED,
+    posts: editPosts.map((p) => `${p.op}@${p.expected_revision}`),
+  };
+  drafts.clearDraft(h);
+}
+
+// -- the toggle: default ON applies; OFF persists in localStorage, renders
+//    the rows, mutates nothing, and Fill still works; a reload restores it (§3.5, §6.1)
+{
+  const hOn = 'DEC-TGL-ON';
+  const edOn = openEditor(hOn, T1);
+  await settleCalc(edOn.calls()[0], payload([]));
+  edOn.area.setSelectionRange(0, 0);
+  edOn.focus();
+  await settleCalc(edOn.calls()[1], payload([spanOn(T1, '5 V', '4 V')]));
+  const defaultApplied = edOn.area.value === T1_FILLED;
+  const checkbox = find(edOn.panel, 'live-calc-autofill');
+  checkbox.checked = false;
+  checkbox.dispatch('change');
+  const stored = globalThis.localStorage.getItem('refdes.live-calc.autofill');
+  edOn.type(T1_FILLED);
+  await advance(401);
+  await settleCalc(edOn.calls()[2], payload([spanOn(T1_FILLED, '4 V', '8 V')]));
+  const offRendered = { text: edOn.area.value, rows: edOn.rowCount() };
+  edOn.fills()[0].click();
+  const fillOnOff = edOn.area.value === 'Rail `Vbad := 2 V * 2 = 8 V`';
+  // a fresh editor (the reload/item-switch posture) reads the preference
+  const h2 = 'DEC-TGL-OFF';
+  const ed2 = openEditor(h2, T1);
+  const reloadChecked = find(ed2.panel, 'live-calc-autofill').checked;
+  results.toggle = {
+    defaultApplied, stored,
+    offTextUnchanged: offRendered.text === T1_FILLED,
+    offRows: offRendered.rows,
+    fillOnOff, reloadChecked,
+  };
+  drafts.clearDraft(hOn);
+  drafts.clearDraft(h2);
+}
+
+// -- idempotent Fill (toggle OFF so the first Fill does the applying):
+//    the second click mutates nothing and commits nothing (§3.5)
+{
+  const h = 'DEC-FILL';
+  const ed = openEditor(h, T1);
+  const commits = { n: 0 };
+  const original = ed.area._refdesCommit;
+  ed.area._refdesCommit = () => { commits.n += 1; original(); };
+  await settleCalc(ed.calls()[0], payload([]));
+  const box = find(ed.panel, 'live-calc-autofill');
+  box.checked = false;
+  box.dispatch('change');
+  ed.area.setSelectionRange(0, 0);
+  ed.focus();
+  await settleCalc(ed.calls()[1], payload([spanOn(T1, '5 V', '4 V')]));
+  ed.fills()[0].click();
+  const afterFirst = { text: ed.area.value, commits: commits.n };
+  ed.fills()[0].click();
+  results.fillIdempotent = {
+    afterFirstText: afterFirst.text === T1_FILLED,
+    afterFirstCommits: afterFirst.commits,
+    secondNoop: ed.area.value === T1_FILLED && commits.n === afterFirst.commits,
+  };
+  drafts.clearDraft(h);
+}
+
+console.log(JSON.stringify(results));
+"""
+
+
+@pytest.mark.skipif(NODE is None, reason="no node on PATH to run the served editor modules")
+def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node():
+    script = HARNESS.replace("__STATIC__", json.dumps(STATIC.replace(os.sep, "/")))
+    proc = subprocess.run(
+        [NODE, "--input-type=module", "-e", script],
+        capture_output=True,
+        text=True,
+        timeout=NODE_TIMEOUT_S,
+        check=False,
+    )
+    assert proc.returncode == 0, f"node harness failed:\n{proc.stderr}"
+    results = json.loads(proc.stdout.strip().splitlines()[-1])
+
+    db = results["debounce"]
+    assert db["firedOnKeystroke"] == 1, "a keystroke fired the request itself: it must only schedule it"
+    assert db["at399"] == 1 and db["at401"] == 2, (
+        "the request fired at the wrong time: the debounce is 400 ms after the "
+        "last keystroke (§3.1)"
+    )
+    assert db["midReset"] == 2 and db["afterReset"] == 3, (
+        "the second keystroke did not reset the debounce window"
+    )
+    assert db["sentText"].endswith("xyz") and db["sentFields"] == {}, (
+        "the request must carry the textarea text and the draft's fields bag (§3.3)"
+    )
+
+    sup = results["supersede"]
+    assert sup["panelHidden"] is True and sup["rowCount"] == 0, (
+        "a response for superseded text updated the panel: the text-snapshot "
+        "guard discards it silently (§3.6)"
+    )
+    assert sup["textKept"] is True, "the apply rewrote text typed after the request"
+    assert sup["reRequestedRows"] == 1, "the next debounce did not re-request and render"
+
+    rev = results["revisionGuard"]
+    assert rev["hidden"] is True and rev["rows"] == 0, (
+        "a response whose revision is not the form's own applied: the revision "
+        "guard discards it silently (§3.6)"
+    )
+    assert rev["text"] == rev["text"], "placeholder"  # (text compare is the panel below)
+    assert rev["matchedHidden"] is False and rev["matchedRows"] == 1, (
+        "the response matching the form's own revision did not render"
+    )
+
+    assert results["abort"] == {"secondFired": True, "firstAborted": True}, (
+        "the superseding request did not abort the in-flight one (§3.6 guard 1)"
+    )
+
+    bf = results["blurFocus"]
+    assert bf["firedOnBlur"] is True, "blur did not flush the pending request through the closure"
+    assert bf["panelRows"] == 1 and bf["fillArmed"] == 1, (
+        "the blur-fired response did not refresh the panel and arm the Fill row"
+    )
+    assert bf["textUnchanged"] is True, "a blur-fired response mutated text while unfocused"
+    assert bf["focusStolen"] is False and bf["activeUnfocused"] is True, (
+        "the unfocused response called focus: the focus rule forbids stealing it (§3.5)"
+    )
+    assert bf["refired"] is True, "the focus flush did not re-fire the request (§3.1)"
+    assert bf["filled"] is True, (
+        "the refocused request did not apply under the normal rules (§3.6 refocus path)"
+    )
+
+    carets = results["caret"]
+    for name in ("start", "end", "inside"):
+        assert carets[name]["text"] == T1, (
+            f"caret {name}: a result range containing the caret (inclusive of both "
+            "boundaries) was overwritten (§3.5)"
+        )
+        assert carets[name]["rows"] == 1, "the skipped span lost its panel row"
+    assert carets["inside"]["caret"] == T1.index("5 V") + 1, "the caret parked inside a skipped range moved"
+    assert carets["outside"]["text"] == T1_FILLED, (
+        "a span whose result range does not contain the caret was not filled"
+    )
+
+    line = results["lineOffset"]
+    assert line["fenceKept"] is True, "the conversion disturbed the lines above the span"
+    assert line["filledLine"] == "Rail `Vbad := 2 V * 2 = 4 V`", (
+        "a span on line 4 was not filled at its own converted offsets: the "
+        "line/column -> document-offset conversion (§3.3)"
+    )
+
+    ltf = results["lastToFirst"]
+    assert ltf["whole"] == ltf["want"], (
+        f"spans did not apply last-to-first with earlier ranges valid: {ltf}"
+    )
+
+    shift = results["caretShift"]
+    assert shift["caret"] == shift["caret0"] + 1, (
+        "the caret shift counted a range ending after it (or missed one ending "
+        f"before it): {shift}"
+    )
+
+    caseb = results["caseB"]
+    assert caseb["spliced"] is True, "Case B did not fill through the .value splice"
+    assert caseb["noUndoLine"] is True, "the no-undo panel line is missing while Case B is active"
+    assert caseb["selfDisabledText"] == T1_FILLED and caseb["selfDisabledRows"] == 1, (
+        "auto-fill kept mutating after insertText proved to fail: it must "
+        "self-disable for the session and keep rendering rows (§3.5)"
+    )
+    assert caseb["fillWorks"] is True, "Fill stopped working in Case B"
+
+    okw = results["okWithinWindow"]
+    assert okw["textUnchanged"] is True, (
+        "an ok-within-window literal (4.4 V, computed 4.436 V) was rewritten: the "
+        "auto-fill gate is `stale`, never `computed != stored` (§3.5, D1)"
+    )
+    assert okw["rows"] == 1 and okw["fillButtons"] == 0, (
+        "ok rows must render display-only: no Fill button on an ok row"
+    )
+
+    save = results["saveInFlight"]
+    assert save["duringSave"] == 2, (
+        f"a calc request fired while a save round-trip was in flight: {save} "
+        "(2 = the open flush + the focus flush that preceded the save)"
+    )
+    assert save["posts"] == ["set_body@rev-0"]
+    assert save["afterSave"] is True, "the post-save re-arm did not re-request"
+    assert save["panelHidden"] is False and save["filled"] is True, (
+        "the form's revision advanced with the save and the guard discarded the "
+        "response: it must pass on the saved model (§3.6)"
+    )
+
+    tgl = results["toggle"]
+    assert tgl["defaultApplied"] is True, "auto-fill is default ON (§6.1)"
+    assert tgl["stored"] == "off", "the toggle does not persist to localStorage"
+    assert tgl["offTextUnchanged"] is True and tgl["offRows"] == 1, (
+        "toggle OFF must gate exactly the text mutation: rows keep rendering (§3.5)"
+    )
+    assert tgl["fillOnOff"] is True, "Fill stopped working with auto-fill OFF"
+    assert tgl["reloadChecked"] is False, "the persisted preference did not survive the reload"
+
+    fill = results["fillIdempotent"]
+    assert fill["afterFirstText"] is True and fill["afterFirstCommits"] == 1
+    assert fill["secondNoop"] is True, (
+        "a second Fill on an applied span mutated text: Fill is idempotent (§3.5)"
+    )
+
+
+T1 = "Rail `Vbad := 2 V * 2 = 5 V`"
+T1_FILLED = "Rail `Vbad := 2 V * 2 = 4 V`"

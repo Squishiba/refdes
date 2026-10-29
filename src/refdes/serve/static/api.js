@@ -2,13 +2,14 @@
 // token (reads too); the server rejects a request without it before routing.
 const token = document.querySelector('meta[name="refdes-token"]').content;
 
-export async function api(path, { method = 'GET', body } = {}) {
+export async function api(path, { method = 'GET', body, signal } = {}) {
   const headers = { 'X-Refdes-Token': token };
   const init = { method, headers };
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
+  if (signal !== undefined) init.signal = signal;
   const res = await fetch(path, init);
   let payload = null;
   try { payload = await res.json(); } catch (_) { /* non-JSON error body */ }

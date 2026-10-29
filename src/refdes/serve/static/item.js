@@ -146,6 +146,12 @@ export async function renderItem(container, handle) {
   }
   const focus = captureFocus(container);
   const controls = collectControls(container);
+  // Live inline-calc teardown (§3.8): the panel the previous render mounted
+  // carries its controller -- destroy it before the view is replaced, so an
+  // in-flight calc request is aborted and its panel state dropped.
+  for (const node of container.querySelectorAll('.live-calc')) {
+    if (node._refdesLiveCalc) node._refdesLiveCalc.destroy();
+  }
   container.textContent = '';
 
   const head = section(`${item.id || item.handle} — ${item.title}`);
@@ -182,6 +188,10 @@ export async function renderItem(container, handle) {
     // writes is the same one a field edit uses).
     if (editor.imagePicker) body.appendChild(editor.imagePicker);
     if (editor.sourcePicker) body.appendChild(editor.sourcePicker);
+    // The live inline-calc panel sits under the textarea, beside the
+    // pickers (design §3.5, placement §6.3): rows and Fill buttons for the
+    // text the author is typing into the control right above.
+    if (editor.liveCalcPanel) body.appendChild(editor.liveCalcPanel);
   } else {
     body.appendChild(el('pre', 'body-text', item.body || '(empty)'));
     const info = item.edit && item.edit.body;

@@ -647,3 +647,91 @@ def test_pdf_confirm_uses_the_existing_save_path_and_persists_its_session_select
     assert "setDraftBody(handle, area.value)" in editor
     assert "addDraftPin(handle, {" in editor
     assert "quoted: proposal" not in editor and "value: proposal.entry" not in editor
+
+
+# ------------------------------------------------------------ live inline calc (slice B)
+
+
+def test_the_live_calc_panel_is_wired_into_the_body():
+    """Slice B's panel has to reach the page the same way every earlier panel
+    did: the module exists, editor.js imports and attaches it to the body
+    textarea, item.js places it under that textarea beside the pickers, and a
+    teardown sweep destroys it before the container it lives in is cleared."""
+    assert os.path.isfile(os.path.join(STATIC, "live-calc.js"))
+    with open(os.path.join(STATIC, "editor.js"), encoding="utf-8") as fh:
+        editor = fh.read()
+    with open(os.path.join(STATIC, "item.js"), encoding="utf-8") as fh:
+        item = fh.read()
+    assert "from './live-calc.js'" in editor
+    assert "createLiveCalc(handle, {" in editor
+    assert "liveCalc.attach(area)" in editor
+    assert "liveCalcPanel: liveCalc.node" in editor
+    assert "editor.liveCalcPanel" in item
+    # under the textarea, beside the pickers (the image/source placement rule)
+    body_at = item.index("const bodyArea = editor.bodyControl(")
+    assert body_at < item.index("editor.liveCalcPanel")
+    assert body_at < item.index("editor.imagePicker")
+    # and destroyed with the view it lives in, not left listening
+    assert "querySelectorAll('.live-calc')" in item
+    assert "_refdesLiveCalc.destroy()" in item
+    assert item.index("_refdesLiveCalc.destroy()") < item.index("restoreFocus(container, focus)")
+
+
+def test_the_panel_reads_the_forms_own_revision_and_the_save_window():
+    """The §3.6 guards read the editor's own state through accessors -- the
+    form's live `revision` variable (the same string saveAll sends as
+    expected_revision) and a flag set for the whole save round-trip. A panel
+    with a stale copy of either would discard live responses or stomp a save."""
+    with open(os.path.join(STATIC, "editor.js"), encoding="utf-8") as fh:
+        editor = fh.read()
+    assert "getRevision: () => revision" in editor
+    assert "isSaving: () => saving" in editor
+    assert "getFields: () => draft.fields" in editor
+    assert editor.index("let saving = false") < editor.index("const liveCalc = createLiveCalc")
+    assert "saving = true" in editor
+    # the flag drops in `finally`: a failed save must not silence the panel
+    assert "saving = false" in editor and "} finally {" in editor
+    assert editor.index("} finally {") < editor.index("\n      saving = false;")
+    with open(os.path.join(STATIC, "live-calc.js"), encoding="utf-8") as fh:
+        panel = fh.read()
+    assert "export function createLiveCalc" in panel
+    # the guard is the editor's revision, never app.js's openRevision
+    assert "openRevision" not in panel
+    assert "payload.revision !== getRevision()" in panel
+    # the second guard: the textarea's text as of the request
+    assert "area.value !== snapshotText" in panel
+
+
+def test_the_calc_request_is_debounced_carries_the_bag_and_is_abortable():
+    """§3.1/§3.3: a 400 ms trailing debounce, the request body is
+    `{text, fields}` with the draft's live bag, and each request owns an
+    AbortController signal threaded through api.js (guard 1: the in-flight
+    request of superseded text is aborted, not awaited)."""
+    with open(os.path.join(STATIC, "live-calc.js"), encoding="utf-8") as fh:
+        panel = fh.read()
+    assert "const DEBOUNCE_MS = 400" in panel
+    assert "setTimeout(" in panel and "clearTimeout(" in panel
+    assert "/calc`," in panel
+    assert "body: { text, fields: getFields() }" in panel
+    assert "new AbortController()" in panel
+    assert "signal: controller.signal" in panel
+    with open(os.path.join(STATIC, "api.js"), encoding="utf-8") as fh:
+        apijs = fh.read()
+    assert "{ method = 'GET', body, signal } = {}" in apijs
+    assert "init.signal = signal" in apijs
+
+
+def test_the_auto_fill_toggles_on_one_persisted_preference():
+    """§3.5/§6.1: one localStorage key, default ON (absence is on), and the
+    gate reads `stale` -- never `computed !== stored`, the D1 rule an
+    ok-within-window literal (`4.4 V` vs computed `4.436 V`) survives."""
+    with open(os.path.join(STATIC, "live-calc.js"), encoding="utf-8") as fh:
+        panel = fh.read()
+    assert "refdes.live-calc.autofill" in panel
+    assert "!== 'off'" in panel  # default on: only an explicit 'off' turns it off
+    assert "status === 'stale'" in panel
+    # fills go through the native undo path first (Case A), splice as Case B
+    assert "execCommand('insertText'" in panel
+    # the panel writes text only through those two paths
+    assert panel.count("area.value = ") <= 2
+    assert "innerHTML" not in panel
