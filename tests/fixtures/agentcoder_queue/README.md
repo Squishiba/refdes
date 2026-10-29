@@ -15,7 +15,9 @@ through permit handling and then wait; send is never repeated. The detached
 stderr fixture is byte-identical to the blocking banner fixture and records
 that detached runs print the same workspace banner.
 
-`ls-g.json` and `ls-g-permission.json` preserve global listing rows.
+`ls-g.json` and `ls-g-permission.json` preserve global listing rows. `inspect.json`
+and `ls-g.json` came from different commands, so their payloads use different key
+casing and cwd shapes.
 `workspace-ls.json` preserves the sanitized workspace listing. `workspace-create.json`
 is exercised by tests; `workspace-archive.json` is unconsumed evidence. `stop-idle.json`
 and `stop-running.json` preserve stop results. `inspect.json` and `logs-tail4.txt`
