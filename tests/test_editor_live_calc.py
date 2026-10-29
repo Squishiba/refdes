@@ -59,6 +59,11 @@ NODE = shutil.which("node")
 # 10 s is not one).
 NODE_TIMEOUT_S = 120
 
+# One definition of the fixture texts, used by the harness (injected below)
+# and by the Python assertions -- a drift between them is a silent test lie.
+T1 = "Rail `Vbad := 2 V * 2 = 5 V`"
+T1_FILLED = "Rail `Vbad := 2 V * 2 = 4 V`"
+
 HARNESS = r"""
 const STATIC = __STATIC__;
 const url = (name) => `file://${STATIC}/${name}`;
@@ -117,6 +122,31 @@ class FakeNode {
   }
   dispatch(type) { for (const fn of this.listeners[type] || []) fn({}); }
   click() { this.dispatch('click'); }
+  contains(node) {
+    let p = node;
+    while (p) { if (p === this) return true; p = p._parent; }
+    return false;
+  }
+  querySelectorAll(sel) {
+    // the two selector shapes the item view uses: `.class` and `[data-attr]`
+    const match = (n) => {
+      if (sel.startsWith('.')) return hasCls(n, sel.slice(1));
+      if (sel.startsWith('[')) {
+        const camel = sel.slice(1, -1).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+        return n.dataset[camel] !== undefined;
+      }
+      return n.tagName === sel.toUpperCase();
+    };
+    const out = [];
+    const walk = (n) => {
+      for (const c of n.children) {
+        if (match(c)) out.push(c);
+        walk(c);
+      }
+    };
+    walk(this);
+    return out;
+  }
   setSelectionRange(s, e) { this.selectionStart = s; this.selectionEnd = e; }
   focus() { globalThis.document.activeElement = this; focusCalls += 1; }
   select() {}
@@ -200,6 +230,11 @@ globalThis.fetch = async (path, init) => {
   if (path.startsWith('/api/items')) {
     return { ok: true, status: 200, statusText: 'OK', json: async () => ({ items: [] }) };
   }
+  if (path.startsWith('/api/item/') && !path.includes('/calc') && !path.includes('/edit')) {
+    if (globalThis.fetch.__failItem) throw new Error('network down');
+    const h = decodeURIComponent(path.split('/api/item/')[1].split('?')[0]);
+    return { ok: true, status: 200, statusText: 'OK', json: async () => itemRender(h) };
+  }
   return { ok: true, status: 200, statusText: 'OK', json: async () => ({}) };
 };
 const editPosts = [];
@@ -216,7 +251,19 @@ const settleEdit = async (payload, ok = true) => {
 };
 
 const { createEditor } = await import(url('editor.js'));
+const { renderItem } = await import(url('item.js'));
 const drafts = await import(url('drafts.js'));
+
+function itemRender(handle) {
+  return {
+    id: handle, handle, title: 'Item.', type: 'decision',
+    source_file: 'items/decisions.yaml', source_line: 3, page: `items/${handle}`,
+    fields: {}, inherited_fields: [], body: T1,
+    edit: { editable: true, file_revision: 'rev-0', fields: {}, body: { editable: true } },
+    links: { outgoing: [], incoming: [] },
+    coverage: null, checks: [], diagnostics: [],
+  };
+}
 
 function editItem(handle) {
   return {
@@ -257,13 +304,16 @@ function spanOn(text, stored, computed, name = 'Vbad', line = 0) {
 const payload = (spans, revision = 'rev-0') => ({ revision, spans });
 
 const results = {};
-const T1 = 'Rail `Vbad := 2 V * 2 = 5 V`';
-const T1_FILLED = 'Rail `Vbad := 2 V * 2 = 4 V`';
+const T1 = __T1__;
+const T1_FILLED = __T1_FILLED__;
 
 // -- debounce: one request 400 ms after the last keystroke; the second
 //    keystroke resets; the request carries the text and the fields bag (§3.1, §3.3)
 {
   const h = 'DEC-DB';
+  // a real draft field edit (the same writes a field control makes): the
+  // request must carry the draft's fields verbatim, not a constant bag
+  drafts.setDraftField(h, 'status', 'open');
   const ed = openEditor(h, T1);
   const openReq = ed.calls();
   await settleCalc(openReq[0], payload([]));
@@ -469,11 +519,21 @@ const T1_FILLED = 'Rail `Vbad := 2 V * 2 = 4 V`';
   const selfDisabled = { text: ed.area.value, rows: ed.rowCount() };
   // Fill (the author's own click) applies through the splice
   ed.fills()[0].click();
+  const splicedText = ed.area.value;
+  const splicedTo = splicedText === 'Rail `Vbad := 2 V * 2 = 8 V`';
+  // a splice fires no input event: the panel must schedule the recalculation
+  // itself, so it stops showing the pre-fill verdict (and Fill stops being
+  // inert against a stale snapshot of its own row)
+  await advance(401);
+  const recycled = ed.calls().length === 4;
+  const recalcSent = recycled ? ed.calls()[3].body.text === splicedText : false;
   results.caseB = {
     spliced, noUndoLine,
     selfDisabledText: selfDisabled.text,
     selfDisabledRows: selfDisabled.rows,
-    fillWorks: ed.area.value === 'Rail `Vbad := 2 V * 2 = 8 V`',
+    fillWorks: splicedTo,
+    recycled,
+    recalcSent,
   };
   EXEC_FAILS = false;
   drafts.clearDraft(h);
@@ -509,8 +569,7 @@ const T1_FILLED = 'Rail `Vbad := 2 V * 2 = 4 V`';
   ed.focus(); // focus flush: request #2, settles clean
   await settleCalc(ed.calls()[1], payload([]));
   ed.type(T1); // the keystroke dirties the draft; the debounce is pending
-  ed.editor.node; // (the save button lives in the editor block)
-  const save = find(ed.editor.node, 'save');
+  const save = find(ed.editor.node, 'save'); // the button lives in the editor block
   save.disabled = false;
   save.click(); // saveAll: the in-flight flag goes up before the round-trip
   await flushMicro();
@@ -560,8 +619,68 @@ const T1_FILLED = 'Rail `Vbad := 2 V * 2 = 4 V`';
     offRows: offRendered.rows,
     fillOnOff, reloadChecked,
   };
+  // the preference store is global to the harness: clear it so later
+  // scenarios start from the default-ON posture like a fresh browser
+  globalThis.localStorage.removeItem('refdes.live-calc.autofill');
   drafts.clearDraft(hOn);
   drafts.clearDraft(h2);
+}
+
+// -- a span missing one half of its result pair is display-only: no Fill,
+//    no mutation (the guards enforce the PAIR, not just result_start) (§3.3)
+{
+  const h = 'DEC-PAIR';
+  const ed = openEditor(h, T1);
+  await settleCalc(ed.calls()[0], payload([]));
+  ed.area.setSelectionRange(0, 0);
+  ed.focus();
+  const half = spanOn(T1, '5 V', '4 V');
+  delete half.result_end; // a route that sent only one boundary
+  await settleCalc(ed.calls()[1], payload([half]));
+  results.halfPair = { text: ed.area.value, fills: ed.fills().length, rows: ed.rowCount() };
+  drafts.clearDraft(h);
+}
+
+// -- an item switch tears the panel down: the pending 400 ms timer dies,
+//    the in-flight request is aborted, the textarea listeners are removed,
+//    and a failing fetch clears the container the same way (§3.8)
+{
+  const h = 'DEC-TEA';
+  const container = new FakeNode('div');
+  await renderItem(container, h);
+  const area = find(container, 'body-edit');
+  area.value = T1;
+  area.dispatch('input'); // a pending debounce on the OLD item
+  const inflight = calcCalls.filter((c) => c.path.includes(h));
+  await renderItem(container, 'DEC-TEB'); // switch items
+  // the textarea also carries the editor's own commit listener (it is meant
+  // to survive); only live-calc's three handlers must be gone
+  const liveHandlers = ['scheduleFromInput', 'flushOnBlur', 'focusFlush'];
+  const leaked = ['input', 'blur', 'focus'].some((t) =>
+    (area.listeners[t] || []).some((fn) => liveHandlers.includes(fn.name)));
+  const afterSwitch = {
+    calls: calcCalls.filter((c) => c.path.includes(h)).length,
+    aborted: inflight.every((c) => c.signal.aborted === true),
+    leaked,
+  };
+  await advance(500); // the dead timer must not fire a /calc for the old item
+  const afterAdvance = calcCalls.filter((c) => c.path.includes(h)).length;
+  // the fetch-error path: a failed load clears the container too
+  const failBox = new FakeNode('div');
+  await renderItem(failBox, h); // normal render: panel mounted
+  failBox.dataset.renderedHandle = 'DEC-BROKEN'; // force the switch path
+  globalThis.fetch.__failItem = true;
+  await renderItem(failBox, h); // now the fetch rejects
+  const failCleared = failBox.children.length === 1 && hasCls(failBox.children[0], 'banner');
+  globalThis.fetch.__failItem = false;
+  results.teardown = {
+    ...afterSwitch,
+    afterAdvance,
+    noLeak: afterAdvance === afterSwitch.calls,
+    failCleared,
+  };
+  drafts.clearDraft(h);
+  drafts.clearDraft('DEC-TEB');
 }
 
 // -- idempotent Fill (toggle OFF so the first Fill does the applying):
@@ -596,7 +715,11 @@ console.log(JSON.stringify(results));
 
 @pytest.mark.skipif(NODE is None, reason="no node on PATH to run the served editor modules")
 def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node():
-    script = HARNESS.replace("__STATIC__", json.dumps(STATIC.replace(os.sep, "/")))
+    script = (
+        HARNESS.replace("__STATIC__", json.dumps(STATIC.replace(os.sep, "/")))
+        .replace("__T1__", json.dumps(T1))
+        .replace("__T1_FILLED__", json.dumps(T1_FILLED))
+    )
     proc = subprocess.run(
         [NODE, "--input-type=module", "-e", script],
         capture_output=True,
@@ -616,8 +739,9 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node():
     assert db["midReset"] == 2 and db["afterReset"] == 3, (
         "the second keystroke did not reset the debounce window"
     )
-    assert db["sentText"].endswith("xyz") and db["sentFields"] == {}, (
-        "the request must carry the textarea text and the draft's fields bag (§3.3)"
+    assert db["sentText"].endswith("xyz") and db["sentFields"] == {"status": "open"}, (
+        "the request must carry the textarea text and the draft's fields bag "
+        "verbatim (§3.3): a constant empty bag passes the old shape check"
     )
 
     sup = results["supersede"]
@@ -633,7 +757,10 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node():
         "a response whose revision is not the form's own applied: the revision "
         "guard discards it silently (§3.6)"
     )
-    assert rev["text"] == rev["text"], "placeholder"  # (text compare is the panel below)
+    assert rev["text"] == T1, (
+        "the guarded response applied text: the revision guard must discard it "
+        "silently, leaving the textarea exactly as typed (§3.6)"
+    )
     assert rev["matchedHidden"] is False and rev["matchedRows"] == 1, (
         "the response matching the form's own revision did not render"
     )
@@ -693,7 +820,16 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node():
         "auto-fill kept mutating after insertText proved to fail: it must "
         "self-disable for the session and keep rendering rows (§3.5)"
     )
+    pair = results["halfPair"]
+    assert pair == {"text": T1, "fills": 0, "rows": 1}, (
+        "a span with only one result boundary got a Fill button or a mutation: "
+        "the guards must enforce the full pair, not just result_start"
+    )
     assert caseb["fillWorks"] is True, "Fill stopped working in Case B"
+    assert caseb["recycled"] is True and caseb["recalcSent"] is True, (
+        "after a Case B splice nothing re-requested: a .value splice fires no "
+        "input event, so the panel must schedule its own recalculation"
+    )
 
     okw = results["okWithinWindow"]
     assert okw["textUnchanged"] is True, (
@@ -715,6 +851,24 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node():
         "the form's revision advanced with the save and the guard discarded the "
         "response: it must pass on the saved model (§3.6)"
     )
+    td = results["teardown"]
+    assert td["aborted"] is True, (
+        "an item switch left the old panel's in-flight request running: every "
+        "container clear must destroy the controller first (§3.8)"
+    )
+    assert td["leaked"] is False, (
+        "the detached textarea kept a live-calc listener after the switch: the "
+        "panel's listeners die with the view (§3.8)"
+    )
+    assert td["noLeak"] is True and td["afterAdvance"] == td["calls"], (
+        "the pending 400 ms timer fired a /calc for the item that was switched away"
+    )
+    assert td["failCleared"] is True, (
+        "the fetch-error path did not run the teardown: it clears the container "
+        "and must destroy the panel like every other clear"
+    )
+
+
 
     tgl = results["toggle"]
     assert tgl["defaultApplied"] is True, "auto-fill is default ON (§6.1)"
@@ -732,5 +886,3 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node():
     )
 
 
-T1 = "Rail `Vbad := 2 V * 2 = 5 V`"
-T1_FILLED = "Rail `Vbad := 2 V * 2 = 4 V`"

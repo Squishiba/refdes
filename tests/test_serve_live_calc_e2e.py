@@ -184,15 +184,12 @@ def test_the_panel_loop_from_get_to_saved_bytes(served):
     assert after["Vbad"]["status"] == "ok", payload2
     assert after["Vout"]["status"] == "ok"
 
-    # 7. the truth pin: a full build of the saved bytes reports no stale-
-    #    result diagnostic at all -- the fill made the item true, §5 slice B
+    # 7. the truth pin: a full build of the saved bytes reports NOTHING
+    #    against the item -- the fill made it true, §5 slice B. Not "no
+    #    stale diagnostic": no diagnostic for DEC-001 at all.
     built = _build_at(root)
-    stale_says = [
-        d.message
-        for d in built.diagnostics
-        if d.item_id == "DEC-001" and "stored result says" in d.message
-    ]
-    assert stale_says == [], stale_says
+    for_item = [d.message for d in built.diagnostics if d.item_id == "DEC-001"]
+    assert for_item == [], for_item
 
 
 def test_the_form_revision_survives_the_save_sequence_of_the_real_editor(served):

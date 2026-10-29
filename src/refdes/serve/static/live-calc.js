@@ -1,15 +1,14 @@
 // Live inline-calc recalculation in the body editor
 // (in-prog-logs/inline-calc-live-editor-design-20261020.md §3.1-§3.8): the
-// current text of the textarea goes to `POST /api/item/<ref>/calc` on a 400 ms
+// textarea's current text goes to `POST /api/item/<ref>/calc` on a 400 ms
 // debounce, the computed rows come back, and stale result slots can be
 // filled. The client interprets no grammar: the route owns the parse, the
 // statuses and every message, and the response carries line-relative
 // columns only (§3.3) — converting them to document offsets of the text it
-// sent is owned by this module alone (§3.5). Text mutates only through
-// the input pipeline of the focused textarea, so the draft, the one Save and
-// the revision
+// sent is this module's alone (§3.5). Text mutates only through the focused
+// textarea's own input pipeline, so the draft, the one Save and the revision
 // check are untouched (§3.8). Two guards decide every response (§3.6): the
-// sent-text snapshot and the revision of the form; a response failing either is
+// sent-text snapshot and the form's revision; a response failing either is
 // discarded silently and the next trigger re-requests.
 
 import { api } from './api.js';
@@ -117,9 +116,11 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
         const kind = span.status === 'ok' ? 'info' : span.status === 'stale' ? 'warning' : 'error';
         line.appendChild(el('span', `diag diag-${kind}`, span.message));
       }
-      // Fill rides stale rows with a result slot only (§3.5): the verdict of
-      // the checker makes that the safe scope; ok rows are display-only.
-      if (span.status === 'stale' && span.result_start !== undefined) {
+      // Fill rides stale rows with a result slot only (§3.5): the checker's
+      // own verdict makes that the safe scope; ok rows are display-only.
+      // A span with only one boundary is not fillable — the apply path
+      // needs the full pair, so the button appears on the pair alone.
+      if (span.status === 'stale' && span.result_start !== undefined && span.result_end !== undefined) {
         const fill = el('button', 'btn live-calc-fill', 'Fill');
         fill.addEventListener('click', () => applySpan(span, true));
         line.appendChild(fill);
@@ -159,7 +160,7 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
       // §3.6 guard 2 (the correctness one): typing beat the network.
       if (area.value !== sent) return;
       // §3.6 guard 3: computed against an old model — the revision of the form,
-      // never the unassigned revision variable of app.js (§1).
+      // never app.js's unassigned openRevision (§1).
       if (payload.revision !== getRevision()) return;
       rows = Array.isArray(payload.spans) ? payload.spans : [];
       snapshotText = sent;
@@ -195,7 +196,10 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
     const caret = area.selectionStart;
     const targets = [];
     for (const span of rows) {
-      if (span.status !== 'stale' || span.result_start === undefined) continue;
+      // Auto-fill's stale gate: a non-stale row is never touched, and a
+      // span missing either boundary of its result pair is skipped — the
+      // apply path needs the full pair to splice.
+      if (span.status !== 'stale' || span.result_start === undefined || span.result_end === undefined) continue;
       const off = toOffsets(text, span);
       if (!off) continue;
       if (text.slice(off.resultStart, off.resultEnd) === span.computed) continue;
@@ -223,9 +227,12 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
     const caret0 = typeof area.selectionStart === 'number' ? area.selectionStart : area.value.length;
     let shift = 0;
     let applied = 0;
+    let spliced = false;
     // Last-to-first, so every earlier offset stays valid in the same pass.
     for (const target of targets.slice().reverse()) {
-      if (!applyOne(target, consented)) continue;
+      const outcome = applyOne(target, consented);
+      if (!outcome) continue;
+      if (outcome === 'splice') spliced = true;
       applied += 1;
       // Caret restore (§3.5): ranges ending before the caret move it by
       // their length delta; ranges after it contribute zero. Compare the
@@ -237,8 +244,12 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
     area.setSelectionRange(caret0 + shift, caret0 + shift);
     if (consented) area.focus();
     // One commit for the whole batch: the draft, dirty flag and mirror
-    // behave exactly as for typed text (the contract of editor.js).
+    // behave exactly as for typed text (editor.js's contract).
     if (area._refdesCommit) area._refdesCommit();
+    // A Case B splice fires no input event, so nothing would re-request on
+    // its own: schedule the recalculation the commit cannot, keeping the
+    // panel (and a focused textarea's auto-fill) current with the text.
+    if (spliced) schedule();
   }
 
   function applyOne(target, consented) {
@@ -247,8 +258,8 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
     area.setSelectionRange(off.resultStart, off.resultEnd);
     let ok = false;
     try {
-      // Case A: the native-undo-protected edit (the copy button in
-      // editor.js is the in-tree precedent for using execCommand).
+      // Case A: the native-undo-protected edit (editor.js's copy button is
+      // the in-tree precedent for using execCommand).
       ok = document.execCommand('insertText', false, span.computed) === true;
     } catch (_) {
       ok = false;
@@ -263,7 +274,7 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
       undoWarn.hidden = false;
     }
     area.value = area.value.slice(0, off.resultStart) + span.computed + area.value.slice(off.resultEnd);
-    return true;
+    return 'splice';
   }
 
   const scheduleFromInput = () => schedule();

@@ -131,7 +131,18 @@ export async function renderItem(container, handle) {
   // over: focus and the caret are captured just before the swap and restored
   // into the same logical field afterwards (update.js). A first render, or a
   // different item, still shows the loading line.
+  // Live inline-calc teardown (§3.8): every path that clears the container
+  // destroys the mounted panel's controller FIRST (one helper, every clear):
+  // a pending 400 ms timer, an in-flight request and the textarea listeners
+  // die with the view that owned them -- on a switch to a different item and
+  // on a failed fetch exactly as on the normal swap.
+  const destroyLiveCalc = () => {
+    for (const node of container.querySelectorAll('.live-calc')) {
+      if (node._refdesLiveCalc) node._refdesLiveCalc.destroy();
+    }
+  };
   if (container.dataset.renderedHandle !== handle || !container.firstChild) {
+    destroyLiveCalc();
     container.textContent = '';
     container.appendChild(el('p', 'muted', 'Loading item…'));
   }
@@ -139,6 +150,7 @@ export async function renderItem(container, handle) {
   try {
     item = await api(`/api/item/${encodeURIComponent(handle)}`);
   } catch (err) {
+    destroyLiveCalc();
     container.textContent = '';
     container.dataset.renderedHandle = '';
     container.appendChild(el('p', 'banner bad', `Could not load the item: ${err.message}`));
@@ -146,12 +158,7 @@ export async function renderItem(container, handle) {
   }
   const focus = captureFocus(container);
   const controls = collectControls(container);
-  // Live inline-calc teardown (§3.8): the panel the previous render mounted
-  // carries its controller -- destroy it before the view is replaced, so an
-  // in-flight calc request is aborted and its panel state dropped.
-  for (const node of container.querySelectorAll('.live-calc')) {
-    if (node._refdesLiveCalc) node._refdesLiveCalc.destroy();
-  }
+  destroyLiveCalc();
   container.textContent = '';
 
   const head = section(`${item.id || item.handle} — ${item.title}`);

@@ -41,7 +41,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
   const specs = {};
   // The live inline-calc layer (live-calc.js, design §3.1-§3.8): it reads
   // the form's own revision through the accessor below (§3.6 guard 2 --
-  // never the openRevision variable of app.js, which is never assigned),
+  // never app.js's unassigned openRevision, which is never assigned),
   // stays quiet while a save round-trip is in flight (§3.1), and sends the
   // draft field bag with every request (carried, inert, until the
   // field-reference slice).
