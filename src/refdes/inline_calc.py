@@ -76,7 +76,11 @@ class InlineSpan:
     calc fence's offset). `raw` is the span content as written, inside
     the backticks. When `error` is set the span is malformed: the build
     reports it at the line and the name/rhs/unit/result fields are
-    meaningless.
+    meaningless. `result_col` is the column of the ` = ` result separator
+    within `raw` (the parse's cut, translated out of the stripped text it
+    is computed on); set only when the span parsed a result slot, so a
+    rewriter locates the stored-result range without re-running the
+    separator scan.
     """
 
     line_offset: int
@@ -86,6 +90,7 @@ class InlineSpan:
     unit: str = ""
     result: str = ""
     error: str | None = None
+    result_col: int | None = None
 
 
 def contains_trigger(text: str) -> bool:
@@ -343,8 +348,12 @@ def parse_span(line_offset: int, content: str) -> InlineSpan:
         return span
 
     if readings:
-        # Exactly one reading is a complete, well-formed calc.
-        _cut, name, rhs_unit, tail = readings[0]
+        # Exactly one reading is a complete, well-formed calc. The cut is
+        # an index into the stripped `text`; a rewriter needs it in `raw`
+        # (the content as written), so shift it by the leading whitespace
+        # `strip()` removed.
+        cut, name, rhs_unit, tail = readings[0]
+        span.result_col = cut + (len(content) - len(content.lstrip()))
     elif not positions:
         # The only `=` in the span is the one in `:=` -- declared intent
         # with no stored result (design open question 4, decided: error).

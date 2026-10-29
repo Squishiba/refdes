@@ -13,7 +13,9 @@ import posixpath
 import re
 import urllib.parse
 
+from .. import build as build_mod
 from .. import citations as citations_mod
+from .. import inline_calc
 from ..model import (
     CHECK_VIOLATION,
     NON_SCALAR_FIELD_TYPES,
@@ -50,6 +52,11 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
         ref = urllib.parse.unquote(path[len("/api/item/"):-len("/edit")])
         if method == "POST":
             return _write_outcome(app, _apply_edit(app, ref, body))
+        return 405, {"error": "method not allowed"}
+    if path.startswith("/api/item/") and path.endswith("/calc"):
+        ref = urllib.parse.unquote(path[len("/api/item/"):-len("/calc")])
+        if method == "POST":
+            return _calc_preview(app, ref, body)
         return 405, {"error": "method not allowed"}
     if path == "/api/create/schema" and method in ("GET", "HEAD"):
         return _create_schema(app)
@@ -754,6 +761,52 @@ def _value_type(value) -> str:
     if value is None:
         return "null"
     return "string"
+
+
+def _calc_preview(app, ref: str, body) -> tuple[int, dict]:
+    """`POST /api/item/<ref>/calc` -- the live editor's read-only inline-calc
+    preview (docs/design/inline-calc-live-editor-design.md §3.3): the draft
+    body text goes in, the span rows come out. The browser never assembles
+    the grammar and never learns it -- the same posture as `_source_propose`'s
+    "composed and checked here". The pass (`build.preview_inline_spans`)
+    mutates nothing: no file, no snapshot state, no diagnostics; the response
+    carries spans, text and messages only, so the write routes'
+    path-scrubbing contract is satisfied by construction. `fields` is the
+    draft's field bag: validated for shape and carried, and unused until the
+    field-reference slice (item G1) lands. Unknown keys are ignored, the
+    `_apply_edit` posture -- the forward-compat the §3.3 contract names.
+    """
+    if not isinstance(body, dict):
+        return 400, {"error": "expected a JSON object"}
+    text = body.get("text")
+    if not isinstance(text, str):
+        return 400, {"error": "text is required: the draft body as one string"}
+    if "fields" in body and not isinstance(body["fields"], dict):
+        return 400, {"error": "fields must be an object: the draft's field values"}
+    project = app.state.snapshot.project
+    item, _handle = _find_item(project, ref)
+    if item is None:
+        return 404, {"error": f"no item matches {ref!r}"}
+    # The edit affordance is the single source of editability (sealed entry,
+    # imported item): a body the author cannot save is a body this route does
+    # not evaluate -- "stop the false affordance" (editor.js:45-53), answered
+    # with the edit_state reason verbatim.
+    state = edit_state(app, project, item)
+    if not state["body"]["editable"]:
+        return 403, {"error": state["body"]["reason"]}
+    spans = build_mod.preview_inline_spans(project, item, text, fields=body.get("fields"))
+    payload = {
+        # The item's file revision, from the same edit_state the 403 above
+        # consulted: the string the form holds as `file_revision` and sends
+        # as `expected_revision`, so the browser's stale-response guard
+        # (design §3.6) compares like with like -- not the project-wide
+        # `/api/revision` revision, which the form does not hold (§3.3).
+        "revision": state["file_revision"],
+        "spans": spans,
+    }
+    if len(inline_calc.triggered_spans(text)) > build_mod.PREVIEW_SPAN_LIMIT:
+        payload["truncated"] = True
+    return 200, payload
 
 
 def edit_state(app, project: Project, item: Item) -> dict:

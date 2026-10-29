@@ -1934,6 +1934,142 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
     item._calc_failed = failed
 
 
+PREVIEW_SPAN_LIMIT = 200
+"""Max triggered spans one live-editor calc preview evaluates (docs/design/
+inline-calc-live-editor-design.md §3.3): the route stops at the first 200 in
+source order and flags `truncated`; per-span cost is ~0.15-0.35 ms, so a
+request is bounded tens of ms regardless of body size."""
+
+
+def preview_inline_spans(
+    project: Project, item, body_text: str, *, fields: dict | None = None
+) -> list[dict]:
+    """Evaluate one item body's inline calc spans for the live editor's
+    read-only preview route (`POST /api/item/<ref>/calc`, docs/design/
+    inline-calc-live-editor-design.md §3.4): a side-effect-free sibling of
+    `_run_item_calcs` over `body_text` -- the author's unsaved draft.
+
+    The pass mirrors `_run_item_calcs`'s shape (fences and spans as one
+    source-ordered event list, the same resolvers), so a span may use a
+    name a fence defines earlier in the same draft and the duplicate-name
+    rule fires exactly as at build. What it must not touch is every
+    mutation `_run_inline_span` makes: no `project.error`/`project.warn`
+    (the verdict stays the build's), no `item.calc_values`, `item.calcs`,
+    `item._source_uses`, `item._env`, no lockfile write, no disk. Locals
+    own `env`, `origins`, and the source resolver's `resolved`/`uses`; the
+    memoised `project._source_lock` is read, never re-read into the
+    project. Cross-item references resolve against the snapshot's cached
+    `_env`s, exactly as a build resolves them.
+
+    `fields` is the editor's draft-field bag (§3.3): accepted from day one
+    so the field-reference slice (§4, item G1) needs no signature change,
+    and ignored until that slice lands -- today's arithmetic reads body
+    text, snapshot envs and the lockfile, nothing field-derived.
+
+    `line`/`start`/`end` are coordinates within `body_text` (the route's
+    contract), not file lines; `start_line` threaded into the evaluator is
+    the body-relative 1-based line, which is the line a duplicate-name
+    diagnostic names. At most the first `PREVIEW_SPAN_LIMIT` triggered
+    spans are evaluated, in source order; the route reports the
+    truncation (§3.3).
+    """
+    del fields  # accepted-and-unused until G1 (the §3.4 contract)
+    records = getattr(project, "_source_lock", None)
+    if records is None:
+        # An unbuilt project has no memo. Reading the lockfile is itself
+        # read-only, so the preview asks for it; unlike a build it never
+        # memoises onto the project.
+        records, _problem = citations_mod.read_lockfile(project)
+    env: dict[str, calc.Value] = {
+        calc.RESOLVER_KEY: _make_calc_resolver(project, _key_index(project)),
+        calc.SOURCE_RESOLVER_KEY: _make_source_resolver(project, item, records, {}, []),
+    }
+    origins: dict[str, int | None] = {}
+    events: list[tuple[int, tuple]] = [
+        (offset, ("fence", (block, offset)))
+        for block, offset, _block_id in calc.extract_blocks_with_lines(body_text)
+    ]
+    events += [
+        (line_offset, ("span", (start, end, content)))
+        for line_offset, start, end, content in inline_calc.triggered_span_events(
+            body_text.splitlines()
+        )
+    ]
+    events.sort(key=lambda event: event[0])
+    rows: list[dict] = []
+    for _offset, (kind, payload) in events:
+        if kind == "fence":
+            # Evaluate the draft's fences to give their names to later
+            # spans (the duplicate-name rule fires across the two
+            # spellings exactly as at build); fence diagnostics are not
+            # reported -- the save-time 422 owns fences (§3.3).
+            calc.evaluate_block(payload[0], env, start_line=payload[1] + 1, origins=origins)
+            continue
+        if len(rows) >= PREVIEW_SPAN_LIMIT:
+            break
+        start, end, content = payload
+        rows.append(
+            _preview_inline_span(project, env, origins, _offset, start, end, content)
+        )
+    return rows
+
+
+def _preview_inline_span(
+    project: Project,
+    env: dict,
+    origins: dict,
+    line_offset: int,
+    start: int,
+    end: int,
+    content: str,
+) -> dict:
+    """One span's preview row (docs/design/inline-calc-live-editor-design.md
+    §3.3): status/message verbatim from the same parse/eval/compare calls
+    the build makes -- the panel teaches `refdes check`'s vocabulary, not
+    a second one -- with positions in `body_text` line coordinates. The
+    result-slot range is absent when the span has no parseable result slot
+    (B2's `result_col`); auto-fill and Fill are then unavailable for it."""
+    span = inline_calc.parse_span(line_offset, content)
+    label = span.name or span.raw.strip()
+
+    row: dict = {"line": line_offset, "start": start, "end": end}
+    if span.result_col is not None:
+        pos = content.find(span.result, span.result_col)
+        if pos >= 0:
+            row["result_start"] = start + pos
+            row["result_end"] = start + pos + len(span.result)
+    row["name"] = label
+
+    def finish(status: str, computed: str, message: str) -> dict:
+        row["status"] = status
+        row["computed"] = computed
+        row["message"] = f"inline calc {label}: {message}" if message else ""
+        return row
+
+    if span.error:
+        return finish("error", "", span.error)
+    expression = f"{span.name} = {span.rhs}"
+    if span.unit:
+        expression += f" | {span.unit}"
+    for outcome in calc.evaluate_block(
+        expression, env, start_line=line_offset + 1, origins=origins
+    ):
+        if outcome.error:
+            return finish("error", "", outcome.error)
+        if outcome.value is None:
+            continue
+        try:
+            computed = calc.format_value(outcome.value, project.sigfigs)
+        except Exception as exc:  # noqa: BLE001 -- pint raises many types
+            return finish("error", "", f"the value could not be formatted: {exc}")
+        try:
+            stale = inline_calc.compare_stored(outcome.value, span, computed)
+        except calc.CalcError as exc:
+            return finish("error", "", str(exc))
+        return finish("stale" if stale else "ok", computed, stale or "")
+    return finish("error", "", "the span produced no value")
+
+
 def run_calcs(project: Project) -> None:
     """Evaluate every local item's calc blocks and inline calc spans in
     dependency order.
