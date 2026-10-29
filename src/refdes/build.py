@@ -1935,19 +1935,20 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
 
 
 PREVIEW_SPAN_LIMIT = 200
-"""Max triggered spans one live-editor calc preview evaluates (docs/design/
-inline-calc-live-editor-design.md §3.3): the route stops at the first 200 in
-source order and flags `truncated`; per-span cost is ~0.15-0.35 ms, so a
-request is bounded tens of ms regardless of body size."""
+"""Max triggered spans one live-editor calc preview evaluates
+(in-prog-logs/inline-calc-live-editor-design-20261020.md §3.3): the route stops
+at the first 200 in source order and flags `truncated`; per-span cost is
+~0.15-0.35 ms, so a request is bounded tens of ms regardless of body size."""
 
 
 def preview_inline_spans(
     project: Project, item, body_text: str, *, fields: dict | None = None
 ) -> list[dict]:
     """Evaluate one item body's inline calc spans for the live editor's
-    read-only preview route (`POST /api/item/<ref>/calc`, docs/design/
-    inline-calc-live-editor-design.md §3.4): a side-effect-free sibling of
-    `_run_item_calcs` over `body_text` -- the author's unsaved draft.
+    read-only preview route (`POST /api/item/<ref>/calc`,
+    in-prog-logs/inline-calc-live-editor-design-20261020.md §3.4): a
+    side-effect-free sibling of `_run_item_calcs` over `body_text` -- the
+    author's unsaved draft.
 
     The pass mirrors `_run_item_calcs`'s shape (fences and spans as one
     source-ordered event list, the same resolvers), so a span may use a
@@ -1967,11 +1968,17 @@ def preview_inline_spans(
     text, snapshot envs and the lockfile, nothing field-derived.
 
     `line`/`start`/`end` are coordinates within `body_text` (the route's
-    contract), not file lines; `start_line` threaded into the evaluator is
-    the body-relative 1-based line, which is the line a duplicate-name
-    diagnostic names. At most the first `PREVIEW_SPAN_LIMIT` triggered
-    spans are evaluated, in source order; the route reports the
-    truncation (§3.3).
+    contract), not file lines. The one deliberate message divergence from
+    the build: messages are the R12 vocabulary verbatim EXCEPT embedded
+    line numbers -- the duplicate-name diagnostic's "first at line N,
+    again at line M" -- which are body-relative here (`start_line`
+    threaded into the evaluator is the 1-based line of `body_text`) and
+    file-relative at the build (front matter offsets them by
+    `item.body_line - 1`). Body-relative is the panel's coordinate space:
+    the number must name a line of the text the author is looking at, and
+    a frontmatter item's build numbers (file lines) are the ones that do
+    not. At most the first `PREVIEW_SPAN_LIMIT` triggered spans are
+    evaluated, in source order; the route reports the truncation (§3.3).
     """
     del fields  # accepted-and-unused until G1 (the §3.4 contract)
     records = getattr(project, "_source_lock", None)
@@ -2023,12 +2030,20 @@ def _preview_inline_span(
     end: int,
     content: str,
 ) -> dict:
-    """One span's preview row (docs/design/inline-calc-live-editor-design.md
-    §3.3): status/message verbatim from the same parse/eval/compare calls
-    the build makes -- the panel teaches `refdes check`'s vocabulary, not
-    a second one -- with positions in `body_text` line coordinates. The
-    result-slot range is absent when the span has no parseable result slot
-    (B2's `result_col`); auto-fill and Fill are then unavailable for it."""
+    """One span's preview row
+    (in-prog-logs/inline-calc-live-editor-design-20261020.md §3.3):
+    status/message verbatim from the same parse/eval/compare calls the
+    build makes -- the panel teaches `refdes check`'s vocabulary, not a
+    second one -- with positions in `body_text` line coordinates. The one
+    divergence: line numbers embedded in a message (the duplicate-name
+    diagnostic) are body-relative, not the file-relative numbers the build
+    reports for a frontmatter item, because the panel must name a line of
+    the text the author is editing. `outcome.warning` (e.g. the
+    unit-collision warning the build reports as an `inline calc` warning)
+    is deliberately not surfaced: the row schema is three-status, and the
+    save/build diagnostics own warnings. The result-slot range is absent
+    when the span has no parseable result slot (B2's `result_col`);
+    auto-fill and Fill are then unavailable for it."""
     span = inline_calc.parse_span(line_offset, content)
     label = span.name or span.raw.strip()
 

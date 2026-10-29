@@ -1,5 +1,5 @@
 """The live editor's calc-preview route: `POST /api/item/<ref>/calc`
-(docs/design/inline-calc-live-editor-design.md §3.3, slice A/B3).
+(in-prog-logs/inline-calc-live-editor-design-20261020.md §3.3, slice A/B3).
 
 The `serve_support.Client` live-`EditorApp` posture of
 `test_serve_edit_http.py`: a real server, real tokens and Origin checks,
@@ -227,6 +227,10 @@ def test_a_sealed_log_and_an_imported_item_are_403(tmp_path):
         client = Client(app)
         _status, view = client.api_get("/api/item/IFC-001")
         assert view["external"] is True
+        # the 400 shape guard runs before the 403 affordance guard, on a
+        # body this route would refuse outright:
+        status, payload = client.api_post("/api/item/LOG-001/calc", {})
+        assert status == 400, (status, payload)  # missing text, not 403
         for ref, reason in (
             ("LOG-001", "sealed"),
             ("IFC-001", "imported"),
@@ -245,11 +249,15 @@ def test_a_sealed_log_and_an_imported_item_are_403(tmp_path):
 def test_preview_requests_change_nothing_on_disk(served):
     _app, client, root = served
     before = snapshot_tree(root)
-    calc(client, text=DRAFT)
-    calc(client, text=DRAFT, fields={"title": "drafted"})
-    calc(client, text="`P := source(\"a.csv\", \"k\") | W = 1 W`\n")
-    calc(client, text="`V := NOWHERE-001.V = 1 V`\n")
-    calc(client, text="")
+    for body in (
+        {"text": DRAFT},
+        {"text": DRAFT, "fields": {"title": "drafted"}},
+        {"text": '`P := source("a.csv", "k") | W = 1 W`\n'},
+        {"text": "`V := NOWHERE-001.V = 1 V`\n"},
+        {"text": ""},
+    ):
+        status, payload = client.api_post(CALC_PATH, body)
+        assert status == 200, (body, payload)
     assert snapshot_tree(root) == before, "a preview request wrote to the project"
 
 
@@ -290,16 +298,39 @@ def test_the_revision_moves_when_the_file_moves(served):
 # ------------------------------------------------------------- the cap
 
 
-def test_more_than_two_hundred_spans_is_truncated(served):
+def test_the_cap_truncates_at_the_span_limit(served):
+    # Exactly the limit: no `truncated`, all rows. One over: `truncated`,
+    # the first 200 rows in source order.
     _app, client, _root = served
-    text = "".join(f"`A{i} := 1 V = 1 V`\n" for i in range(201))
-    status, payload = calc(client, text=text)
+    status, payload = calc(
+        client, text="".join(f"`A{i} := 1 V = 1 V`\n" for i in range(200))
+    )
+    assert status == 200 and len(payload["spans"]) == 200
+    assert "truncated" not in payload, payload
+    status, payload = calc(
+        client, text="".join(f"`A{i} := 1 V = 1 V`\n" for i in range(201))
+    )
     assert status == 200
     assert payload["truncated"] is True
     assert len(payload["spans"]) == 200
-    assert payload["spans"][0]["name"] == "A0"
+    assert payload["spans"][0]["name"] == "A0" and payload["spans"][-1]["name"] == "A199"
     status, payload = calc(client, text=DRAFT)
     assert "truncated" not in payload, payload  # omitted, not false
+
+
+def test_the_guards_run_in_a_fixed_order(served):
+    # 400 shape before 404 target: a malformed request is rejected on its
+    # body, not its ref (the api.py order: text -> fields -> _find_item ->
+    # edit_state).
+    _app, client, _root = served
+    status, payload = client.api_post("/api/item/DEC-999/calc", {"text": 5})
+    assert status == 400, (status, payload)
+    assert "text is required" in payload["error"]
+    # 404 target before 403 affordance: unknown refs answer 404 even
+    # though the write path's 403 space (sealed/imported) is what a known
+    # sealed item would answer.
+    status, payload = client.api_post("/api/item/NOPE-001/calc", {"text": DRAFT})
+    assert status == 404, (status, payload)
 
 
 # ---------------------------------------------------------------- oracle
@@ -309,7 +340,7 @@ def test_the_route_and_a_full_overlay_build_agree_on_every_status(served):
     # The fidelity pin (§5): `loader.load_readonly(overlay=...)` is a real
     # full build of the drafted text. The narrow pass may not drift from it
     # -- the panel's rows must be the build's own verdicts, verbatim.
-    app, client, root = served
+    _app, client, root = served
     status, payload = calc(client, text=DRAFT)
     assert status == 200
     overlay = DECS.replace("      Baseline prose.\n", "      " + DRAFT.rstrip() + "\n")

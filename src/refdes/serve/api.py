@@ -765,16 +765,23 @@ def _value_type(value) -> str:
 
 def _calc_preview(app, ref: str, body) -> tuple[int, dict]:
     """`POST /api/item/<ref>/calc` -- the live editor's read-only inline-calc
-    preview (docs/design/inline-calc-live-editor-design.md §3.3): the draft
-    body text goes in, the span rows come out. The browser never assembles
-    the grammar and never learns it -- the same posture as `_source_propose`'s
-    "composed and checked here". The pass (`build.preview_inline_spans`)
-    mutates nothing: no file, no snapshot state, no diagnostics; the response
-    carries spans, text and messages only, so the write routes'
-    path-scrubbing contract is satisfied by construction. `fields` is the
-    draft's field bag: validated for shape and carried, and unused until the
-    field-reference slice (item G1) lands. Unknown keys are ignored, the
-    `_apply_edit` posture -- the forward-compat the §3.3 contract names.
+    preview (in-prog-logs/inline-calc-live-editor-design-20261020.md §3.3):
+    the draft body text goes in, the span rows come out. The browser never
+    assembles the grammar and never learns it -- the same posture as
+    `_source_propose`'s "composed and checked here". The pass
+    (`build.preview_inline_spans`) mutates nothing: no file, no snapshot
+    state, no diagnostics; the response carries spans, text and messages
+    only, so the write routes' path-scrubbing contract is satisfied by
+    construction. Messages are `refdes check`'s vocabulary verbatim EXCEPT
+    line numbers embedded in a message (the duplicate-name diagnostic's
+    "first at line N"), which are body-relative to the posted text -- the
+    panel's coordinate space -- not the file-relative numbers the build
+    reports for a frontmatter item; `evaluate_block` warnings (e.g. the
+    unit-collision warning) are not surfaced by the three-status row
+    schema. `fields` is the draft's field bag: validated for shape and
+    carried, and unused until the field-reference slice (item G1) lands.
+    Unknown keys are ignored, the `_apply_edit` posture -- the
+    forward-compat the §3.3 contract names.
     """
     if not isinstance(body, dict):
         return 400, {"error": "expected a JSON object"}
@@ -804,7 +811,7 @@ def _calc_preview(app, ref: str, body) -> tuple[int, dict]:
         "revision": state["file_revision"],
         "spans": spans,
     }
-    if len(inline_calc.triggered_spans(text)) > build_mod.PREVIEW_SPAN_LIMIT:
+    if len(inline_calc.triggered_span_events(text.splitlines())) > build_mod.PREVIEW_SPAN_LIMIT:
         payload["truncated"] = True
     return 200, payload
 

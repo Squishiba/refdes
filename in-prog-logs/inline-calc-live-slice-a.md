@@ -1,10 +1,11 @@
 # live inline-calc, slice A: read-only preview route
 
-Design: docs/design/inline-calc-live-editor-design.md (PR #350), Slice A
-tasks B1/B2/B3. Plan confirmed with the user before starting; the one
-contract change we agreed: the response's `revision` is THE ITEM'S FILE
-REVISION (same string as `GET /api/item/<ref>` `edit.file_revision`), not
-the project-wide `/api/revision` revision.
+Design: `in-prog-logs/inline-calc-live-editor-design-20261020.md`
+(PR #350, landed on main), Slice A tasks B1/B2/B3. Plan confirmed with the
+user before starting; the one contract change we agreed: the response's
+`revision` is THE ITEM'S FILE REVISION (same string as
+`GET /api/item/<ref>` `edit.file_revision`), not the project-wide
+`/api/revision` revision.
 
 ## Done
 
@@ -63,6 +64,37 @@ the project-wide `/api/revision` revision.
 - Fixture gotcha: `types:` in `refdes-project.yaml` is a hard error
   (hardware@3, per AGENTS.md); the scratch fixture needed
   `refdes-schema.yaml`.
+
+## Review round (PR #386)
+
+- Dead citations: I cited `docs/design/inline-calc-live-editor-design.md`,
+  a path that exists nowhere -- the design merged to main as
+  `in-prog-logs/inline-calc-live-editor-design-20261020.md`. Fixed every
+  occurrence (grep-verified; the §-refs -- §3.3/3.4/3.5/3.6, §4, §5, G1,
+  §6.5a -- all check out against the real doc's headings).
+- Dup-name line numbers: the build's message embeds FILE lines
+  (`body_line + offset`, calc.py's origins/line_number threading), the
+  preview's are BODY-relative (fence: `offset + 1`; span:
+  `line_offset + 1`). Decision: keep body-relative (panel coordinates name
+  lines of the text being edited); documented as the one message divergence
+  in both pass docstrings and the route docstring, and pinned by
+  `test_dup_name_line_numbers_are_body_relative` (probe: build "first at
+  line 7, again at line 9" / preview "first at line 2, again at line 4"
+  for a 6-line-frontmatter item).
+- `evaluate_block` warnings (e.g. the unit-collision warning) reach the
+  build as `inline calc` WARNING diagnostics; the three-status row schema
+  does not surface them. Stated in the `_preview_inline_span`/route
+  docstrings, pinned by `test_build_warnings_are_not_surfaced`.
+- `truncated` now counts `triggered_span_events(text.splitlines())` (the
+  positioned view of the same `_scan_body` the pass iterates) instead of
+  re-parsing through `triggered_spans`; counts identical by construction.
+- Tests: guard order 400 shape -> 404 target -> 403 affordance verified
+  against `api.py` and pinned (`test_the_guards_run_in_a_fixed_order`, the
+  missing-text-on-sealed-400 case); the inertness test asserts 200 for
+  every request so a 500 can't pass vacuously; the cap test covers exactly
+  200 (no `truncated`) and 201; `_state()` now compares env VALUES (str
+  of each quantity), not just names; ruff `--isolated` (default rules)
+  clean on both new test files.
 
 ## Not done (deliberate)
 

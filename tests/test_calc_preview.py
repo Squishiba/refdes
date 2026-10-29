@@ -1,5 +1,5 @@
 """The live editor's read-only calc preview pass: `build.preview_inline_spans`
-(docs/design/inline-calc-live-editor-design.md §3.4, slice A/B1).
+(in-prog-logs/inline-calc-live-editor-design-20261020.md §3.4, slice A/B1).
 
 The route is the pass's only caller, so the unit tests are the contract:
 status/message parity with the real build (the panel teaches `refdes check`'s
@@ -33,7 +33,6 @@ CONFIG = (
     "    fields: {}\n"
 )
 CSV = "key,value,note\nrail_load,1.85,mW budget\n"
-DEC_MD = "items/dec.md"
 
 # One line with an ok span, a stale span and a half-typed span (no result
 # slot) -- the panel's three live states.
@@ -203,6 +202,60 @@ def test_duplicate_name_fires_live(tmp_path):
     assert "'I' is assigned twice" in rows[0]["message"]
 
 
+def test_dup_name_line_numbers_are_body_relative(tmp_path):
+    # The one message divergence from the build, pinned (review, slice A):
+    # the build embeds FILE line numbers (front matter offsets them), the
+    # preview embeds BODY-relative ones -- the panel's coordinate space.
+    # Everything else about the message is verbatim, including the fix
+    # suggestion, so only the numbers may differ.
+    text = "```calc\nI = 2 A\n```\nDup `I := 3 A = 3 A`\n"
+    rows = _preview(_build(tmp_path), text)
+    assert len(rows) == 1 and rows[0]["status"] == "error"
+    assert "first at line 2, again at line 4" in rows[0]["message"]
+    (tmp_path / "items" / "dec.md").write_text(
+        f"---\nid: DEC-001\ntype: decision\n---\n\n{text}", encoding="utf-8"
+    )
+    built = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(built)
+    build_mod.build(built)
+    build_messages = [
+        d.message
+        for d in built.diagnostics
+        if d.item_id == "DEC-001" and "assigned twice" in d.message
+    ]
+    assert len(build_messages) == 1
+    # front matter (6 lines) shifts every number by 5: same message, file
+    # coordinates.
+    assert build_messages[0] == rows[0]["message"].replace("line 2", "line 7").replace(
+        "line 4", "line 9"
+    )
+    assert "first at line 7, again at line 9" in build_messages[0]
+
+
+def test_build_warnings_are_not_surfaced(tmp_path):
+    # The row schema is three-status: `evaluate_block` warnings (here the
+    # unit-collision warning the build reports as an `inline calc` WARNING)
+    # are deliberately not surfaced by the preview -- the span is fine to
+    # evaluate, and the save/build diagnostics own warnings.
+    text = "Collision `A := 0.5 A * 2 = 1 A` tail\n"
+    rows = _preview(_build(tmp_path), text)
+    assert rows[0]["status"] == "ok"
+    assert rows[0]["computed"] == "1 A"
+    assert rows[0]["message"] == ""
+    (tmp_path / "items" / "dec.md").write_text(
+        f"---\nid: DEC-001\ntype: decision\n---\n\n{text}", encoding="utf-8"
+    )
+    built = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(built)
+    build_mod.build(built)
+    warnings = [
+        d.message
+        for d in built.diagnostics
+        if d.item_id == "DEC-001" and d.level == "warning" and "reads 'A' as a unit" in d.message
+    ]
+    assert len(warnings) == 1
+
+
 def test_cross_item_reference_evaluates_from_the_snapshot(tmp_path):
     rows = _preview(_build(tmp_path), "`Vref := REQ-001.V_in = 5.1 V`\n")
     assert rows[0]["status"] == "ok"
@@ -254,7 +307,12 @@ def _state(project):
     items = tuple(
         (
             item.id,
-            tuple(sorted(getattr(item, "_env", {}) or {})),
+            tuple(
+                sorted(
+                    (name, str(value))
+                    for name, value in (getattr(item, "_env", {}) or {}).items()
+                )
+            ),
             tuple(sorted(item.calc_values.items())),
             len(item.calcs),
             tuple(getattr(item, "_source_uses", [])),
@@ -268,8 +326,10 @@ def _state(project):
 
 
 def test_preview_mutates_nothing(tmp_path):
-    # The §5 posture: env/diag snapshot of the project, compared before and
-    # after ten preview calls that exercise every live state at once.
+    # The §5 posture: a snapshot of every mutable per-item surface (env
+    # names AND values, calc_values, calcs, source uses, failure flag), the
+    # diagnostics list and the memoised lockfile, compared before and after
+    # ten preview calls that exercise every live state at once.
     project = _build(tmp_path, dec_cite=True)
     text = (
         OK_STALE
