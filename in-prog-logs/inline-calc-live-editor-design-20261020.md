@@ -373,6 +373,15 @@ Response 200:
   report, so the panel teaches the CLI's vocabulary.
 - `result_start/-end` is absent when the span has no parseable result
   slot; auto-fill and Fill are then unavailable for that span.
+- All four range fields (`start`, `end`, `result_start`, `result_end`)
+  are **columns within their `line`** (line-relative) — the route
+  sends **no** document offsets. The client converts to document
+  offsets of the textarea value it sent **before** selecting,
+  inserting, or caret-testing: `offset = column + (sum of the lengths
+  of the lines of the sent text preceding `line`, each +1 for its
+  newline)`. §3.5's apply/skip operations run on converted offsets,
+  never raw columns — a span below line 0 selects the wrong document
+  range if this step is skipped.
 - `"revision"` lets the browser discard responses computed against an old
   model (§3.6): **the item's file revision** the snapshot computed on —
   the same string space as the form's `expected_revision` (computed
@@ -455,16 +464,24 @@ New module `src/refdes/serve/static/live-calc.js`, wired by `editor.js`
   (`textContent` everywhere — no HTML injection).
 - **Auto-fill (default ON — owner-confirmed 2026-10-25, §6.1), gated by
   a user toggle (next bullet)**: for each span with `status == "stale"`
-  and a result range, when
+  and a result range — its line-relative `(line, result_start,
+  result_end)` (the §3.3 fields) **first converted to document
+  offsets** of the textarea value that was sent, per §3.3: every
+  selection, insertion, and caret test below uses those offsets,
+  never raw columns — when
   `computed != <current stored text in textarea>`, set
   `selectionStart/End` over the result range and
   `document.execCommand('insertText', false, computed)`, spans applied
   **last-to-first** so earlier ranges stay valid; restore the caret
-  (shift by the length delta of applied ranges after the caret).
+  (shift by the length delta of the applied ranges **ending before
+  the caret** — ranges after it contribute zero, and a caret inside a
+  skipped range does not move).
   Apply precondition: **the textarea is focused** (focus rule below —
-  unfocused, nothing applies). Per-span skip: the caret sits inside
-  the result range **inclusive of both boundaries** —
-  `result_start <= caret <= result_end` — so a caret parked at the
+  unfocused, nothing applies). Per-span skip: the caret (a document
+  offset) sits inside the span's **converted** result range (§3.3)
+  **inclusive of both boundaries** —
+  `result_start <= caret <= result_end` in converted offsets — so a
+  caret parked at the
   end of a partially typed result (`= 5| V`, caret after `5`) counts
   as inside and a pause never overwrites a result being typed (the
   boundary is undefined in the first draft and collides with the
@@ -784,7 +801,11 @@ journal's story (#381 — the live layer rides saves unchanged,
    the next keystroke re-evaluates and fills apply normally; the
    normal single-tab case (save through the form, poll quiet) must
    show fills applying **after** the save — proving the guard
-   discards nothing when nothing moved.
+   discards nothing when nothing moved; (13) a span **below line 0**
+   (fence above it): the fill lands on the span's own result range
+   (proves the §3.3 line/column → document-offset conversion), a
+   caret parked at the same **column on a different line** does not
+   skip it, and a caret inside the converted range does.
 - Acceptance: checklist green; save/conflict flow tests
   (`test_serve_edit_http*`) untouched; no draft-schema change.
 
