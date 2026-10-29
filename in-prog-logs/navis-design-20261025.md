@@ -230,7 +230,7 @@ The author writes the marker keyless; the first **writable load** mints the
 key into the marker — the same class of write as hand-authored `follows:`
 anchoring in the writable-load path (`links.plan_follows_anchor()` /
 `anchor_follows()`, `src/refdes/links.py:685,822`, called from `load_tree()`
-at `src/refdes/loader.py:149`, reached from `_load()` at `src/refdes/cli.py:59` with
+at `src/refdes/loader.py:149`, reached from `_load()` at `src/refdes/cli.py:60` with
 `write=not (args.no_write or dry_run)`, `docs/design/living-notes.md` §2).
 It is announced, never silent (same rule as capture, living-notes §2.5: a
 writable command prints a line naming the write). Consequence stated
@@ -298,14 +298,24 @@ markers are consumed at render, so there is no in-page anchor target in v1.
 ## 11. Project-wide index, panel placement, CLI parity
 
 **Build path.** Markers are discovered by a scan driven by the renderer
-itself: `build._markdown_parser`'s token stream with source maps
-(`src/refdes/navis.py`, `_live_markers`/`_scan_block`), so a marker is
-inert exactly where the published page renders it as literal text --
-fences (including inside blockquotes), indented code, code spans
-spanning lines, open comments -- and linear in body size, the same cost
-class inline calc already pays. A marker that *closes* on a later line
-is a warning naming the opening line; an unclosed one stays the
-existing unclosed-comment diagnostic's. The projection is computed **once per build /
+itself: one cached `analyze_navis(body)` per body value — a dedicated
+instrumented MarkdownIt instance (the production parser's own config plus
+provenance wrappers, so the production renderer is never decorated) walks
+each inline token's children against exact source ranges and a lexical
+machine (inline_calc's contract) turns the live ranges into markers
+(`src/refdes/navis.py`). The scan, the render-local strip and the
+projection all consume that one immutable `Analysis`, whose spans are
+exact raw byte ranges validated against the raw line. A marker is inert
+exactly where the published page renders it as literal text -- fences
+(including inside blockquotes), indented code, code spans spanning lines,
+open comments (a plain `<!--` keeps its ownership across blank lines,
+headings and fences, the body-wide contract; an unclosed `<!--navi:` does
+not) -- and linear in body size, the same cost class inline calc already
+pays. A marker that *closes* on a later line of its own block is a
+warning naming the opening line; an unclosed one stays the
+existing unclosed-comment diagnostic's. Nothing raises out of a build:
+a body whose provenance cannot be replayed fails closed as a diagnostic
+with the source byte-intact. The projection is computed **once per build /
 once per render** — the standing rule for task-pane data
 (`render.py:1145-1157`, "one projection per render", PR #197 review P4) —
 and merged with the `.refdes/navis/` record set (active = markers minus
@@ -396,7 +406,7 @@ of the same projection, never a second implementation (the task pane's
    `index` payload `navis` key (absent-key convention). Site output
    byte-identical (markers consumed, panel not yet emitted).
 2. **Key minting on writable load.** `<!--navi:` → `<!--navi:key …` in
-   `_load(write=True)` (`cli.py:59` gate), announced line
+   `_load(write=True)` (`cli.py:60` gate), announced line
    (`anchor_follows` precedent, `links.py:685,822`); short-key resolution
    (6-char prefix) in CLI; corruption lint via
    `keys.malformed_key_message()`-style validation (`keys.py:131`).

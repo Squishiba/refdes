@@ -665,13 +665,13 @@ and computes no second answer of its own, the `thread` precedent.
 ```console
 $ refdes navis ls
 2 Navis:
-  1. Model worst-case copper temperature.  NOTE-001 (items/note-a.md:6)
-  2. Recheck decoupling near U14.  NOTE-002 (items/note-b.md:5)
+  1. Model worst-case copper temperature.  NOTE-001 (items/note-a.md:7)
+  2. Recheck decoupling near U14.  NOTE-002 (items/note-b.md:6)
 
 $ refdes navis show 1
 Navi: Model worst-case copper temperature.
   key: k7f3q2x8d0m
-  source: NOTE-001 (items/note-a.md:6)
+  source: NOTE-001 (items/note-a.md:7)
 ```
 
 | Verb | Meaning |

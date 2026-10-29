@@ -110,9 +110,11 @@ The grammar is closed and strict:
   quoted paragraph in two. A marker sharing a line with text is removed
   together with the whitespace runs on its sides, collapsed to a single
   space where text remains on both sides (no double space, no
-  leading-space line). Line numbers in the projection always name the
-  ORIGINAL body lines; markers are stripped only in the render-local
-  copy of the body.
+  leading-space line) — except that a run of two or more spaces ending
+  the line is a hard break and a marker's removal never eats it: the
+  marker's own space collapses, the break's spaces stay. Line numbers in
+  the projection always name the ORIGINAL body lines; markers are
+  stripped only in the render-local copy of the body.
 
 The comment form is the point: any standard Markdown renderer already
 hides the marker, and it cannot trigger an inline calc span under it.

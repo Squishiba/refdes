@@ -123,19 +123,27 @@ banner, resolved keeping both sides (main's `recover`, branch's
 `navis`). Diff scope re-verified (slice-1 files only); full suite green
 post-rebase.
 
-## Round 6: mapping layer (review round)
+## Round 6: mapping layer (review round, superseded by round 7)
 
 Reviewer reproduced A3 (strip empties an inert code-span twin, leaves
 the live marker), B (escaped backtick opens a phantom code span), C
 (`\<` escaped marker stripped, stray backslash left), D2 (two markers
-in one table row scan in tokenizer order). One root cause:
-text-search fallback + content-relative columns. Fix: `_scan_block`
-honours backslash escapes; `_live_markers` maps content offsets to
-absolute raw (line, col) through `_raw_prefix` (per-line cursors,
-paragraph-then-cell matching) and validates each span's bytes;
-`strip_markers` cuts the validated spans and collapses maximal
-whitespace+marker runs (one space only between words, nothing before
-punctuation); a mapping failure raises `NavisMappingError` (fail loud,
-never guess). Bare bullets/`>`/ordered prefixes left on a line drop
-with it. Matrix 210 -> 270 cells (A3/B/C/D2 contexts, inert-twin
-placements, text-order assertions); full suite and gate green.
+in one table row scan in tokenizer order). Fixed in round 7's rewrite;
+matrix 210 -> 270 cells (A3/B/C/D2 contexts, inert-twin placements,
+text-order assertions) survives.
+
+## Round 7: deep-analysis restructuring (.scratch/sol/deep-analysis-pr382.md)
+
+One cached `analyze_navis(body)` -> immutable `Analysis` now feeds scan,
+strip and projection. Provenance: dedicated instrumented MarkdownIt
+(production parser never decorated); table provenance groups inline
+tokens by source line (pad cells carry no bytes); last-line clip fixed.
+The machine runs per inline token over exact live ranges: plain `<!--`
+carries body-wide, an unclosed `<!--navi:` is silent and inert, MULTILINE
+fires only within a token. Fail-loud became fail-closed: `strip_markers`
+never raises, a provenance failure yields the MAPPING diagnostic with
+bytes intact. Probes 79/79, trio 361, full suite green, ruff clean on
+touched files, differential PASS (plain project byte-identical). Added:
+lone-CR/NUL/escaped-pipe/comment-carry/residue/attributes/hardbreak/
+mixed-terminators/payload-syntax tests, and the 5,000-digit CLI ordinal
+-> exit 2.

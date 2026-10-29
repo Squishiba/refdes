@@ -2956,7 +2956,7 @@ def cmd_navis(args) -> int:
     # command must not hide the reason a marker it does not list is missing
     # (report-on-typo, build.py:66-68).
     for d in project.diagnostics:
-        if d.level == model.WARNING and "navi marker" in d.message:
+        if d.code == navis_mod.NAVI_DIAGNOSTIC_CODE:
             print(str(d), file=sys.stderr)
     rows = navis_mod.projection(project)
 
@@ -2965,10 +2965,16 @@ def cmd_navis(args) -> int:
         # 11-character all-digit string is legal key grammar and a full-key
         # selector must not be read as an out-of-range ordinal number.
         row = next((r for r in rows if r["key"] == args.navi), None)
-        # ASCII digits only: `str.isdigit()` is true for '²', and int()
-        # then raises -- a selector that names nothing is a naming error,
-        # exit 2, never a traceback.
-        if row is None and re.fullmatch(r"[0-9]+", args.navi):
+        # ASCII digits only, and no more of them than the largest ordinal
+        # has: a longer digit string is out of range by length alone, and
+        # int() of a 4300-digit string raises (CPython's integer-string
+        # limit) -- a selector that names nothing is a naming error, exit
+        # 2, never a traceback.
+        if (
+            row is None
+            and len(args.navi) <= len(str(len(rows)))
+            and re.fullmatch(r"[0-9]+", args.navi)
+        ):
             index = int(args.navi) - 1
             if 0 <= index < len(rows):
                 row = rows[index]

@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 
 from conftest import write_project_config
 
@@ -734,15 +733,23 @@ def test_markers_in_one_table_row_scan_in_document_order():
     ]
 
 
-def test_strip_fails_loud_on_an_unmappable_span(monkeypatch):
-    # The mapping layer's guarantee is exact spans; a span that does not
-    # name the marker's bytes is an internal bug, and strip refuses to
-    # guess (a guessed strip corrupts authored text -- the reviewed A3).
-    monkeypatch.setattr(
-        navis, "_live_markers", lambda body: ([(0, 0, 3, "x")], [])
-    )
-    with pytest.raises(navis.NavisMappingError):
-        navis.strip_markers("text <!--navi: x--> tail\n")
+def test_strip_fails_closed_on_an_unmappable_span(monkeypatch):
+    # The mapping layer's guarantee is exact spans; a body whose spans
+    # cannot be located exactly is an internal bug, and strip refuses to
+    # guess (a guessed strip corrupts authored text -- the reviewed A3):
+    # the bytes stay intact, the diagnostic is reported, nothing raises.
+    def boom(norm_lines, token_ranges):
+        raise navis.NavisMappingError("test-injected mapping failure")
+
+    monkeypatch.setattr(navis, "_machine", boom)
+    body = "text <!--navi: x--> tail\n"
+    assert navis.strip_markers(body) == body
+    analysis = navis.analyze_navis(body)
+    assert analysis.navis == ()
+    assert [m for _, m in analysis.diagnostics] == [navis.MAPPING_MESSAGE]
+    found, bad = navis.scan_body(body)
+    assert found == []
+    assert [m for _, m in bad] == [navis.MAPPING_MESSAGE]
 
 
 def test_strip_drops_a_line_left_bare_of_list_bullets():
@@ -759,3 +766,151 @@ def test_strip_never_inserts_a_space_before_punctuation():
     assert navis.strip_markers("Use <!--navi: n-->, as noted.") == "Use, as noted."
     assert navis.strip_markers("Use <!--navi: n--> notes") == "Use notes"
     assert navis.strip_markers("text<!--navi: n-->.") == "text."
+
+
+# --------- regression family from the deep-analysis report (round 6) ---------
+
+
+def test_lone_cr_marker_offsets_and_strip():
+    body = "a\r<!--navi: x-->\rb"
+    found, bad = navis.scan_body(body)
+    assert bad == []
+    assert [n.line_offset for n in found] == [1]
+    assert navis.strip_markers(body) == "a\rb"
+
+
+def test_nul_and_separators_before_marker_preserve_raw_body():
+    for body in ("a\x00b <!--navi: x-->\n", "a\x0cb <!--navi: x-->\n",
+                 "a\u2028b <!--navi: x-->\n", "a\u2029b <!--navi: x-->\n",
+                 "\ufeffa <!--navi: x-->\n"):
+        found, bad = navis.scan_body(body)
+        assert bad == [] and len(found) == 1, body
+        stripped = navis.strip_markers(body)
+        assert stripped == body.split(" <!--navi: x-->")[0] + "\n", body
+
+
+def test_table_escaped_pipe_raw_span():
+    body = "| a\\|b | <!--navi: x--> |\n|---|---|\n| c | d |\n"
+    found, bad = navis.scan_body(body)
+    assert bad == [] and len(found) == 1
+    stripped = navis.strip_markers(body)
+    assert stripped == "| a\\|b |  |\n|---|---|\n| c | d |\n"
+    assert "\\|" in stripped  # the escape is authored text, byte-untouched
+
+
+def test_table_duplicate_cells_without_final_pipe():
+    body = "|a|b|\n|-|-|\n| <!--navi: x--> | <!--navi: y-->\n"
+    found, bad = navis.scan_body(body)
+    assert bad == []
+    assert [n.text for n in found] == ["x", "y"]
+    assert navis.strip_markers(body) == "|a|b|\n|-|-|\n| |\n"
+
+
+def test_comment_state_across_blank_and_heading():
+    for body in ("<!-- outer\n\n<!--navi: x-->\ntail -->\n",
+                 "<!-- outer\n# <!--navi: x-->\ntail -->\n"):
+        found, bad = navis.scan_body(body)
+        assert found == [] and bad == [], body
+        assert navis.strip_markers(body) == body
+
+
+def test_residue_thematic_breaks_and_plus_text():
+    for residue in ("---", "***", "- - -", "___", "+++"):
+        body = f"{residue} <!--navi: x-->\n"
+        found, bad = navis.scan_body(body)
+        assert bad == [] and len(found) == 1
+        assert navis.strip_markers(body) == f"{residue}\n"
+    for residue in ("1.", ">", "-", "*", "+", ">>", "1. -"):
+        body = f"{residue} <!--navi: x-->\n"
+        assert navis.strip_markers(body) == "", residue
+
+
+def test_marker_in_link_attributes_is_inert():
+    for body in ('[t](u "<!--navi: x-->") tail\n',
+                 "[a]: /url\n"
+                 "text <!--navi: x-->\n"):
+        found, bad = navis.scan_body(body)
+        assert bad == []
+        title = body.startswith("[t](")
+        assert (len(found) == 0) == title, body
+
+
+def test_image_alt_marker_is_inline():
+    body = "![a <!--navi: x--> b](u.png) tail\n"
+    found, bad = navis.scan_body(body)
+    assert bad == [] and len(found) == 1
+    assert navis.strip_markers(body) == "![a b](u.png) tail\n"
+
+
+def test_no_marker_scan_skips_parser(monkeypatch):
+    def boom():
+        raise AssertionError("the parser factory must not run")
+
+    monkeypatch.setattr(navis, "_marker_parser", boom)
+    body = "plain text with no markers and no <!-- at all\n"
+    found, bad = navis.scan_body(body)
+    assert found == [] and bad == []
+    assert navis.strip_markers(body) is body
+    analysis = navis.analyze_navis(body)
+    assert analysis.stripped is body
+
+
+def test_analysis_reused_for_scan_and_render():
+    body = "a <!--navi: x--> b\n"
+    first = navis.analyze_navis(body)
+    assert navis.analyze_navis(body) is first
+    assert navis.strip_markers(body) is first.stripped
+    found, _ = navis.scan_body(body)
+    assert [n.text for n in found] == [n.text for n in first.navis]
+
+
+def test_hardbreak_adjacent_to_marker(tmp_path):
+    # The agreed C1 policy: a run of 2+ spaces ending the line after a
+    # marker is a hard break -- the marker's left run collapses to a
+    # single space, the break's own spaces stay verbatim.
+    assert navis.strip_markers("a <!--navi: x-->  \nb\n") == "a   \nb\n"
+    assert navis.strip_markers("a <!--navi: x-->\\\nb\n") == "a\\\nb\n"
+    html = build_mod._markdown_parser().render(
+        navis.strip_markers("a <!--navi: x-->  \nb\n")
+    )
+    assert "<br" in html and "navi" not in html
+
+
+def test_marker_payload_syntax_is_never_evaluated(tmp_path):
+    body = "text <!--navi: {{missing}} [[x]] `a := b`-->\n"
+    found, bad = navis.scan_body(body)
+    assert bad == [] and len(found) == 1
+    project = _project(
+        tmp_path, {"note.md": _md("NOTE-001", "note", "P", body)}
+    )
+    assert not project.errors and not project.warnings
+    assert "navi" not in project.item_by_id("NOTE-001").body_html
+    assert "{{missing}}" not in project.item_by_id("NOTE-001").body_html
+
+
+def test_original_line_mapping_after_mixed_terminators():
+    body = "a\r\n<!--navi: x-->\rb\n<!--navi: y-->\n"
+    found, bad = navis.scan_body(body)
+    assert bad == []
+    assert [n.line_offset for n in found] == [1, 3]
+    assert [n.text for n in found] == ["x", "y"]
+    assert navis.strip_markers(body) == "a\r\nb\n"
+
+
+def test_normalization_build_diagnostics_never_traceback(tmp_path):
+    project = _project(
+        tmp_path,
+        {
+            "note.md": _md("NOTE-001", "note", "CR", "a\r<!--navi: x-->\rb\n"),
+            "note-b.md": _md(
+                "NOTE-002", "note", "NUL", "a\x00b <!--navi: y-->\n"
+            ),
+            "note-c.md": _md(
+                "NOTE-003", "note", "pipe",
+                "| a\\|b | <!--navi: z--> |\n|---|---|\n| c | d |\n",
+            ),
+        },
+    )
+    assert not project.errors and not project.warnings
+    for id_ in ("NOTE-001", "NOTE-002", "NOTE-003"):
+        assert "navi" not in project.item_by_id(id_).body_html

@@ -125,6 +125,15 @@ def test_navis_show_non_ascii_digit_selector_exits_2(tmp_path, capsys):
     assert "no Navi" in capsys.readouterr().err
 
 
+def test_show_huge_ascii_ordinal_is_naming_error(tmp_path, capsys):
+    # 5,000 digits is a valid ASCII ordinal, not a crash: the selector
+    # is bounded against the row count before int() runs, so it names
+    # nothing and exits 2.
+    config = _setup(tmp_path, TWO_MARKERS)
+    assert _run(config, "--no-write", "navis", "show", "9" * 5000) == 2
+    assert "no Navi" in capsys.readouterr().err
+
+
 def test_navis_ls_numbers_document_order_on_one_line(tmp_path, capsys):
     # Two markers share a line: `ls` numbers them as the page reads them
     # (design §11 (file, line) order + document order), and `show 1` is
