@@ -177,6 +177,36 @@ Renaming a value *inside* the target has no surrogate to protect it (a calc
 name is not a key): every dependent fails loudly at its own reference line,
 which is the report.
 
+### Reading a field: `ITEM.$field`
+
+A reference whose name half starts with `$` names one of the target's declared
+*fields* — its saved front-matter value — instead of a calc value:
+
+```calc
+Rds = DEC-001.$rds_on | mohm
+```
+
+The field value must be a quantity (`18 mohm`, `12 V ± 5%`); it is read
+exactly as saved, with the same pipe-unit re-expression as any reference line,
+and the same form works in an inline span: `Rds := DEC-001.$rds_on | mohm =
+18 mohm`. The whole right-hand side must be the reference: a field spliced
+into a larger arithmetic (`P = DEC-001.$rds_on * 2`) is an error naming the
+two-step form (reference on one line, arithmetic on the next).
+
+The read is the saved item, not its evaluated calc env, so a field reference
+creates no dependency edge: the target's calc never runs "for" the reference,
+two items may read each other's fields, and `X.$field` inside `X` itself is
+legal (a bare self-reference keeps its cycle error). Field values never enter
+any hash, so editing the field moves the computed result — and, for a span,
+the stale-result warning — not the referring item's content hash.
+
+Bare `DEC-001.name` keeps meaning the calc value. When the target has *both*
+a calc value and a field named `name`, the reference resolves to the calc
+value and the build warns, naming both and the `DEC-001.$name` spelling that
+disambiguates. Every field failure is a loud error at the referring line
+naming the field: undeclared (listing the item's declared fields), declared
+but empty, list-valued (out of scope), or not a quantity.
+
 ## Reading a value from a source file
 
 A number that lives in a spreadsheet export -- a power budget, a measured
@@ -358,7 +388,10 @@ A cross-item reference or a `source()` call in a span is read exactly as it
 is in a fence: the build evaluates the referenced item first, `refdes fetch`
 pins the key the span names, and a moved upstream value or a re-pinned
 source value moves the item's content hash — an inline span is a dependency
-like a fence line, with no fence-only forms left. One form is not covered:
+like a fence line, with no fence-only forms left. A field reference
+(`TARGET.$field`) is the exception that proves the rule: it reads the saved
+item, so it is a dependency on nothing and moves no hash (see
+"Reading a field: `ITEM.$field`"). One form is not covered:
 a bare span reference in an item loaded from a YAML list file stays bare on
 disk, so the rename refresh above does not reach it (see "Referencing
 another item's values"). The span's arithmetic

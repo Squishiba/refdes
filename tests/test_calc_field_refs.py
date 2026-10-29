@@ -430,6 +430,31 @@ def test_composite_field_reference_expands_and_survives_rename(tmp_path):
     assert project.item_by_id("DEC-002").calc_values["Rds"] == "18 m\u03a9"
 
 
+def test_bare_and_composite_field_reference_hashes_match(tmp_path):
+    _write_items(
+        tmp_path,
+        {
+            "a.md": RESISTOR,
+            "b.md": _item_md("DEC-002", "```calc\nRds = DEC-001.$rds_on | mohm\n```\n"),
+        },
+    )
+    _load(tmp_path, write=True)  # the writer expands the reference
+    b_file = tmp_path / "items" / "b.md"
+    composite = b_file.read_text(encoding="utf-8")
+    assert "Rds = DEC-001@" in composite
+    composite_hash = _load(tmp_path, write=False).item_by_id("DEC-002").content_hash
+
+    b_file.write_text(
+        re.sub(r"DEC-001@\S+?\.\$rds_on", "DEC-001.$rds_on", composite),
+        encoding="utf-8",
+    )
+    project = _load(tmp_path, write=False)
+    assert not project.errors
+    # The target half of a field reference hashes to the same token as every
+    # other reference: bare and composite spellings are hash-identical.
+    assert project.item_by_id("DEC-002").content_hash == composite_hash
+
+
 def test_no_write_resolves_field_reference_and_changes_nothing(tmp_path):
     _write_items(
         tmp_path,
