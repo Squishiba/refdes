@@ -23,23 +23,26 @@ All line numbers below were read in this session; `main` is `f94a503`
 
 ### The body editor is one `<textarea>` with insertion helpers
 
-- `createEditor` (src/refdes/serve/static/editor.js:12) builds the edit
+- `createEditor` (src/refdes/serve/static/editor.js:36) builds the edit
   form. The body is a plain `textarea.body-edit` (rows=12) created in
   `bodyControl`, with `data-edit-key="body"` (editor.js:190-212) so
-  `applyControl` (src/refdes/serve/static/update.js:20-52) carries the
-  node — and its focus/caret — across full re-renders.
+  `applyControl` (src/refdes/serve/static/controls.js:25, which re-binds
+  the existing node it finds via `collectControls`' `data-edit-key` scan,
+  update.js:13-19) carries the node — and its focus/caret — across full
+  re-renders.
 - The textarea's only live wiring is `area.addEventListener("input",
   writeBody)` (editor.js:209), where `writeBody` calls `setDraftBody` +
   `refreshStatus` (editor.js:203-207). `area._refdesCommit = writeBody`
-  (editor.js:210) is the **official commit hook** for programmatic
+  (editor.js:208) is the **official commit hook** for programmatic
   mutations that deliberately do not fire an `input` event.
 - Mounting: `item.js` calls `bodyControl` and appends the pickers under
   the textarea (src/refdes/serve/static/item.js:176-190). When the body
   is not editable, `bodyControl` returns `null` and the pane shows
-  `pre.body-text` + a reason badge (item.js:177-179) — the bar design
+  `pre.body-text` + a reason badge (item.js:185-189) — the bar design
   below hangs off exactly this seam.
-- **The create form has no body field at all** — `create.js` builds
-  fields only (grep for `body` in create.js finds none). The bar and font
+- **The create form has no body field at all** — `create.js` builds a
+  fields-only form; the identifier `body` there is the POST payload
+  variable (create.js:190-199), not a form field. The bar and font
   setting are item-edit-form features.
 
 ### Existing insertion helpers (the pattern to follow)
@@ -59,7 +62,8 @@ All line numbers below were read in this session; `main` is `f94a503`
   (`image_markdown`, src/refdes/serve/api.py:1487, set on rows at
   api.py:1545-1546 as `row.markdown`), so the client never guesses
   markdown shape. Rows can be `insertable:false` with a visible reason
-  (images.js:71-76). Upload POSTs to `/api/assets` and inserts
+  (the row contract at images.js:23-26; the Add button disabled at
+  images.js:278). Upload POSTs to `/api/assets` and inserts
   `![stem](url)` (images.js:208).
 - **Source picker** (src/refdes/serve/static/sourcepicker.js):
   server-composed calc lines, accepted into a calc fence.
@@ -78,7 +82,8 @@ All line numbers below were read in this session; `main` is `f94a503`
   (`drafts.js:187-194`).
 - Save (editor.js:231-265): ops are sent one at a time with
   `expected_revision`; `saveAll` **snapshots `pendingOps()` once**
-  (editor.js:251) and `clearDraft()` on success (editor.js:252).
+  (the `postAll(ops || pendingOps())` call, editor.js:250) and
+  `clearDraft()` on success (editor.js:251).
   Consequence, verified by reading the flow: **an insertion that lands
   after the snapshot is silently dropped** — `clearDraft` wipes it and
   the post-save re-render rewrites the textarea to the server value
@@ -86,8 +91,8 @@ All line numbers below were read in this session; `main` is `f94a503`
   is in flight. PR #388 supplies the shared accessor for this
   (`saving` flag + `isSaving()` in the pr388 editor.js).
 - 409 → full conflict pane with mine/theirs/copy affordances
-  (editor.js:260, 287-322); 422 → field errors block the save
-  (editor.js:240-244).
+  (editor.js:260, 287-322); 422 → the save loop hands the payload to
+  `showBlocked` (editor.js:261; the pane itself, editor.js:278+).
 
 ### The live-calc panel (PR #388, in review) — the contract the bar shares
 
@@ -106,7 +111,7 @@ All line numbers below were read in this session; `main` is `f94a503`
   (`selectionSkips`, live-calc.js:259-265).
 - If `insertText` returns false/throws ("Case B"), it splices
   `area.value`, calls `_refdesCommit()`, and **does not dispatch
-  `input`** (live-calc.js:325-333); once proven broken, auto-fill stands
+  `input`** (live-calc.js:320-343); once proven broken, auto-fill stands
   down for the session via sessionStorage
   `refdes.live-calc.fallback` (live-calc.js:23).
 - The auto-fill toggle is **localStorage** `refdes.live-calc.autofill`
@@ -142,8 +147,11 @@ typing, and it must not fight the panel.
 
 ### Config surface for a font setting
 
-- Project settings live in `refdes-project.yaml`;
-  `_KNOWN_SETTINGS` is a whitelist in src/refdes/schema.py:65-73 and an
+- Project settings live in `refdes-project.yaml`; the whitelist is the
+  union of two frozensets in src/refdes/schema.py:
+  `_PROJECT_SETTING_KEYS` (schema.py:65-73: site/id/boards/workspaces/
+  units/date_format/on_change/coverage/standard/equations/imports) and
+  `_KNOWN_SETTINGS` (schema.py:79+: sigfigs, item_layout, …); an
   unknown key is a config error naming the block path
   (schema.py:774-782). Nested validation is in
   src/refdes/configcheck.py (`validate_settings`). Adding an
@@ -160,7 +168,7 @@ typing, and it must not fight the panel.
 
 Verified by reading both files in this session; renderer probes run
 against `MarkdownIt('gfm-like', {html: False, linkify: False})` (the
-exact call in build.py, used in src/refdes/build.py:2694 — the preset
+exact call in build.py, used in src/refdes/build.py:2996 — the preset
 string and options confirmed in this session's probe):
 
 - Inline/inline-ish: `**bold**`, `*italic*` (docs/markdown.md:10-12),
@@ -199,9 +207,9 @@ string and options confirmed in this session's probe):
   malformed span, evaluation failure, incompatible unit = **Error**,
   file:line, with the example message
   `inline calc Vout: stored result missing; write '= <quantity>'`.
-  `{{name}}` / `{{name | unit}}` are values (math.md:59-65);
+  `{{name}}` / `{{name | unit}}` are values (math.md:296-313);
   unresolved values stay as written with a warning
-  (markdown.md:312-313) — a `{{}}` skeleton is safe to insert.
+  (math.md:312-313) — a `{{}}` skeleton is safe to insert.
 - **The save gate turns a new build error into a refused save**
   (measured end-to-end this session, see §C/§H): the candidate is
   loaded with the edit overlaid (edit.py:517-520),
@@ -228,8 +236,22 @@ string and options confirmed in this session's probe):
   writable load — **verified from in-prog-logs/navis-design-20261025.md
   §4, lines 100-127, 220-232** (marker grammar at line 109, author
   example `<!--navi: remember X-->` at 120).
-- Raw HTML is disabled; HTML comments are inert in output
-  (docs/math.md:381-384, docs/markdown.md).
+- Raw HTML is disabled — the renderer is
+  `MarkdownIt("gfm-like", {"html": False, "linkify": False})`
+  (src/refdes/build.py:2996) — and with `html: false` an HTML comment is
+  **not inert in output**: it is escaped to visible text on the built
+  site (`<!--x-->` publishes as `&lt;!--x--&gt;`), measured on this
+  branch's renderer (probe in in-prog-logs/navis-design-20261025.md:82-92
+  and re-verified against a built one-item project this session). What
+  math.md:381-384 promises is *scanner* inertness — inline-calc spans
+  inside comments are not checked — plus an unclosed `<!--` warns once
+  at the opener's line and swallows the rest of the body
+  (src/refdes/build.py:1927-1931). GitHub/VS Code preview consumes
+  comments; the refdes site only hides them once the Navis pipeline
+  strips markers before render (PR #382's slice:
+  `navis_mod.strip_markers(item.body)`, build.py:3948-3950 on
+  origin/feat/navis-slice1, and that design's §13 slice 1: "markers
+  consumed"). This is the Navi-button dependency recorded in §C/§E.
 - No `<form>` elements exist in the shell (grep), so button default
   `type=submit` is harmless today — the design mandates explicit
   `type="button"` anyway.
@@ -260,13 +282,14 @@ by item.js:176-190). Choosing the `bodyControl` seam (not a sibling
 widget) buys three baseline properties for free, each of which the bar
 would otherwise have to re-implement:
 
-1. `data-edit-key` re-render carry-over (update.js:20-52): the textarea
+1. `data-edit-key` re-render carry-over (`applyControl`,
+   controls.js:25; scan in update.js:13-19): the textarea
    node is reused across re-renders, so focus/caret survive and bar
    handlers operating on the captured `area` reference stay valid.
 2. Read-only suppression: read-only `bodyControl` returns `null`
-   (item.js:177-179) → **no bar, by construction, with no new
+   (item.js:185-189) → **no bar, by construction, with no new
    condition** — the same guarantee #388's panel inherits.
-3. The `_refdesCommit` hook (editor.js:210) is in scope.
+3. The `_refdesCommit` hook (editor.js:208) is in scope.
 
 New module `src/refdes/serve/static/formatbar.js`, plain ES module,
 imported by `editor.js` only (test_serve_static's import graph check
@@ -291,7 +314,7 @@ selEnd)`:
 2. **Case B (fallback):** splice `area.value`, `setSelectionRange`,
    then **dispatch a synthetic `Event("input", {bubbles: true})`**.
    This is a deliberate refinement of live-calc's Case B (which calls
-   `_refdesCommit` directly and skips `input`, live-calc.js:325-333):
+   `_refdesCommit` directly and skips `input`, live-calc.js:320-343):
    one dispatch drives the draft commit *and* the panel recompute, so
    Case B degrades gracefully instead of leaving the panel stale until
    the next keystroke.
@@ -307,8 +330,8 @@ Hard rules:
 - **Never mutate while a save is in flight.** Handlers check
   `isSaving()` (the accessor #388 adds to editor.js) and no-op.
   Rationale is mechanical, not stylistic: `saveAll` snapshots
-  `pendingOps()` (editor.js:251) then `clearDraft()` on success
-  (editor.js:252) — an insertion landing mid-save is silently
+  `pendingOps()` (editor.js:250) then `clearDraft()` on success
+  (editor.js:251) — an insertion landing mid-save is silently
   destroyed (verified in §A).
 - **Fence safety.** Every block insertion keeps ` ``` ` fences
   balanced by construction (block inserts are pushed to paragraph
@@ -400,7 +423,9 @@ it.
   `insertIntoBody` splices without firing `input` (editor.js:111-116),
   so today's image/calc-fence insertions do **not** retrigger the
   panel (fence lines are not inline spans, so the panel stays
-  semantically correct; the snapshot guard (live-calc.js:236,329)
+  semantically correct; the sent-text guard (`area.value !== sent`,
+  live-calc.js:203; Fill guards the same way via `snapshotText`,
+  live-calc.js:270)
   discards any stale in-flight response). Slice 1 converts
   `insertIntoBody` to the shared mutator, which makes the whole editor
   input-event-clean in one stroke.
@@ -428,10 +453,10 @@ docs/math.md (§A).
 | Figure `[[fig:]]` | skeleton with caret inside the brackets; with sel, sel becomes the id | Cheap skeleton. A real picker would scan the body for image `{id="..."}` suffixes (client-side regex; cross-item figure refs only resolve in combined documents, markdown.md:274-278) — slice-2 follow-up, not v1. |
 | Calc fence | skeleton ```` ```calc\nname = expr | V\n``` ````, sel `name` | Cheap. **DECIDED (Jared, §H-4): the skeleton fails the build in the same spirit as the span** — the unfilled skeleton cannot be saved forgotten. Verified message: `calc 'name': unknown name 'expr'`, an ERROR at the body's source line (measured: `refdes --no-write -c refdes-project.yaml check` on a scratch project, §H-4). The author renames `name`, replaces `expr`. The panel shows no row for it (fences are panel-silent; the save-time 422 owns fences, build.py:2141-2147). An empty fence was the alternative (build-clean) — rejected for the same reason Jared rejected the valid span: a clean unfilled skeleton is a forgotten skeleton. |
 | Inline span | skeleton `` `name := 0 | V` `` (no `= result`), sel `name`, caret after `V` | Cheap. **DECIDED (Jared, §H-4): placeholder-that-fails-the-build** — the author cannot forget to fill it. Skeleton chosen as the *cleanest teaching failure*: it triggers the span grammar (unquoted `:=`, valid name), and the checker's first complaint is the completion instruction, verified verbatim: `inline calc name := 0 | V: stored result missing; write '= <quantity>'` (ERROR at the body line; measured §H-4). While typing, the live-calc panel shows a row with status chip **error**, the span text as name, and that message (route payload measured §H-4); **no auto-fill and no Fill** for it (status `error`, no result slot — live-calc.js:244, build.py:2185-2189), exactly Jared's "no auto-fill because it is not `stale`". Completing `= <quantity>` moves the row to stale/ok under the normal panel rules. The valid-example recommendation (`x := 1 V * 2 | V = 2 V`) was **not taken**. |
-| Value `{{name}}` | `{{}}` caret inside; with sel, sel becomes the name | Cheap. Unresolved names stay as written with a warning (markdown.md:312-313) — safe. A suggest-popover fed by the live-calc rows (which already carry `name`, live-calc.js:142) is the natural slice-3 upgrade. |
+| Value `{{name}}` | `{{}}` caret inside; with sel, sel becomes the name | Cheap. Unresolved names stay as written with a warning (math.md:312-313) — safe. A suggest-popover fed by the live-calc rows (which already carry `name`, live-calc.js:142) is the natural slice-3 upgrade. |
 | Image | — | **No new picker**: the Images panel already exists below the textarea (images.js); a bar button that opens/focuses it reuses the server-composed lines (api.py:1487,1545-1546) and upload path. Building a second image UI is a non-goal. |
 | Source | — | Same: focus the existing Sources panel (sourcepicker.js). Accept-and-save stays its own flow (editor.js:161-166). |
-| Navi marker | `<!--navi: text-->`, sel `text` | Cheap, **conditional on the Navis grammar landing** (PR #382 in review; grammar verified §A from navis-design-20261025.md:109,120). Keyless-on-insert is exactly what the author types by hand (§7.2 minting); the one-line + no-`-->` constraint is on the author — the live comment diagnostics (build.py:1797-1803) catch violations. The bar reserves the slot; the button ships in a follow-up slice when #382 merges, not gated-into-slice-2. |
+| Navi marker | `<!--navi: text-->`, sel `text` | Cheap, **conditional on the Navis grammar landing** (PR #382 in review; grammar verified §A from navis-design-20261025.md:109,120). Keyless-on-insert is exactly what the author types by hand (§7.2 minting); the one-line + no-`-->` constraint is on the author — the live unclosed-comment diagnostic (build.py:1927-1931) catches violations. **Visibility consequence (verified §A): on any tree without PR #382's render-consumption slice, an inserted marker publishes as escaped visible text** (`&lt;!--navi:...--&gt;`), because the site renderer runs with `html: false` (build.py:2996) — it is invisible only after #382's slice 1 (markers stripped before render, build.py:3948-3950 on its branch). Decision (chose (a)): the bar reserves the slot, the button ships **only after #382 merges** (its slice 1 carries the hide), not gated-into-slice-2 — a button that puts visible `&lt;!--navi:--&gt;` garbage on the published site is exactly the kind of thing authors forget to clean. Alternative (b) — ship the button now and document the visible marker — rejected. |
 | `[[cite:id]]` | skeleton | Deferred (slice-3): citation ids live in item frontmatter; `/api/items` rows don't carry them (api.py list payload checked — no citations field), so a picker needs a small endpoint addition. A bare skeleton the author fills is a fine v1. |
 
 Cheap skeleton (no picker, no endpoint): figure ref, calc fence,
@@ -471,7 +496,9 @@ in-memory (the live-calc fallback pattern). The same class as
 `refdes.live-calc.autofill` (live-calc.js:17) — which is exactly the
 precedent Jared cited. **No `refdes-project.yaml` change is in this
 feature's scope** (verbatim §H-1), so the schema work that option
-would cost (a `_KNOWN_SETTINGS` entry at schema.py:65-73, configcheck
+would cost (a top-level project-key entry in `_PROJECT_SETTING_KEYS`,
+schema.py:65-73 — `_KNOWN_SETTINGS` (schema.py:79) is the *item-layout*
+whitelist, §A — plus configcheck
 validation, docs/schema-reference.md, schema tests, revision-payload
 plumbing — §A) is not scheduled by anything in this design.
 
@@ -498,7 +525,7 @@ plumbing — §A) is not scheduled by anything in this design.
 ### What the font setting must NOT touch
 
 - **Published site**: the editor CSS is `/edit/static`
-  (server.py:~708 static serving); site templates/themes untouched.
+  (`/edit/static` route, server.py:688); site templates/themes untouched.
 - **Content hashes / body bytes**: the setting never writes into the
   draft (storage key is disjoint from `refdes.draft.v1.*`) — the save
   path is byte-identical.
@@ -518,7 +545,7 @@ plumbing — §A) is not scheduled by anything in this design.
 | 2 | `editor-refdes-buttons` | refdes row: `[[ID]]` picker (GET /api/items, all items + type-ahead filter — §H-5), calc-fence/inline-span/`{{}}` skeletons (span/fence skeletons per §H-4, exact texts in §C), image/source panel-focus buttons; tests | slice 1 |
 | 3 | `editor-font-setting` | font popover (three stacks + size + line-height, §H-2), localStorage store (browser-only, §H-1 — no schema/serve changes in this slice), CSS custom properties, tests | nothing (can land parallel with 1-2) |
 | 4 | `docs` | new user-facing `docs/browser-editor.md` (the editor has **no user doc** today — §A), index.md nav entry; update docs/design/browser-editor.md v1 item 5 → done; a formatting/font section in docs/markdown.md pointers | 1-3 landed |
-| follow-up | `editor-navi-button` | the Navi marker button | **#382 merged** (grammar) + slice 2 |
+| follow-up | `editor-navi-button` | the Navi marker button | **#382 merged (grammar *and* its slice 1 render-consumption — markers stripped before render, §A/§C; pre-#382 the marker publishes as escaped visible text)** + slice 2 |
 
 Each of 1-3: module + tests + style.css, ~250-400 JS lines, ~150-300
 test lines, no server change, no CSP change, no draft-schema change.
@@ -710,7 +737,7 @@ node):
      edit.py:548-550 → 422 with diagnostics api.py:1238-1246).
      **Nothing lands on disk** — the file kept its previous bytes
      (verified), and the draft survives client-side (`clearDraft` runs
-     only on success, editor.js:252). Completing the span (`= <real
+     only on success, editor.js:251). Completing the span (`= <real
      quantity>`) saves cleanly. Nuance measured too: the gate is
      delta-based — a span that already existed in the file with the
      identical diagnostic key is *not* new, and that save applies
@@ -783,3 +810,24 @@ docs/math.md — the doc now cites it for the span). Citation fix:
 live-calc.js auto-fill gate is line 244. Scratch project kept at
 `.scratch/editor-toolbar-design/spanproj/`. Docs-only again; one
 push.
+
+2026-10-29 (round 3): citation-accuracy review fixed. All eleven
+reviewer items verified true by reading each cited line, then fixed:
+the HTML-comment claim in §A rewritten to the measured truth (html:
+false renderer publishes comments as escaped visible text — probe
+navis-design-20261025.md:82-92; scanner inertness at math.md:381-384
+is not output inertness), the Navi button's visibility consequence
+recorded in §C/§E with option (a) chosen (button ships only after
+#382's slice-1 render-consumption, build.py:3948-3950 on its branch),
+and every stale line cite re-verified: editor.js 12→36, 210→208,
+240-244→261/278, 251/252→250/251; live-calc.js 236,329→203 (+270
+Fill), 325-333→320-343, 185/236/244/259-265/315/356 confirmed on the
+pr388 copy; markdown.md:312-313→math.md:312-313, math.md:59-65→
+296-313; build.py 2694→2996, 1797-1803→1927-1931; schema.py:65-73
+relabeled `_PROJECT_SETTING_KEYS` (whitelist = its union with
+`_KNOWN_SETTINGS` at :79); images.js 71-76→23-26/278; item.js
+177-179→185-189; update.js:20-52→controls.js:25+update.js:13-19;
+server.py:~708→688; create.js "no body hits" reworded (its `body` is
+the POST payload, create.js:190-199). ~30 citations checked at the
+line this round; the fixes above are all that came of it. Docs-only,
+one push.
