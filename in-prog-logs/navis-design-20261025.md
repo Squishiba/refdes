@@ -123,14 +123,14 @@ text        = any text, single line, not containing "-->"
   reporting exact (a marker line is `item.body_line + offset`, the
   `inline_calc` line-reporting pattern), and keeps the panel row a sentence.
   A `<!--navi:` that closes on a later line is a warning naming the
-  opening line (`navis._scan_block`), not a silently-ignored Navi.
+  opening line (`navis.scan_body` over `analyze_navis`, `navis.py:1120,1163`), not a silently-ignored Navi.
 - Author writes `<!--navi: remember X-->`; the tool mints the key into the
   marker on the next writable load (§5, §7.2). Malformed `navi:` comment
   (bad key length/alphabet, empty text) is a warning diagnostic at the line
   (model.Diagnostic, `src/refdes/model.py:144-156`), never swallowed.
 - Consumption: the body scan strips markers before `md.render` (exactly the
   way calc fences are swapped for pass-through placeholder tokens before
-  render, `build.py:3156-3158,3955`); published HTML therefore contains no
+  render, `build.py:3156-3158,3960-3961`); published HTML therefore contains no
   marker bytes.
 
 ## 5. Stable identity
@@ -248,7 +248,7 @@ edited-after-captured flip (`history.py:799`, read-only under
 `expected_revision` tracks the item file). A test suite must pin this
 invariant (archive a Navi, assert item bytes/hashes byte-identical).
 `--no-write` refuses archive/restore through `_refuse_no_write()`
-(`src/refdes/cli.py:95-102`); in `refdes serve`, the API layer already
+(`src/refdes/cli.py:97-108`); in `refdes serve`, the API layer already
 returns 403 on writes under `--no-write` (`src/refdes/serve/api.py:1082-1083`).
 
 ## 8. Compression format
@@ -353,7 +353,7 @@ following the "absent key, not null" convention (`render.py:641-643`).
 
 **CLI parity (semantic reachability — AGENTS.md rule).** New
 `refdes navis` family, noun-verb style matching `keys adopt` /
-`history capture` (`src/refdes/cli.py:3544-3561,3693-3745`):
+`history capture` (`src/refdes/cli.py:3670-3685,3819-3844`):
 
 ```console
 refdes navis ls             # active Navis project-wide
@@ -412,7 +412,7 @@ of the same projection, never a second implementation (the task pane's
    `keys.malformed_key_message()`-style validation (`keys.py:131`).
 3. **Archive store + archive/restore.** gzip records under
    `.refdes/navis/`, per-project lock, `--no-write` refusal
-   (`cli.py:95-102`), §9 state table incl. `navis.archived_orphan`,
+   (`cli.py:97-108`), §9 state table incl. `navis.archived_orphan`,
    journal-dir refusal (§12), byte-identity invariant tests (§7.3).
 4. **Site panel.** Projection once-per-render (`render.py:1145-1157`
    pattern), `navis_assets` gate byte-identical for Navis-free projects

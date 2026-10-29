@@ -87,7 +87,8 @@ resolve by key).
 
 Root-cause fix, not per-case patches: the scan is now driven by the
 project's own renderer -- `build._markdown_parser` token stream with
-source maps (navis._live_markers/_scan_block). Comment and code-span
+source maps (navis._live_markers/_scan_block -- round-4 symbols,
+superseded by round 7's analyze_navis/_machine). Comment and code-span
 state carry across an inline token's newlines exactly as the renderer
 reads them; markers outside the token stream (fences, indented code,
 html blocks, tables structure) are inert by construction; a closed
@@ -99,51 +100,50 @@ validated span, text-locate fallback) and drops lines left as only
 (file, line) sort; source gains `key`.
 
 Pinned by tests/test_navis_matrix.py: 21 Markdown contexts x 5 marker
-placements x LF/CRLF = 210 cells, each asserting scan count, warning
-count, and rendered HTML. Contexts include fences (bare, in-list,
-in-blockquote), indented code, multi-line code spans, open comments,
-raw html, tables, ATX/setext headings, link text, emphasis, escaped
-backslash; placement alone/leading/trailing/two/span. The
-open-comment + two-markers cell pins the swallow-to-first-`-->`
-semantics; list-context span cells pin the unclosed-in-new-item
-consequence. Two existing pins updated to the intended new behavior:
-two-line closed marker now warns; payload source rows carry `key`.
+placements x LF/CRLF = 210 cells (grew to 270 in round 6), each asserting
+scan count, warning count, and rendered HTML: fences (bare, in-list,
+in-blockquote), indented code, multi-line code spans, open comments, raw
+html, tables, headings, links, emphasis, escapes. The open-comment +
+two-markers cell pins the swallow-to-first-`-->` semantics; list-context
+span cells pin the unclosed-in-new-item consequence. Two existing pins
+updated to the intended new behavior: two-line closed marker now warns;
+payload source rows carry `key`.
 docs/markdown.md: inertness reworded renderer-driven (lazy-continuation
-markers under list items now COUNT -- behavior change from round 1's
-documented "write at column 0" rule, which is now just a convention);
-span warning; blockquote-only-line drop. docs/cli-reference.md: ASCII
-ordinals, document-order row. Log itself trimmed per the same review
-(no commit shas, rounds condensed, no stale pass counts -- CI is the
-record).
+markers under list items now COUNT -- round 1's "write at column 0" rule
+is now just a convention); span warning; blockquote-only-line drop.
+docs/cli-reference.md: ASCII ordinals, document-order row.
 
 ## Round 5: rebase onto origin/main (#381 landed)
 
-Branch rebased onto origin/main; sole conflict docs/cli-reference.md usage
-banner, resolved keeping both sides (main's `recover`, branch's
-`navis`). Diff scope re-verified (slice-1 files only); full suite green
-post-rebase.
+Rebased; sole conflict docs/cli-reference.md usage banner, resolved keeping
+both sides. Diff scope re-verified; full suite green post-rebase.
 
 ## Round 6: mapping layer (review round, superseded by round 7)
 
-Reviewer reproduced A3 (strip empties an inert code-span twin, leaves
-the live marker), B (escaped backtick opens a phantom code span), C
-(`\<` escaped marker stripped, stray backslash left), D2 (two markers
-in one table row scan in tokenizer order). Fixed in round 7's rewrite;
-matrix 210 -> 270 cells (A3/B/C/D2 contexts, inert-twin placements,
-text-order assertions) survives.
+Reviewer reproduced A3 (strip empties an inert code-span twin), B (escaped
+backtick opens a phantom code span), C (`\<` escaped marker stripped, stray
+backslash left), D2 (two markers in one table row scan in tokenizer
+order). Fixed in round 7's rewrite; matrix 210 -> 270 cells survives.
 
 ## Round 7: deep-analysis restructuring (.scratch/sol/deep-analysis-pr382.md)
 
-One cached `analyze_navis(body)` -> immutable `Analysis` now feeds scan,
-strip and projection. Provenance: dedicated instrumented MarkdownIt
-(production parser never decorated); table provenance groups inline
-tokens by source line (pad cells carry no bytes); last-line clip fixed.
-The machine runs per inline token over exact live ranges: plain `<!--`
-carries body-wide, an unclosed `<!--navi:` is silent and inert, MULTILINE
-fires only within a token. Fail-loud became fail-closed: `strip_markers`
-never raises, a provenance failure yields the MAPPING diagnostic with
-bytes intact. Probes 79/79, trio 361, full suite green, ruff clean on
-touched files, differential PASS (plain project byte-identical). Added:
-lone-CR/NUL/escaped-pipe/comment-carry/residue/attributes/hardbreak/
-mixed-terminators/payload-syntax tests, and the 5,000-digit CLI ordinal
--> exit 2.
+One cached `analyze_navis(body)` -> immutable `Analysis` feeds scan,
+strip and projection: dedicated instrumented MarkdownIt (production
+parser never decorated), per-token live ranges, table provenance grouped
+by source line, last-line clip fixed. Plain `<!--` carries body-wide; an
+unclosed `<!--navi:` is silent and inert; MULTILINE fires only within a
+token. Fail-loud became fail-closed (`strip_markers` never raises, the
+MAPPING diagnostic keeps bytes intact). Probes 79/79, differential PASS.
+Added the round-6 review's pins (lone-CR, NUL, escaped-pipe, comment
+syntax) + the 5,000-digit CLI ordinal -> exit 2.
+
+## Round 8: review round (final)
+
+Load-write announcement on stderr (stdout purity pinned for all verbs on
+cold projects). Fill-row cell count escape-aware (reviewer's `\\|` repro
+pinned). Fail-closed warning names the exception. Perf: bisected
+`line_of`, single-join strip -- 5k markers 2.46s->1.24s, 5k-line para
+2.21s->1.05s, 1k 0.12s->0.08s; 5k-strip correctness test added (no
+wall-clock asserts). Ruff default rules: 0 findings on the four slice-1
+files (SIM102/B023/ISC004/FURB136 fixed, BLE001 noqa'd with reason).
+Design-log cites re-verified: `_scan_block` -> `scan_body`/`analyze_navis`; cli.py:60,97-108,3670-3685,3819-3844; build.py:3960-3961.

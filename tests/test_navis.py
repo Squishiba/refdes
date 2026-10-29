@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import json
 
-
 from conftest import write_project_config
 
 from refdes import build as build_mod
@@ -109,8 +108,8 @@ def test_marker_is_one_line_only():
     # machinery's territory (build.py), not this one.
     found, bad = navis.scan_body("<!--navi: spans\ntwo lines-->\n")
     assert found == []
-    assert bad == [(0, "navi marker spans lines; a marker is one line: "
-                       "`<!--navi: the reminder-->`")]
+    assert bad == [(0, ("navi marker spans lines; a marker is one line: "
+                        "`<!--navi: the reminder-->`"))]
 
 
 def test_malformed_empty_text_is_a_warning():
@@ -358,6 +357,24 @@ def test_render_marker_only_line_does_not_split_paragraph(tmp_path):
     assert "navi" not in html
     assert html.count("<p>") == 1
     assert "a 3V3 rail at\ntext" in html
+
+
+def test_render_escaped_pipe_in_table_row_keeps_the_table(tmp_path):
+    # `table.py`'s escapedSplit treats `\|` as cell content, not a cell
+    # delimiter -- counting it as a delimiter rebuilt the blank row with
+    # an extra column and the stripped page rendered a paragraph.
+    project = _project(
+        tmp_path,
+        {
+            "note.md": _md(
+                "NOTE-001", "note", "Power",
+                "| <!--navi: a \\| b--> |\n|---|\n",
+            )
+        },
+    )
+    html = project.item_by_id("NOTE-001").body_html
+    assert "<table>" in html and "<p>" not in html
+    assert "navi" not in html
 
 
 def test_render_marker_only_line_does_not_split_blockquote(tmp_path):
@@ -746,10 +763,13 @@ def test_strip_fails_closed_on_an_unmappable_span(monkeypatch):
     assert navis.strip_markers(body) == body
     analysis = navis.analyze_navis(body)
     assert analysis.navis == ()
-    assert [m for _, m in analysis.diagnostics] == [navis.MAPPING_MESSAGE]
+    (msg,) = [m for _, m in analysis.diagnostics]
+    assert msg.startswith(navis.MAPPING_MESSAGE)
+    # the warning names the failure so a bug report is actionable
+    assert "NavisMappingError" in msg and "test-injected mapping failure" in msg
     found, bad = navis.scan_body(body)
     assert found == []
-    assert [m for _, m in bad] == [navis.MAPPING_MESSAGE]
+    assert len(bad) == 1 and bad[0][1].startswith(navis.MAPPING_MESSAGE)
 
 
 def test_strip_drops_a_line_left_bare_of_list_bullets():
@@ -827,8 +847,8 @@ def test_residue_thematic_breaks_and_plus_text():
 
 def test_marker_in_link_attributes_is_inert():
     for body in ('[t](u "<!--navi: x-->") tail\n',
-                 "[a]: /url\n"
-                 "text <!--navi: x-->\n"):
+                 ("[a]: /url\n"
+                  "text <!--navi: x-->\n")):
         found, bad = navis.scan_body(body)
         assert bad == []
         title = body.startswith("[t](")
@@ -840,6 +860,16 @@ def test_image_alt_marker_is_inline():
     found, bad = navis.scan_body(body)
     assert bad == [] and len(found) == 1
     assert navis.strip_markers(body) == "![a b](u.png) tail\n"
+
+
+def test_five_thousand_markers_strip_correctly():
+    # Scale, not speed (no wall-clock assertion -- CI flakes): the
+    # linear passes (bisected line lookup, single-join strip) must keep a
+    # many-marker body exact.
+    body = "".join(f"thing {i} <!--navi: note {i}-->\n" for i in range(5000))
+    analysis = navis.analyze_navis(body)
+    assert [n.text for n in analysis.navis] == [f"note {i}" for i in range(5000)]
+    assert analysis.stripped == "".join(f"thing {i}\n" for i in range(5000))
 
 
 def test_no_marker_scan_skips_parser(monkeypatch):

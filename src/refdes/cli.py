@@ -2947,7 +2947,7 @@ def cmd_navis(args) -> int:
     like `thread <unknown-ref>`.
     """
     project, _stale = _load(args, require_ids=False)
-    _announce_load_writes(project)
+    _announce_load_writes(project, stream=sys.stderr)
     load_errors = list(project.errors)
     for d in load_errors:
         print(str(d), file=sys.stderr)

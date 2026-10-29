@@ -52,6 +52,7 @@ input ever sees a scan-side change (§7).
 
 from __future__ import annotations
 
+import bisect
 import re
 import threading
 from functools import lru_cache
@@ -111,7 +112,7 @@ class _Occurrence:
     are the parsed grammar (``error`` set = malformed marker: consumed
     from the page, never a Navi)."""
 
-    __slots__ = ("line", "start", "end", "inner", "key", "text", "error")
+    __slots__ = ("end", "error", "inner", "key", "line", "start", "text")
 
     def __init__(self, line, start, end, inner, key, text, error):
         self.line = line
@@ -136,8 +137,14 @@ class Analysis:
     project without Navis cannot render a byte differently because the
     analysis ran."""
 
-    __slots__ = ("body", "has_navi_syntax", "navis", "diagnostics",
-                 "stripped", "occurrences")
+    __slots__ = (
+        "body",
+        "diagnostics",
+        "has_navi_syntax",
+        "navis",
+        "occurrences",
+        "stripped",
+    )
 
     def __init__(self, body, has_navi_syntax, navis, diagnostics, stripped,
                  occurrences=()):
@@ -311,7 +318,7 @@ class _Ctx:
     coordinate: every consumed byte is a source byte, and pad spaces the
     block rule synthesized for an expanded tab simply consume no source."""
 
-    __slots__ = ("norm", "pos_n", "snap", "lo", "hi", "starts", "cstarts")
+    __slots__ = ("cstarts", "hi", "lo", "norm", "pos_n", "snap", "starts")
 
     def __init__(self, norm, pos_n, snap, lo, hi, starts, cstarts):
         self.norm = norm
@@ -330,10 +337,11 @@ class _Ctx:
         self.pos_n += n
 
     def line_of(self, pos_n):
-        j = len(self.starts) - 1
-        while j > 0 and self.starts[j] > pos_n:
-            j -= 1
-        return j
+        # `starts` is ascending (starts[0] == 0, so the result is never
+        # negative): the line is the last entry at or before `pos_n`.
+        # 5,000-marker bodies made the old downward walk the hot loop --
+        # quadratic in body length.
+        return bisect.bisect_right(self.starts, pos_n) - 1
 
     def ws_expand(self, pos, length):
         """`length` source bytes of whitespace starting at `pos`: how many
@@ -460,9 +468,7 @@ def _text_scan(ctx, content, ranges, inert, entity):
             ranges.append((run, pos, live))
             raise NavisMappingError("text run runs past the source")
         c = norm[pos]
-        if c == ch:
-            pos += 1
-        elif ch == " " and c in " \t":
+        if c == ch or ch == " " and c in " \t":
             pos += 1
         elif ch == " " and i > 0:
             pass  # a synthesized pad space: no source byte at all
@@ -628,18 +634,18 @@ def _break(ctx, ranges, min_ws):
     norm = ctx.norm
     pos = ctx.pos_n
     k = 0
-    if pos < len(norm) and norm[pos] == "\\":
-        if pos + 1 < len(norm) and norm[pos + 1] == "\n":
-            ctx.take(0, 2, ranges, False)
-            pos += 2
-            ws = 0
-            while pos + ws < len(norm) and norm[pos + ws] in " \t\v\f":
-                ws += 1
-            ranges.append((pos, pos + ws, False))
-            ctx.pos_n = pos + ws
-            if min_ws > 0:
-                return
-            raise NavisMappingError("backslash hard break is a hard break")
+    if pos < len(norm) and norm[pos] == "\\" and pos + 1 < len(norm) \
+            and norm[pos + 1] == "\n":
+        ctx.take(0, 2, ranges, False)
+        pos += 2
+        ws = 0
+        while pos + ws < len(norm) and norm[pos + ws] in " \t\v\f":
+            ws += 1
+        ranges.append((pos, pos + ws, False))
+        ctx.pos_n = pos + ws
+        if min_ws > 0:
+            return
+        raise NavisMappingError("backslash hard break is a hard break")
     while pos + k < len(norm) and norm[pos + k] in " \t":
         k += 1
     if pos + k >= len(norm) or norm[pos + k] != "\n":
@@ -750,7 +756,7 @@ def _machine(norm_lines, token_ranges):
             line = norm_lines[li]
             ranges = sorted(ranges_by_line[li])
 
-            def _closer(text, pos):
+            def _closer(text, pos, ranges):
                 """The first `-->` whose bytes are all live text (an opener's
                 6 bytes must all be visible for the opener to open)."""
                 while True:
@@ -765,7 +771,7 @@ def _machine(norm_lines, token_ranges):
             pos = 0
             while True:
                 if in_comment:
-                    close = _closer(line, pos)
+                    close = _closer(line, pos, ranges)
                     if close < 0:
                         break
                     pos = close + len(COMMENT_CLOSE)
@@ -788,7 +794,7 @@ def _machine(norm_lines, token_ranges):
                     break
                 navi = line.startswith(MARKER_OPEN, opener)
                 close = _closer(line, opener + (len(MARKER_OPEN) if navi
-                                                 else len("<!--")))
+                                                 else len("<!--")), ranges)
                 if close < 0:
                     if navi:
                         if pending < 0:
@@ -895,7 +901,15 @@ def _strip_line(content, spans, prefixes, prose, fill):
     single space, so deleting a marker can neither add nor destroy a
     forced line break."""
     if fill:
-        cells = len(content.split("|")) - 1
+        # Cell count as `table.py`'s escapedSplit sees it: a `|` preceded
+        # by an unescaped backslash is content, not a delimiter -- the
+        # same walk `_table_cells` uses above.
+        cells = 0
+        isEscaped = False
+        for ch in content:
+            if ch == "|" and not isEscaped:
+                cells += 1
+            isEscaped = ch == "\\"
         return "|".join([""] + [" "] * cells).rstrip(), False
     tokens = []
     pos = 0
@@ -970,9 +984,16 @@ def _strip(body, raw_lines, prefixes, policy):
             edits.append((start, start + len(content) + len(term), ""))
         else:
             edits.append((start, start + len(content), joined))
-    for s, e, text in reversed(edits):
-        body = body[:s] + text + body[e:]
-    return body
+    # Edits are ascending (one per line, in line order): one forward join
+    # -- rebuilding `body` per edit is quadratic on a many-marker body.
+    parts = []
+    prev = 0
+    for s, e, text in edits:
+        parts.append(body[prev:s])
+        parts.append(text)
+        prev = e
+    parts.append(body[prev:])
+    return "".join(parts)
 
 
 # ---- the one analysis ----
@@ -1104,9 +1125,15 @@ def analyze_navis(body: str) -> Analysis:
     value, immutable, with the body identity kept on the result."""
     try:
         return _analyze(body)
-    except Exception:
-        return Analysis(body, MARKER_OPEN in body, (),
-                        ((0, MAPPING_MESSAGE),), body)
+    except Exception as exc:  # noqa: BLE001 -- the fail-closed promise:
+        # ANY provenance failure degrades to a diagnostic with the source
+        # byte-intact; nothing a body can contain may traceback a build.
+        # The exception names itself in the warning so a bug report is
+        # actionable without a reproduction.
+        return Analysis(
+            body, MARKER_OPEN in body, (),
+            ((0, f"{MAPPING_MESSAGE} [{type(exc).__name__}]: {exc}"),),
+            body)
 
 
 def parse_marker(inner: str) -> tuple[str, str, str | None]:

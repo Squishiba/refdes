@@ -66,6 +66,21 @@ def test_navis_ls_on_project_without_markers_exits_clean(tmp_path, capsys):
     assert "no navis" in out.lower()
 
 
+def test_a_cold_navis_run_prints_the_answer_on_stdout_alone(tmp_path, capsys):
+    # The load's `(minted N key(s) while loading)` notice belongs on
+    # stderr (cmd_thread precedent): a human pipes `navis ls` and stdout
+    # owes only the answer -- for every verb.
+    for verb, args in (("ls", ()), ("all", ()), ("show", ("1",))):
+        root = tmp_path / verb
+        root.mkdir()
+        config = _setup(root, TWO_MARKERS)
+        assert _run(config, "navis", verb, *args) == 0
+        captured = capsys.readouterr()
+        assert "minted" in captured.err, verb
+        assert "minted" not in captured.out, verb
+        assert "Model worst-case copper temperature." in captured.out, verb
+
+
 def test_navis_ls_lists_rows_with_source(tmp_path, capsys):
     config = _setup(tmp_path, TWO_MARKERS)
     assert _run(config, "--no-write", "navis", "ls") == 0
