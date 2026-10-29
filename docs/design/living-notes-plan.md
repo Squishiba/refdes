@@ -1,12 +1,12 @@
-Status: **Implemented (H1–H8; optional H9 not landed)** — this is the plan
+Status: **Implemented (H1–H9)** — this is the plan
 `living-notes.md` was waiting for, and its phases landed: the history store
 (H1 `d84e123`), capture at the `follows:` freeze (H2 `47a5300`), the
 edited-after-captured diagnostic (H3 `506842c`), the history commands
 (H4 `1981f9e`), history-backed sealing (H5 #157), the merged-log `tasks:` fold
 (H6 #183), the thread projection and `refdes thread`/`refdes work`
-(H7a #187, H7b #191, H7c #194), and the open-tasks / captured-edits gate rules
-(H8 #193). The optional H9 (baseline snapshot events and the site history
-disclosure) has not landed. The decisions it
+(H7a #187, H7b #191, H7c #194), the open-tasks / captured-edits gate rules
+(H8 #193), and the optional baseline snapshot events with the site history
+disclosure (H9). The decisions it
 implements are in `docs/design/living-notes.md` and are not reopened here. All
 eight open questions (§Open questions for Jared) were ratified by Jared on
 2026-09-19 as the conservative defaults this plan already assumed.
@@ -535,9 +535,15 @@ huge), sabotage matrix in the log.
 
 ## Phase H9 — baseline snapshot events and the site history disclosure (optional)
 
+**Landed.** Snapshot events are written by `stamp()` on the success path
+(`write=True` only, gate-failed releases write nothing), one per keyed local
+item, kind = baseline kind, fingerprint = baseline name; the item page's
+`<section class="history-disclosure">` renders one row per containing
+baseline and is absent when there is nothing to show. **Not built (deferred):**
+the baseline selector — the disclosure lists the baselines inline.
 **Adds.** `revision`/`release` write `baseline` events into the same store, and
-the item page gains a history disclosure showing captured content, the
-edited-after-captured marker, and a baseline selector.
+the item page gains a history disclosure showing captured content and the
+edited-after-captured marker.
 
 **Files.** `src/refdes/lifecycle.py` — `stamp()` (`:642`) writes events beside
 the compact baseline it already writes; `diff_against()` (`:804`) unchanged in

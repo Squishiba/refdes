@@ -346,6 +346,26 @@ baseline_identity: os_user   # os_user | git_identity — default: os_user
 With the shipped default, `revision`/`release` never invoke git in any
 form — this is deliberately not the git-history layer (below).
 
+## Baseline snapshot events
+
+A successful `revision`/`release` stamp also writes one snapshot event per
+keyed baseline entry into the history store (`.refdes/history/`), with the
+item's semantic payload at the moment of the stamp — the same
+fields/links/normalized-body core the content hash covers, not rendered
+HTML — and the baseline's name
+as its `fingerprint:`. That is what makes a baseline readable in the *item's*
+own history: the item page's history disclosure renders one row per
+baseline that contains the item, showing the captured text (see
+`docs/output.md`, "An item page").
+
+The store's rules apply unchanged: content is stored once and deduped by
+hash, an identical re-stamp writes nothing (the stamp itself refuses as
+"already stamped"), `--no-write` writes nothing, a gate-failed `release`
+writes nothing, and the writer takes the project write lock like every
+other history writer. Events live under `.refdes/history/`, outside every
+hashed and sealed surface — writing them changes no content hash, no seal,
+and no baseline digest.
+
 ## The diff: what changed, and since when
 
 Two independently useful questions, both answered by comparing the current

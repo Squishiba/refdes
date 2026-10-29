@@ -171,6 +171,34 @@ def test_revision_stamps_unconditionally_despite_draft_and_uncovered_items(lifec
     assert os.path.isfile(outcome.path)
 
 
+# Living notes H9: the stamp's history snapshot events, pinned from the
+# lifecycle side (the store side, the disclosure, and the read-only posture
+# are tests/test_history_baseline.py). `stamp` is the only writer, so the
+# write/`--no-write` split and the gate floor are this file's to pin.
+
+
+def test_stamp_writes_baseline_events_for_every_local_item(lifecycle_project):
+    project = _lc_build(lifecycle_project)
+    adoption = adopt.apply(str(lifecycle_project))
+    assert adoption.ok, adoption.errors
+    project = _lc_build(lifecycle_project)
+    outcome = lifecycle.stamp(project, kind="revision", name="rev-a")
+    assert outcome.status == "stamped"
+    events = [e for e in history.load_events(str(lifecycle_project)) if e["kind"] == "revision"]
+    assert len(events) == outcome.item_count
+    for event in events:
+        assert event["fingerprint"] == "rev-a"
+        assert "rev-a" in str(event["reason"])
+        assert str(event["occurred_at"]) == outcome.stamped_at
+
+
+def test_write_false_stamp_writes_no_events(lifecycle_project):
+    project = _lc_build(lifecycle_project)
+    outcome = lifecycle.stamp(project, kind="revision", name="rev-a", write=False)
+    assert outcome.status == "would_stamp"
+    assert history.load_events(str(lifecycle_project)) == []
+
+
 def test_stamp_records_the_pinned_standard_version(tmp_path):
     """A baseline records `refdes_version` (the tool) but nothing said which
     *vocabulary* version produced its hashes -- revise.py needs this to know
