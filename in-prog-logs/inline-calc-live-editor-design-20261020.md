@@ -394,7 +394,9 @@ Response 200:
 - `"revision"` lets the browser discard responses computed against an old
   model (§3.6): **the item's file revision** the snapshot computed on —
   the same string space as the form's `expected_revision` (computed
-  `src/refdes/serve/api.py:769-770`, served :825, checked :1087-1089) — not the
+  `src/refdes/serve/api.py:769-770`, served :825; :1087-1089 only
+  extracts and type-checks it — the comparison is in
+  `edit_mod.apply_edit`, `src/refdes/serve/edit.py:459`) — not the
   project-wide `/api/revision` `revision` (`src/refdes/serve/state.py:305`), which the
   form does not hold.
 - Guard: the server evaluates at most the first 200 triggered spans of

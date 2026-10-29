@@ -364,8 +364,10 @@ re-stamp under a new name to record the snapshots. The store's rules apply
 unchanged: content is stored once and deduped by hash, `--no-write` writes
 nothing, a gate-failed `release` writes nothing, and the writer takes the
 project write lock like every other history writer. A re-stamp of an
-existing name with identical content returns "unchanged" and writes
-nothing — no events, not even a refreshed `stamped_at` — and a re-stamp
+existing name with identical content returns "unchanged": it writes no
+events and does not refresh the stamp (not even `stamped_at` — the one
+file touch it can still make is migrating a baseline stored in an older
+hash format in place) — and a re-stamp
 whose content *differs* is the existing "already stamped … with different
 content" conflict. The identical re-stamp deliberately never backfills
 missing events: it proves the *hashed* state matches the baseline, not
