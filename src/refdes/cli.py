@@ -156,6 +156,8 @@ def _load_write_notice(project: Project) -> str | None:
     parts = []
     if writes.minted_keys:
         parts.append(f"minted {writes.minted_keys} key(s)")
+    if writes.minted_navi_keys:
+        parts.append(f"minted {writes.minted_navi_keys} navi key(s)")
     if writes.rewritten_targets:
         parts.append(f"rewrote {writes.rewritten_targets} reference(s)")
     if writes.rewritten_images:
@@ -2936,12 +2938,15 @@ def cmd_navis(args) -> int:
     is no second implementation to maintain (§11's "panel/CLI never a
     second implementation" rule, the `cmd_thread` precedent).
 
-    Slice 1 mints no keys and archives nothing (design §13), so `show`'s
+    Slice 2 mints keys on the writable load (design §5, §13): a writable
+    `navis` run writes keys into keyless markers, announced on stderr like
+    every other load write, and `--no-write` keeps markers keyless. `show`'s
     selector is a marker's full 11-character key (matched first -- every
     digit is in the key alphabet, so an all-digit key must not be read as
-    an ordinal) or the `ls` ordinal number (the key only exists once a
-    later slice writes it), and `all` is the active list with a stated
-    note. Exit posture is the read-only
+    an ordinal), a 6-to-10-character key *prefix* (the short key the CLI
+    and panel display -- a unique match selects, an ambiguous one names its
+    candidates and exits 2, §5's short-key resolution), or the `ls` ordinal
+    number. Exit posture is the read-only
     neighbours': a clean run is 0 -- including a project with no Navis at
     all -- and a selector that names nothing is a naming error, exit 2,
     like `thread <unknown-ref>`.
@@ -2965,6 +2970,34 @@ def cmd_navis(args) -> int:
         # 11-character all-digit string is legal key grammar and a full-key
         # selector must not be read as an out-of-range ordinal number.
         row = next((r for r in rows if r["key"] == args.navi), None)
+        # Short-key selector (slice 2, design §5): 6..10 characters of the
+        # key alphabet are a key PREFIX. A unique match selects; an
+        # ambiguous one names its candidates (naming the thing you meant is
+        # on you, like an ambiguous item-id prefix); no match falls through
+        # to the ordinal reading below.
+        if (
+            row is None
+            and 6 <= len(args.navi) < keys_mod.KEY_LEN
+            and all(ch in keys_mod.ALPHABET for ch in args.navi)
+        ):
+            candidates = [
+                r for r in rows if r["key"] and r["key"].startswith(args.navi)
+            ]
+            if len(candidates) == 1:
+                row = candidates[0]
+            elif candidates:
+                print(
+                    f"navi key prefix {args.navi!r} is ambiguous:",
+                    file=sys.stderr,
+                )
+                for cand in candidates:
+                    csrc = cand["source"]
+                    print(
+                        f"  {cand['key']}  {cand['text']}  "
+                        f"({csrc['file']}:{csrc['line']})",
+                        file=sys.stderr,
+                    )
+                return 2
         # ASCII digits only, and no more of them than the largest ordinal
         # has: a longer digit string is out of range by length alone, and
         # int() of a 4300-digit string raises (CPython's integer-string
@@ -2981,12 +3014,13 @@ def cmd_navis(args) -> int:
         if row is None:
             print(
                 f"no Navi {args.navi!r}: `refdes navis ls` numbers them "
-                f"1..{len(rows)}; a selector is a number or a full key",
+                f"1..{len(rows)}; a selector is a number, a full key, "
+                "or a key prefix",
                 file=sys.stderr,
             )
             return 2
         src = row["source"]
-        key_note = row["key"] if row["key"] else "(keyless -- keys are minted by a later slice)"
+        key_note = row["key"] if row["key"] else "(keyless -- the next writable command mints a key)"
         print(f"Navi: {row['text']}")
         print(f"  key: {key_note}")
         print(f"  source: {src['item']} ({src['file']}:{src['line']})")
@@ -3004,7 +3038,10 @@ def cmd_navis(args) -> int:
         print(f"{len(rows)} Navis:")
     for number, row in enumerate(rows, 1):
         src = row["source"]
-        print(f"  {number}. {row['text']}  {src['item']} ({src['file']}:{src['line']})")
+        # The 6-char key prefix is the Navi's display name (§5); a keyless
+        # marker (a --no-write run) shows no key column.
+        short = f"{row['key'][:6]} " if row["key"] else ""
+        print(f"  {number}. {short}{row['text']}  {src['item']} ({src['file']}:{src['line']})")
     if verb == "all":
         print("  archived: none -- archive records land in a later slice (design §13)")
     return 1 if load_errors else 0

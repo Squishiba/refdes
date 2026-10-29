@@ -86,10 +86,12 @@ The grammar is closed and strict:
   convention the tooling assumes you write; it is not enforced. A marker
   that *closes* on a later line is a warning naming the opening line,
   not a Navi;
-- a marker may carry its own 11-character key
-  (`<!--navi:k7f3q2x8d0m Model worst-case copper temperature.-->`); keys
-  are minted by the tool in a later slice, so hand-write none of them
-  today;
+- a marker carries its own 11-character key
+  (`<!--navi:k7f3q2x8d0f Model worst-case copper temperature.-->`); you
+  never write one by hand — the tool mints it into the marker on the next
+  writable command, at the marker's exact position in your file, and
+  announces it. A declared key that fails key validation is reported,
+  never repaired;
 - a marker is inert exactly where the page's own Markdown renderer says
   it is literal text: inside a fenced code block, an indented code
   block, an inline code span (however many lines the span covers), or an

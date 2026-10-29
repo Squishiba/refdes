@@ -664,31 +664,48 @@ and computes no second answer of its own, the `thread` precedent.
 
 ```console
 $ refdes navis ls
+navis: minted key 12zmcm (12zmcmfc039) into NOTE-001 (items/note-a.md)
+navis: minted key cw0jwt (cw0jwtvdmj6) into NOTE-002 (items/note-b.md)
+(minted 2 navi key(s) while loading)
 2 Navis:
-  1. Model worst-case copper temperature.  NOTE-001 (items/note-a.md:7)
-  2. Recheck decoupling near U14.  NOTE-002 (items/note-b.md:6)
+  1. 12zmcm Model worst-case copper temperature.  NOTE-001 (items/note-a.md:8)
+  2. cw0jwt Recheck decoupling near U14.  NOTE-002 (items/note-b.md:7)
 
-$ refdes navis show 1
+$ refdes navis show 12zmcm
 Navi: Model worst-case copper temperature.
-  key: k7f3q2x8d0m
-  source: NOTE-001 (items/note-a.md:7)
+  key: 12zmcmfc039
+  source: NOTE-001 (items/note-a.md:8)
 ```
+
+A writable run mints a key into every keyless marker as part of its load —
+the same posture as item-key minting — writes it into the marker in the
+author's file (`<!--navi:12zmcmfc039 text-->`), and announces each mint on
+**stderr**; `--no-write` keeps markers keyless. `ls` shows each key's
+6-character prefix (the marker's display name), and `show` resolves a
+selector as the full key, a key **prefix** (a unique match selects; an
+ambiguous one names its candidates and exits 2), or the `ls` ordinal, in
+that order.
 
 | Verb | Meaning |
 | --- | --- |
-| `ls` | Every active marker, as `N. text  DISPLAY-ID (file:line)`. Malformed markers print as warnings on stderr with their `file:line` — the listing never hides the reason a marker it does not list is missing |
-| `all` | The active list, labelled, plus the archived section's line. Slice 1 writes no archive records, so that line names its absence rather than printing nothing where a reader expects the archived rows |
-| `show <selector>` | One Navi in full: text, key, source. The selector is the `ls` ordinal (1-based, ASCII digits only — `²` is not a digit here) or a marker's full 11-character key — a key is matched first, so an all-digit key is a selector, not an ordinal; a keyless marker's key line says so |
+| `ls` | Every active marker, as `N. key6 text  DISPLAY-ID (file:line)` (no key column under `--no-write`). Malformed markers print as warnings on stderr with their `file:line` — the listing never hides the reason a marker it does not list is missing |
+| `all` | The active list, labelled, plus the archived section's line. Slice 2 writes no archive records, so that line names its absence rather than printing nothing where a reader expects the archived rows |
+| `show <selector>` | One Navi in full: text, key, source. The selector is the marker's full 11-character key (matched first, so an all-digit key is a selector, not an ordinal), a 6-to-10-character key prefix, or the `ls` ordinal (1-based, ASCII digits only — `²` is not a digit here); a keyless marker's key line says so |
 
 A project with no Navis is a clean **exit 0** (`ls` and `all` print
 `no Navis: …`); a `show` selector that names nothing is a naming error,
 **exit 2**. An items file that fails to parse is reported on stderr and the
-command exits 1 (like `ls`). The commands write nothing: like `thread`, the
-load's own key minting/expansions are announced on **stderr**, and the
-build runs with no seal write.
+command exits 1 (like `ls`). The listing writes nothing of its own: like
+`thread`, the load's own key minting/expansions are announced on **stderr**,
+and the build runs with no seal write.
 
-Keys are minted and archive records written by later slices of the design,
-not by slice 1 — `show` can only print a key that is already in the marker.
+Keys are minted by the writable load (slice 2): the mint writes at the
+marker's exact source position, refuses — with a warning, bytes untouched —
+any marker whose body is not the item's own markdown file (a list file's
+`body:` scalar stays keyless), and never rewrites a declared key. A
+declared key that fails key validation is reported on stderr as corrupt
+input, never repaired. Archive records land in a later slice of the
+design, not slice 2 — `all` can only print the active list.
 
 ---
 
