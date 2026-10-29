@@ -29,6 +29,22 @@ def shadow_os(monkeypatch, **overrides):
     monkeypatch.setattr(queue, "os", SimpleNamespace(**namespace))
 
 
+def shadow_time(monkeypatch, **overrides):
+    """Give queue_mode a private time namespace for deterministic clocks."""
+    namespace = vars(time).copy()
+    namespace.update(overrides)
+    shadow = SimpleNamespace(**namespace)
+    monkeypatch.setattr(queue, "time", shadow)
+    return shadow
+
+
+def shadow_subprocess(monkeypatch, **overrides):
+    """Give queue_mode a private subprocess namespace for child fakes."""
+    namespace = vars(subprocess).copy()
+    namespace.update(overrides)
+    monkeypatch.setattr(queue, "subprocess", SimpleNamespace(**namespace))
+
+
 def fixture(name):
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
@@ -205,7 +221,7 @@ def test_supervised_wait_is_capped_by_all_active_deadlines(
                          job_wall_timeout=30,
                          permission_started_at=wall_now - (10 - permission_remaining))
     queue.atomic_json(tmp_path / "state.json", state)
-    monkeypatch.setattr(queue.time, "time", lambda: wall_now)
+    queue_time = shadow_time(monkeypatch, time=lambda: wall_now)
     monkeypatch.setattr(queue, "record_permission_progress", lambda _jobdir: None)
     monotonic_calls = 0
 
@@ -215,6 +231,7 @@ def test_supervised_wait_is_capped_by_all_active_deadlines(
         return monotonic_start if monotonic_calls == 1 else monotonic_start + 10 - agent_remaining
 
     time_namespace = vars(time).copy()
+    time_namespace["time"] = queue_time.time
     time_namespace["monotonic"] = monotonic
     monkeypatch.setattr(driver, "time", SimpleNamespace(**time_namespace))
     monkeypatch.setattr(driver, "check_permits", lambda _job: None)
@@ -259,8 +276,8 @@ def test_supervisor_reads_spec_once(tmp_path, monkeypatch):
         return original_read_json(path)
 
     monkeypatch.setattr(queue, "read_json", counted_read)
-    monkeypatch.setattr(queue.subprocess, "run",
-                        lambda *_args, **_kwargs: fake_result(rc=2, out="human needed"))
+    shadow_subprocess(monkeypatch,
+                      run=lambda *_args, **_kwargs: fake_result(rc=2, out="human needed"))
     assert queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py",
                            sleep_fn=lambda _seconds: None) == 2
     assert len(reads) == 1
@@ -325,7 +342,7 @@ def test_in_loop_daemon_recovery_keeps_reconciled_owned_agents_and_operations(
         return fake_result(rc=2, out="human needed")
 
     monkeypatch.setattr(queue, "_listing_from_cli", listing)
-    monkeypatch.setattr(queue.subprocess, "run", child)
+    shadow_subprocess(monkeypatch, run=child)
     assert queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py",
                            sleep_fn=lambda _seconds: None) == 2
     saved = queue.load_state(jobdir)
@@ -551,7 +568,7 @@ def test_check_permits_recognizes_owned_reviewer_agent(tmp_path, monkeypatch):
         return fake_result(out="[]")
 
     monkeypatch.setattr(driver, "run_guarded", guarded)
-    monkeypatch.setattr(queue.subprocess, "run", paseo)
+    shadow_subprocess(monkeypatch, run=paseo)
     jobdir = tmp_path / "job"
     create_state(jobdir)
     job = {"queue_supervised": True, "jobdir": str(jobdir),
@@ -718,7 +735,8 @@ def test_long_turn_after_permission_grant_refreshes_no_progress_timer(tmp_path, 
         now[0] += 10
         return value
 
-    monkeypatch.setattr(queue.time, "time", wall_time)
+    shadow_time(monkeypatch, time=wall_time)
+    monkeypatch.setattr(driver, "time", SimpleNamespace(**vars(queue.time)))
 
     def guarded(_argv, **_kwargs):
         return 0, json.dumps(responses.pop(0)), ""
@@ -767,7 +785,7 @@ def test_supervisor_migrates_missing_attempts_collection(tmp_path, monkeypatch, 
     def child(*_args, **_kwargs):
         return fake_result(rc=2, out="human needed")
 
-    monkeypatch.setattr(queue.subprocess, "run", child)
+    shadow_subprocess(monkeypatch, run=child)
     assert queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py",
                            sleep_fn=lambda _seconds: None) == 2
     saved = queue.load_state(jobdir)
@@ -789,7 +807,8 @@ def test_supervise_terminal_resume_reemits_terminal_event(tmp_path, monkeypatch,
     jobdir = tmp_path / "job"
     state = create_state(jobdir)
     event = queue.save_terminal(jobdir, state, "parked", "already done")
-    monkeypatch.setattr(queue.subprocess, "run", lambda *_a, **_k: pytest.fail("driver child spawned"))
+    shadow_subprocess(monkeypatch,
+                      run=lambda *_a, **_k: pytest.fail("driver child spawned"))
     assert queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py",
                            sleep_fn=lambda _seconds: None) == 2
     emitted = json.loads(capsys.readouterr().out)
@@ -971,7 +990,7 @@ def test_supervise_initial_state_records_first_spawn_and_parks_crash(tmp_path, m
         driver.record_turn(job, "coder", 0, json.dumps(run), "workspace banner")
         raise TypeError("simulated post-spawn supervisor fault")
 
-    monkeypatch.setattr(queue.subprocess, "run", child_run)
+    shadow_subprocess(monkeypatch, run=child_run)
     result = queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py",
                              sleep_fn=lambda _seconds: None)
     assert result == 2
@@ -1011,7 +1030,8 @@ def test_unexpected_supervisor_exception_is_a_short_durable_park(tmp_path, monke
     (jobdir / "job.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(queue, "_listing_from_cli", lambda: (_ for _ in ()).throw(
         TypeError("simulated inventory failure")))
-    monkeypatch.setattr(queue.subprocess, "run", lambda *_a, **_k: pytest.fail("driver child spawned"))
+    shadow_subprocess(monkeypatch,
+                      run=lambda *_a, **_k: pytest.fail("driver child spawned"))
     assert queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py",
                            sleep_fn=lambda _seconds: None) == 2
     state = queue.load_state(jobdir)
@@ -1261,7 +1281,8 @@ def test_maintenance_stop_intent_survives_restart(tmp_path, monkeypatch):
     state["spec_path"] = str(spec_path)
     queue.atomic_json(jobdir / "state.json", state)
     # Restarting the supervisor observes and preserves, rather than clears, intent.
-    monkeypatch.setattr(queue.subprocess, "run", lambda *_a, **_k: pytest.fail("driver child spawned"))
+    shadow_subprocess(monkeypatch,
+                      run=lambda *_a, **_k: pytest.fail("driver child spawned"))
     assert queue.read_json(jobdir / "state.json")["maintenance"]["intent"] == "maintenance"
     assert queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py",
                            sleep_fn=lambda _seconds: None) == 1
@@ -1282,7 +1303,8 @@ def test_corrupt_state_fails_closed_without_overwrite(tmp_path, monkeypatch, cap
 
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps({"task_id": "corrupt"}), encoding="utf-8")
-    monkeypatch.setattr(queue.subprocess, "run", lambda *_a, **_k: pytest.fail("driver child spawned"))
+    shadow_subprocess(monkeypatch,
+                      run=lambda *_a, **_k: pytest.fail("driver child spawned"))
     queue.supervise(spec_path, jobdir, ROOT / "tools/agentcoder/agentcoder.py",
                     sleep_fn=lambda _seconds: None)
     # Unlike queue wait, supervise currently catches the corruption and parks by
