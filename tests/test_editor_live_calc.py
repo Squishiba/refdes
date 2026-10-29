@@ -12,6 +12,8 @@ timer queue pins the 400 ms debounce without real waiting.
 
 Scenarios, one node process:
 
+- client pre-gate (§3.1): a body with no calc marker costs no request (open
+  flush included) and leaves the panel hidden.
 - debounce: a keystroke schedules one request 400 ms later; a second
   keystroke resets it (§3.1); the request carries the textarea text and the
   draft's ``fields`` bag (§3.3).
@@ -23,19 +25,32 @@ Scenarios, one node process:
 - blur evaluates only: blur flushes the pending request; the response
   refreshes the panel and arms Fill, mutates no text, steals no focus (§3.1,
   §3.5 focus rule); refocus re-fires the flush and the fills apply (§3.6).
-- caret skip is inclusive of both result-range boundaries (§3.5).
+- caret skip is inclusive of both result-range boundaries (§3.5), and a
+  NON-collapsed selection overlapping a result range is skipped like a caret
+  inside it, while a selection clear of the range fills.
 - line-relative columns convert to document offsets -- a span below line 0
   fills its own range, not line 0's (§3.3).
 - last-to-first application keeps earlier ranges valid (§3.5).
 - the caret shifts only by applied ranges that END before it (§3.5).
 - Case B: insertText false -> the .value splice fills, the no-undo line
-  shows, auto-fill self-disables for the session, Fill keeps working (§3.5).
+  shows, auto-fill self-disables, the splice schedules its own
+  recalculation, Fill keeps working (§3.5).
+- the Case B stand-down is SESSION-scoped (§3.5): a controller constructed
+  after the first splice starts stood down -- no auto-fill, rows render,
+  the session line shows, the checkbox reads OFF.
 - the auto-fill toggle persists in localStorage and gates exactly the text
   mutation: OFF renders rows and Fill still works (§3.5, §6.1).
 - an ok-within-window literal (``4.4 V`` vs computed ``4.436 V``) is never
   rewritten under auto-fill ON (§3.5's stale gate -- the D1 pin).
+- a span missing one half of its result pair is display-only: no Fill, no
+  mutation (the guards enforce the PAIR).
 - no request while a save round-trip is in flight (§3.1), and the post-save
   form revision passes the guard.
+- item-switch teardown drives the real ``renderItem`` (§3.8): the pending
+  timer dies, the in-flight request is aborted, live-calc's textarea
+  listeners go, no /calc fires for the switched-away item -- and the same
+  on a SAME-handle re-render whose fetch fails (the clear the pre-fetch
+  pass never runs).
 - Fill is idempotent: a second click on an applied span mutates nothing (§3.5).
 """
 
@@ -116,6 +131,7 @@ class FakeNode {
     if (parent) parent.children = parent.children.filter((c) => c !== this);
   }
   setAttribute(name, value) { this.attrs[name] = value; }
+  get firstChild() { return this.children[0] || null; }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
   removeEventListener(type, fn) {
     this.listeners[type] = (this.listeners[type] || []).filter((f) => f !== fn);
@@ -251,6 +267,7 @@ const settleEdit = async (payload, ok = true) => {
 };
 
 const { createEditor } = await import(url('editor.js'));
+const { createLiveCalc } = await import(url('live-calc.js'));
 const { renderItem } = await import(url('item.js'));
 const drafts = await import(url('drafts.js'));
 
@@ -306,6 +323,52 @@ const payload = (spans, revision = 'rev-0') => ({ revision, spans });
 const results = {};
 const T1 = __T1__;
 const T1_FILLED = __T1_FILLED__;
+
+// -- client pre-gate (§3.1): text without a calc marker costs no request
+//    and no panel -- a plain paragraph body stays silent
+{
+  const h = 'DEC-PREGATE';
+  const ed = openEditor(h, 'Rail Vbad is 2 V times 2, about 4 V.');
+  const afterOpen = ed.calls().length; // the open flush is pre-gated too: zero
+  await advance(450);
+  ed.type('Rail Vbad is 2 V times 2, about 4.4 V.');
+  await advance(450);
+  results.preGate = {
+    afterOpen,
+    afterType: ed.calls().length,
+    panelHidden: ed.panel.hidden === true,
+  };
+  drafts.clearDraft(h);
+}
+
+// -- a NON-collapsed selection that overlaps a result range is treated like
+//    a caret inside it: the author is working on those bytes (§3.5 caret
+//    rule); a selection clear of the range fills
+{
+  const h = 'DEC-SELOVERLAP';
+  const at = T1.indexOf('5 V');
+  const cases = [];
+  for (const [label, s, e, expectFilled] of [
+    ['overlaps-left', at - 3, at + 1, false],
+    ['overlaps-right', at + 1, at + 5, false],
+    ['clear-outside', T1.indexOf('Rail'), T1.indexOf('`'), true],
+  ]) {
+    const base = calcCalls.length; // the handle repeats: settle by global index
+    const ed = openEditor(h, T1);
+    await settleCalc(calcCalls[base], payload([]));
+    ed.area.setSelectionRange(s, e);
+    ed.focus();
+    await settleCalc(calcCalls[base + 1], payload([spanOn(T1, '5 V', '4 V')]));
+    cases.push({ label, filled: ed.area.value === T1_FILLED });
+    ed.blur();
+    ed.editor.liveCalcPanel._refdesLiveCalc.destroy();
+    drafts.clearDraft(h);
+  }
+  results.selectionOverlap = {
+    cases,
+    pass: cases[0].filled === false && cases[1].filled === false && cases[2].filled === true,
+  };
+}
 
 // -- debounce: one request 400 ms after the last keystroke; the second
 //    keystroke resets; the request carries the text and the fields bag (§3.1, §3.3)
@@ -539,6 +602,41 @@ const T1_FILLED = __T1_FILLED__;
   drafts.clearDraft(h);
 }
 
+// -- the session scope of the Case B stand-down (§3.5, session-scoped flag):
+//    a controller constructed AFTER the first splice -- the shell builds a
+//    new one on every save/poll rebuild/item switch -- starts out stood
+//    down: focused, pref ON, a stale row renders, the text does NOT mutate,
+//    the panel says the session is off, and the checkbox shows OFF (the
+//    EFFECTIVE state). The consented Fill keeps working (Case B scenario).
+{
+  EXEC_FAILS = true;
+  const h = 'DEC-CASEB2';
+  const area = new FakeNode('textarea');
+  area.value = T1;
+  const calc = createLiveCalc(h, {
+    getRevision: () => 'rev-0',
+    isSaving: () => false,
+    getFields: () => ({}),
+  });
+  calc.attach(area); // the open flush fires
+  globalThis.document.activeElement = area; // focused: autofill would apply
+  const callsFor = () => calcCalls.filter((c) => c.path.includes(encodeURIComponent(h)));
+  await settleCalc(callsFor()[0], payload([spanOn(T1, '5 V', '4 V')]));
+  const notes = findAll(calc.node, 'live-calc-note');
+  const offLine = notes.find((n) => n.textContent.includes('off for this session'));
+  results.caseBSession = {
+    noMutation: area.value === T1,
+    rowsShown: findAll(calc.node, 'live-calc-row').length === 1,
+    offShown: Boolean(offLine) && offLine.hidden === false,
+    checkboxOff: findAll(calc.node, 'live-calc-autofill')[0].checked === false,
+    flagPersisted: globalThis.sessionStorage.getItem('refdes.live-calc.fallback') === 'on',
+  };
+  calc.destroy();
+  EXEC_FAILS = false;
+  // the session-scoped flag must not leak into the scenarios that follow
+  globalThis.sessionStorage.removeItem('refdes.live-calc.fallback');
+}
+
 // -- an ok-within-window literal is never rewritten under auto-fill ON:
 //    status ok, computed 4.436 V, stored 4.4 V stays byte-for-byte (§3.5)
 {
@@ -660,24 +758,40 @@ const T1_FILLED = __T1_FILLED__;
     (area.listeners[t] || []).some((fn) => liveHandlers.includes(fn.name)));
   const afterSwitch = {
     calls: calcCalls.filter((c) => c.path.includes(h)).length,
-    aborted: inflight.every((c) => c.signal.aborted === true),
+    aborted: inflight.length >= 1 && inflight.every((c) => c.signal.aborted === true),
     leaked,
   };
   await advance(500); // the dead timer must not fire a /calc for the old item
   const afterAdvance = calcCalls.filter((c) => c.path.includes(h)).length;
-  // the fetch-error path: a failed load clears the container too
+  // the fetch-error path, the REAL case: a same-handle re-render (what the
+  // revision poll drives). renderedHandle already matches and the container
+  // has children, so the pre-fetch clear never runs -- the catch-path
+  // destroy is the only thing between a live panel (pending timer,
+  // in-flight request, textarea listeners) and an emptied container.
   const failBox = new FakeNode('div');
-  await renderItem(failBox, h); // normal render: panel mounted
-  failBox.dataset.renderedHandle = 'DEC-BROKEN'; // force the switch path
+  await renderItem(failBox, h); // normal render: panel mounted, renderedHandle = h
+  const failArea = find(failBox, 'body-edit');
+  failArea.value = T1;
+  failArea.dispatch('input'); // pending debounce on THIS panel
+  await advance(401); // the request is now in flight
+  const failInflight = calcCalls.filter((c) => c.path.includes(encodeURIComponent(h)));
   globalThis.fetch.__failItem = true;
-  await renderItem(failBox, h); // now the fetch rejects
-  const failCleared = failBox.children.length === 1 && hasCls(failBox.children[0], 'banner');
+  await renderItem(failBox, h); // same handle, children present -> the fetch rejects
+  const failLeaked = ['input', 'blur', 'focus'].some((t) =>
+    (failArea.listeners[t] || []).some((fn) => liveHandlers.includes(fn.name)));
+  await advance(500); // nothing left may fire for this item
+  const failCallsAfter = calcCalls.filter((c) => c.path.includes(encodeURIComponent(h))).length;
   globalThis.fetch.__failItem = false;
+  const failCleared = failBox.children.length === 1 && hasCls(failBox.children[0], 'banner');
   results.teardown = {
     ...afterSwitch,
     afterAdvance,
     noLeak: afterAdvance === afterSwitch.calls,
     failCleared,
+    failInflight: failInflight.length,
+    failAborted: failInflight.length >= 1 && failInflight.every((c) => c.signal.aborted === true),
+    failLeaked,
+    failNoNewCalls: failCallsAfter === failInflight.length,
   };
   drafts.clearDraft(h);
   drafts.clearDraft('DEC-TEB');
@@ -867,6 +981,49 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node():
         "the fetch-error path did not run the teardown: it clears the container "
         "and must destroy the panel like every other clear"
     )
+    assert td["failInflight"] >= 1, (
+        "the fetch-error scenario reached the failed fetch with no request in "
+        "flight: every abort assert below would be true of an empty list"
+    )
+    assert td["failAborted"] is True, (
+        "the same-handle re-render whose fetch failed left its in-flight /calc "
+        "running: the catch-path clear must destroy the panel it is emptying"
+    )
+    assert td["failLeaked"] is False, (
+        "the failed fetch cleared the container but left live-calc listeners "
+        "on the textarea"
+    )
+    assert td["failNoNewCalls"] is True, (
+        "a timer kept running after the failed fetch: the destroyed panel must "
+        "fire no further /calc (the timer dies with the view)"
+    )
+
+    pg = results["preGate"]
+    assert pg["afterOpen"] == 0 and pg["afterType"] == 0, (
+        f"a body without a calc marker cost a request: {pg} (§3.1 pre-gate)"
+    )
+    assert pg["panelHidden"] is True, "the pre-gate cleared the panel of an empty body"
+
+    so = results["selectionOverlap"]
+    assert so["pass"] is True, (
+        f"a non-collapsed selection overlapping a result range was not treated "
+        f"like a caret inside it: {so['cases']}"
+    )
+
+    cs = results["caseBSession"]
+    assert cs["noMutation"] is True, (
+        "a controller built AFTER the first Case B splice auto-filled again: "
+        "the stand-down is session-scoped (§3.5), not per-controller"
+    )
+    assert cs["rowsShown"] is True and cs["offShown"] is True, (
+        "the rebuilt controller must still render rows AND say the session "
+        "stand-down is in force (§3.5)"
+    )
+    assert cs["checkboxOff"] is True, (
+        "the checkbox showed ON while the session stand-down suppressed "
+        "mutation: it must display the effective state"
+    )
+    assert cs["flagPersisted"] is True, "the stand-down did not persist for the session"
 
 
 

@@ -721,11 +721,21 @@ def test_the_live_calc_panel_is_wired_into_the_body():
     # path that clears the container destroys the panel first -- the helper
     # is defined before the first clear, and there is a destroy call for
     # every clear (item switch, fetch error, normal swap).
-    assert item.index("destroyLiveCalc") < item.index("container.textContent = ''")
-    assert item.count("destroyLiveCalc();") == item.count("container.textContent = '';")
+    assert item.index("destroyLiveCalc(container)") < item.index("container.textContent = ''")
+    assert item.count("destroyLiveCalc(container);") == item.count("container.textContent = '';")
     assert "querySelectorAll('.live-calc')" in item
     assert "_refdesLiveCalc.destroy()" in item
     assert item.index("_refdesLiveCalc.destroy()") < item.index("restoreFocus(container, focus)")
+    # the shell's own clears of the same pane (create form, empty selection)
+    # tear the panel down too -- the helper is exported for exactly this
+    assert "export function destroyLiveCalc" in item
+    app = js_code("app.js")
+    assert "renderItem, destroyLiveCalc } from './item.js'" in app
+    assert app.count("destroyLiveCalc(detailPane)") == 2  # create form, empty selection
+    # the controller is built only for an editable form (after the early
+    # return), and both return shapes carry the same keys
+    assert editor.index("if (!edit.editable)") < editor.index("const liveCalc = createLiveCalc")
+    assert editor.count("liveCalcPanel: null") == 1
 
 
 def test_the_panel_reads_the_forms_own_revision_and_the_save_window():
@@ -784,8 +794,39 @@ def test_the_auto_fill_toggles_on_one_persisted_preference():
     # check alone would let a scheduled auto-fill mutate a non-stale row)
     assert "span.status !== 'stale'" in panel
     # the pair is enforced, not just one boundary: a span missing its
-    # result_end is display-only everywhere (guards AND the Fill button)
-    assert panel.count("span.result_end !== undefined") == 2
+    # result_end is display-only everywhere (Fill button, auto-fill gate,
+    # and the offset conversion itself, which has no half-pair path)
+    assert panel.count("span.result_end !== undefined") == 1
+    assert panel.count("span.result_end === undefined") == 2
+    # the Case B stand-down is SESSION-scoped (a browser session outlives
+    # every controller: the flag lives in sessionStorage, not in the closure)
+    assert "refdes.live-calc.fallback" in panel
+    assert "sessionStorage.getItem(FALLBACK_KEY)" in panel
+    assert "let sessionFallback = readFallbackFlag();" in panel
+    assert "writeFallbackFlag();" in panel
+    # it says so, in a line that survives the controller rebuild
+    assert "auto-fill is off for this session (undo is unavailable here); Fill still works" in panel
+    assert "sessionOff.hidden = !sessionFallback;" in panel
+    # the checkbox shows the EFFECTIVE state, never a lying ON
+    assert "readAutofillPref() && !sessionFallback" in panel
+    # the author's live selection (non-collapsed) blocks fills it overlaps
+    assert "const e = area.selectionEnd" in panel
+    assert "s < off.resultEnd && e > off.resultStart" in panel
+    # the offset conversion computes the line starts ONCE per batch
+    assert "function toOffsets" not in panel
+    assert panel.count("lineStarts(") == 3  # definition + one call per apply path
+    assert "const starts = lineStarts(text);" in panel
+    # the truncation footer mirrors the server's limit, not a magic number
+    js_limit = re.search(r"const PREVIEW_SPAN_LIMIT = (\d+)", panel)
+    assert js_limit is not None, "the panel must name the span limit as a constant"
+    build_py = os.path.join(os.path.dirname(os.path.dirname(STATIC)), "build.py")
+    with open(build_py, encoding="utf-8") as fh:
+        py = fh.read()
+    py_limit = re.search(r"PREVIEW_SPAN_LIMIT = (\d+)", py)
+    assert py_limit is not None and js_limit.group(1) == py_limit.group(1), (
+        "the panel's truncation footer no longer mirrors build.PREVIEW_SPAN_LIMIT"
+    )
+    assert "showing the first ${PREVIEW_SPAN_LIMIT} spans" in panel
     # fills go through the native undo path first (Case A), splice as Case B
     assert "execCommand('insertText'" in panel
     # a Case B splice fires no input event: the apply path schedules the

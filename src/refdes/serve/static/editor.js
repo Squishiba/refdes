@@ -39,18 +39,6 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
   const draft = getDraft(handle);
   let revision = draft.revision || edit.file_revision || item.revision;
   const specs = {};
-  // The live inline-calc layer (live-calc.js, design §3.1-§3.8): it reads
-  // the form's own revision through the accessor below (§3.6 guard 2 --
-  // never app.js's unassigned openRevision, which is never assigned),
-  // stays quiet while a save round-trip is in flight (§3.1), and sends the
-  // draft field bag with every request (carried, inert, until the
-  // field-reference slice).
-  let saving = false;
-  const liveCalc = createLiveCalc(handle, {
-    getRevision: () => revision,
-    isSaving: () => saving,
-    getFields: () => draft.fields,
-  });
 
   const block = el('section', 'detail-block edit-block');
   block.appendChild(el('h2', null, 'Edit'));
@@ -62,8 +50,22 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     return {
       node: block, fieldControl: () => null, bodyControl: () => null,
       imagePicker: null, sourcePicker: createSourcePicker(item, handle, null),
+      liveCalcPanel: null,
     };
   }
+
+  // The live inline-calc layer (live-calc.js, design §3.1-§3.8), built only
+  // for an editable form: it reads the form's own revision through the
+  // accessor below (§3.6 guard 2 -- never app.js's unassigned openRevision,
+  // which is never assigned), stays quiet while a save round-trip is in
+  // flight (§3.1), and sends the draft field bag with every request
+  // (carried, inert, until the field-reference slice).
+  let saving = false;
+  const liveCalc = createLiveCalc(handle, {
+    getRevision: () => revision,
+    isSaving: () => saving,
+    getFields: () => draft.fields,
+  });
 
   const bar = el('div', 'edit-bar');
   const status = el('span', 'edit-status muted', 'saved');

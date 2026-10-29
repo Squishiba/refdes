@@ -15,6 +15,15 @@ import { api } from './api.js';
 
 const DEBOUNCE_MS = 400;
 const AUTOFILL_KEY = 'refdes.live-calc.autofill';
+// §3.5: once insertText has proven it fails here, auto-fill stands down for
+// the whole SESSION -- and a browser session outlives every controller (a
+// save, a poll rebuild and an item switch each build a new one), so the flag
+// lives in sessionStorage, not in a closure. sessionStorage is per-tab and
+// dies with the tab: exactly the session §3.5 names.
+const FALLBACK_KEY = 'refdes.live-calc.fallback';
+// Mirrors build.PREVIEW_SPAN_LIMIT (src/refdes/build.py); the static test
+// pins the two numbers against each other.
+const PREVIEW_SPAN_LIMIT = 200;
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -51,16 +60,29 @@ function lineStarts(text) {
   return starts;
 }
 
-function toOffsets(text, span) {
-  const starts = lineStarts(text);
+function readFallbackFlag() {
+  try {
+    return sessionStorage.getItem(FALLBACK_KEY) === 'on';
+  } catch (_) {
+    return false; // a storage failure costs the stand-down, not a crash
+  }
+}
+
+function writeFallbackFlag() {
+  try {
+    sessionStorage.setItem(FALLBACK_KEY, 'on');
+  } catch (_) {
+    /* the splice warning still shows; only persistence is lost */
+  }
+}
+
+// The starts are computed once per response batch (the text is the same for
+// every span in it); spanOffsets converts one span against them.
+function spanOffsets(starts, span) {
   const base = starts[span.line];
   if (base === undefined) return null;
-  const out = { start: base + span.start, end: base + span.end };
-  if (span.result_start !== undefined && span.result_end !== undefined) {
-    out.resultStart = base + span.result_start;
-    out.resultEnd = base + span.result_end;
-  }
-  return out;
+  if (span.result_start === undefined || span.result_end === undefined) return null;
+  return { resultStart: base + span.result_start, resultEnd: base + span.result_end };
 }
 
 export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
@@ -71,8 +93,17 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
   header.appendChild(el('span', 'live-calc-title', 'Live inline calc'));
   const toggle = el('input', 'live-calc-autofill');
   toggle.type = 'checkbox';
-  toggle.checked = readAutofillPref();
-  toggle.addEventListener('change', () => writeAutofillPref(toggle.checked));
+  // Session fallback (§3.5): read at construction, so every controller the
+  // shell rebuilds (save, poll, item switch) starts out stood down. The
+  // checkbox shows the EFFECTIVE state, not the stored preference: it never
+  // reads ON while the session stand-down is suppressing mutation.
+  let sessionFallback = readFallbackFlag();
+  toggle.checked = readAutofillPref() && !sessionFallback;
+  toggle.addEventListener('change', () => {
+    const on = toggle.checked && !sessionFallback;
+    writeAutofillPref(on);
+    toggle.checked = on;
+  });
   const toggleLabel = el('label', 'live-calc-toggle');
   toggleLabel.appendChild(toggle);
   toggleLabel.appendChild(el('span', null, 'update results while I type'));
@@ -92,11 +123,22 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
   undoWarn.hidden = true;
   panel.appendChild(undoWarn);
 
+  // The session stand-down line (§3.5): shown whenever auto-fill is off
+  // for the session, at construction too -- a rebuilt controller says so
+  // before its first response, because the state is the session's, not
+  // this panel's.
+  const sessionOff = el(
+    'p',
+    'live-calc-note warn',
+    'auto-fill is off for this session (undo is unavailable here); Fill still works',
+  );
+  sessionOff.hidden = !sessionFallback;
+  panel.appendChild(sessionOff);
+
   let area = null;
   let destroyed = false;
   let timer = null;
   let inflight = null;
-  let sessionFallback = false; // Case B entered: insertText failed once
   let rows = [];
   let snapshotText = null; // the textarea value the visible rows were computed from
 
@@ -128,7 +170,7 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
       rowsBox.appendChild(line);
     }
     footer.hidden = !truncated;
-    if (truncated) footer.textContent = 'showing the first 200 spans';
+    if (truncated) footer.textContent = `showing the first ${PREVIEW_SPAN_LIMIT} spans`;
   }
 
   function clearPanel() {
@@ -193,31 +235,41 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
     // an unfocused response is display-only (rows, chips, armed Fill).
     if (!autofillActive() || isSaving() || document.activeElement !== area) return;
     const text = area.value;
-    const caret = area.selectionStart;
+    const starts = lineStarts(text); // once per batch: every span converts against it
     const targets = [];
     for (const span of rows) {
       // Auto-fill's stale gate: a non-stale row is never touched, and a
-      // span missing either boundary of its result pair is skipped — the
+      // span missing either boundary of its result pair is skipped -- the
       // apply path needs the full pair to splice.
       if (span.status !== 'stale' || span.result_start === undefined || span.result_end === undefined) continue;
-      const off = toOffsets(text, span);
+      const off = spanOffsets(starts, span);
       if (!off) continue;
       if (text.slice(off.resultStart, off.resultEnd) === span.computed) continue;
-      // Skip a span whose result range contains the caret, inclusive of
-      // both boundaries: a caret parked just after a half-typed `= 5`
-      // counts as inside, so a pause never overwrites a result being typed.
-      if (typeof caret === 'number' && off.resultStart <= caret && caret <= off.resultEnd) continue;
+      if (selectionSkips(off)) continue;
       targets.push({ span, off });
     }
     applyRanges(targets, false);
+  }
+
+  // The author's live selection owns any text it touches (§3.5 caret rule):
+  // a caret parked anywhere in a result range, inclusive of both boundaries,
+  // counts as inside -- a pause never overwrites a result being typed. A
+  // NON-collapsed selection is inside anything it overlaps: bytes selected
+  // at the moment a fill lands are bytes the author is working on.
+  function selectionSkips(off) {
+    const s = area.selectionStart;
+    const e = area.selectionEnd;
+    if (typeof s !== 'number') return false;
+    if (s === e) return off.resultStart <= s && s <= off.resultEnd;
+    return s < off.resultEnd && e > off.resultStart;
   }
 
   // The Fill entry (§3.5): one row through the shared apply path, consented —
   // the author invoked the insertion, so focusing the body is their request.
   function applySpan(span, consented) {
     if (isSaving() || snapshotText === null || area.value !== snapshotText) return;
-    const off = toOffsets(area.value, span);
-    if (!off || off.resultStart === undefined) return;
+    const off = spanOffsets(lineStarts(area.value), span);
+    if (!off) return;
     if (area.value.slice(off.resultStart, off.resultEnd) === span.computed) return;
     applyRanges([{ span, off }], consented);
   }
@@ -267,11 +319,14 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
     if (ok) return true;
     // Case B: insertText has proven it fails here. The splice is not
     // undo-protected, so it says so and auto-fill stands down for the
-    // session (its mutation shares this path). Entered only after a
-    // proven failure, never preemptively.
+    // SESSION (its mutation shares this path): the flag goes to
+    // sessionStorage, so the next controller the shell builds is born
+    // stood down. Entered only after a proven failure, never preemptively.
     if (!sessionFallback) {
       sessionFallback = true;
+      writeFallbackFlag();
       undoWarn.hidden = false;
+      sessionOff.hidden = false;
     }
     area.value = area.value.slice(0, off.resultStart) + span.computed + area.value.slice(off.resultEnd);
     return 'splice';

@@ -6,7 +6,7 @@
 import { api } from './api.js';
 import { parseFilters, filterQuery, renderSidebar } from './filters.js';
 import { renderList } from './list.js';
-import { renderItem } from './item.js';
+import { renderItem, destroyLiveCalc } from './item.js';
 import { createForm } from './create.js';
 
 const banner = document.getElementById('banner');
@@ -54,6 +54,7 @@ async function renderRoute() {
   });
   renderList(listPane, payload, route.filters);
   if (route.name === 'create') {
+    destroyLiveCalc(detailPane); // the pane may still hold the item view's live panel (§3.8)
     detailPane.textContent = '';
     detailPane.appendChild(createForm({
       type: route.params.get('type'),
@@ -66,6 +67,7 @@ async function renderRoute() {
   } else if (payload.items.length === 1) {
     renderItem(detailPane, payload.items[0].handle);
   } else {
+    destroyLiveCalc(detailPane); // empty selection: same clear, same teardown (§3.8)
     detailPane.textContent = '';
     const p = document.createElement('p');
     p.className = 'muted';
