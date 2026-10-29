@@ -38,6 +38,7 @@ from .model import (
     INFO,
     INLINE_CALC_STALE,
     INVALIDATE,
+    NON_SCALAR_FIELD_TYPES,
     RETIRED_UNIT_SPELLING,
     TASK_STATES,
     WARNING,
@@ -1536,9 +1537,46 @@ def _calc_reference_targets(item) -> list[str]:
     return targets
 
 
+def _calc_field_reference_targets(item) -> list[str]:
+    """The target strings of every *field* reference (`TARGET.$field`, fence
+    lines and inline spans) in this item, fence lines first, deduped. The
+    scheduler deliberately never walks this list: a field reference reads the
+    target item's saved fields, not its evaluated calc env, so it creates no
+    dependency edge -- including the self-reference `ITEM.$field` in ITEM
+    itself, which is why a field reference into one's own item is not a
+    cycle (a bare self-reference keeps its edge, and its cycle). This list
+    exists for the expansion plan (a field reference's target half gets the
+    same `DISPLAY-ID@key` expansion as a bare reference) and for the content
+    hash, where the target half is reduced to the same token while the field
+    *value* never enters `calc_refs` (see `_calc_refs_hash_value`)."""
+    targets: list[str] = []
+    for block in calc.extract_blocks(item.body):
+        for raw_line in block.splitlines():
+            line = raw_line.partition("#")[0].rstrip()
+            if not line.strip():
+                continue
+            pipe = calc.PIPE_UNIT_RE.match(line)
+            if pipe:
+                line = pipe.group("lhs").rstrip()
+            match = calc.ASSIGN_RE.match(line)
+            if not match:
+                continue
+            ref = calc.FIELD_REF_RE.match(match.group(2).strip())
+            if ref and ref.group("target") not in targets:
+                targets.append(ref.group("target"))
+    for span in inline_calc.triggered_spans(item.body):
+        ref = inline_calc.span_field_ref(span)
+        if ref and ref.group("target") not in targets:
+            targets.append(ref.group("target"))
+    return targets
+
+
 def _calc_fence_reference_targets(item) -> set[str]:
-    """The target strings of this item's fenced cross-item references only
-    (the `calc.extract_blocks` loop of `_calc_reference_targets`)."""
+    """The target strings of this item's fenced cross-item references -- bare
+    and field (`TARGET.$field`) forms alike -- only (the
+    `calc.extract_blocks` loop of `_calc_reference_targets`, field lines
+    included; feeds the expansion plan's span-only skip, and a field
+    reference's rewrite is the same file-line edit)."""
     targets: set[str] = set()
     for block in calc.extract_blocks(item.body):
         for raw_line in block.splitlines():
@@ -1551,7 +1589,8 @@ def _calc_fence_reference_targets(item) -> set[str]:
             match = calc.ASSIGN_RE.match(line)
             if not match:
                 continue
-            ref = calc.CROSS_REF_RE.match(match.group(2).strip())
+            rhs = match.group(2).strip()
+            ref = calc.CROSS_REF_RE.match(rhs) or calc.FIELD_REF_RE.match(rhs)
             if ref:
                 targets.add(ref.group("target"))
     return targets
@@ -1559,7 +1598,8 @@ def _calc_fence_reference_targets(item) -> set[str]:
 
 def _calc_span_reference_targets(item) -> set[str]:
     """The target strings of this item's inline-span cross-item references
-    only -- the subset of `_calc_reference_targets` whose rewrite is a span
+    -- bare and field (`TARGET.$field`) forms alike -- only -- the subset of
+    `_calc_reference_targets` whose rewrite is a span
     *content* replacement. The expansion plan drops these (and only these --
     a target a fenced reference also uses stays, its fence rewrite being a
     file-line edit) for an item whose body has no file position
@@ -1572,7 +1612,12 @@ def _calc_span_reference_targets(item) -> set[str]:
     return {
         ref.group("target")
         for span in inline_calc.triggered_spans(item.body)
-        if (ref := inline_calc.span_cross_ref(span)) is not None
+        if (
+            ref := (
+                inline_calc.span_cross_ref(span) or inline_calc.span_field_ref(span)
+            )
+        )
+        is not None
     }
 
 
@@ -1585,14 +1630,58 @@ def _calc_ref_display(target_str: str, target) -> str:
     return target_str.partition("@")[0] or target_str
 
 
-def _make_calc_resolver(project: Project, by_key: dict[str, Item]):
+def _make_calc_resolver(
+    project: Project, by_key: dict[str, Item], warnings: list[str] | None = None
+):
     """The resolver a cross-item reference line calls, bound to the referring
     item's evaluation. Resolution is by key half only (`resolve_link_target`,
     docs/design/keys.md §3) -- the display half is refreshed by
     links.expand_missing_calc_refs and is never consulted here. Every failure
     raises CalcError with the message the referring line reports: file, line,
     and item id come from the caller's diagnostic, exactly like any other
-    calc error. There is no silent default and no stale value on any path."""
+    calc error. There is no silent default and no stale value on any path.
+
+    A `$`-prefixed name half (`Rds = DEC-PWR-001.$rds_on`) reads the target's
+    saved FIELD, not its calc env: no evaluation ordering is needed for a
+    field (the scheduler creates no edge for it), so the read goes straight
+    to `target.fields`, validated against the target's declared type --
+    undeclared, empty, list-valued and non-quantity field values are all
+    loud errors naming the field. With ``warnings``, a bare reference whose
+    target has BOTH a calc value and a field of that name appends the
+    collision warning here (the calc value is what resolves -- the field
+    needs the explicit `$` spelling)."""
+
+    def field_value(target, display: str, reference: str, field: str) -> calc.Value:
+        spec = project.types.get(target.type)
+        declared = sorted(spec.fields) if spec is not None else []
+        listing = (
+            "it declares: " + ", ".join(declared) if declared
+            else "it declares no fields"
+        )
+        if field not in declared:
+            raise calc.CalcError(
+                f"cross-item reference {reference!r}: {display} has no field "
+                f"{field!r} ({listing})"
+            )
+        if spec.fields[field].type in NON_SCALAR_FIELD_TYPES:
+            raise calc.CalcError(
+                f"cross-item reference {reference!r}: {display}'s field "
+                f"{field!r} is a list-valued field; field references read a "
+                "single quantity, and lists are out of scope"
+            )
+        value = (target.fields or {}).get(field)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise calc.CalcError(
+                f"cross-item reference {reference!r}: {display}'s field "
+                f"{field!r} is empty -- give it a quantity ({listing})"
+            )
+        try:
+            return calc.parse_quantity(str(value))
+        except calc.CalcError as exc:
+            raise calc.CalcError(
+                f"cross-item reference {reference!r}: {display}'s field "
+                f"{field!r} is {str(value)!r}, not a quantity ({exc})"
+            )
 
     def resolve(reference: str) -> calc.Value:
         target_str, _, name = reference.rpartition(".")
@@ -1612,6 +1701,11 @@ def _make_calc_resolver(project: Project, by_key: dict[str, Item]):
                 f"cross-item reference {reference!r} points at {display}, an "
                 "imported item; references into imported items are not supported"
             )
+        if name.startswith("$"):
+            # A field reference reads the saved item, so the target's own
+            # calc state is none of its business -- no `_calc_failed` gate
+            # here, and none for the scheduler's benefit either (no edge).
+            return field_value(target, display, reference, name[1:])
         if getattr(target, "_calc_failed", False):
             # One root error was already reported at the item that broke; a
             # dependent restates it in one line rather than a second confusing
@@ -1636,6 +1730,26 @@ def _make_calc_resolver(project: Project, by_key: dict[str, Item]):
                 f"cross-item reference {reference!r}: {display} does not "
                 f"define {name!r} ({listing})"
             )
+        if warnings is not None:
+            spec = project.types.get(target.type)
+            if (
+                spec is not None
+                and name in spec.fields
+                and name in (target.fields or {})
+            ):
+                # The decided policy warns whenever BOTH exist -- empty,
+                # null and list-valued fields included. The `$` spelling is
+                # only suggested where it can actually read the field.
+                scalar = spec.fields[name].type not in NON_SCALAR_FIELD_TYPES
+                hint = (
+                    " -- write " + f"{display}.$" + f"{name} to read the field"
+                    if scalar
+                    else " -- this field is list-valued, so no reference reads it"
+                )
+                warnings.append(
+                    f"{display} has both a calc value {name!r} and a field "
+                    f"{name!r}; the reference reads the calc value{hint}"
+                )
         return value
 
     return resolve
@@ -1764,11 +1878,29 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
         project._lockfile_problem = problem
     source_resolved: dict[tuple[str, str], tuple[str, str | None]] = {}
     item._source_uses = []
+    calc_warnings: list[str] = []
+
+    def field_fields(target_str: str) -> list[str]:
+        # The declared, identifier-style field names of a reference target --
+        # what the non-identifier field-name error lists (calc.py
+        # FIELD_FIELDS_KEY). Best effort: an unresolvable target lists nothing.
+        target = resolve_link_target(by_key, project, target_str)
+        spec = project.types.get(target.type) if target is not None else None
+        if spec is None:
+            return []
+        return sorted(
+            name
+            for name in spec.fields
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
+        )
+
     env: dict[str, calc.Value] = {
-        calc.RESOLVER_KEY: _make_calc_resolver(project, by_key),
+        calc.RESOLVER_KEY: _make_calc_resolver(project, by_key, calc_warnings),
         calc.SOURCE_RESOLVER_KEY: _make_source_resolver(
             project, item, records, source_resolved, item._source_uses
         ),
+        calc.CALC_WARNINGS_KEY: calc_warnings,
+        calc.FIELD_FIELDS_KEY: field_fields,
     }
     # name -> line first assigned, threaded across every block of this item
     # exactly like `env` -- what lets evaluate_block catch a name reused in
@@ -1930,6 +2062,8 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
             item.calcs.append(line)
     del env[calc.RESOLVER_KEY]
     del env[calc.SOURCE_RESOLVER_KEY]
+    del env[calc.CALC_WARNINGS_KEY]
+    del env[calc.FIELD_FIELDS_KEY]
     item._env = env  # retained for check evaluation and cross-item references
     item._calc_failed = failed
 
@@ -2772,11 +2906,28 @@ def _calc_refs_hash_value(
     or imported target) contributes a ``None`` value; the build already
     reports that as an error at the referring line, this only has to be
     deterministic and distinct from any real value.
+
+    A field reference (`TARGET.$field`) contributes NO entry to
+    ``resolved`` -- the field's value never enters the content hash, so
+    editing it moves the computed result and the release gate's stale-span
+    report, not the hash (the rule is what keeps a field read out of the
+    dependency-order story it shares with the scheduler's no-edge rule). Its
+    target half IS reduced to the same token in ``body_text``, so the on-disk
+    bare -> composite expansion of a field reference is hash-invisible like
+    every other reference.
     """
     refs = _calc_reference_values(by_key, project, item, include_inline=include_inline)
-    if not refs:
+    field_targets = [
+        target_str
+        for target_str in _calc_field_reference_targets(item)
+        if target_str not in {t for t, *_ in refs}
+    ]
+    if not refs and not field_targets:
         return None
-    tokens = {t: _link_hash_token(by_key, project, t) for t, *_ in refs}
+    tokens = {
+        t: _link_hash_token(by_key, project, t)
+        for t in [*[t for t, *_ in refs], *field_targets]
+    }
     resolved = [
         [
             tokens[target_str],

@@ -1115,13 +1115,35 @@ CROSS_REF_RE = re.compile(
     r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
     r"\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)$"
 )
-# A dotted reference with a block half spliced in: `DEC-PWR-001.losses.P_diss`.
-# Rejected, never resolved (docs/design/named-calc-blocks.md §4.2, §7): a calc
-# value is named by ITEM.NAME and that is already unique per item. CROSS_REF_RE
-# allows exactly one dot, so any dotted reference with two or more is this.
+# The field-reference sibling (in-prog-logs/inline-calc-live-editor-design-20261020.md
+# §6.5a):
+# `Rds = DEC-PWR-001.$rds_on` names one *field* of the target item, `$` being
+# what distinguishes it from `DEC-PWR-001.rds_on`, the target's calc value.
+# The target half is identical to CROSS_REF_RE's (bare display id, bare key,
+# `DISPLAY-ID@key` composite); the name half is a field name. Like CROSS_REF_RE
+# it matches only the whole right-hand side (pipe unit split off first).
+FIELD_REF_RE = re.compile(
+    r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
+    r"\.\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)$"
+)
+# The same shape with a name half that is not an identifier: `DEC-001.$rds-on`
+# (a declared field whose schema key allows characters the reference grammar
+# does not). Never resolves -- the grammar is deliberately not widened -- so
+# the whole-right-hand-side `$` shape gets a message naming the field name
+# and the identifier rule, not the arithmetic shape blame.
+FIELD_REF_SHAPE_RE = re.compile(
+    r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
+    r"\.\$(?P<name>[^$.\s]*)$"
+)
+# A dotted reference with a block half spliced in: `DEC-PWR-001.losses.P_diss`,
+# and the same shape with `$` segments: `DEC-PWR-001.losses.$rds_on`. Rejected,
+# never resolved (docs/design/named-calc-blocks.md §4.2, §7): a calc value is
+# named by ITEM.NAME and that is already unique per item. CROSS_REF_RE and
+# FIELD_REF_RE allow exactly one dot, so any dotted reference with two or more
+# is this.
 BLOCK_QUALIFIED_REF_RE = re.compile(
     r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
-    r"(?:\.[A-Za-z_][A-Za-z0-9_]*){2,}$"
+    r"(?:\.\$?[A-Za-z_][A-Za-z0-9_]*){2,}$"
 )
 # `eff = source("analysis/power-budget.csv", "tps62913_half_load_eff") | 1`
 # (docs/design/calc-sources.md §1): the whole right-hand side is one call with
@@ -1241,7 +1263,8 @@ class CalcOutcome:
     # a sealed append-only entry -- which cannot be edited without resealing
     # -- downgrades to a warning instead of failing the build.
     retired: bool = False
-    # Set on a cross-item reference line (`V_in = DEC-PWR-001.V_in`): the
+    # Set on a cross-item reference line (`V_in = DEC-PWR-001.V_in`) or a
+    # field-reference line (`Rds = DEC-PWR-001.$rds_on`): the
     # reference text exactly as authored. The value itself is resolved by the
     # caller -- evaluation order across items is a build-level concern, so
     # `evaluate_block` hands the reference to the resolver installed in the
@@ -1265,6 +1288,22 @@ RESOLVER_KEY = "__refdes_calc_resolver__"
 # the message to report. Absent, a source() line is an error rather than a
 # guess -- evaluation never opens the cited file (docs/design/calc-sources.md §5).
 SOURCE_RESOLVER_KEY = "__refdes_calc_source_resolver__"
+# Key under which the caller installs a list the resolver may append warning
+# messages to -- the collision warning (a bare reference whose target has
+# both a calc value and a field of that name) is the first use: the resolver
+# sees the collision, the outcome loop owns the diagnostic, so the message
+# reaches the referring line through `CalcOutcome.warning` like every other
+# calc warning. The list is drained per line (the length before the resolver
+# runs is the drain mark), never shared between items. Protocol: a resolver
+# appends immediately before returning its value -- the collision check runs
+# on the found value, so an append with no value is a resolver bug; the drain
+# rides the error outcomes too, so even that shape loses no message.
+CALC_WARNINGS_KEY = "__refdes_calc_warnings__"
+# Key under which the caller installs a callable taking a reference target
+# string and returning the target type's declared, identifier-style field
+# names (sorted), for the non-identifier field-name error's listing. Best
+# effort: absent or raising, the message just omits the listing.
+FIELD_FIELDS_KEY = "__refdes_calc_field_fields__"
 
 
 def assigned_names(source: str) -> set[str]:
@@ -1485,20 +1524,38 @@ def evaluate_block(
             parts = ref.split(".")
             plain = f"{parts[0]}.{parts[-1]}"
             dropped = "".join(f".{part}" for part in parts[1:-1])
+            if "$" in ref:
+                # A field-reference shape with block segments spliced in
+                # (`DEC-001.losses.$rds_on`): the working spelling keeps the
+                # `$` and drops the middle, so the plain/`ITEM.NAME` calc-value
+                # wording below would point at the wrong form.
+                suggestion = f"{parts[0]}.{parts[-1]}"
+                message = (
+                    f"cross-item reference {ref!r} names a block -- a field "
+                    f"is named by ITEM.$field, and {suggestion} already names "
+                    f"it uniquely. Drop '{dropped}'."
+                )
+            else:
+                message = (
+                    f"cross-item reference {ref!r} names a block -- a calc "
+                    f"value is named by ITEM.NAME, and {plain} already names "
+                    f"it uniquely. Drop '{dropped}'."
+                )
             outcomes.append(
                 CalcOutcome(
                     name, expression, comment, None,
-                    f"cross-item reference {ref!r} names a block -- a calc "
-                    f"value is named by ITEM.NAME, and {plain} already names "
-                    f"it uniquely. Drop '{dropped}'.",
+                    message,
                     annotation, unit_style=unit_style, line=line_number,
                 )
             )
             continue
 
-        ref_match = CROSS_REF_RE.match(expression.strip())
+        rhs = expression.strip()
+        ref_match = CROSS_REF_RE.match(rhs)
+        if ref_match is None:
+            ref_match = FIELD_REF_RE.match(rhs)
         if ref_match:
-            reference = expression.strip()
+            reference = rhs
             if name in origins:
                 first_line = origins[name]
                 first_where = f"line {first_line}" if first_line is not None else "earlier in this item"
@@ -1525,6 +1582,16 @@ def evaluate_block(
                                 line=line_number, reference=reference)
                 )
                 continue
+            sink = env.get(CALC_WARNINGS_KEY)
+            mark = len(sink) if isinstance(sink, list) else 0
+
+            def drained(sink: list, mark: int) -> str | None:
+                return (
+                    "; ".join(sink[mark:])
+                    if isinstance(sink, list) and len(sink) > mark
+                    else None
+                )
+
             try:
                 value = resolver(reference)
                 if annotation:
@@ -1533,22 +1600,75 @@ def evaluate_block(
                 outcomes.append(
                     CalcOutcome(name, expression, comment, None, str(exc),
                                 annotation, unit_style=unit_style,
-                                line=line_number, reference=reference)
+                                line=line_number, reference=reference,
+                                warning=drained(sink, mark))
                 )
                 continue
             except Exception as exc:  # noqa: BLE001 -- resolver may surface pint errors too
                 outcomes.append(
                     CalcOutcome(name, expression, comment, None, str(exc),
                                 annotation, unit_style=unit_style,
-                                line=line_number, reference=reference)
+                                line=line_number, reference=reference,
+                                warning=drained(sink, mark))
                 )
                 continue
             env[name] = value
             origins[name] = line_number
+            ref_warning = drained(sink, mark)
             outcomes.append(
                 CalcOutcome(name, expression, comment, value, None, annotation,
-                            None, unit_style=unit_style, line=line_number,
+                            ref_warning, unit_style=unit_style, line=line_number,
                             reference=reference)
+            )
+            continue
+
+        if "$" in rhs:
+            shape = FIELD_REF_SHAPE_RE.match(rhs)
+            if shape:
+                # The whole right-hand side IS a `$` reference, but the field
+                # name is not identifier-style (a hyphen, a leading digit):
+                # the grammar is deliberately not widened, so blame the name
+                # and the rule -- not the arithmetic shape, which is what the
+                # generic message below would say. Listing the names that DO
+                # qualify is the caller's job (it knows the schema).
+                listing = ""
+                fields_of = env.get(FIELD_FIELDS_KEY)
+                if callable(fields_of):
+                    try:
+                        declared = fields_of(shape.group("target"))
+                    except Exception:  # noqa: BLE001 -- listing is best effort
+                        declared = None
+                    if declared:
+                        listing = (
+                            "; the item type declares: "
+                            + ", ".join(declared)
+                        )
+                outcomes.append(
+                    CalcOutcome(
+                        name, expression, comment, None,
+                        f"field name {shape.group('name')!r} cannot be "
+                        "referenced with $: calc field references need an "
+                        "identifier-style name ([A-Za-z_][A-Za-z0-9_]*), "
+                        f"which {shape.group('name')!r} is not{listing}",
+                        annotation, unit_style=unit_style,
+                        line=line_number,
+                    )
+                )
+                continue
+            # A field reference spliced into arithmetic: `x = A.$v * 2`. The
+            # reference form is the whole right-hand side (like a cross-item
+            # reference), never an operand -- the `$` token has no meaning in
+            # the expression language, so this is the author's spelling, not
+            # a parse accident. Name the working two-step form.
+            outcomes.append(
+                CalcOutcome(
+                    name, expression, comment, None,
+                    f"field reference {rhs!r} must be the whole right-hand "
+                    f"side -- read it into a name first "
+                    f"(`{name} = ITEM.$field`), then use the name in the "
+                    f"arithmetic",
+                    annotation, unit_style=unit_style, line=line_number,
+                )
             )
             continue
 

@@ -289,6 +289,19 @@ def span_cross_ref(span: InlineSpan) -> re.Match[str] | None:
     return calc.CROSS_REF_RE.match(_evaluator_rhs(span))
 
 
+def span_field_ref(span: InlineSpan) -> re.Match[str] | None:
+    """The field reference a parsed span's RHS is -- `TARGET.$field` as the
+    whole right-hand side, matched with the evaluator's own `FIELD_REF_RE`,
+    so a span is a field reference here exactly when it is one in
+    `evaluate_block` (same `_evaluator_rhs` order as `span_cross_ref`). None
+    for a malformed span and for every other RHS. Used by the expansion plan
+    and the rewrite scan only -- never by the scheduler: a field reference
+    reads the saved item, so it creates no dependency edge."""
+    if span.error:
+        return None
+    return calc.FIELD_REF_RE.match(_evaluator_rhs(span))
+
+
 def span_source_call(span: InlineSpan) -> tuple[str, str] | None:
     """`(path, key)` for a parsed span whose RHS is a well-formed `source()`
     call, None otherwise -- the span counterpart of `calc.source_calls_in_block`

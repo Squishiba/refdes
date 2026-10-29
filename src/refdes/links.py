@@ -1075,13 +1075,16 @@ def _calc_ref_rewrites(
 ) -> set[str]:
     """Rewrite bare calc-reference targets inside one item's line span, and
     refresh stale composite display halves, in place. Operates only on the
-    target half of a `name = TARGET.NAME` line (pipe unit stripped first), so
-    ordinary expressions and comments are never touched. Returns the *old
-    target strings* actually rewritten -- what the caller attributes back to
-    the item so in-memory state follows only real file changes.
+    target half of a `name = TARGET.NAME` line -- a field-reference line
+    `name = TARGET.$FIELD` too, the `$` on the name half left untouched --
+    (pipe unit stripped first), so ordinary expressions and comments are
+    never touched. Returns the *old target strings* actually rewritten --
+    what the caller attributes back to the item so in-memory state follows
+    only real file changes.
 
     With ``include_inline``, the target half of an inline calc span's
-    cross-item reference (`TARGET.NAME` as the span's whole right-hand side)
+    cross-item reference (`TARGET.NAME` or `TARGET.$FIELD` as the span's
+    whole right-hand side)
     gets the same treatment: a span sitting in prose outside any fence, its
     content replaced in place so the author's surrounding text, the stored
     result and the line count all survive exactly. Fence lines stay the
@@ -1115,6 +1118,8 @@ def _calc_ref_rewrites(
         ):
             span = inline_calc_mod.parse_span(0, content)
             ref = inline_calc_mod.span_cross_ref(span)
+            if ref is None:
+                ref = inline_calc_mod.span_field_ref(span)
             if ref is None:
                 continue
             target = ref.group("target")
@@ -1170,6 +1175,8 @@ def _calc_ref_rewrites(
             continue
         rhs = match.group(2).strip()
         ref = calc_mod.CROSS_REF_RE.match(rhs)
+        if ref is None:
+            ref = calc_mod.FIELD_REF_RE.match(rhs)
         if not ref:
             continue
         target = ref.group("target")
@@ -1201,7 +1208,10 @@ def plan_calc_ref_expansion(
     it cannot drift between the three (docs/design/keys.md).
 
     Only the target half of the reference is rewritten; the name half is the
-    target's calc variable and belongs to the target's own rename story."""
+    target's calc variable and belongs to the target's own rename story. A
+    field reference (`Rds = DEC-PWR-001.$rds_on`) gets the same target-half
+    expansion; its `$name` half names a field, which follows the field's own
+    (declared-type) story, not the calc-name one."""
     from .revise import FileRewrite
 
     candidates: list[tuple[Item, str, str, str]] = []
@@ -1211,6 +1221,7 @@ def plan_calc_ref_expansion(
 
     from .build import (
         _calc_fence_reference_targets,
+        _calc_field_reference_targets,
         _calc_reference_targets,
         _calc_span_reference_targets,
     )
@@ -1227,7 +1238,11 @@ def plan_calc_ref_expansion(
             if item.body_line is None
             else set()
         )
-        for target in _calc_reference_targets(item):
+        ref_targets = list(_calc_reference_targets(item))
+        for field_target in _calc_field_reference_targets(item):
+            if field_target not in ref_targets:
+                ref_targets.append(field_target)
+        for target in ref_targets:
             # `_planned_target` runs BEFORE the span-only skip: it is not
             # only the rewrite decision, it is where the crossed-reference
             # refusal-and-warn (docs/design/keys.md §3 case 2) is emitted.
