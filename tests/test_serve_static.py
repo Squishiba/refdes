@@ -836,3 +836,24 @@ def test_the_auto_fill_toggles_on_one_persisted_preference():
     # Case A goes through execCommand, which mutates natively)
     assert panel.count("area.value = ") == 1
     assert "innerHTML" not in panel
+
+
+def test_the_font_setting_is_wired_into_the_editor():
+    assert os.path.isfile(os.path.join(STATIC, "fontsetting.js"))
+
+    with open(os.path.join(STATIC, "editor.js"), encoding="utf-8") as fh:
+        editor = fh.read()
+    assert "from './fontsetting.js'" in editor
+    assert "createFontSetting()" in editor
+    assert "fontSetting.applyTo(area)" in editor
+    assert "fontBar: fontSetting.node" in editor
+
+    with open(os.path.join(STATIC, "item.js"), encoding="utf-8") as fh:
+        item = fh.read()
+    assert "if (editor.fontBar) body.appendChild(editor.fontBar);" in item
+
+    with open(os.path.join(STATIC, "style.css"), encoding="utf-8") as fh:
+        css = fh.read()
+    assert "var(--refdes-editor-font, monospace)" in css
+    assert "var(--refdes-editor-size, 12px)" in css
+    assert "var(--refdes-editor-line-height, 1.5)" in css
