@@ -167,15 +167,54 @@ def test_a_non_object_fields_bag_is_400(served):
     assert status == 400
 
 
-def test_a_fields_bag_is_validated_carried_and_ignored(served):
+def test_a_fields_bag_is_validated_and_carried(served):
+    # Scalars of any JSON shape are accepted and carried; DRAFT's spans name
+    # no field, so an undeclared bag changes no row (the consumption itself
+    # is pinned by test_the_fields_bag_changes_the_rows below).
     _app, client, _root = served
     status, plain = calc(client, text=DRAFT)
     assert status == 200
-    status, with_fields = calc(client, text=DRAFT, fields={"anything": 5, "n": None})
+    status, with_fields = calc(client, text=DRAFT, fields={"anything": 5, "n": "text"})
     assert status == 200, with_fields
     assert with_fields["spans"] == plain["spans"]
     status, empty = calc(client, text=DRAFT, fields={})
     assert status == 200 and empty["spans"] == plain["spans"]
+
+
+def test_the_fields_bag_changes_the_rows(served):
+    # G1: the bag is consumed -- a span of this item naming its OWN field
+    # computes with the drafted value, not the saved one. The vocabulary's
+    # fidelity is the unit suite's (test_calc_preview.py); this is the route
+    # carrying it end-to-end, byte-identity included.
+    _app, client, root = served
+    text = "Own `U := DEC-001.$title | V = 3 V`\n"
+    status, plain = calc(client, text=text)
+    assert status == 200, plain
+    assert plain["spans"][0]["status"] == "error"
+    assert "not a quantity" in plain["spans"][0]["message"]
+    before = snapshot_tree(root)
+    status, payload = calc(client, text=text, fields={"title": "3 V"})
+    assert status == 200, payload
+    assert snapshot_tree(root) == before, "a calc request wrote to the project"
+    assert payload["spans"][0]["status"] == "ok"
+    assert payload["spans"][0]["computed"] == "3 V"
+    assert payload["spans"][0]["message"] == ""
+
+
+def test_non_scalar_field_values_are_400(served):
+    # §3.3: bag values mirror the set_field scalar rule -- collections and
+    # null have no representation in the patcher, so the route refuses them
+    # (the browser only ever sends strings from the field inputs).
+    _app, client, _root = served
+    for bag in ({"title": None}, {"title": {"a": 1}}, {"title": [1]}):
+        status, payload = calc(client, text=DRAFT, fields=bag)
+        assert status == 400, (bag, payload)
+        assert "scalar" in payload["error"]
+        assert set(payload) == {"error"}
+    status, _payload = calc(
+        client, text=DRAFT, fields={"n": 5, "b": True, "s": "text", "f": 1.5}
+    )
+    assert status == 200
 
 
 def test_unknown_request_keys_are_ignored(served):

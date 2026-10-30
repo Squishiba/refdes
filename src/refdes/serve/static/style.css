@@ -68,7 +68,7 @@ ul.diagnostics, ul.checks { list-style: none; margin: 0; padding: 0; }
 .fmt-btn:hover { border-color: var(--accent); background: #eef4fb; }
 .format-bar-note { display: none; width: 100%; margin: 2px 0 0; font-size: 12px; color: var(--warn); }
 .format-bar-note:not([hidden]) { display: block; }
-.body-edit { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--line); border-radius: 6px; font: 12px/1.5 monospace; }
+.body-edit { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--line); border-radius: 6px; font-family: var(--refdes-editor-font, monospace); font-size: var(--refdes-editor-size, 12px); line-height: var(--refdes-editor-line-height, 1.5); }
 .badge.readonly { font-size: 11px; margin-left: 6px; color: var(--muted); background: #f2f3f5; }
 .edit-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
 .edit-status { font-size: 12px; }
@@ -178,3 +178,19 @@ ul.diagnostics, ul.checks { list-style: none; margin: 0; padding: 0; }
 .live-calc-fill { padding: 1px 8px; font-size: 11px; }
 .live-calc-note { margin: 4px 0 0; }
 .live-calc-note.warn { color: var(--warn); }
+
+/* Editor font setting (design §D): the textarea receives CSS custom
+   properties from fontsetting.js; this draws the popover only. */
+.font-setting { position: relative; display: inline-block; margin-bottom: 6px; }
+.font-setting-popover { position: absolute; z-index: 3; top: calc(100% + 4px); left: 0; width: 232px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; box-shadow: 0 6px 18px rgba(0, 0, 0, .12); }
+.font-setting-popover[hidden] { display: none; }
+.font-setting-section { margin: 8px 0; }
+.font-setting-title { display: block; margin-bottom: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.font-family-choice, .font-line-height-choice { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.font-sample { font-size: 12px; overflow-wrap: anywhere; }
+.font-sample-mono { font-family: monospace; }
+.font-sample-sans { font-family: system-ui, sans-serif; }
+.font-sample-serif { font-family: Georgia, serif; }
+.font-size-row { display: flex; align-items: center; gap: 6px; }
+.font-size-value { min-width: 44px; text-align: center; }
+.font-reset { margin-top: 4px; }

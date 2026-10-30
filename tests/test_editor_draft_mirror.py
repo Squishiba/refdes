@@ -60,6 +60,12 @@ class FakeNode {
     this.tagName = tag.toUpperCase();
     this.children = [];
     this.attrs = {};
+    this.dataset = {};
+    this.style = {
+      _props: {},
+      setProperty(name, value) { this._props[name] = String(value); },
+      getPropertyValue(name) { return this._props[name] || ''; },
+    };
     this.listeners = {};
     this._text = '';
   }

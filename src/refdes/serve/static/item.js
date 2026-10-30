@@ -192,9 +192,10 @@ export async function renderItem(container, handle) {
   const body = section('Body');
   const bodyArea = editor.bodyControl(item.body, controls.get('body'));
   if (bodyArea) {
-    // The formatting bar sits immediately above the textarea it mutates
-    // (formatbar.js §B), and precedes it in DOM order so tab reaches it.
+    // The formatting bar and font control sit above the textarea they affect
+    // (formatbar.js §B, fontsetting.js §D), and precede it in DOM order.
     if (bodyArea._refdesFormatBar) body.appendChild(bodyArea._refdesFormatBar);
+    if (editor.fontBar) body.appendChild(editor.fontBar);
     body.appendChild(bodyArea);
     // The image picker inserts into that textarea, so it belongs beside it
     // rather than in the Edit block below (editor.js builds it; the draft it

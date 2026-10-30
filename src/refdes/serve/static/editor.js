@@ -16,6 +16,7 @@ import { createImagePicker } from './images.js';
 import { createSourcePicker } from './sourcepicker.js';
 import { createLiveCalc } from './live-calc.js';
 import { createFormatBar, applyEdit, blockInsertPlan } from './formatbar.js';
+import { createFontSetting } from './fontsetting.js';
 import { fieldControlNode, applyControl } from './controls.js';
 
 function el(tag, cls, text) {
@@ -51,7 +52,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     return {
       node: block, fieldControl: () => null, bodyControl: () => null,
       imagePicker: null, sourcePicker: createSourcePicker(item, handle, null),
-      liveCalcPanel: null,
+      liveCalcPanel: null, fontBar: null,
     };
   }
 
@@ -59,8 +60,8 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
   // for an editable form: it reads the form's own revision through the
   // accessor below (§3.6 guard 2 -- never app.js's unassigned openRevision,
   // which is never assigned), stays quiet while a save round-trip is in
-  // flight (§3.1), and sends the draft field bag with every request
-  // (carried, inert, until the field-reference slice).
+  // flight (§3.1), and sends the draft field bag with every request -- a
+  // field edit schedules one too (fieldsChanged, §3.2/§6.4).
   let saving = false;
   const liveCalc = createLiveCalc(handle, {
     getRevision: () => revision,
@@ -76,6 +77,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     isSaving: () => saving,
     getFields: () => draft.fields,
   });
+  const fontSetting = createFontSetting();
 
   // The formatting bar shares the same textarea, draft and save window as
   // typing and the live-calc panel. It is mounted by item.js immediately
@@ -205,6 +207,9 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
       setDraftField(handle, name, node.value);
       note('');
       refreshStatus();
+      // A field is a calc input (design §3.2/§6.4): the panel re-reads the
+      // draft bag on the same debounced request the body keystrokes use.
+      liveCalc.fieldsChanged();
     };
     const node = applyControl(existing, spec, shown, writeDraft)
       || fieldControlNode(spec, shown, writeDraft);
@@ -234,6 +239,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     area.addEventListener('input', writeBody);
     bodyArea = area;
     area._refdesFormatBar = formatBar.node;
+    fontSetting.applyTo(area);
     // Bind once per textarea and re-arm here (design §3.8): a re-render
     // carries the node over, so the new editor instance takes it from the
     // previous controller and the live-calc layer re-arms against this form.
@@ -382,5 +388,6 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     // The live inline-calc panel, mounted by item.js under the textarea
     // beside the pickers (design §3.5, panel placement §6.3).
     liveCalcPanel: liveCalc.node,
+    fontBar: fontSetting.node,
   };
 }

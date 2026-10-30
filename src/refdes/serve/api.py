@@ -778,8 +778,11 @@ def _calc_preview(app, ref: str, body) -> tuple[int, dict]:
     panel's coordinate space -- not the file-relative numbers the build
     reports for a frontmatter item; `evaluate_block` warnings (e.g. the
     unit-collision warning) are not surfaced by the three-status row
-    schema. `fields` is the draft's field bag: validated for shape and
-    carried, and unused until the field-reference slice (item G1) lands.
+    schema. `fields` is the draft's field bag (§3.3): a span of THIS item
+    naming its own field computes with the drafted value overlaid on the
+    saved fields (cross-item `$` refs keep reading saved -- §3.2's limit);
+    values mirror the `set_field` scalar rule below -- collections and null
+    are 400, the browser sends only the inputs' strings.
     Unknown keys are ignored, the `_apply_edit` posture -- the
     forward-compat the §3.3 contract names.
     """
@@ -790,6 +793,12 @@ def _calc_preview(app, ref: str, body) -> tuple[int, dict]:
         return 400, {"error": "text is required: the draft body as one string"}
     if "fields" in body and not isinstance(body["fields"], dict):
         return 400, {"error": "fields must be an object: the draft's field values"}
+    for value in (body.get("fields") or {}).values():
+        if value is None or isinstance(value, (dict, list)):
+            return 400, {
+                "error": "fields takes scalar values: collections and null "
+                "are not editable"
+            }
     project = app.state.snapshot.project
     item, _handle = _find_item(project, ref)
     if item is None:

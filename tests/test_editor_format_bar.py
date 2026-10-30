@@ -114,6 +114,11 @@ class FakeNode {
     this.type = '';
     this.selectionStart = 0;
     this.selectionEnd = 0;
+    this.style = {
+      _props: {},
+      setProperty(name, value) { this._props[name] = String(value); },
+      getPropertyValue(name) { return this._props[name] || ''; },
+    };
   }
   set className(v) { this._cls = v; }
   get className() { return this._cls || ''; }

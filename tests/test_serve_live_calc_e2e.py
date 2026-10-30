@@ -212,3 +212,55 @@ def test_the_form_revision_survives_the_save_sequence_of_the_real_editor(served)
             "the calc revision must track the form's revision after each "
             "save: the guard compares them (§3.6)"
         )
+
+
+def test_editing_a_field_moves_the_panel_without_saving(served):
+    # The §6.4 browser case at wire level (slice C, G1): the author types a
+    # new value into the FIELD input -- the request carries the draft bag,
+    # the row flips, NOTHING is saved (byte-identity); then the ordinary
+    # field+body save lands the panel's verdict in a real build.
+    _app, client, root = served
+    _status, view = client.api_get("/api/item/DEC-001")
+    rev = view["edit"]["file_revision"]
+    text = "Own `U := DEC-001.$title | V = 3 V`\n"
+
+    # The saved title is prose, not a quantity: the span is an error row.
+    status, drafted = client.api_post(
+        "/api/item/DEC-001/calc", {"text": text, "fields": {}}
+    )
+    assert status == 200, drafted
+    assert drafted["spans"][0]["status"] == "error"
+
+    # The field edit, unsaved: same text, the bag carries the draft title.
+    snap = snapshot_tree(root)
+    status, drafted = client.api_post(
+        "/api/item/DEC-001/calc", {"text": text, "fields": {"title": "4.5 V"}}
+    )
+    assert status == 200, drafted
+    assert snapshot_tree(root) == snap, "a field draft wrote to the project"
+    row = drafted["spans"][0]
+    assert row["status"] == "stale", row  # the body text still says `= 3 V`
+    assert row["computed"] == "4.5 V"
+
+    # Save the field, then the body (editor.js posts one op per request and
+    # threads the revision), and the FULL build agrees with the panel: same
+    # value in calc_values, the same stale diagnostic verbatim.
+    status, saved = client.api_post(
+        "/api/item/DEC-001/edit",
+        {"op": "set_field", "field": "title", "value": "4.5 V",
+         "expected_revision": rev},
+    )
+    assert status == 200, saved
+    status, saved = client.api_post(
+        "/api/item/DEC-001/edit",
+        {"op": "set_body", "text": text, "expected_revision": saved["revision"]},
+    )
+    assert status == 200, saved
+    built = _build_at(root)
+    dec = next(i for i in built.local_items if i.id == "DEC-001")
+    assert dec.calc_values["U"] == "4.5 V"
+    diags = [
+        d.message for d in built.diagnostics
+        if d.item_id == "DEC-001" and d.message.startswith("inline calc U:")
+    ]
+    assert diags == [row["message"]], diags
