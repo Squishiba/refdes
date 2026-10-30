@@ -685,6 +685,77 @@ function cpSpan(text, stored, computed, name = 'Vbad', line = 0) {
   globalThis.window = { addEventListener: () => {} };
 }
 
+// -- round 7 (a): a DRAFT-backed baseline (dropAppliedOp persists
+//    draft.revision rev-1 after a partial save + 409; the model is AT REST
+//    at rev-2). The form INTENTIONALLY trails the model while the author
+//    resolves the conflict -- every response is legitimately stale, so a
+//    drop here must not fire recovery: a re-render keeps the same
+//    draft-backed baseline, destroys the conflict box, and re-fires /calc
+//    forever (measured: 12 cycles of drop->re-render->calc at the
+//    previous head). At most 0 events, and the /calc count stays bounded.
+{
+  const h = 'DEC-DRAFTSTORM';
+  globalThis.window = new EventTarget();
+  let staleEvents = 0;
+  globalThis.window.addEventListener('refdes:stale-calc', () => { staleEvents += 1; });
+  const area = new FakeNode('textarea');
+  area.value = T1;
+  const calc = createLiveCalc(h, {
+    getRevision: () => 'rev-1', // draft.revision: the form trails on purpose
+    revisionFromDraft: () => true,
+    isSaving: () => false,
+    getFields: () => ({}),
+  });
+  calc.attach(area); // the open flush
+  const callsFor = () => calcCalls.filter((c) => c.path.includes(encodeURIComponent(h)));
+  for (let cycle = 0; cycle < 12; cycle += 1) {
+    for (const call of callsFor()) {
+      if (!call.settled) await settleCalc(call, payload([spanOn(T1, '5 V', '4 V')], 'rev-2'));
+    }
+    await flushMicro();
+  }
+  results.draftStorm = { events: staleEvents, requests: callsFor().length };
+  calc.destroy();
+  globalThis.window = { addEventListener: () => {} };
+}
+
+// -- round 7 (c): the progress guard. A baseline a re-sync CANNOT fix
+//    (stubbed getRevision, no draft): the first drop of a server revision
+//    fires recovery once; a repeat drop of the SAME revision after the
+//    re-render proved it useless stays silent; a NEW dropped revision
+//    fires again. Bounds any storm to one re-render per model revision.
+{
+  const h = 'DEC-STALELOOP';
+  globalThis.window = new EventTarget();
+  let staleEvents = 0;
+  globalThis.window.addEventListener('refdes:stale-calc', () => { staleEvents += 1; });
+  const area = new FakeNode('textarea');
+  area.value = T1;
+  const calc = createLiveCalc(h, {
+    getRevision: () => 'rev-0',
+    isSaving: () => false,
+    getFields: () => ({}),
+  });
+  calc.attach(area);
+  const callsFor = () => calcCalls.filter((c) => c.path.includes(encodeURIComponent(h)));
+  await settleCalc(callsFor()[0], payload([spanOn(T1, '5 V', '4 V')], 'rev-9'));
+  const first = staleEvents; // attach's drop: the first re-sync
+  area.dispatch('input');
+  await advance(401);
+  await settleCalc(callsFor()[callsFor().length - 1], payload([spanOn(T1, '5 V', '4 V')], 'rev-9'));
+  const repeat = staleEvents; // same revision dropped again: must stay silent
+  area.dispatch('input');
+  await advance(401);
+  await settleCalc(callsFor()[callsFor().length - 1], payload([spanOn(T1, '5 V', '4 V')], 'rev-10'));
+  results.staleLoop = {
+    firstFires: first === 1,
+    repeatSilent: repeat === 1,
+    newRevisionFires: staleEvents === 2,
+  };
+  calc.destroy();
+  globalThis.window = { addEventListener: () => {} };
+}
+
 // -- abort: the superseding request aborts the in-flight one (§3.6 guard 1)
 {
   const h = 'DEC-ABT';
@@ -1215,6 +1286,33 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node(tmp_
     assert rsv["eventWhenIdle"] is True, (
         "the recovery event must still fire when not saving: the ff1 "
         "cold-start recovery rides on refdes:stale-calc"
+    )
+
+    storm = results["draftStorm"]
+    assert storm["events"] == 0, (
+        "a persisted draft.revision is the form's baseline INTENTIONALLY "
+        "behind the model (partial save + 409: the author is resolving the "
+        "conflict); recovery events in that state storm the shell and "
+        "destroy the conflict box -- drop stays silent (§3.6, round 7)"
+    )
+    assert storm["requests"] <= 2, (
+        f"a draft-backed baseline issued {storm['requests']} /calc requests "
+        "with the model at rest: the drop must not trigger re-render "
+        "re-cycles (<= 2: the open flush plus at most one flush-on-blur)"
+    )
+
+    loop = results["staleLoop"]
+    assert loop["firstFires"] is True, (
+        "the first drop of a server revision must fire recovery once"
+    )
+    assert loop["repeatSilent"] is True, (
+        "a repeat drop of the SAME revision after the re-sync proved "
+        "useless must stay silent: the progress guard bounds the storm to "
+        "one re-render per model revision (round 7)"
+    )
+    assert loop["newRevisionFires"] is True, (
+        "a NEW dropped revision is new information: recovery must fire "
+        "again for it"
     )
 
     boot = results["appBootRace"]

@@ -106,7 +106,15 @@ function spanOffsets(starts, text, span) {
   };
 }
 
-export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
+// Guard 3's progress memory (round 7): the server revision last re-synced
+// for each handle. A re-sync that did not fix the baseline (a state the
+// shell's re-render cannot reach) must not fire again for the SAME dropped
+// revision -- that is the storm: drop -> re-render -> attach flush -> drop.
+// Keyed by handle, so a genuinely NEW model revision fires again.
+const lastStaleSync = new Map();
+
+export function createLiveCalc(handle, { getRevision, isSaving, getFields,
+  revisionFromDraft = () => false }) {
   const panel = el('section', 'live-calc');
   panel.hidden = true;
 
@@ -234,8 +242,17 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
       // leave saveAll writing against detached DOM (a conflict box would
       // render invisibly). The save re-renders at its end and the next
       // request carries the fresh revision — skipping loses nothing.
+      // The same reasoning covers a DRAFT-backed baseline (dropAppliedOp
+      // persists draft.revision after a partial save + 409): the form
+      // INTENTIONALLY trails the model while the author resolves the
+      // conflict, so every response is legitimately stale and a re-render
+      // only destroys the conflict box and re-fires the drop forever.
+      // Belt: fire at most once per distinct dropped revision per handle —
+      // if the re-sync did not fix it, it will not.
       if (payload.revision !== getRevision()) {
-        if (!isSaving() && window.dispatchEvent) {
+        if (!isSaving() && !revisionFromDraft() && window.dispatchEvent
+            && lastStaleSync.get(handle) !== payload.revision) {
+          lastStaleSync.set(handle, payload.revision);
           window.dispatchEvent(new CustomEvent('refdes:stale-calc', { detail: payload.revision }));
         }
         return;

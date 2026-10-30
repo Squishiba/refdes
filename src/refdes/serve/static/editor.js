@@ -63,6 +63,15 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
   let saving = false;
   const liveCalc = createLiveCalc(handle, {
     getRevision: () => revision,
+    // Guard 3's recovery signal (round 7) is for baselines that came from
+    // the VIEW (the ff1 boot race). A baseline from a persisted
+    // draft.revision (dropAppliedOp after a partial save + 409: the form
+    // INTENTIONALLY trails the model while the conflict is resolved) must
+    // not fire it -- the re-render keeps the same draft-backed baseline,
+    // destroys the conflict box and re-fires the drop forever. The draft
+    // object is live (drafts.js hands out the shared object), so this
+    // tracks dropAppliedOp/clearDraft as they happen.
+    revisionFromDraft: () => !!draft.revision,
     isSaving: () => saving,
     getFields: () => draft.fields,
   });
@@ -358,9 +367,10 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     node: block,
     fieldControl,
     bodyControl,
-    // The form's own revision (advanced by each save response): the value
-    // §3.6's revision guard and any future reader of the form's concurrency
-    // state must see — the same string the save sends as expected_revision.
+    // The form's own revision (advanced by each save response): the same
+    // string the save sends as expected_revision. Exported for the
+    // createLiveCalc wiring above (the §3.6 revision guard); no consumer
+    // outside this module's wiring.
     getRevision: () => revision,
     // Built here (it needs the insert callback) and placed by item.js in the
     // Body section, under the textarea it writes into.

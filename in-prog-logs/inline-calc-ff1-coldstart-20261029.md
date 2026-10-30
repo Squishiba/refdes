@@ -2,8 +2,8 @@
 
 ## The reported failure
 
-Orchestrator's Firefox run (saved in
-`/home/jorb/work/refdes/.scratch/pptr388/run-ff.json`): ff1 failed with
+Orchestrator's Firefox run (results in the harness's
+`.scratch/` run-ff.json): ff1 failed with
 `warned=false, settled=false, text="Rail \`Vbad := 2 V * 2 = 5 V\`"` —
 typed text intact, never a warn row, never an auto-fill. Re-runs passed;
 Chromium cold passed.
@@ -33,7 +33,7 @@ fixture write):
 The watcher's build swap landed between the item handler and the revision
 handler. The form carries the pre-swap revision, the baseline serial is
 already the new one, so no `refdes:rebuilt` event ever fires, and
-live-calc's revision guard (live-calc.js:206) silently drops every /calc
+live-calc's revision guard (live-calc.js:252) silently drops every /calc
 response for the life of the draft: warned=false, settled=false, typed
 text intact, permanent. The window is cold-serve specific (first item-view
 build is slow, the watcher tick from the harness's fixture write lands ~1s

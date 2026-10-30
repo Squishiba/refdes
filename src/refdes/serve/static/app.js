@@ -129,9 +129,11 @@ window.addEventListener('refdes:rebuilt', renderRoute);
 // the served model (the rebuild raced between the view's GET and the
 // baseline capture). Re-render now — the draft survives — and let the next
 // poll re-capture the baseline from the model the view was just refetched
-// against. This is not a loop waiting to storm: every iteration is caused
-// by a live model change (the drop is that proof), and a model at rest
-// drops nothing.
+// against. This cannot storm (round 7): live-calc never fires it for a
+// draft-backed baseline (a conflict form INTENTIONALLY trails the model —
+// re-rendering keeps the same baseline and only destroys the conflict box),
+// and never twice for the same dropped server revision — if the re-sync
+// did not fix it, it will not. A genuinely new model revision fires again.
 window.addEventListener('refdes:stale-calc', () => {
   lastServed = null;
   renderRoute();

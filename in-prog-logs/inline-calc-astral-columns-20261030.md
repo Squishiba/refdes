@@ -96,3 +96,44 @@ under 150 (merged api.js/mutation bullets; round-6 NIT about
 `createLiveCalc` for fields-only editors skipped by review, noted
 there). Full suite 5101 passed/2 skipped; Chromium 14/14, Firefox
 15/15 at this head.
+
+## Round 7 (review): drop -> re-render storm from draft-backed baselines
+
+Reviewer finding (HIGH, reproduced with `.scratch/r7/probe.mjs` against
+the worktree's static): a persisted `draft.revision` (partial save +
+409 conflict state) plus an at-rest model makes EVERY /calc response
+fail guard 3 — `getRevision()` returns the draft revision, the model
+never moves — each drop dispatches `refdes:stale-calc`, app.js
+re-renders, the fresh controller's attach flush re-fires /calc, drops
+again: measured 12 calc requests / 12 events / 12 render cycles, with
+the conflict box destroyed between cycles. The round-6 `isSaving()`
+gate covers only the save window; this is the at-rest state after it.
+
+Fix (live-calc.js): two conditions on the guard-3 dispatch —
+`revisionFromDraft()` (editor passes `() => !!draft.revision`; a
+draft-backed baseline means every response is legitimately stale and a
+re-render can't fix it) and a per-handle `lastStaleSync` Map firing at
+most once per distinct dropped revision (module-level, survives
+controller rebuilds — if the re-sync didn't fix it, it won't repeat).
+editor.js wiring + honest export comment; app.js comment reworded to
+the bounded-storm truth.
+
+RED first: new node-harness scenarios in
+`tests/test_editor_live_calc.py` — `DEC-DRAFTSTORM` (events == 0,
+requests <= 2; RED: 1 event on the pre-fix head) and `DEC-STALELOOP`
+(first drop fires, repeat is silent, a NEW revision fires; RED:
+repeat-silent false on the pre-fix head). appBootRace stays green
+(boot draft has no revision, so ff1 recovery is intact). Browser case
+15 in both drivers (Chromium `item15`, Firefox `ff15`): A saves first
+(model settles ahead), B seeded with a stale-revision draft, 409 ->
+conflict box, then a 5 s model-at-rest window: box must survive and
+`/calc` requests stay <= 3. FAILS on the pre-fix static (Chromium:
+detached-node from the storm; Firefox: `.save` click timeout), passes
+fixed (Chromium 15/15, Firefox 16/16, calcCount 0 in the window).
+A-save-first ordering matters: if A saves AFTER B opens, B's own poll
+rebuild legitimately re-renders and kills the box — not the storm.
+Full suite 5101 passed/2 skipped at this head.
+
+Small fixes: slice-b log `serve.py:789` -> `server.py:789` (origin
+check is at server.py:789), machine-local path out of both logs;
+ff1 log's stale `live-calc.js:206` citation -> :252.

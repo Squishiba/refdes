@@ -134,12 +134,12 @@ confirmed before each run.
 ## Notes / deviations
 
 - The served JS is the static dir of the running `refdes` package: the
-  editable install at /home/jorb/work/refdes serves its own copy, so browser
+  editable install outside this worktree serves its own copy, so browser
   testing of this worktree needs `PYTHONPATH=<worktree>/src`.
 - `page.reload`/`page.goto` time out on the editor page with the default
   load wait (the preview iframe's event stream keeps the load event open):
   drivers reload via CDP `Page.reload` / `domcontentloaded`.
-- The POST `/api` routes require the `Origin` header (serve.py:789) —
+- The POST `/api` routes require the `Origin` header (server.py:789) —
   probe scripts outside the browser must send it.
 - Review rounds 1-3 (session-scoped fallback, §5 renumbering, app.js
   clears, batch lineStarts, teardown/pre-gate/overlap tests, editor.js NITs)
