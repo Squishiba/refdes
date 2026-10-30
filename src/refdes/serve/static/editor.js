@@ -79,10 +79,29 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
   });
   const fontSetting = createFontSetting();
 
+  // The image and source pickers (built below the textarea by item.js). The
+  // bar's Image/Source buttons focus these very panels -- a second image UI
+  // is a non-goal (design §C) -- so they are built before the bar and shared.
+  const imagePicker = createImagePicker(item, handle, insertIntoBody);
+  const sourcePicker = createSourcePicker(item, handle, edit.body && edit.body.editable ? acceptSource : null);
+
   // The formatting bar shares the same textarea, draft and save window as
   // typing and the live-calc panel. It is mounted by item.js immediately
   // above the textarea, via the node stashed on the control in bodyControl.
-  const formatBar = createFormatBar({ isSaving: () => saving });
+  const formatBar = createFormatBar({
+    isSaving: () => saving,
+    focusPanel: (which) => {
+      const panel = which === 'images' ? imagePicker : sourcePicker;
+      if (!panel) return;
+      if (panel.scrollIntoView) panel.scrollIntoView({ block: 'start' });
+      const target = panel.querySelector('button, input, a, select, textarea');
+      if (target) target.focus();
+      else {
+        panel.tabIndex = -1; // panels fetch lazily: focus the container itself
+        panel.focus();
+      }
+    },
+  });
 
   const bar = el('div', 'edit-bar');
   const status = el('span', 'edit-status muted', 'saved');
@@ -381,10 +400,11 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     // createLiveCalc wiring above (the §3.6 revision guard); no consumer
     // outside this module's wiring.
     getRevision: () => revision,
-    // Built here (it needs the insert callback) and placed by item.js in the
-    // Body section, under the textarea it writes into.
-    imagePicker: createImagePicker(item, handle, insertIntoBody),
-    sourcePicker: createSourcePicker(item, handle, edit.body && edit.body.editable ? acceptSource : null),
+    // Built above (the image one needs the insert callback, and the bar's
+    // focus buttons need both) and placed by item.js in the Body section,
+    // under the textarea it writes into.
+    imagePicker,
+    sourcePicker,
     // The live inline-calc panel, mounted by item.js under the textarea
     // beside the pickers (design §3.5, panel placement §6.3).
     liveCalcPanel: liveCalc.node,
