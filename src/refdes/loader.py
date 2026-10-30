@@ -25,6 +25,7 @@ from . import image_freeze as image_freeze_mod
 from . import imports as imports_mod
 from . import keys as keys_mod
 from . import links as links_mod
+from . import navis as navis_mod
 from . import parse as parse_mod
 from . import schema_json as schema_json_mod
 from .model import Project
@@ -175,6 +176,19 @@ def load_tree(
         # The follows-anchor writer is the one later source rewrite that still
         # needs a reparse. Rebuild the imported portion of the resolution
         # scope afterward so build() never sees a local-only graph.
+        project.imports_loaded = False
+        parse_span = parse_items(project, require_ids, discard=parse_span)
+        imports_mod.load_imports(project)
+
+    # Navis keys (docs/design/navis.md §5, §7.2; slice 2): the same
+    # posture as key minting above -- writable load only, counted on
+    # `load_writes`, never on --no-write. Runs last among the load's
+    # writers so it splices against freshly reparsed positions; the
+    # splice is within-line (line counts preserved), and the reparse
+    # afterward makes build hash the keyed text (§7.2's disclosed cost).
+    minted_navis = navis_mod.mint_keys(project, write=write)
+    if minted_navis:
+        project.load_writes.minted_navi_keys = len(minted_navis)
         project.imports_loaded = False
         parse_span = parse_items(project, require_ids, discard=parse_span)
         imports_mod.load_imports(project)

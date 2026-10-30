@@ -947,6 +947,11 @@ class LoadWrites:
     """
 
     minted_keys: int = 0
+    #: Navi marker keys written into `<!--navi:...-->` markers by
+    #: `navis.mint_keys()` (Navis design §5/§7.2) -- counted apart from
+    #: `minted_keys` because they land in bodies (visible body edits), not
+    #: in front matter.
+    minted_navi_keys: int = 0
     rewritten_targets: int = 0
     rewritten_images: int = 0
     #: Project-relative paths this load tried to write and could not, in the
@@ -956,7 +961,12 @@ class LoadWrites:
     blocked: list[str] = field(default_factory=list)
 
     def __bool__(self) -> bool:
-        return bool(self.minted_keys or self.rewritten_targets or self.rewritten_images)
+        return bool(
+            self.minted_keys
+            or self.minted_navi_keys
+            or self.rewritten_targets
+            or self.rewritten_images
+        )
 
 
 @dataclass

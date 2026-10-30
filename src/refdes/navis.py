@@ -53,13 +53,16 @@ input ever sees a scan-side change (§7).
 from __future__ import annotations
 
 import bisect
+import os
 import re
+import sys
 import threading
 from functools import lru_cache
 from html import unescape as _html_unescape
 from typing import TYPE_CHECKING
 
 from . import keys as keys_mod
+from . import textio
 from .model import Diagnostic, Item, Navi
 
 if TYPE_CHECKING:
@@ -71,6 +74,12 @@ COMMENT_CLOSE = "-->"
 # Every diagnostic this module raises about a marker's own grammar; the
 # CLI filters on the code, never on the message text.
 NAVI_DIAGNOSTIC_CODE = "NAVI_MARKER"
+
+#: The mint step's own refusals (slice 2, design §5): a keyless marker whose
+#: bytes cannot be located losslessly in the item's own file is reported and
+#: left exactly as written -- the fail-closed contract of `analyze_navis`,
+#: carried to the write side.
+NAVI_MINT_REFUSED_CODE = "NAVI_MINT_REFUSED"
 
 MULTILINE_MESSAGE = (
     "navi marker spans lines; a marker is one line: `<!--navi: the reminder-->`"
@@ -1212,12 +1221,142 @@ def marker_line(item: Item, line_offset: int) -> int:
     return item.source_line
 
 
+def mint_keys(project: Project, write: bool = True) -> list[tuple[Item, str]]:
+    """Slice 2 (design §5, §7.2): mint a key into every keyless live marker,
+    written into the marker in the item's own source file -- the same
+    posture as `keys.mint_missing()` (writable load, announced through
+    `Project.load_writes`, never on `--no-write`).
+
+    The write is exact-provenance or nothing: the target line is located by
+    `Item.body_line + occurrence.line`, and the file's line must match the
+    body's raw line byte for byte -- a body that is not the markdown file's
+    own text (a list file's `body:` scalar has no `body_line`), a file that
+    changed under the parse, or a line break `textio` splits at (e.g.
+    U+2028) all REFUSE the mint with a `NAVI_MINT_REFUSED` warning and leave
+    the marker keyless and the bytes untouched. The splice (``key + " "``
+    after ``<!--navi:``) never changes line counts, so every parsed position
+    stays valid; occurrences on one line are spliced right-to-left.
+
+    Keys are a fresh namespace (§5): minted with `keys.mint()`, unique
+    against every key currently declared in the project. A declared key is
+    never rewritten (idempotence, and §5's corruption posture: minting
+    mints, it does not repair)."""
+    from .revise import FileRewrite, write_rewrites_verified
+
+    unkeyed: list[tuple[Item, _Occurrence]] = []
+    used: set[str] = set()
+    for item in project.local_items:
+        analysis = analyze_navis(item.body)
+        for occ in analysis.occurrences:
+            if occ.error:
+                continue
+            if occ.key:
+                used.add(occ.key)
+            else:
+                unkeyed.append((item, occ))
+    if not unkeyed:
+        return []
+    if not write:
+        noun = "marker has" if len(unkeyed) == 1 else "markers have"
+        project.info(
+            f"{len(unkeyed)} navi {noun} no key yet; the next writable "
+            "command will mint them."
+        )
+        return []
+
+    by_file: dict[str, list[tuple[Item, _Occurrence, str]]] = {}
+    for item, occ in unkeyed:
+        key = keys_mod.mint()
+        while key in used:
+            key = keys_mod.mint()
+        used.add(key)
+        by_file.setdefault(item.source_file, []).append((item, occ, key))
+
+    rewrites: list[FileRewrite] = []
+    assignments: list[tuple[Item, str]] = []
+    for rel, entries in by_file.items():
+        path = os.path.join(project.root, rel)
+        source = textio.SourceText.of(path)
+        text = source.text
+        lines = source.lines
+        by_line: dict[int, list[tuple[_Occurrence, str]]] = {}
+        for item, occ, key in entries:
+            if item.body_line is None:
+                project.warn(
+                    "navi marker has no key, and its body is a `body:` scalar "
+                    "in a YAML list file -- refdes mints keys only into "
+                    "markdown item bodies, where the marker's bytes can be "
+                    "located exactly; the marker stays keyless",
+                    file=rel, line=item.source_line, item_id=item.id,
+                    code=NAVI_MINT_REFUSED_CODE,
+                )
+                continue
+            li = item.body_line - 1 + occ.line
+            raw_line = _split_raw(item.body)[occ.line][0]
+            if li >= len(lines) or lines[li] != raw_line:
+                project.warn(
+                    "navi marker has no key, and the source line at its "
+                    f"position does not match the parsed body (line {li + 1} "
+                    "of this file) -- the mint is refused so the bytes stay "
+                    "byte-intact; the marker stays keyless",
+                    file=rel, line=item.source_line, item_id=item.id,
+                    code=NAVI_MINT_REFUSED_CODE,
+                )
+                continue
+            by_line.setdefault(li, []).append((occ, key))
+        for li, splices in by_line.items():
+            line = lines[li]
+            for occ, key in sorted(splices, key=lambda e: e[0].start, reverse=True):
+                open_end = occ.start + len(MARKER_OPEN)
+                # The key sits colon-adjacent (`<!--navi:KEY text-->`), so a
+                # space the author left after `<!--navi:` is consumed by the
+                # splice, not left in front of the key.
+                ws = open_end
+                while ws < len(line) and line[ws] in " \t":
+                    ws += 1
+                line = line[:open_end] + key + " " + line[ws:]
+            lines[li] = line
+        minted_ids = {id(occ) for splices in by_line.values() for occ, _ in splices}
+        for _item, occ, key in entries:
+            if id(occ) in minted_ids:
+                assignments.append((_item, key))
+        after = source.render(lines)
+        if after != text:
+            rewrites.append(FileRewrite(path=path, rel=rel, before=text, after=after))
+
+    refused = write_rewrites_verified(project, rewrites)
+    landed = [(item, key) for item, key in assignments if item.source_file not in refused]
+    if landed:
+        _announce_navi_mints(landed)
+    return landed
+
+
+def _announce_navi_mints(landed: list[tuple[Item, str]]) -> None:
+    """Announced, never silent -- the `anchor_follows` precedent (design
+    §13 slice 2): one line per minted marker on stderr, naming the key and
+    where it landed. The machine-output commands keep their stdout pure;
+    this line is a side-effect announcement, not an answer."""
+    for item, key in landed:
+        print(
+            f"navis: minted key {key[:6]} ({key}) into {item.id} "
+            f"({item.source_file})",
+            file=sys.stderr,
+        )
+
+
 def scan(project: Project) -> list[Diagnostic]:
     """Populate `item.navis` for every local item and return the
     malformed-marker warnings, which the build pass appends to
     `project.diagnostics` at the marker's line. Read-only: nothing here
     writes, mints, or touches `item.body` (§7.3's hard invariant starts
-    here)."""
+    here).
+
+    A declared key is validated the way an item key is (§5,
+    `keys.malformed_key_message`): the corruption lint reports it at the
+    marker's line and changes nothing -- a key is written by refdes, so a
+    marker whose key fails validation is corrupt input to report, never a
+    marker to repair.
+    """
     diagnostics: list[Diagnostic] = []
     for item in project.local_items:
         analysis = analyze_navis(item.body)
@@ -1233,6 +1372,19 @@ def scan(project: Project) -> list[Diagnostic]:
                     code=NAVI_DIAGNOSTIC_CODE,
                 )
             )
+        for navi in analysis.navis:
+            message = keys_mod.malformed_key_message(navi.key) if navi.key else None
+            if message is not None:
+                diagnostics.append(
+                    Diagnostic(
+                        "warning",
+                        message,
+                        file=item.source_file,
+                        line=marker_line(item, navi.line_offset),
+                        item_id=item.id,
+                        code=NAVI_DIAGNOSTIC_CODE,
+                    )
+                )
     return diagnostics
 
 
