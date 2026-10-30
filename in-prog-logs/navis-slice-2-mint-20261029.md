@@ -83,6 +83,10 @@ keys must be 11 chars via check_char.
   configs) identical.
 - Docs console block captured from a real demo-project run (writable ls
   mint announcement + prefix column; show by 6-char prefix).
+- CI round 1: windows-latest failed one fixture assertion that spelled
+  `\n` into a text-mode-written file (write_text translates to CRLF
+  there); the mint itself was correct. Replaced with splitlines content
+  comparison; all checks green.
 
 ## Notes / open points for reviewers
 
