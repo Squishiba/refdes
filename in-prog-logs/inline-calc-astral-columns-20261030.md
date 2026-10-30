@@ -63,3 +63,36 @@ fixture.
 
 5101 passed, 2 skipped (unchanged baseline; the new scenarios live in
 the existing node-harness test).
+
+## Round 6 (2026-10-30, review: test hygiene + save-window drop silence)
+
+CHANGES REQUESTED on the test file only, plus two small src items in the
+amendment. Fixed: the astral fixture block had been pasted twice (second
+block won, so the effective E1 was precomposed U+00E9 while comments/
+messages said combining) — dead duplicate deleted, E1 kept precomposed,
+E2 (base e + U+0301) added as its own scenario, labels/messages say
+exactly what runs; module imports to one fixture set (verified by
+exec'ing the module head, not by eye). Deleted the always-false
+`formCarriedPreRebuildRevision` (the /calc body is {text, fields}; it
+read body.revision). The listener-leak check is now COUNT-based, not
+name-matched (renaming a handler made the old check vacuous): attach
+pins 2 input / 1 blur / 1 focus (live-calc owns the only blur/focus
+registrations in the served modules), post-teardown only the editor's
+one input listener may remain; pinned by mutation — deleting one
+`removeEventListener('input', …)` from live-calc's `detachFrom` (scratch
+edit, restored) fails the check. appBootRace comments rewritten for the
+fixed tree (baseline-first boot, recovery listener clears it, poll
+re-captures); triple blank line removed.
+
+Src: guard 3 no longer dispatches `refdes:stale-calc` while
+`isSaving()` — mid-save the form's revision advances after saveAll's
+first op, a pre-save response is legitimately stale, and re-rendering
+the pane mid-save leaves saveAll on detached DOM. RED first (new
+`DEC-REVSAVE` scenario: event fired during save on the previous head),
+GREEN after; not-saving dispatches as before (ff1 recovery intact).
+app.js comment reworded (no seq-guard credit; the loop is self-limiting
+because each iteration needs a live model change). slice-b log trimmed
+under 150 (merged api.js/mutation bullets; round-6 NIT about
+`createLiveCalc` for fields-only editors skipped by review, noted
+there). Full suite 5101 passed/2 skipped; Chromium 14/14, Firefox
+15/15 at this head.

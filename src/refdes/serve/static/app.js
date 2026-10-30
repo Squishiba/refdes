@@ -129,7 +129,9 @@ window.addEventListener('refdes:rebuilt', renderRoute);
 // the served model (the rebuild raced between the view's GET and the
 // baseline capture). Re-render now — the draft survives — and let the next
 // poll re-capture the baseline from the model the view was just refetched
-// against; renderRoute's request-seq guard keeps a drop storm to one flight.
+// against. This is not a loop waiting to storm: every iteration is caused
+// by a live model change (the drop is that proof), and a model at rest
+// drops nothing.
 window.addEventListener('refdes:stale-calc', () => {
   lastServed = null;
   renderRoute();

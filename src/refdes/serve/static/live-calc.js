@@ -228,8 +228,14 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
       // can land between the view's GET and the poll's baseline capture), so
       // tell the shell to re-sync: it re-renders the view behind the draft
       // (drafts.js survives it) and the next request carries a fresh revision.
+      // While a save is running the signal is suppressed: the editor advances
+      // the form's own revision after saveAll's first op, so a pre-save
+      // response is LEGITIMATELY stale, and re-rendering the pane now would
+      // leave saveAll writing against detached DOM (a conflict box would
+      // render invisibly). The save re-renders at its end and the next
+      // request carries the fresh revision — skipping loses nothing.
       if (payload.revision !== getRevision()) {
-        if (window.dispatchEvent) {
+        if (!isSaving() && window.dispatchEvent) {
           window.dispatchEvent(new CustomEvent('refdes:stale-calc', { detail: payload.revision }));
         }
         return;

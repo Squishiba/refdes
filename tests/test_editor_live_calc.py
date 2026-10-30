@@ -82,22 +82,15 @@ T1_FILLED = "Rail `Vbad := 2 V * 2 = 4 V`"
 # Astral fixtures: the server's span columns are Python string indices =
 # Unicode code points; textarea offsets are UTF-16 code units. Every text
 # here puts astral characters on the span's line BEFORE the span, so a raw
-# column addition lands off by one unit per astral character.
-A1 = "\U0001F600 `Vbad := 2 V * 2 = 5 V`"
-A1_FILLED = "\U0001F600 `Vbad := 2 V * 2 = 4 V`"
-E1 = "\U0001F600\u0301\U0001F600 `Vbad := 2 V * 2 = 5 V`"
-E1_FILLED = "\U0001F600\u0301\U0001F600 `Vbad := 2 V * 2 = 4 V`"
-F1 = "\U0001F600 heading\n`Vbad := 2 V * 2 = 5 V`"
-F1_FILLED = "\U0001F600 heading\n`Vbad := 2 V * 2 = 4 V`"
-
-# Astral fixtures: the server's span columns are Python string indices =
-# Unicode code points; textarea offsets are UTF-16 code units. Every text
-# here puts astral characters on the span's line BEFORE the span, so a raw
-# column addition lands off by one unit per astral character.
+# column addition lands off by one unit per astral character. E1 carries a
+# PRECOMPOSED e-acute (U+00E9); E2 a base e plus a COMBINING acute (U+0301).
+# Both are BMP: one code point, one UTF-16 unit -- they must stay green.
 A1 = "\U0001F600 `Vbad := 2 V * 2 = 5 V`"
 A1_FILLED = "\U0001F600 `Vbad := 2 V * 2 = 4 V`"
 E1 = "\U0001F600\u00E9\U0001F600 `Vbad := 2 V * 2 = 5 V`"
 E1_FILLED = "\U0001F600\u00E9\U0001F600 `Vbad := 2 V * 2 = 4 V`"
+E2 = "\U0001F600e\u0301\U0001F600 `Vbad := 2 V * 2 = 5 V`"
+E2_FILLED = "\U0001F600e\u0301\U0001F600 `Vbad := 2 V * 2 = 4 V`"
 F1 = "\U0001F600 heading\n`Vbad := 2 V * 2 = 5 V`"
 F1_FILLED = "\U0001F600 heading\n`Vbad := 2 V * 2 = 4 V`"
 
@@ -384,6 +377,8 @@ const A1 = __A1__;
 const A1_FILLED = __A1_FILLED__;
 const E1 = __E1__;
 const E1_FILLED = __E1_FILLED__;
+const E2 = __E2__;
+const E2_FILLED = __E2_FILLED__;
 const F1 = __F1__;
 const F1_FILLED = __F1_FILLED__;
 
@@ -479,7 +474,8 @@ function cpSpan(text, stored, computed, name = 'Vbad', line = 0) {
   };
 }
 {
-  // two astral emoji with a BMP accent between them: only the emoji shift
+  // two astral emoji with a PRECOMPOSED e-acute (U+00E9) between them:
+  // BMP is one unit in both encodings, only the emoji shift
   const h = 'DEC-ASTRAL-MIX';
   const ed = openEditor(h, E1);
   await settleCalc(ed.calls()[0], payload([]));
@@ -491,6 +487,23 @@ function cpSpan(text, stored, computed, name = 'Vbad', line = 0) {
   await settleCalc(ed.calls()[1], payload([cpSpan(E1, '5 V', '4 V')]));
   ed.fills()[0].click();
   results.astralMix = { whole: ed.area.value };
+  globalThis.localStorage.removeItem('refdes.live-calc.autofill');
+  drafts.clearDraft(h);
+}
+{
+  // the same shape with a base e plus a COMBINING acute (U+0301): two code
+  // points, two UTF-16 units -- BMP, so it must behave exactly like E1
+  const h = 'DEC-ASTRAL-MIX2';
+  const ed = openEditor(h, E2);
+  await settleCalc(ed.calls()[0], payload([]));
+  const box = find(ed.panel, 'live-calc-autofill');
+  box.checked = false;
+  box.dispatch('change');
+  ed.area.setSelectionRange(0, 0);
+  ed.focus();
+  await settleCalc(ed.calls()[1], payload([cpSpan(E2, '5 V', '4 V')]));
+  ed.fills()[0].click();
+  results.astralMix2 = { whole: ed.area.value };
   globalThis.localStorage.removeItem('refdes.live-calc.autofill');
   drafts.clearDraft(h);
 }
@@ -628,6 +641,48 @@ function cpSpan(text, stored, computed, name = 'Vbad', line = 0) {
     matchedRows: ed.rowCount(),
   };
   drafts.clearDraft(h);
+}
+
+// -- revision guard WHILE saving (§3.6 guard 3, round-6): a multi-op save
+//    advances the form's own revision after the first op, so a response from
+//    before the save is legitimately stale -- the drop must stay SILENT.
+//    Dispatching refdes:stale-calc mid-save re-renders the pane and leaves
+//    saveAll running against detached DOM (a conflict box would render
+//    invisibly). The save re-renders at its end; the next /calc is fresh.
+//    When NOT saving, the recovery event must still fire (ff1 recovery).
+{
+  const h = 'DEC-REVSAVE';
+  globalThis.window = new EventTarget();
+  let staleEvents = 0;
+  globalThis.window.addEventListener('refdes:stale-calc', () => { staleEvents += 1; });
+  let saving = false;
+  const area = new FakeNode('textarea');
+  area.value = T1;
+  const calc = createLiveCalc(h, {
+    getRevision: () => 'rev-0',
+    isSaving: () => saving,
+    getFields: () => ({}),
+  });
+  calc.attach(area); // the open flush fires: request 1 is in flight
+  const callsFor = () => calcCalls.filter((c) => c.path.includes(encodeURIComponent(h)));
+  saving = true; // saveAll begins: op 1 advances the form's revision
+  await settleCalc(callsFor()[0], payload([spanOn(T1, '5 V', '4 V')], 'rev-9'));
+  const duringSave = {
+    rows: findAll(calc.node, 'live-calc-row').length,
+    text: area.value,
+    events: staleEvents,
+  };
+  saving = false; // the save is over; the pane is at rest
+  area.dispatch('input');
+  await advance(401);
+  await settleCalc(callsFor()[1], payload([spanOn(T1, '5 V', '4 V')], 'rev-9'));
+  results.revisionGuardSaving = {
+    droppedWhileSaving: duringSave.rows === 0 && duringSave.text === T1,
+    noEventWhileSaving: duringSave.events === 0,
+    eventWhenIdle: staleEvents === 1,
+  };
+  calc.destroy();
+  globalThis.window = { addEventListener: () => {} };
 }
 
 // -- abort: the superseding request aborts the in-flight one (§3.6 guard 1)
@@ -937,13 +992,21 @@ function cpSpan(text, stored, computed, name = 'Vbad', line = 0) {
   const area = find(container, 'body-edit');
   area.value = T1;
   area.dispatch('input'); // a pending debounce on the OLD item
+  // the textarea also carries the editor's own input listener (writeBody,
+  // it must survive). Renaming a live-calc handler must not make this pass
+  // vacuously, so the check is a COUNT, never a name match: at attach time
+  // the textarea carries 2 input listeners (the editor's + live-calc's) and
+  // exactly one blur/focus each -- live-calc's are the only blur/focus
+  // registrations in the served modules -- and after teardown only the
+  // editor's single input listener may remain.
+  const attached = (area.listeners.input || []).length === 2
+    && (area.listeners.blur || []).length === 1
+    && (area.listeners.focus || []).length === 1;
   const inflight = calcCalls.filter((c) => c.path.includes(h));
   await renderItem(container, 'DEC-TEB'); // switch items
-  // the textarea also carries the editor's own commit listener (it is meant
-  // to survive); only live-calc's three handlers must be gone
-  const liveHandlers = ['scheduleFromInput', 'flushOnBlur', 'focusFlush'];
-  const leaked = ['input', 'blur', 'focus'].some((t) =>
-    (area.listeners[t] || []).some((fn) => liveHandlers.includes(fn.name)));
+  const leaked = (area.listeners.blur || []).length > 0
+    || (area.listeners.focus || []).length > 0
+    || (area.listeners.input || []).length > 1;
   const afterSwitch = {
     calls: calcCalls.filter((c) => c.path.includes(h)).length,
     aborted: inflight.length >= 1 && inflight.every((c) => c.signal.aborted === true),
@@ -959,20 +1022,26 @@ function cpSpan(text, stored, computed, name = 'Vbad', line = 0) {
   const failBox = new FakeNode('div');
   await renderItem(failBox, h); // normal render: panel mounted, renderedHandle = h
   const failArea = find(failBox, 'body-edit');
+  const failAttached = (failArea.listeners.input || []).length === 2
+    && (failArea.listeners.blur || []).length === 1
+    && (failArea.listeners.focus || []).length === 1;
   failArea.value = T1;
   failArea.dispatch('input'); // pending debounce on THIS panel
   await advance(401); // the request is now in flight
   const failInflight = calcCalls.filter((c) => c.path.includes(encodeURIComponent(h)));
   globalThis.fetch.__failItem = true;
   await renderItem(failBox, h); // same handle, children present -> the fetch rejects
-  const failLeaked = ['input', 'blur', 'focus'].some((t) =>
-    (failArea.listeners[t] || []).some((fn) => liveHandlers.includes(fn.name)));
+  const failLeaked = (failArea.listeners.blur || []).length > 0
+    || (failArea.listeners.focus || []).length > 0
+    || (failArea.listeners.input || []).length > 1;
   await advance(500); // nothing left may fire for this item
   const failCallsAfter = calcCalls.filter((c) => c.path.includes(encodeURIComponent(h))).length;
   globalThis.fetch.__failItem = false;
   const failCleared = failBox.children.length === 1 && hasCls(failBox.children[0], 'banner');
   results.teardown = {
     ...afterSwitch,
+    attached,
+    failAttached,
     afterAdvance,
     noLeak: afterAdvance === afterSwitch.calls,
     failCleared,
@@ -1015,11 +1084,14 @@ function cpSpan(text, stored, computed, name = 'Vbad', line = 0) {
 //    two boot GETs must never leave the captured serial AHEAD of the view's
 //    revision. The serve answers the boot GETs on parallel handler threads,
 //    so arrival order, not issue order, decides who reads which build; the
-//    adversarial interleaving runs the detail-view handler on build 1 and
-//    the revision handler on build 2. The form then carries rev-1, the
-//    baseline says serial 2, no refdes:rebuilt event ever fires, and
-//    live-calc's revision guard drops every response -- the recovery signal
-//    (refdes:stale-calc) must re-sync the shell so the panel comes back.
+//    adversarial interleaving runs the detail-view handler first (on build
+//    1: the form carries rev-1, its /calc fires) and the revision handler
+//    after the watcher rebuild (baseline captures serial 2). The /calc
+//    responses carry rev-2 and live-calc's revision guard drops them all;
+//    the poll never fires refdes:rebuilt (serial 2 is its own baseline,
+//    the view's GET never saw build 2) -- the recovery signal
+//    (refdes:stale-calc) must clear the baseline and re-render against
+//    build 2, so the form carries rev-2 and the panel comes back.
 {
   globalThis.location = { hash: '#/items/DEC-BOOT' };
   globalThis.window = new EventTarget();
@@ -1045,7 +1117,8 @@ function cpSpan(text, stored, computed, name = 'Vbad', line = 0) {
     await settleCalc(call, payload([spanOn(T1, '5 V', '4 V')], build.revision));
   }
   const dropped = findAll(__byId.detail, 'live-calc-row').length === 0;
-  app.poll(); // the 2 s interval tick sees serial 2 == the baseline: silent
+  app.poll(); // the recovery listener already cleared the baseline; this
+  // tick re-captures serial 2 from the queued response: no refdes:rebuilt
   let guard = 0;
   while (q('api/') && guard++ < 50) await __flushPath('api/'); // poll + recovery
   const late = calcCalls.filter((c) => c.path.includes('/api/item/DEC-BOOT/calc'));
@@ -1053,7 +1126,6 @@ function cpSpan(text, stored, computed, name = 'Vbad', line = 0) {
     await settleCalc(call, payload([spanOn(T1, '5 V', '4 V')], build.revision));
   }
   results.appBootRace = {
-    formCarriedPreRebuildRevision: sent.length > 0 && sent[0].body.revision === 'rev-1',
     dropped,
     recoveredRows: findAll(__byId.detail, 'live-calc-row').length,
   };
@@ -1076,6 +1148,8 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node(tmp_
         .replace("__A1_FILLED__", json.dumps(A1_FILLED))
         .replace("__E1__", json.dumps(E1))
         .replace("__E1_FILLED__", json.dumps(E1_FILLED))
+        .replace("__E2__", json.dumps(E2))
+        .replace("__E2_FILLED__", json.dumps(E2_FILLED))
         .replace("__F1__", json.dumps(F1))
         .replace("__F1_FILLED__", json.dumps(F1_FILLED))
     )
@@ -1131,6 +1205,18 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node(tmp_
         "the response matching the form's own revision did not render"
     )
 
+    rsv = results["revisionGuardSaving"]
+    assert rsv["droppedWhileSaving"] is True and rsv["noEventWhileSaving"] is True, (
+        "a stale-model drop during a save must stay silent: the form's own "
+        "revision advances mid-save, so a pre-save response is legitimately "
+        "stale -- re-rendering the pane would pull the DOM out from under "
+        "saveAll (§3.6)"
+    )
+    assert rsv["eventWhenIdle"] is True, (
+        "the recovery event must still fire when not saving: the ff1 "
+        "cold-start recovery rides on refdes:stale-calc"
+    )
+
     boot = results["appBootRace"]
     assert boot["dropped"] is True, (
         "the adversarial boot interleaving did not produce a stale-model "
@@ -1166,8 +1252,14 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node(tmp_
     )
     am = results["astralMix"]
     assert am["whole"] == E1_FILLED, (
-        "two emoji with a combining accent before the span: Fill replaced "
-        "the wrong range (one unit of shift per astral code point)"
+        "two emoji with a PRECOMPOSED e-acute (U+00E9) before the span: "
+        "Fill replaced the wrong range (one unit of shift per astral code point)"
+    )
+    am2 = results["astralMix2"]
+    assert am2["whole"] == E2_FILLED, (
+        "two emoji with a base e plus a COMBINING acute (U+0301) before the "
+        "span: Fill replaced the wrong range -- the combining mark is BMP, "
+        "one unit in both encodings, only the emoji shift"
     )
     an = results["astralLaterLine"]
     assert an["whole"] == F1_FILLED, (
@@ -1262,6 +1354,10 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node(tmp_
         "response: it must pass on the saved model (§3.6)"
     )
     td = results["teardown"]
+    assert td["attached"] is True and td["failAttached"] is True, (
+        "the live-calc panel never attached its three textarea listeners "
+        "(2 input / 1 blur / 1 focus): the leak check below would be vacuous"
+    )
     assert td["aborted"] is True, (
         "an item switch left the old panel's in-flight request running: every "
         "container clear must destroy the controller first (§3.8)"
@@ -1320,8 +1416,6 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node(tmp_
         "mutation: it must display the effective state"
     )
     assert cs["flagPersisted"] is True, "the stand-down did not persist for the session"
-
-
 
     tgl = results["toggle"]
     assert tgl["defaultApplied"] is True, "auto-fill is default ON (§6.1)"

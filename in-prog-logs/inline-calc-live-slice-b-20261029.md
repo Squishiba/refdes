@@ -2,13 +2,11 @@
 
 Design: `in-prog-logs/inline-calc-live-editor-design-20261020.md`
 (§3.1-§3.8, §4 F1+F2+F3, §5 Slice B, §6 decisions 1-4). Base: origin/main
-a78e30f (slice A route). Scope: browser-side only; no Python source touched
-(`src/refdes/serve/api.py` untouched, route from slice A).
+a78e30f (slice A route). Scope: browser-side only (`api.py` untouched).
 
 ## What landed
 
-- `api.js` (F1): `api(path, { method = 'GET', body, signal } = {})` passes
-  `init.signal` when provided.
+- `api.js` (F1): `api(path, { method = 'GET', body, signal } = {})` passes `init.signal` when provided.
 - `live-calc.js` (F2, new): `createLiveCalc(handle, { getRevision,
   isSaving, getFields })` → `{ node, attach, detachFrom, destroy }`.
   400 ms trailing debounce (input/focus/open-editor triggers, blur
@@ -96,15 +94,13 @@ a78e30f (slice A route). Scope: browser-side only; no Python source touched
   the form's own applied".
 - (b) caret containment exclusive (`<`): FAILS — "caret start ... was
   overwritten".
-- (c) offset conversion off-by-one: FAILS — "a span on line 4 was not
-  filled at its own converted offsets".
-- (d) switch-path clear runs before destroy (the review's bug): FAILS —
-  teardown scenario reports in-flight not aborted, listener leaked, a
-  /calc fires for the switched-away item.
+- (c) offset conversion off-by-one: FAILS — "a span on line 4 was not filled at its own converted offsets".
+- (d)+(f1) switch-path clear runs before destroy (the review's bug) /
+  catch-path `destroyLiveCalc` removed: FAILS — teardown reports in-flight
+  not aborted, listener leaked, a /calc fires for the switched-away item;
+  `failAborted` proves the fetch-error scenario is non-vacuous.
 - (e) pair gate reverted to result_start-only: FAILS — the half-pair
   scenario's Fill count goes 0 → 1.
-- (f1) catch-path `destroyLiveCalc` removed (fetch-error re-render):
-  FAILS — `failAborted` (proves the teardown scenario is now non-vacuous).
 - (f2) session fallback made closure-scoped (flag never written): FAILS —
   the rebuilt controller auto-fills again.
 
@@ -137,17 +133,17 @@ confirmed before each run.
 
 ## Notes / deviations
 
-- The served JS is the static dir of the running `refdes` package: an
-  editable install at /home/jorb/work/refdes serves its own copy, so
-  browser testing of this worktree needs `PYTHONPATH=<worktree>/src`.
-- `page.reload`/`page.goto` with the default load wait time out on the
-  editor page (the preview iframe's event stream keeps the load event
-  open): the drivers reload via CDP `Page.reload` / `domcontentloaded`.
+- The served JS is the static dir of the running `refdes` package: the
+  editable install at /home/jorb/work/refdes serves its own copy, so browser
+  testing of this worktree needs `PYTHONPATH=<worktree>/src`.
+- `page.reload`/`page.goto` time out on the editor page with the default
+  load wait (the preview iframe's event stream keeps the load event open):
+  drivers reload via CDP `Page.reload` / `domcontentloaded`.
 - The POST `/api` routes require the `Origin` header (serve.py:789) —
   probe scripts outside the browser must send it.
-- Review rounds 1-3 (session-scoped fallback, design-§5 renumbering,
-  app.js clears, batch lineStarts, real teardown + pre-gate + overlap
-  tests, editor.js NITs) are all addressed above.
+- Review rounds 1-3 (session-scoped fallback, §5 renumbering, app.js
+  clears, batch lineStarts, teardown/pre-gate/overlap tests, editor.js NITs)
+  addressed above; round-6 NIT (`createLiveCalc` for fields-only editors)
+  skipped by review, left as is.
 
-Status: complete; checklist driven in Chromium + Firefox under design §5
-numbering.
+Status: complete; checklist driven in Chromium + Firefox under design §5 numbering.
