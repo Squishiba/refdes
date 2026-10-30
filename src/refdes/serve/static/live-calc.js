@@ -202,8 +202,17 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
       // §3.6 guard 2 (the correctness one): typing beat the network.
       if (area.value !== sent) return;
       // §3.6 guard 3: computed against an old model — the revision of the form,
-      // never app.js's unassigned openRevision (§1).
-      if (payload.revision !== getRevision()) return;
+      // never app.js's unassigned openRevision (§1). Dropping stays silent, but
+      // the drop proves the form's baseline trails the served model (a rebuild
+      // can land between the view's GET and the poll's baseline capture), so
+      // tell the shell to re-sync: it re-renders the view behind the draft
+      // (drafts.js survives it) and the next request carries a fresh revision.
+      if (payload.revision !== getRevision()) {
+        if (window.dispatchEvent) {
+          window.dispatchEvent(new CustomEvent('refdes:stale-calc', { detail: payload.revision }));
+        }
+        return;
+      }
       rows = Array.isArray(payload.spans) ? payload.spans : [];
       snapshotText = sent;
       renderRows(payload.truncated === true);

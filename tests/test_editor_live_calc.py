@@ -183,8 +183,10 @@ function findAll(node, cls) {
 
 function find(node, cls) { return findAll(node, cls)[0] || null; }
 
+const __byId = {};
 globalThis.document = {
   createElement: (tag) => new FakeNode(tag),
+  getElementById: (id) => (__byId[id] || (__byId[id] = new FakeNode('div'))),
   querySelector: (sel) => (sel.includes('refdes-token') ? { content: 'tok' } : null),
   activeElement: null,
   execCommand: (name, ui, text) => {
@@ -228,6 +230,20 @@ async function advance(ms) {
 
 // ---------- fetch: /calc resolves on demand, /edit is scripted per scenario
 const calcCalls = [];
+// The serve answers GETs on parallel handler threads: a scenario that needs
+// the interleaving of a watcher rebuild with the two boot fetches defers
+// those handlers into this queue and runs them one at a time.
+const __serverQueue = [];
+// Serve threads are scheduled independently of request order: the scenario
+// picks WHICH queued handler runs next (the adversarial interleaving), and
+// each handler reads the build current at the moment it runs.
+async function __flushPath(p) {
+  const i = __serverQueue.findIndex((h) => h.__path.includes(p));
+  if (i === -1) throw new Error(`no queued handler matching ${p}`);
+  const [h] = __serverQueue.splice(i, 1);
+  h();
+  await flushMicro();
+}
 let editSettle = null;
 globalThis.fetch = async (path, init) => {
   if (path.includes('/calc')) {
@@ -243,12 +259,31 @@ globalThis.fetch = async (path, init) => {
       { ok, status: ok ? 200 : 422, statusText: 'OK', json: async () => payload });
     });
   }
+  if (path.startsWith('/api/revision')) {
+    return new Promise((resolve) => {
+      const h = () => resolve(
+        { ok: true, status: 200, statusText: 'OK',
+          json: async () => (globalThis.__revisionHook
+            ? globalThis.__revisionHook()
+            : { serial: 1, revision: 'rev-0', git: null }) });
+      h.__path = path;
+      __serverQueue.push(h);
+    });
+  }
   if (path.startsWith('/api/items')) {
-    return { ok: true, status: 200, statusText: 'OK', json: async () => ({ items: [] }) };
+    return { ok: true, status: 200, statusText: 'OK', json: async () => ({ items: [], facets: {} }) };
   }
   if (path.startsWith('/api/item/') && !path.includes('/calc') && !path.includes('/edit')) {
     if (globalThis.fetch.__failItem) throw new Error('network down');
     const h = decodeURIComponent(path.split('/api/item/')[1].split('?')[0]);
+    if (globalThis.__itemViewHook) {
+      return new Promise((resolve) => {
+        const hh = () => resolve(
+          { ok: true, status: 200, statusText: 'OK', json: async () => globalThis.__itemViewHook(h) });
+        hh.__path = path;
+        __serverQueue.push(hh);
+      });
+    }
     return { ok: true, status: 200, statusText: 'OK', json: async () => itemRender(h) };
   }
   return { ok: true, status: 200, statusText: 'OK', json: async () => ({}) };
@@ -823,6 +858,56 @@ const T1_FILLED = __T1_FILLED__;
   drafts.clearDraft(h);
 }
 
+// -- the shell's boot race (app.js): a watcher rebuild landing between the
+//    two boot GETs must never leave the captured serial AHEAD of the view's
+//    revision. The serve answers the boot GETs on parallel handler threads,
+//    so arrival order, not issue order, decides who reads which build; the
+//    adversarial interleaving runs the detail-view handler on build 1 and
+//    the revision handler on build 2. The form then carries rev-1, the
+//    baseline says serial 2, no refdes:rebuilt event ever fires, and
+//    live-calc's revision guard drops every response -- the recovery signal
+//    (refdes:stale-calc) must re-sync the shell so the panel comes back.
+{
+  globalThis.location = { hash: '#/items/DEC-BOOT' };
+  globalThis.window = new EventTarget();
+  globalThis.setInterval = () => 0;
+  let build = { serial: 1, revision: 'rev-1' };
+  globalThis.__revisionHook = () => ({ serial: build.serial, revision: build.revision, git: null });
+  globalThis.__itemViewHook = (req) => {
+    if (String(req).includes('/sources')) return { sources: [] };
+    const v = itemRender(req);
+    return { ...v, revision: build.revision, edit: { ...v.edit, file_revision: build.revision } };
+  };
+  const app = await import(url('app.js'));
+  await flushMicro(); // boot issued its GETs; the handlers sit in the queue
+  const q = (p) => __serverQueue.some((h) => h.__path.includes(p));
+  // the view handler runs first (on build 1): the form carries rev-1
+  if (q('/api/item/DEC-BOOT')) await __flushPath('/api/item/DEC-BOOT');
+  else await __flushPath('/api/revision'); // (poll-first boot: nothing queued yet)
+  if (q('/api/item/DEC-BOOT')) await __flushPath('/api/item/DEC-BOOT'); // sources
+  build = { serial: 2, revision: 'rev-2' }; // the watcher rebuild lands
+  if (q('/api/revision')) await __flushPath('/api/revision'); // baseline reads build 2
+  const sent = calcCalls.filter((c) => c.path.includes('/api/item/DEC-BOOT/calc'));
+  for (const call of sent) {
+    await settleCalc(call, payload([spanOn(T1, '5 V', '4 V')], build.revision));
+  }
+  const dropped = findAll(__byId.detail, 'live-calc-row').length === 0;
+  app.poll(); // the 2 s interval tick sees serial 2 == the baseline: silent
+  let guard = 0;
+  while (q('api/') && guard++ < 50) await __flushPath('api/'); // poll + recovery
+  const late = calcCalls.filter((c) => c.path.includes('/api/item/DEC-BOOT/calc'));
+  for (const call of late.slice(sent.length)) {
+    await settleCalc(call, payload([spanOn(T1, '5 V', '4 V')], build.revision));
+  }
+  results.appBootRace = {
+    formCarriedPreRebuildRevision: sent.length > 0 && sent[0].body.revision === 'rev-1',
+    dropped,
+    recoveredRows: findAll(__byId.detail, 'live-calc-row').length,
+  };
+  globalThis.__revisionHook = null;
+  globalThis.__itemViewHook = null;
+}
+
 console.log(JSON.stringify(results));
 """
 
@@ -877,6 +962,17 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node():
     )
     assert rev["matchedHidden"] is False and rev["matchedRows"] == 1, (
         "the response matching the form's own revision did not render"
+    )
+
+    boot = results["appBootRace"]
+    assert boot["dropped"] is True, (
+        "the adversarial boot interleaving did not produce a stale-model "
+        "drop: the scenario no longer exercises the revision guard"
+    )
+    assert boot["recoveredRows"] == 1, (
+        "the stale-model drop left the panel silent for the life of the "
+        "draft: the shell must re-sync the view on refdes:stale-calc "
+        "(the observed failure: a cold-start panel that never warns)"
     )
 
     assert results["abort"] == {"secondFired": True, "firstAborted": True}, (

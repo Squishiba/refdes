@@ -77,7 +77,6 @@ async function renderRoute() {
 }
 
 window.addEventListener('hashchange', renderRoute);
-renderRoute();
 
 const gitBadge = document.getElementById('git-badge');
 let openRevision = null;   // the revision the current view was loaded against
@@ -126,5 +125,23 @@ export async function poll() {
 // live in drafts.js, not in the DOM the re-render replaces.
 window.addEventListener('refdes:rebuilt', renderRoute);
 
-poll();
+// live-calc dropped a response as stale-model: the form's baseline trails
+// the served model (the rebuild raced between the view's GET and the
+// baseline capture). Re-render now — the draft survives — and let the next
+// poll re-capture the baseline from the model the view was just refetched
+// against; renderRoute's request-seq guard keeps a drop storm to one flight.
+window.addEventListener('refdes:stale-calc', () => {
+  lastServed = null;
+  renderRoute();
+});
+
+// The baseline serial must be captured before the first view is fetched.
+// The serve answers the two boot fetches on parallel handler threads, so a
+// watcher rebuild landing between them is ordered by arrival: poll-first
+// leaves lastServed at or behind the view's build (a rebuild between them
+// fires `refdes:rebuilt` on the next poll and the view re-renders);
+// view-first can capture a serial NEWER than the view's build, and then no
+// rebuild event ever fires — live-calc's revision guard drops every
+// response for the life of the draft, silently.
+poll().then(renderRoute);
 setInterval(poll, 2000);
