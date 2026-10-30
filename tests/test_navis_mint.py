@@ -263,8 +263,14 @@ def test_hard_break_adjacent_bytes_preserved(tmp_path):
     )
     _load(config)
     raw = _bytes(tmp_path, "note-a.md").decode()
-    assert "para  \n" in raw          # the hard break above the marker
-    assert "-->  \nnext" in raw        # the hard break after it
+    # Line terminators are the fixture's own (write_text translates them
+    # per platform), so compare line CONTENT: the two-space runs that make
+    # the hard breaks survive the splice untouched, on both sides.
+    lines = raw.splitlines()
+    assert "para  " in lines
+    marker = next(i for i, line in enumerate(lines) if line.startswith("<!--navi:"))
+    assert lines[marker].startswith("<!--navi:") and lines[marker].endswith("one-->  ")
+    assert lines[marker + 1] == "next"
 
 
 def test_table_cell_marker_minted(tmp_path):
