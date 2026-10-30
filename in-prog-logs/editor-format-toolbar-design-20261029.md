@@ -396,7 +396,7 @@ are browser-native, and they are per-platform:
 | Ctrl/Cmd+I | italic | Chrome: DevTools — **DECIDED (Jared, §H-3): bind it**; the slice's real-browser test must check it, and the binding drops only if real Chromium shows the browser reserves it — and the test result is documented (F.2) |
 | Ctrl/Cmd+K | link | Chrome/FF: focus search/omnibox — page-preventable (Gmail precedent) |
 | Alt+Shift+5 | strike | free (Word convention) |
-| Ctrl/Cmd+Alt+C | code fence | free (Gmail code-block convention) |
+| Ctrl/Cmd+Alt+C | code fence (deferred to slice 2) | slice 1 binds no Ctrl/Cmd+Alt letter; the Gmail-code row contradicts the Ctrl+Alt+letter rule and the fence skeleton belongs to slice 2 |
 
 Never bound: Ctrl+Z/Y/Shift+Z (the bar **depends** on native undo),
 Ctrl+Shift+I/J/C and F12 (DevTools, reserved — not preventable),

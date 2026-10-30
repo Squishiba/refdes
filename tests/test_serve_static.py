@@ -838,6 +838,178 @@ def test_the_auto_fill_toggles_on_one_persisted_preference():
     assert "innerHTML" not in panel
 
 
+# ------------------------------------------------------------ formatting bar (slice 1)
+
+
+def test_the_format_bar_is_wired_into_the_body():
+    """The bar has to reach the page the same way the pickers and the live-calc
+    panel do: the module exists, editor.js imports and attaches it to the body
+    textarea, and item.js mounts it immediately above that textarea."""
+    assert os.path.isfile(os.path.join(STATIC, "formatbar.js"))
+    editor = js_code("editor.js")
+    item = js_code("item.js")
+    assert "from './formatbar.js'" in editor
+    assert "createFormatBar({ isSaving: () => saving })" in editor
+    assert "area._refdesFormatBar = formatBar.node;" in editor
+    assert "formatBar.attach(area);" in editor
+    assert editor.index("if (!edit.editable)") < editor.index("const formatBar = createFormatBar")
+    assert editor.count("area._refdesFormatBar = formatBar.node;") == 1
+    assert editor.count("formatBar.attach(area);") == 1
+
+    assert "body.appendChild(bodyArea._refdesFormatBar);" in item
+    assert item.index("body.appendChild(bodyArea._refdesFormatBar);") < item.index(
+        "body.appendChild(bodyArea);"
+    )
+
+    with open(os.path.join(STATIC, "style.css"), encoding="utf-8") as fh:
+        css = fh.read()
+    assert ".format-bar" in css
+    assert ".fmt-core" in css
+    assert ".fmt-btn" in css
+    assert ".format-bar-note" in css
+
+
+def test_the_format_bar_shares_the_case_a_b_mutator_and_save_gate():
+    """The bar must mutate through one shared path, not by writing to the
+    textarea ad hoc: Case A tries the native insertion once, Case B splices and
+    dispatches exactly one synthetic input event. The same save-window gate as
+    live-calc must stop both the bar and the editor's insertion helpers."""
+    bar = js_code("formatbar.js")
+    editor = js_code("editor.js")
+
+    assert "export function applyEdit(" in bar
+    assert "export function blockInsertPlan(" in bar
+    assert "export function createFormatBar(" in bar
+    assert "export const SHORTCUTS = [" in bar
+    assert bar.count("document.execCommand('insertText', false, text)") == 1
+    assert bar.count("area.value = ") == 1
+    assert bar.count("area.dispatchEvent(new Event('input', { bubbles: true }))") == 1
+    assert "if (opts.isSaving && opts.isSaving()) return false;" in bar
+    assert "const FALLBACK_KEY = 'refdes.live-calc.fallback'" in bar
+    assert "Undo may need more than one step in this browser." in bar
+    assert "note.hidden = !readFallbackFlag();" in bar
+    assert "if (opts.fallback) opts.fallback();" in bar
+    assert "innerHTML" not in bar
+    with open(os.path.join(STATIC, "formatbar.js"), encoding="utf-8") as fh:
+        bar_source = fh.read()
+    assert (
+        "// The three isSaving() gates (applyEdit, run(), and the keydown handler) are\n"
+        "// deliberate. applyEdit is exported for editor.js's non-bar insert paths; run()\n"
+        "// gates button clicks; the keydown handler gates shortcuts before preventDefault.\n"
+    ) in bar_source
+
+    assert "const plan = blockInsertPlan(area, text);" in editor
+    assert "plan.caret," in editor
+    assert "if (!applyEdit(area, at, at, inserted, after, after, { isSaving: () => saving })) return;" in editor
+
+
+def test_the_format_bar_is_real_buttons_and_only_the_bounded_shortcuts():
+    """§B: real focusable buttons, labels, no focus stealing, and only the
+    shortcuts whose browser-reserved neighbors were explicitly checked."""
+    bar = js_code("formatbar.js")
+    ops_source = _section(bar, "const OPS = {")
+    for op in ("bold", "italic", "strike", "code", "heading", "list", "numbered",
+               "quote", "link", "table", "hr"):
+        assert re.search(rf"^  {op}:", ops_source, re.MULTILINE), op
+        assert f"['{op}'," in bar, op
+    assert "button.type = 'button';" in bar
+    assert "button.setAttribute('aria-label', aria);" in bar
+    assert "addEventListener('mousedown', (event) => event.preventDefault());" in bar
+    assert "addEventListener('click', () => run(op));" in bar
+    assert "if (!area || (isSaving && isSaving())) return;" in bar
+    assert bar.count("if (isSaving && isSaving()) return;") == 1
+    assert "(event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey" in bar
+    assert "String(event.code) === 'Digit5'" in bar
+    assert "event.preventDefault();" in bar
+    assert bar.count("event.preventDefault()") == 2
+
+
+def _section(source, marker):
+    start = source.index(marker)
+    end = source.index("\n};", start)
+    return source[start:end]
+
+
+def test_the_format_bar_binds_exactly_the_collision_audited_shortcuts():
+    """Slice 1 binds exactly four shortcuts, and the exact set is the audited one.
+
+    The design table's Ctrl/Cmd+Alt+C entry contradicts the section's blanket
+    rule against Ctrl+Alt+letter bindings, and slice 1 has no fence op to bind
+    it to. Slice 1 therefore binds only Ctrl/Cmd+B/I/K and Alt+Shift+5; the
+    code-fence shortcut is deferred to slice 2 pending Jared.
+    """
+    bar = js_code("formatbar.js")
+    start = bar.index("export const SHORTCUTS = [")
+    end = bar.index("\n];", start)
+    shortcuts = bar[start:end]
+
+    ops = re.findall(r"\bop:\s*'([a-z]+)'", shortcuts)
+    assert len(ops) == 4, ops
+
+    expected_ops = {"bold", "italic", "link", "strike"}
+    assert set(ops) == expected_ops, ops
+
+    seen = {}
+    for op, block in zip(ops, re.split(r"\bop:\s*'[a-z]+'", shortcuts)[1:]):
+        keys = set(re.findall(r"toLowerCase\(\) === '([a-z0-9]+)'", block))
+        codes = set(re.findall(r"String\(event\.code\) === '([^']+)'", block))
+        plain_ctrl = re.search(r"(?<!!)event\.ctrlKey", block) is not None
+        plain_meta = re.search(r"(?<!!)event\.metaKey", block) is not None
+        plain_alt = re.search(r"(?<!!)event\.altKey", block) is not None
+        plain_shift = re.search(r"(?<!!)event\.shiftKey", block) is not None
+        seen[op] = (keys, codes, plain_ctrl, plain_meta, plain_alt, plain_shift)
+
+    never_bound_keys = {
+        "s", "z", "y", "t", "n", "w", "l", "j", "c", "tab", "f12",
+        "1", "2", "3", "4", "5", "6", "7", "8", "9", "0",
+    }
+    assert not ({k for v in seen.values() for k in v[0]} & never_bound_keys), seen
+    assert not ({c for v in seen.values() for c in v[1]} - {"Digit5"}), seen
+    assert not {
+        op: v for op, v in seen.items() if v[4] and v[5] and op not in {"strike"}
+    }, "only Alt+Shift+5 binds a shift-key shortcut"
+
+    ctrl_plain = {
+        k for op, v in seen.items() if v[2] and v[3] and not v[4] for k in v[0]
+    }
+    ctrl_alt = {
+        k for op, v in seen.items() if v[2] and v[3] and v[4] for k in v[0]
+    }
+    assert ctrl_plain == {"b", "i", "k"}, seen
+    assert ctrl_alt == set(), "slice 1 binds no Ctrl/Cmd+Alt shortcut"
+    assert "op: 'code'" not in shortcuts
+
+    assert seen["bold"] == ({"b"}, set(), True, True, False, False)
+    assert seen["italic"] == ({"i"}, set(), True, True, False, False)
+    assert seen["link"] == ({"k"}, set(), True, True, False, False)
+    assert seen["strike"] == (set(), {"Digit5"}, False, False, True, True)
+
+
+def test_the_format_bar_fence_scan_follows_the_markdown_renderer():
+    """§B's fence-safety rule is for ANY fenced code block, not only ```calc.
+
+    The production renderer is markdown-it's CommonMark/gfm-like parser, which
+    recognizes ``` and ~~~ fences (build.py:_FENCE_LINE_RE mirrors the same
+    ```/~~~ shape), including blockquoted fences, a closer at least as long
+    as the opener, and at most three spaces of indentation on fence lines.
+    """
+    bar = js_code("formatbar.js")
+    assert r"const FENCE_OPEN = new RegExp('^[ ]{0,3}(`{3,}|~{3,})([^\\n]*)$');" in bar
+    assert r"const BLOCKQUOTE_PREFIX = new RegExp('^[ \\t]*(?:>[ \\t]?)+');" in bar
+    assert "const FENCE = new RegExp(" not in bar
+    assert "FENCE.lastIndex" not in bar
+
+    start = bar.index("function fenceBlocks(text) {")
+    fence = bar[start:bar.index("function fenceInsertAfter(", start)]
+    assert "const opener = FENCE_OPEN.exec(stripped[i]);" in fence
+    assert "const closer = fenceCloser(opener[1]);" in fence
+    assert "while (j < lines.length && !closer.test(stripped[j])) j += 1;" in fence
+    assert "const end = j < lines.length ? lines[j].end : text.length;" in fence
+    assert "blocks.push({ start: lines[i].start, end, endLine: end });" in fence
+    assert r"const char = marker[0] === '~' ? '\\~' : '`';" in bar
+    assert r"new RegExp(`^[ ]{0,3}${char}{${marker.length},}[ \\t]*$`)" in bar
+
+
 def test_the_font_setting_is_wired_into_the_editor():
     assert os.path.isfile(os.path.join(STATIC, "fontsetting.js"))
 
