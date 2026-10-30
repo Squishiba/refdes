@@ -1389,12 +1389,27 @@ def scan(project: Project) -> list[Diagnostic]:
 
 
 def projection(project: Project) -> list[dict]:
-    """Every Navi of the project, in (file, line) order, as plain JSON
-    data: ``{key, text, source: {item, file, line}}`` (design §11: one
+    """Every Navi of the project as plain JSON data (design §11: one
     projection, read by the `index` payload and the CLI alike -- no second
-    implementation). `key` is None for a keyless marker (keys are minted
-    by a later slice; the nullable always-present field is the item
-    payload's convention, render.items_json)."""
+    implementation), merged with the `.refdes/navis/` archive store:
+    **active first in (file, line) order, then archived, then the records
+    whose marker is gone** (the §9 states; `ls` is the active prefix,
+    `all` is the whole list, and the selector ordinals address this list).
+
+    Marker rows are ``{key, text, source: {item, key, file, line},
+    archived, snapshot, text_changed}``; `key` is None for a keyless
+    marker (the nullable always-present field is the item payload's
+    convention, render.items_json). An archived row's `snapshot` is the
+    record's frozen text (``{text, archived_at}``); `text_changed` says
+    the live marker text differs from it (§9 row 4: the note, shown by
+    `show`/Show-all, snapshot never re-stamped). An archived Navi whose
+    marker has been hand-deleted is an orphan row: `text` is the
+    snapshot, `source` is the record's stored snapshot with
+    ``marker_found: False`` (display labels it "marker not found", §9
+    row 3), and the record's ``navis.archived_orphan`` diagnostic comes
+    from the build (`build.py`), not from here."""
+    from . import navis_archive
+
     rows = []
     for item in project.local_items:
         for navi in item.navis:
@@ -1417,4 +1432,87 @@ def projection(project: Project) -> list[dict]:
     # line (two markers on one line are the page's order, not the
     # alphabet's), which is what `ls` numbers and `show <n>` addresses.
     rows.sort(key=lambda row: (row["source"]["file"], row["source"]["line"]))
-    return rows
+
+    records, _corrupt = navis_archive.load_records(str(project.root))
+    by_key = {r.navi_key: r for r in records}
+    active, archived, matched = [], [], set()
+    for row in rows:
+        record = by_key.get(row["key"]) if row["key"] else None
+        if record is None:
+            row["archived"] = False
+            row["snapshot"] = None
+            row["text_changed"] = False
+            active.append(row)
+            continue
+        matched.add(record.navi_key)
+        row["archived"] = True
+        row["snapshot"] = {
+            "text": record.text,
+            "archived_at": record.archived_at,
+        }
+        row["text_changed"] = row["text"] != record.text
+        archived.append(row)
+    for record in records:
+        if record.navi_key in matched:
+            continue
+        archived.append(
+            {
+                # §9 row 3: the marker is gone; the scan is the live truth
+                # and it finds nothing, so this row IS the record -- text
+                # and all. The live link is dead by design (the pointer
+                # was the archive's subject, §2.3).
+                "key": record.navi_key,
+                "text": record.text,
+                "source": {
+                    "item": None,
+                    "key": record.item_key or None,
+                    "file": record.source["file"],
+                    "line": record.source["line"],
+                    "marker_found": False,
+                },
+                "archived": True,
+                "snapshot": {
+                    "text": record.text,
+                    "archived_at": record.archived_at,
+                },
+                "text_changed": False,
+            }
+        )
+    return active + archived
+
+
+def archive_diagnostics(project: Project) -> list:
+    """The store's build-time diagnostics (design §9): every unreadable
+    record (`navis.archive_corrupt`, naming its file) and every record
+    with no marker (`navis.archived_orphan`, attached to the record's
+    stored file -- the §9 row-3 posture). Reads the same records the
+    projection merges; one read per build, the standing rule for
+    task-pane data (PR #197 review P4)."""
+    from . import navis_archive
+
+    records, diagnostics = navis_archive.load_records(str(project.root))
+    keyed = set()
+    for item in project.local_items:
+        for navi in item.navis:
+            if navi.key:
+                keyed.add(navi.key)
+    for record in records:
+        if record.navi_key in keyed:
+            continue
+        diagnostics.append(
+            Diagnostic(
+                level="warning",
+                message=(
+                    f"navis.archived_orphan: Navi {record.navi_key} is "
+                    f"archived with no marker found at its stored source "
+                    f"({record.source['file']}:{record.source['line']}) -- "
+                    "the marker was hand-deleted or moved out of scope. "
+                    "Show-all reveals it by snapshot; restore refuses "
+                    "(§9) -- hand-restore the marker to re-pair them by key"
+                ),
+                file=os.path.relpath(record.path, str(project.root)),
+                line=record.source["line"],
+                code=navis_archive.NAVI_ARCHIVED_ORPHAN_CODE,
+            )
+        )
+    return diagnostics

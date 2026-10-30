@@ -4683,6 +4683,11 @@ def build(
     # are byte-identical to the same content scanned without it (§7.1).
     for d in navis_mod.scan(project):
         project.diagnostics.append(d)
+    # Slice 3 (design §9): the archive store's own findings -- a record
+    # this build cannot read, and a record whose marker is gone. Like the
+    # scan, this reads and reports only; it writes nothing.
+    for d in navis_mod.archive_diagnostics(project):
+        project.diagnostics.append(d)
     render_bodies(project)
     render_pages(project)
     # After EVERY render pass that can reference an asset (bodies and

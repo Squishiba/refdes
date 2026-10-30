@@ -652,60 +652,95 @@ never-opened project. Its build never writes a seal.
 
 ---
 
-## `refdes navis ls` / `all` / `show`
+## `refdes navis ls` / `all` / `show` / `archive` / `restore`
 
-The read-only face of [Navis — flying notes](markdown.md#navis-markers):
-one hand-authored `<!--navi: text-->` comment in an item body is scanned
-into one project-wide list, and this command reads that list. The rows are
-the same `navis.projection` the `index` payload carries under its top-level
-`navis` key (ordered by file, then line; markers on one line keep document
-order, left to right) — the CLI renders one projection
-and computes no second answer of its own, the `thread` precedent.
+The face of [Navis — flying notes](markdown.md#navis-markers): one
+hand-authored `<!--navi: text-->` comment in an item body is scanned into
+one project-wide list, and this command reads that list and moves a Navi
+between its two states. The rows are the same `navis.projection` the
+`index` payload carries under its top-level `navis` key (active first,
+ordered by file then line; the archived rows appended after, each
+labelled) — the CLI renders one projection and computes no second answer
+of its own, the `thread` precedent.
 
 ```console
 $ refdes navis ls
-navis: minted key 12zmcm (12zmcmfc039) into NOTE-001 (items/note-a.md)
-navis: minted key cw0jwt (cw0jwtvdmj6) into NOTE-002 (items/note-b.md)
-(minted 2 navi key(s) while loading)
+navis: minted key 39k8cw (39k8cwx1g6k) into NOTE-001 (items/note-a.md)
+navis: minted key 0nmwt7 (0nmwt7tacwr) into NOTE-002 (items/note-b.md)
+(minted 2 key(s) and minted 2 navi key(s) while loading)
 2 Navis:
-  1. 12zmcm Model worst-case copper temperature.  NOTE-001 (items/note-a.md:8)
-  2. cw0jwt Recheck decoupling near U14.  NOTE-002 (items/note-b.md:7)
+  1. 39k8cw Model worst-case copper temperature.  NOTE-001 (items/note-a.md:8)
+  2. 0nmwt7 Recheck decoupling near U14.  NOTE-002 (items/note-b.md:7)
 
-$ refdes navis show 12zmcm
+$ refdes navis archive 1
+navis archive: archived Navi 39k8cw (39k8cwx1g6k): 'Model worst-case copper temperature.'  NOTE-001 (items/note-a.md:8)
+
+$ refdes navis ls
+1 Navis:
+  1. 0nmwt7 Recheck decoupling near U14.  NOTE-002 (items/note-b.md:7)
+
+$ refdes navis all
+1 Navis (active), 1 archived:
+  1. 0nmwt7 Recheck decoupling near U14.  NOTE-002 (items/note-b.md:7)
+  2. 39k8cw Model worst-case copper temperature.  NOTE-001 (items/note-a.md:8) [archived]
+
+$ refdes navis show 39k8cw
 Navi: Model worst-case copper temperature.
-  key: 12zmcmfc039
+  key: 39k8cwx1g6k
   source: NOTE-001 (items/note-a.md:8)
+  archived: yes -- restore with `refdes navis restore`
+  archived: snapshot: Model worst-case copper temperature.  (at 2026-10-30T22:38:51Z)
+
+$ refdes navis restore 39k8cw
+navis restore: restored Navi 39k8cw (39k8cwx1g6k) -- the marker at items/note-a.md:8 is active again, showing its current text
 ```
 
 A writable run mints a key into every keyless marker as part of its load —
 the same posture as item-key minting — writes it into the marker in the
-author's file (`<!--navi:12zmcmfc039 text-->`), and announces each mint on
-**stderr**; `--no-write` keeps markers keyless. `ls` shows each key's
-6-character prefix (the marker's display name), and `show` resolves a
-selector as the full key, a key **prefix** (a unique match selects; an
-ambiguous one names its candidates and exits 2), or the `ls` ordinal, in
-that order.
+author's file (`<!--navi:39k8cwx1g6k text-->`), and announces each mint on
+**stderr**; `--no-write` keeps markers keyless. Every verb resolves a
+selector the same way: the full key (matched first, so an all-digit key is
+a selector, not an ordinal), a 6-to-10-character key **prefix** (a unique
+match selects; an ambiguous one names its candidates and exits 2), or the
+ordinal in the `all` listing (active first). `ls` lists the active Navis
+with those same numbers; an ordinal addresses the list as it is *now*, so
+`archive`ing row 1 renumbers — the key is the stable name.
 
 | Verb | Meaning |
 | --- | --- |
-| `ls` | Every active marker, as `N. key6 text  DISPLAY-ID (file:line)` (no key column under `--no-write`). Malformed markers print as warnings on stderr with their `file:line` — the listing never hides the reason a marker it does not list is missing |
-| `all` | The active list, labelled, plus the archived section's line. Slice 2 writes no archive records, so that line names its absence rather than printing nothing where a reader expects the archived rows |
-| `show <selector>` | One Navi in full: text, key, source. The selector is the marker's full 11-character key (matched first, so an all-digit key is a selector, not an ordinal), a 6-to-10-character key prefix, or the `ls` ordinal (1-based, ASCII digits only — `²` is not a digit here); a keyless marker's key line says so |
+| `ls` | The active Navis — markers with no archive record — as `N. key6 text  DISPLAY-ID (file:line)` (no key column under `--no-write`). Malformed markers print as warnings on stderr with their `file:line` — the listing never hides the reason a marker it does not list is missing |
+| `all` | The Show-all: the active rows, then the archived rows labelled `[archived]`; with none archived, an explicit `archived: none` line |
+| `show <selector>` | One Navi in full: text, key, source — plus, when it is archived, the record's snapshot (and a `marker text has changed since archived` note when the marker's live text differs from it: the snapshot is the archive, the live text is what a restore shows). A keyless marker's key line says so |
+| `archive <selector>` | Writes the Navi's gzip record under `.refdes/navis/<navi-key>.yaml.gz` (format, keys, the source and text snapshot, `archived_at`) and the pointer stops linking: the Navi leaves the active list. The marker stays in the body — **no item byte, hash, seal, or history content changes**. Archiving an archived Navi says so and writes nothing |
+| `restore <selector>` | Removes the record: the marker, if the scan still finds it, is active again showing its **current** text. A Navi that is not archived is exit 2 (nothing to restore); an archived Navi whose marker was hand-deleted is `navis.archived_orphan` and **exit 1** — restore refuses, because writing a marker back would edit a body (hand-restore the marker and the pair re-links by key) |
+
+The two write verbs write **only** under `.refdes/navis/` (the design's
+hard invariant): `--no-write` refuses them outright
+(`--no-write: archive writes the .refdes/navis/ archive store; …`, exit
+2), and both refuse while an editor transaction is in flight
+(`.refdes/editor-transaction/`, exit 2). Each store write takes the
+project's own write lock and lands atomically (temp file + rename), so a
+concurrent archiver sees one whole record or none, and an interrupted
+write leaves the previous state intact.
 
 A project with no Navis is a clean **exit 0** (`ls` and `all` print
-`no Navis: …`); a `show` selector that names nothing is a naming error,
-**exit 2**. An items file that fails to parse is reported on stderr and the
-command exits 1 (like `ls`). The listing writes nothing of its own: like
-`thread`, the load's own key minting/expansions are announced on **stderr**,
-and the build runs with no seal write.
+`no Navis: …`); a selector that names nothing is a naming error, **exit
+2**. An items file that fails to parse is reported on stderr and the
+command exits 1 (like `ls`). The read verbs write nothing of their own:
+like `thread`, the load's own key minting/expansions are announced on
+**stderr**, and the build runs with no seal write.
 
-Keys are minted by the writable load (slice 2): the mint writes at the
-marker's exact source position, refuses — with a warning, bytes untouched —
-any marker whose body is not the item's own markdown file (a list file's
+Keys are minted by the writable load: the mint writes at the marker's
+exact source position, refuses — with a warning, bytes untouched — any
+marker whose body is not the item's own markdown file (a list file's
 `body:` scalar stays keyless), and never rewrites a declared key. A
 declared key that fails key validation is reported on stderr as corrupt
-input, never repaired. Archive records land in a later slice of the
-design, not slice 2 — `all` can only print the active list.
+input, never repaired. A keyless marker cannot be archived (the record is
+named by the key) — the refusal names the minting writable command. A
+record the tool cannot read (not gzip, not YAML, a foreign
+`archive_format`, a key that is not its own file's name) is a
+`navis.archive_corrupt` warning naming the file; it is skipped, not
+deleted, and the rest of the store loads.
 
 ---
 

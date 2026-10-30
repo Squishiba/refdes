@@ -27,6 +27,7 @@ from . import keys as keys_mod
 from . import lifecycle as lifecycle_mod
 from . import loader as loader_mod
 from . import navis as navis_mod
+from . import navis_archive as navis_archive_mod
 from . import render as render_mod
 from . import revise as revise_mod
 from . import scaffold as scaffold_mod
@@ -2927,29 +2928,189 @@ def cmd_history_migrate_seals(args) -> int:
     return 0
 
 
+def _navi_select(rows: list[dict], selector: str) -> tuple[dict | None, list[dict]]:
+    """The selector every Navis verb shares (slice 2's `show` selector,
+    design §5): the full 11-character key first -- every digit is in the
+    key alphabet, so an 11-character all-digit string is legal key
+    grammar and a full-key selector must not be read as an out-of-range
+    ordinal number -- then a 6-to-10-character key *prefix* (the short
+    key the CLI and panel display; a unique match selects, an ambiguous
+    one names its candidates, §5's short-key resolution), then the
+    ls/Show-all ordinal. Returns ``(row, ambiguous)``; at most one side
+    is populated.
+
+    Slice 3: `archive` and `restore` share this selector verbatim --
+    one way to name a Navi, for every verb that needs to name one."""
+    row = next((r for r in rows if r["key"] == selector), None)
+    if (
+        row is None
+        and 6 <= len(selector) < keys_mod.KEY_LEN
+        and all(ch in keys_mod.ALPHABET for ch in selector)
+    ):
+        candidates = [
+            r for r in rows if r["key"] and r["key"].startswith(selector)
+        ]
+        if len(candidates) == 1:
+            row = candidates[0]
+        elif candidates:
+            return None, candidates
+    # ASCII digits only, and no more of them than the largest ordinal
+    # has: a longer digit string is out of range by length alone, and
+    # int() of a 4300-digit string raises (CPython's integer-string
+    # limit) -- a selector that names nothing is a naming error, exit 2,
+    # never a traceback.
+    if (
+        row is None
+        and len(selector) <= len(str(len(rows)))
+        and re.fullmatch(r"[0-9]+", selector)
+    ):
+        index = int(selector) - 1
+        if 0 <= index < len(rows):
+            row = rows[index]
+    return row, []
+
+
+def _print_ambiguous_navi(selector: str, candidates: list[dict]) -> None:
+    print(f"navi key prefix {selector!r} is ambiguous:", file=sys.stderr)
+    for cand in candidates:
+        csrc = cand["source"]
+        print(
+            f"  {cand['key']}  {cand['text']}  "
+            f"({csrc['file']}:{csrc['line']})",
+            file=sys.stderr,
+        )
+
+
+def _navis_write_verb(args, project, rows: list[dict], load_errors) -> int:
+    """`archive`/`restore` (slice 3, design §6, §9, §12, §13). The only
+    writes are the Navi's gzip record under `.refdes/navis/` and its
+    removal -- that is the §7.3 invariant, and it is why there is no
+    other write here: the item's body keeps the marker (the pointer),
+    the record is the snapshot, and a Navi's text is edited by editing
+    the marker, never by the archive. `main()` took the project write
+    lock and ran the journal gate before dispatch; the store writer
+    re-checks the journal for callers that are not this CLI (§12)."""
+    verb = args.navis_command
+    if not _writes_allowed(args):
+        return _refuse_no_write(verb, "the .refdes/navis/ archive store")
+    row, ambiguous = _navi_select(rows, args.navi)
+    if ambiguous:
+        _print_ambiguous_navi(args.navi, ambiguous)
+        return 2
+    if row is None:
+        print(
+            f"no Navi {args.navi!r}: `refdes navis all` numbers them "
+            f"1..{len(rows)}; a selector is a number, a full key, "
+            "or a key prefix",
+            file=sys.stderr,
+        )
+        return 2
+    key = row["key"]
+    if not key:
+        print(
+            f"navis {verb}: this Navi has no key -- keys are minted by "
+            "the next writable command, and this marker's body is one "
+            "refdes will not mint into (see the mint warnings above), so "
+            "it cannot be archived",
+            file=sys.stderr,
+        )
+        return 2
+    short = key[:6]
+    src = row["source"]
+    try:
+        if verb == "archive":
+            if row["archived"]:
+                print(
+                    f"Navi {short} ({key}) is already archived -- "
+                    f"`refdes navis restore {short}` reactivates it"
+                )
+                return 1 if load_errors else 0
+            navis_archive_mod.archive_record(
+                str(project.root),
+                navi_key=key,
+                item_key=src.get("key") or "",
+                source={"file": src["file"], "line": src["line"]},
+                text=row["text"],
+            )
+            print(
+                f"navis archive: archived Navi {short} ({key}): "
+                f"{row['text']!r}  {src['item']} ({src['file']}:{src['line']})"
+            )
+            return 1 if load_errors else 0
+        # restore
+        if not row["archived"]:
+            print(
+                f"navis restore: Navi {short} ({key}) is not archived "
+                "-- nothing to restore",
+                file=sys.stderr,
+            )
+            return 2
+        if src.get("marker_found") is False:
+            # §9 row 3: restore reactivates a *marker*; writing a marker
+            # back would edit a body, which §2.3 forbids. The record
+            # stays, Show-all keeps revealing it, and hand-restoring the
+            # marker re-pairs the two by key.
+            print(
+                f"navis.archived_orphan: Navi {short} ({key}) is archived "
+                f"at {src['file']}:{src['line']} with marker not found -- "
+                "restore refuses (there is no marker to reactivate; "
+                "writing one would edit a body, design §9). Hand-restore "
+                "the marker and the pair re-links by key.",
+                file=sys.stderr,
+            )
+            return 1
+        navis_archive_mod.restore_record(str(project.root), key)
+        print(
+            f"navis restore: restored Navi {short} ({key}) -- the marker "
+            f"at {src['file']}:{src['line']} is active again, showing its "
+            "current text"
+        )
+        return 1 if load_errors else 0
+    except navis_archive_mod.JournalPending as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except navis_archive_mod.NavisArchiveError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        # The record is the archive: a failed write says so and writes
+        # nothing half -- the temp is unlinked by the store writer, the
+        # marker is untouched, and the run exits like every other failed
+        # write. Never a traceback.
+        print(
+            f"error: navis {verb} could not write the archive store: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+
+
 def cmd_navis(args) -> int:
     """The project's Navis -- flying notes (in-prog-logs/navis-design-20261025.md §11).
 
-    The read-only surface of slice 1: `ls` (active markers), `all` (active
-    plus the archive's honest absence), `show <selector>` (one Navi in
-    full). Every row comes from `navis.projection` -- the same single
-    answer the `index` payload carries -- so the CLI can never disagree
-    with `refdes index` about a marker's text, source, or order, and there
-    is no second implementation to maintain (§11's "panel/CLI never a
-    second implementation" rule, the `cmd_thread` precedent).
+    `ls` is the active list (markers with no archive record), `all` is
+    the Show-all (active first, archived appended), `show <selector>`
+    prints one Navi in full, and `archive`/`restore` move one Navi
+    between the states by writing/deleting its gzip record under
+    `.refdes/navis/` -- never an item byte (§7.3). Every row comes from
+    `navis.projection` -- the same single answer the `index` payload
+    carries, merged with the archive store -- so the CLI can never
+    disagree with `refdes index` about a marker's text, source, archive
+    state, or order, and there is no second implementation to maintain
+    (§11's "panel/CLI never a second implementation" rule, the
+    `cmd_thread` precedent).
 
-    Slice 2 mints keys on the writable load (design §5, §13): a writable
-    `navis` run writes keys into keyless markers, announced on stderr like
-    every other load write, and `--no-write` keeps markers keyless. `show`'s
-    selector is a marker's full 11-character key (matched first -- every
-    digit is in the key alphabet, so an all-digit key must not be read as
-    an ordinal), a 6-to-10-character key *prefix* (the short key the CLI
-    and panel display -- a unique match selects, an ambiguous one names its
-    candidates and exits 2, §5's short-key resolution), or the `ls` ordinal
-    number. Exit posture is the read-only
-    neighbours': a clean run is 0 -- including a project with no Navis at
-    all -- and a selector that names nothing is a naming error, exit 2,
-    like `thread <unknown-ref>`.
+    A writable run mints keys into keyless markers (slice 2, design §5,
+    §7.2), announced on stderr like every other load write; `--no-write`
+    keeps markers keyless and refuses the two write verbs outright
+    (§7.3). Every verb's selector is the same: the ls/Show-all ordinal,
+    the full 11-character key (matched first -- every digit is in the
+    key alphabet, so an all-digit key must not be read as an ordinal),
+    or a unique 6-to-10-character key prefix (an ambiguous one names its
+    candidates, §5's short-key resolution). Exit posture is the
+    neighbours': a clean run is 0 -- including a project with no Navis
+    at all -- and a selector that names nothing is a naming error, exit
+    2, like `thread <unknown-ref>`; the §9 archived-orphan restore
+    refusal is exit 1.
     """
     project, _stale = _load(args, require_ids=False)
     _announce_load_writes(project, stream=sys.stderr)
@@ -2963,57 +3124,28 @@ def cmd_navis(args) -> int:
     for d in project.diagnostics:
         if d.code == navis_mod.NAVI_DIAGNOSTIC_CODE:
             print(str(d), file=sys.stderr)
+        elif d.code in (
+            navis_archive_mod.NAVI_ARCHIVE_CORRUPT_CODE,
+            navis_archive_mod.NAVI_ARCHIVED_ORPHAN_CODE,
+        ):
+            # The store's own findings (slice 3, design §9): a record
+            # this build cannot read, and an archived Navi whose marker
+            # is gone. A listing must not hide either -- the reader is
+            # looking at the list these records shape.
+            print(str(d), file=sys.stderr)
     rows = navis_mod.projection(project)
 
+    if args.navis_command in ("archive", "restore"):
+        return _navis_write_verb(args, project, rows, load_errors)
+
     if args.navis_command == "show":
-        # Key before ordinal: every digit is in the key alphabet, so an
-        # 11-character all-digit string is legal key grammar and a full-key
-        # selector must not be read as an out-of-range ordinal number.
-        row = next((r for r in rows if r["key"] == args.navi), None)
-        # Short-key selector (slice 2, design §5): 6..10 characters of the
-        # key alphabet are a key PREFIX. A unique match selects; an
-        # ambiguous one names its candidates (naming the thing you meant is
-        # on you, like an ambiguous item-id prefix); no match falls through
-        # to the ordinal reading below.
-        if (
-            row is None
-            and 6 <= len(args.navi) < keys_mod.KEY_LEN
-            and all(ch in keys_mod.ALPHABET for ch in args.navi)
-        ):
-            candidates = [
-                r for r in rows if r["key"] and r["key"].startswith(args.navi)
-            ]
-            if len(candidates) == 1:
-                row = candidates[0]
-            elif candidates:
-                print(
-                    f"navi key prefix {args.navi!r} is ambiguous:",
-                    file=sys.stderr,
-                )
-                for cand in candidates:
-                    csrc = cand["source"]
-                    print(
-                        f"  {cand['key']}  {cand['text']}  "
-                        f"({csrc['file']}:{csrc['line']})",
-                        file=sys.stderr,
-                    )
-                return 2
-        # ASCII digits only, and no more of them than the largest ordinal
-        # has: a longer digit string is out of range by length alone, and
-        # int() of a 4300-digit string raises (CPython's integer-string
-        # limit) -- a selector that names nothing is a naming error, exit
-        # 2, never a traceback.
-        if (
-            row is None
-            and len(args.navi) <= len(str(len(rows)))
-            and re.fullmatch(r"[0-9]+", args.navi)
-        ):
-            index = int(args.navi) - 1
-            if 0 <= index < len(rows):
-                row = rows[index]
+        row, ambiguous = _navi_select(rows, args.navi)
+        if ambiguous:
+            _print_ambiguous_navi(args.navi, ambiguous)
+            return 2
         if row is None:
             print(
-                f"no Navi {args.navi!r}: `refdes navis ls` numbers them "
+                f"no Navi {args.navi!r}: `refdes navis all` numbers them "
                 f"1..{len(rows)}; a selector is a number, a full key, "
                 "or a key prefix",
                 file=sys.stderr,
@@ -3023,10 +3155,57 @@ def cmd_navis(args) -> int:
         key_note = row["key"] if row["key"] else "(keyless -- the next writable command mints a key)"
         print(f"Navi: {row['text']}")
         print(f"  key: {key_note}")
-        print(f"  source: {src['item']} ({src['file']}:{src['line']})")
+        if src.get("marker_found") is False:
+            print(
+                f"  source: marker not found -- archived at "
+                f"{src['file']}:{src['line']} (restore refuses, design §9)"
+            )
+        else:
+            print(f"  source: {src['item']} ({src['file']}:{src['line']})")
+        if row["archived"]:
+            print("  archived: yes -- restore with `refdes navis restore`")
+            print(
+                f"  archived: snapshot: {row['snapshot']['text']}  "
+                f"(at {row['snapshot']['archived_at']})"
+            )
+            if row["text_changed"]:
+                print(
+                    "  archived: marker text has changed since archived -- "
+                    "the live text above is what a restore shows"
+                )
         # Like ls/all and `thread <ref>`: the answer prints even when an
         # items file failed to parse, and the command exits 1.
         return 1 if load_errors else 0
+
+    verb = args.navis_command
+    active = [r for r in rows if not r["archived"]]
+    archived_rows = [r for r in rows if r["archived"]]
+    if not rows:
+        print("no Navis: no `<!--navi: text-->` marker in any item body")
+        return 1 if load_errors else 0
+    if verb == "all":
+        print(f"{len(active)} Navis (active), {len(archived_rows)} archived:")
+    else:
+        print(f"{len(active)} Navis:")
+    for number, row in enumerate(rows, 1):
+        # Numbers address the Show-all list (`all`'s printout, active
+        # first), so every row `all` prints is addressable by number --
+        # `ls` prints the active prefix with those same numbers.
+        if row["archived"] and verb == "ls":
+            continue
+        src = row["source"]
+        # The 6-char key prefix is the Navi's display name (§5); a keyless
+        # marker (a --no-write run) shows no key column.
+        short = f"{row['key'][:6]} " if row["key"] else ""
+        if src.get("marker_found") is False:
+            where = f"marker not found ({src['file']}:{src['line']})"
+        else:
+            where = f"{src['item']} ({src['file']}:{src['line']})"
+        tag = " [archived]" if row["archived"] else ""
+        print(f"  {number}. {short}{row['text']}  {where}{tag}")
+    if verb == "all" and not archived_rows:
+        print("  archived: none")
+    return 1 if load_errors else 0
 
     verb = args.navis_command
     if not rows:
@@ -3437,32 +3616,36 @@ def main(argv: list[str] | None = None) -> int:
         description="A Navi is one hand-authored `<!--navi: text-->` comment "
         "in an item body: a flying note the published page consumes, and "
         "which the tool scans into one project-wide list "
-        "(in-prog-logs/navis-design-20261025.md). Read-only slice 1: ls "
-        "lists the active markers ordered by (file, line), show prints one "
-        "Navi in full, addressed by its ls number or its full 11-character "
-        "key, all is the active list with a stated note where archived "
-        "Navis will appear. Keys are minted and archive records written "
-        "by later slices, not here. The rows are the same projection the "
-        "index payload's top-level navis key carries. A project with no "
-        "Navis is a clean exit 0; a show selector that names nothing is "
+        "(in-prog-logs/navis-design-20261025.md). ls lists the active "
+        "markers ordered by (file, line), all is the Show-all (active "
+        "first, archived appended), show prints one Navi in full, and "
+        "archive/restore move one Navi between the two states by writing "
+        "and deleting its gzip record under .refdes/navis/ -- never an "
+        "item byte (§7.3). Every verb addresses a Navi the same way: its "
+        "ls/Show-all number, its full 11-character key, or a 6-10-character "
+        "key prefix (keys mint themselves on the writable load). A project "
+        "with no Navis is a clean exit 0; a selector that names nothing is "
         "exit 2.",
     )
     navis_sub = p_navis.add_subparsers(dest="navis_command", required=True)
     navis_sub.add_parser(
         "ls",
         help="list the active Navis",
-        description="Every marker in any item body, ordered by (file, line), "
+        description="Every marker in any item body that has no archive "
+        "record (the active list, design §4), ordered by (file, line), "
         "as `N. text  DISPLAY-ID (file:line)`. Malformed markers print as "
         "warnings on stderr with their file:line -- the listing never "
-        "hides the reason a marker it does not list is missing.",
+        "hides the reason a marker it does not list is missing. Archived "
+        "Navis are `all`'s.",
     )
     navis_sub.add_parser(
         "all",
-        help="active Navis, plus the archive's stated (slice 1: empty) half",
-        description="The active list, labelled, plus the archived section's "
-        "line: slice 1 writes no archive records, so it names its absence "
-        "rather than printing nothing where a reader expects the archived "
-        "rows (design §11: `all` distinguishes the two states).",
+        help="the Show-all: active Navis, then the archived ones labelled",
+        description="The active list, then the archived rows (design §11: "
+        "`all` distinguishes the two states) -- each numbered with its "
+        "selector number, archived rows labelled. The numbers run over "
+        "the whole Show-all list, so `show`/`archive`/`restore` address "
+        "any row printed here.",
     )
     p_navis_show = navis_sub.add_parser(
         "show",
@@ -3473,6 +3656,35 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_navis_show.add_argument(
         "navi", help="an ls number (1-based) or a full 11-character key"
+    )
+    p_navis_archive = navis_sub.add_parser(
+        "archive",
+        help="archive one Navi (writes the .refdes/navis/ record)",
+        description="Removal is archival (design §2.2): writes the Navi's "
+        "gzip record under .refdes/navis/ (snapshot text, source, key -- "
+        "§6) and leaves the marker in the body inert (the pointer stops "
+        "linking; Show-all reveals it, restore reactivates it). Writes "
+        "only under .refdes/navis/: no item byte, hash, seal, or history "
+        "content changes (§7.3). --no-write refuses. Refused while an "
+        "editor transaction is in flight (§12). The same selector as "
+        "show: ls/Show-all number, full key, 6-10-character key prefix.",
+    )
+    p_navis_archive.add_argument(
+        "navi", help="an ls/Show-all number, a full key, or a key prefix"
+    )
+    p_navis_restore = navis_sub.add_parser(
+        "restore",
+        help="restore one archived Navi (removes its archive record)",
+        description="Delete the archive record (§9): the marker, if the "
+        "scan still finds it, is active again with its CURRENT text. "
+        "A Navi that is not archived is exit 2 (nothing to restore); an "
+        "archived orphan (record, no marker) is exit 1 and refuses -- "
+        "writing a marker back would edit a body, which §2.3 forbids. "
+        "Same posture as archive: store-only writes, --no-write refuses, "
+        "journal refuses.",
+    )
+    p_navis_restore.add_argument(
+        "navi", help="an ls/Show-all number, a full key, or a key prefix"
     )
     p_navis.set_defaults(func=cmd_navis)
 
