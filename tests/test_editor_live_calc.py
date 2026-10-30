@@ -79,6 +79,28 @@ NODE_TIMEOUT_S = 120
 T1 = "Rail `Vbad := 2 V * 2 = 5 V`"
 T1_FILLED = "Rail `Vbad := 2 V * 2 = 4 V`"
 
+# Astral fixtures: the server's span columns are Python string indices =
+# Unicode code points; textarea offsets are UTF-16 code units. Every text
+# here puts astral characters on the span's line BEFORE the span, so a raw
+# column addition lands off by one unit per astral character.
+A1 = "\U0001F600 `Vbad := 2 V * 2 = 5 V`"
+A1_FILLED = "\U0001F600 `Vbad := 2 V * 2 = 4 V`"
+E1 = "\U0001F600\u0301\U0001F600 `Vbad := 2 V * 2 = 5 V`"
+E1_FILLED = "\U0001F600\u0301\U0001F600 `Vbad := 2 V * 2 = 4 V`"
+F1 = "\U0001F600 heading\n`Vbad := 2 V * 2 = 5 V`"
+F1_FILLED = "\U0001F600 heading\n`Vbad := 2 V * 2 = 4 V`"
+
+# Astral fixtures: the server's span columns are Python string indices =
+# Unicode code points; textarea offsets are UTF-16 code units. Every text
+# here puts astral characters on the span's line BEFORE the span, so a raw
+# column addition lands off by one unit per astral character.
+A1 = "\U0001F600 `Vbad := 2 V * 2 = 5 V`"
+A1_FILLED = "\U0001F600 `Vbad := 2 V * 2 = 4 V`"
+E1 = "\U0001F600\u00E9\U0001F600 `Vbad := 2 V * 2 = 5 V`"
+E1_FILLED = "\U0001F600\u00E9\U0001F600 `Vbad := 2 V * 2 = 4 V`"
+F1 = "\U0001F600 heading\n`Vbad := 2 V * 2 = 5 V`"
+F1_FILLED = "\U0001F600 heading\n`Vbad := 2 V * 2 = 4 V`"
+
 HARNESS = r"""
 const STATIC = __STATIC__;
 const url = (name) => `file://${STATIC}/${name}`;
@@ -358,6 +380,137 @@ const payload = (spans, revision = 'rev-0') => ({ revision, spans });
 const results = {};
 const T1 = __T1__;
 const T1_FILLED = __T1_FILLED__;
+const A1 = __A1__;
+const A1_FILLED = __A1_FILLED__;
+const E1 = __E1__;
+const E1_FILLED = __E1_FILLED__;
+const F1 = __F1__;
+const F1_FILLED = __F1_FILLED__;
+
+// The server's columns are PYTHON string indices = Unicode code points;
+// textarea offsets are UTF-16 code units. The plain spanOn above is only
+// honest for BMP text -- on astral lines it emits UTF-16 offsets, which is
+// exactly the client bug this family tests, never the server's truth. This
+// helper emits CODE-POINT columns, as the real server does.
+function cpSpan(text, stored, computed, name = 'Vbad', line = 0) {
+  const cps = Array.from(text.split('\n')[line]);
+  const sp = Array.from(stored);
+  let col = -1;
+  for (let i = 0; i + sp.length <= cps.length; i++) {
+    if (cps.slice(i, i + sp.length).join('') === stored) { col = i; break; }
+  }
+  return {
+    line,
+    start: 0, end: cps.length,
+    result_start: col, result_end: col + sp.length,
+    name, status: 'stale', computed,
+    message: `inline calc ${name}: stored result says ${stored}, now computes ${computed}`,
+  };
+}
+
+// -- astral text (emoji before the span on the SAME line): every consumer of
+//    a server column -- Fill, auto-fill insertText, the Case B splice, the
+//    caret-skip boundaries -- must convert code-point columns to UTF-16
+//    offsets before touching the textarea
+{
+  const h = 'DEC-ASTRAL-FILL';
+  const ed = openEditor(h, A1);
+  await settleCalc(ed.calls()[0], payload([]));
+  const box = find(ed.panel, 'live-calc-autofill');
+  box.checked = false;
+  box.dispatch('change');
+  ed.area.setSelectionRange(0, 0);
+  ed.focus();
+  await settleCalc(ed.calls()[1], payload([cpSpan(A1, '5 V', '4 V')]));
+  ed.fills()[0].click();
+  results.astralFill = { whole: ed.area.value };
+  globalThis.localStorage.removeItem('refdes.live-calc.autofill');
+  drafts.clearDraft(h);
+}
+{
+  const h = 'DEC-ASTRAL-AUTO';
+  const ed = openEditor(h, A1);
+  await settleCalc(ed.calls()[0], payload([]));
+  ed.area.setSelectionRange(0, 0);
+  ed.focus();
+  await settleCalc(ed.calls()[1], payload([cpSpan(A1, '5 V', '4 V')]));
+  results.astralAutoFill = { whole: ed.area.value };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'DEC-ASTRAL-CASEB';
+  EXEC_FAILS = true;
+  const ed = openEditor(h, A1);
+  await settleCalc(ed.calls()[0], payload([]));
+  ed.area.setSelectionRange(0, 0);
+  ed.focus();
+  await settleCalc(ed.calls()[1], payload([cpSpan(A1, '5 V', '4 V')]));
+  results.astralCaseB = { whole: ed.area.value };
+  EXEC_FAILS = false;
+  globalThis.sessionStorage.removeItem('refdes.live-calc.fallback');
+  drafts.clearDraft(h);
+}
+{
+  // emoji costs one EXTRA UTF-16 unit before the span: the true range is
+  // 22..25, the raw code-point columns say 21..24. A caret just BEFORE the
+  // true start (21) must fill; at a true boundary (22, 25) it must skip.
+  const u = A1.indexOf('5 V');
+  const cases = [];
+  for (const [label, caret, expectFilled] of [
+    ['just-before', u - 1, true],
+    ['start-edge', u, false],
+    ['end-edge', u + 3, false],
+  ]) {
+    const base = calcCalls.length;
+    const h = 'DEC-ASTRAL-CARET';
+    const ed = openEditor(h, A1);
+    await settleCalc(calcCalls[base], payload([]));
+    ed.area.setSelectionRange(caret, caret);
+    ed.focus();
+    await settleCalc(calcCalls[base + 1], payload([cpSpan(A1, '5 V', '4 V')]));
+    cases.push({ label, expectFilled, filled: ed.area.value === A1_FILLED });
+    ed.blur();
+    ed.editor.liveCalcPanel._refdesLiveCalc.destroy();
+    drafts.clearDraft(h);
+  }
+  results.astralCaret = {
+    cases,
+    pass: cases.every((c) => c.filled === c.expectFilled),
+  };
+}
+{
+  // two astral emoji with a BMP accent between them: only the emoji shift
+  const h = 'DEC-ASTRAL-MIX';
+  const ed = openEditor(h, E1);
+  await settleCalc(ed.calls()[0], payload([]));
+  const box = find(ed.panel, 'live-calc-autofill');
+  box.checked = false;
+  box.dispatch('change');
+  ed.area.setSelectionRange(0, 0);
+  ed.focus();
+  await settleCalc(ed.calls()[1], payload([cpSpan(E1, '5 V', '4 V')]));
+  ed.fills()[0].click();
+  results.astralMix = { whole: ed.area.value };
+  globalThis.localStorage.removeItem('refdes.live-calc.autofill');
+  drafts.clearDraft(h);
+}
+{
+  // the emoji is on line 0, the span on line 1: line starts are computed in
+  // JS (UTF-16), so this must keep working -- a regression guard
+  const h = 'DEC-ASTRAL-NL';
+  const ed = openEditor(h, F1);
+  await settleCalc(ed.calls()[0], payload([]));
+  const box = find(ed.panel, 'live-calc-autofill');
+  box.checked = false;
+  box.dispatch('change');
+  ed.area.setSelectionRange(0, 0);
+  ed.focus();
+  await settleCalc(ed.calls()[1], payload([cpSpan(F1, '5 V', '4 V', 'Vbad', 1)]));
+  ed.fills()[0].click();
+  results.astralLaterLine = { whole: ed.area.value };
+  globalThis.localStorage.removeItem('refdes.live-calc.autofill');
+  drafts.clearDraft(h);
+}
 
 // -- client pre-gate (§3.1): text without a calc marker costs no request
 //    and no panel -- a plain paragraph body stays silent
@@ -906,6 +1059,7 @@ const T1_FILLED = __T1_FILLED__;
   };
   globalThis.__revisionHook = null;
   globalThis.__itemViewHook = null;
+  drafts.clearDraft('DEC-BOOT'); // the shell wrote a draft during the race
 }
 
 console.log(JSON.stringify(results));
@@ -918,6 +1072,12 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node(tmp_
         HARNESS.replace("__STATIC__", json.dumps(STATIC.replace(os.sep, "/")))
         .replace("__T1__", json.dumps(T1))
         .replace("__T1_FILLED__", json.dumps(T1_FILLED))
+        .replace("__A1__", json.dumps(A1))
+        .replace("__A1_FILLED__", json.dumps(A1_FILLED))
+        .replace("__E1__", json.dumps(E1))
+        .replace("__E1_FILLED__", json.dumps(E1_FILLED))
+        .replace("__F1__", json.dumps(F1))
+        .replace("__F1_FILLED__", json.dumps(F1_FILLED))
     )
     # Run from a file, not `node -e`: the harness outgrew the 32k Windows
     # command-line limit (WinError 206 in CI).
@@ -977,6 +1137,39 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node(tmp_
         "the stale-model drop left the panel silent for the life of the "
         "draft: the shell must re-sync the view on refdes:stale-calc "
         "(the observed failure: a cold-start panel that never warns)"
+    )
+
+    af = results["astralFill"]
+    assert af["whole"] == A1_FILLED, (
+        "Fill on a line with a preceding emoji replaced the wrong range: "
+        "the server's columns are code points, textarea offsets are UTF-16 "
+        "units -- spanOffsets must convert"
+    )
+    aa = results["astralAutoFill"]
+    assert aa["whole"] == A1_FILLED, (
+        "auto-fill (insertText) on a line with a preceding emoji replaced "
+        "the wrong range: the same code-point conversion is required"
+    )
+    ac = results["astralCaseB"]
+    assert ac["whole"] == A1_FILLED, (
+        "the Case B .value splice on a line with a preceding emoji spliced "
+        "the wrong range: the same code-point conversion is required"
+    )
+    acaret = results["astralCaret"]
+    assert acaret["pass"] is True, (
+        f"caret-skip boundaries on a line with a preceding emoji: {acaret['cases']} "
+        "-- the skip test must run on converted offsets, not raw code-point "
+        "columns (emoji shifts the range by one unit)"
+    )
+    am = results["astralMix"]
+    assert am["whole"] == E1_FILLED, (
+        "two emoji with a combining accent before the span: Fill replaced "
+        "the wrong range (one unit of shift per astral code point)"
+    )
+    an = results["astralLaterLine"]
+    assert an["whole"] == F1_FILLED, (
+        "Fill on a later line after an emoji line regressed: line starts "
+        "are UTF-16 already, only same-line columns need conversion"
     )
 
     assert results["abort"] == {"secondFired": True, "firstAborted": True}, (

@@ -78,11 +78,32 @@ function writeFallbackFlag() {
 
 // The starts are computed once per response batch (the text is the same for
 // every span in it); spanOffsets converts one span against them.
-function spanOffsets(starts, span) {
+// The server's columns are PYTHON string indices = Unicode code points
+// within the line; JS string offsets and textarea selection indices are
+// UTF-16 code units. A BMP character (combining marks included) is one unit
+// in both; only astral code points (above U+FFFF — every emoji) cost two,
+// so a raw column addition lands one unit early per astral character
+// earlier on the same line. cpToUnits advances cp code points and counts
+// their UTF-16 length; a column past the line's last code point clamps to
+// the line's end (the same tolerance a textarea gives setSelectionRange).
+function cpToUnits(line, cp) {
+  let units = 0;
+  for (let seen = 0; seen < cp && units < line.length; seen++) {
+    units += line.codePointAt(units) > 0xffff ? 2 : 1;
+  }
+  return units;
+}
+
+function spanOffsets(starts, text, span) {
   const base = starts[span.line];
   if (base === undefined) return null;
   if (span.result_start === undefined || span.result_end === undefined) return null;
-  return { resultStart: base + span.result_start, resultEnd: base + span.result_end };
+  const next = starts[span.line + 1];
+  const line = text.slice(base, next === undefined ? text.length : next - 1);
+  return {
+    resultStart: base + cpToUnits(line, span.result_start),
+    resultEnd: base + cpToUnits(line, span.result_end),
+  };
 }
 
 export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
@@ -251,7 +272,7 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
       // span missing either boundary of its result pair is skipped -- the
       // apply path needs the full pair to splice.
       if (span.status !== 'stale' || span.result_start === undefined || span.result_end === undefined) continue;
-      const off = spanOffsets(starts, span);
+      const off = spanOffsets(starts, text, span);
       if (!off) continue;
       if (text.slice(off.resultStart, off.resultEnd) === span.computed) continue;
       if (selectionSkips(off)) continue;
@@ -277,7 +298,7 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields }) {
   // the author invoked the insertion, so focusing the body is their request.
   function applySpan(span, consented) {
     if (isSaving() || snapshotText === null || area.value !== snapshotText) return;
-    const off = spanOffsets(lineStarts(area.value), span);
+    const off = spanOffsets(lineStarts(area.value), area.value, span);
     if (!off) return;
     if (area.value.slice(off.resultStart, off.resultEnd) === span.computed) return;
     applyRanges([{ span, off }], consented);
