@@ -900,14 +900,68 @@ def test_the_format_bar_is_real_buttons_and_only_the_bounded_shortcuts():
     """§B: real focusable buttons, labels, no focus stealing, and only the
     shortcuts whose browser-reserved neighbors were explicitly checked."""
     bar = js_code("formatbar.js")
+    ops_source = _section(bar, "const OPS = {")
     for op in ("bold", "italic", "strike", "code", "heading", "list", "numbered",
                "quote", "link", "table", "hr"):
-        assert f"op: '{op}'" in bar or f"'{op}'," in bar, op
+        assert re.search(rf"^  {op}:", ops_source, re.MULTILINE), op
+        assert f"['{op}'," in bar, op
     assert "button.type = 'button';" in bar
     assert "button.setAttribute('aria-label', aria);" in bar
     assert "addEventListener('mousedown', (event) => event.preventDefault());" in bar
     assert "addEventListener('click', () => run(op));" in bar
+    assert "if (!area || (isSaving && isSaving())) return;" in bar
+    assert bar.count("if (isSaving && isSaving()) return;") == 1
     assert "(event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey" in bar
     assert "String(event.code) === 'Digit5'" in bar
     assert "event.preventDefault();" in bar
     assert bar.count("event.preventDefault()") == 2
+
+
+def _section(source, marker):
+    start = source.index(marker)
+    end = source.index("\n};", start)
+    return source[start:end]
+
+
+def test_the_format_bar_binds_exactly_the_collision_audited_shortcuts():
+    """§B binds exactly five shortcuts and the exact set is the audited one.
+    The never-bound list (Ctrl+S, Ctrl+Z/Y/Shift+Z, Ctrl+Shift+I/J/C, F12,
+    Ctrl+T/N/W/L/J/Tab, Ctrl+1..9, Ctrl+Alt+letter, Ctrl+Alt+digit) must be
+    absent from SHORTCUTS; a sixth colliding shortcut fails here."""
+    bar = js_code("formatbar.js")
+    start = bar.index("export const SHORTCUTS = [")
+    end = bar.index("\n];", start)
+    shortcuts = bar[start:end]
+
+    blocks = re.split(r"\n\s*\{\n", shortcuts)[1:]
+    assert len(blocks) == 5, blocks
+
+    expected_ops = {"bold", "italic", "link", "strike", "code"}
+    seen = {}
+    for block in blocks:
+        op_match = re.search(r"op: '([a-z]+)'", block)
+        assert op_match is not None, block
+        op = op_match.group(1)
+        keys = set(re.findall(r"toLowerCase\(\) === '([a-z0-9]+)'", block))
+        codes = set(re.findall(r"String\(event\.code\) === '([^']+)'", block))
+        ctrlmeta = "event.ctrlKey || event.metaKey" in block
+        alt = re.search(r"(?<!!)event\.altKey", block) is not None
+        shift = re.search(r"(?<!!)event\.shiftKey", block) is not None
+        seen[op] = (keys, codes, ctrlmeta, alt, shift)
+
+    assert set(seen) == expected_ops, seen
+
+    never_bound_keys = {
+        "s", "z", "y", "t", "n", "w", "l", "j", "tab", "f12",
+        "1", "2", "3", "4", "5", "6", "7", "8", "9", "0",
+    }
+    assert not ({k for v in seen.values() for k in v[0]} & never_bound_keys), seen
+    assert not ({c for v in seen.values() for c in v[1]} - {"Digit5"}), seen
+    assert not {op: v for op, v in seen.items() if v[3] and v[4]
+                and op not in {"strike"}}, "only Alt+Shift+5 binds a shift-key shortcut"
+
+    assert seen["bold"] == ({"b"}, set(), True, False, False)
+    assert seen["italic"] == ({"i"}, set(), True, False, False)
+    assert seen["link"] == ({"k"}, set(), True, False, False)
+    assert seen["strike"] == (set(), {"Digit5"}, False, True, True)
+    assert seen["code"] == ({"c"}, set(), True, True, False)

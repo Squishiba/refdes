@@ -26,18 +26,30 @@ mutator behavior before the real-browser checklist.
 - Wired `item.js`: the bar is appended immediately before the body textarea.
 - Added CSS for the bar and note.
 - Added static wiring checks to `tests/test_serve_static.py`.
+- Review round 2: implemented inline toggle-off for caret, selected inner
+  text, marker-inclusive selections, marker runs, triple nesting, astral
+  characters, and line-break guards.
+- Strengthened the node harness with the requested toggle, save-gate,
+  placeholder, caret, draft, fence, and localStorage checks. It red-first on
+  the missing toggle behavior, then failed on a duplicated Case A insertion
+  found by the harness.
+- Strengthened static checks to pin the exact five shortcuts, their modifier
+  conditions, every button against `OPS`, and the formatbar's own save gates.
 
 ## Verification
 
 - `python -m pytest -q tests/test_editor_format_bar.py`
 - `python -m pytest -q tests/test_serve_static.py`
 - `python -m pytest -q tests/test_serve_static.py tests/test_editor_format_bar.py tests/test_editor_live_calc.py tests/test_editor_link_undo.py`
+- `python -m pytest -q`
+- `node format-bar-e2e.mjs chromium`
+- `node format-bar-e2e.mjs ff`
 
-All pass.
-
-- Real-browser checklist on Chromium and Firefox: toolbar DOM/a11y, bold
-  selection with one native undo, shortcuts, live-calc coexistence, and the
-  save-window gate all pass.
+All pass. The browser probe covers all 11 base button cases, native undo,
+persistence, caret placeholder/toggle, double-click, marker-inclusive
+selection, nested triple cases, astral characters, markers across a line
+break, Case B fallback wrap/toggle, Ctrl+I, and Ctrl+B in Chromium and
+Firefox. The PR body has the case-by-case table.
 
 ## Open
 

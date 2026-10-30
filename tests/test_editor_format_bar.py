@@ -15,12 +15,14 @@ panel stands down on; the bar shares it, so one detection serves both).
 Scenarios, one node process:
 
 - core-row semantics for every §B button: wrap, placeholder-selection,
-  toggle-unwrap (run-marker guard: an italic toggle never fires inside a
-  ``**bold**`` pair), heading cycle through H6->none, multi-line list /
-  numbered / quote prefix and strip, link URL-vs-text split + unwrap, the
-  table skeleton with the first header cell selected, the HR as its own
-  blank-line-padded paragraph, a block insert with the caret inside a calc
-  fence lands AFTER the fence, fences balanced after every block op.
+  caret-inside toggle-unwrap, selected-inner toggle-unwrap, marker-inclusive
+  toggle-unwrap (run-marker guards keep italic from stripping one star out of
+  ``**bold**`` and bold from matching a lone ``*``), heading cycle through
+  H6->none, multi-line list / numbered / quote prefix and strip, link
+  URL-vs-text split + unwrap, the table skeleton with the first header cell
+  selected, the HR as its own blank-line-padded paragraph, a block insert with
+  the caret inside a calc fence lands AFTER the fence, fences balanced after
+  every block op.
 - caret placement and the UTF-16 trap: an astral (emoji) character before
   the selection must not shift a wrap (``#388``'s exact bug class).
 - Case A: execCommand called exactly once per insertion, selection restored.
@@ -79,9 +81,8 @@ const localStore = new Map();
 globalThis.localStorage = {
   getItem: (k) => (localStore.has(k) ? localStore.get(k) : null),
   setItem: (k, v) => localStore.set(k, String(v)),
-  removeItem: (k) => storeDelete,
+  removeItem: (k) => { localStore.delete(k); },
 };
-function storeDelete(k) { localStore.delete(k); }
 
 // ---------- fake DOM
 let focusCalls = 0;
@@ -320,8 +321,84 @@ const results = {};
     selIsPlaceholder: ed.area.selectionStart === s
       && ed.area.selectionEnd === s + 'bold text'.length,
   };
-  ed.click('italic'); // placeholder replaced by a fresh caret op at the selection
-  results.italicAfterBold = { value: ed.area.value };
+  ed.click('italic'); // the selected placeholder receives the italic markers
+  results.italicAfterBold = {
+    value: ed.area.value,
+    sel: [ed.area.selectionStart, ed.area.selectionEnd],
+    inner: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-ITALICPLACE';
+  const ed = openEditor(h, '');
+  ed.select(0, 0);
+  ed.click('italic');
+  const s = ed.area.value.indexOf('italic text');
+  results.italicPlaceholder = {
+    value: ed.area.value,
+    placeholderSelected: ed.area.selectionStart === s
+      && ed.area.selectionEnd === s + 'italic text'.length,
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-STRIKEPLACE';
+  const ed = openEditor(h, '');
+  ed.select(0, 0);
+  ed.click('strike');
+  const s = ed.area.value.indexOf('text');
+  results.strikePlaceholder = {
+    value: ed.area.value,
+    placeholderSelected: ed.area.selectionStart === s
+      && ed.area.selectionEnd === s + 'text'.length,
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-CODEPLACE';
+  const ed = openEditor(h, '');
+  ed.select(0, 0);
+  ed.click('code');
+  const s = ed.area.value.indexOf('code');
+  results.codePlaceholder = {
+    value: ed.area.value,
+    placeholderSelected: ed.area.selectionStart === s
+      && ed.area.selectionEnd === s + 'code'.length,
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-ITALICUNWRAP';
+  const ed = openEditor(h, 'go *ital* end');
+  ed.select(5, 5);
+  ed.click('italic');
+  results.italicUnwrap = {
+    value: ed.area.value,
+    inner: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-STRIKEUNWRAP';
+  const ed = openEditor(h, 'go ~~strike~~ end');
+  ed.select(5, 5);
+  ed.click('strike');
+  results.strikeUnwrap = {
+    value: ed.area.value,
+    inner: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-CODEUNWRAP';
+  const ed = openEditor(h, 'go `code` end');
+  ed.select(4, 4);
+  ed.click('code');
+  results.codeUnwrap = {
+    value: ed.area.value,
+    inner: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
   drafts.clearDraft(h);
 }
 {
@@ -349,6 +426,113 @@ const results = {};
   drafts.clearDraft(h);
 }
 {
+  const h = 'FB-SELUNWRAP';
+  const ed = openEditor(h, 'ab');
+  ed.select(1, 1);
+  ed.click('bold');
+  const placeholder = {
+    value: ed.area.value,
+    selected: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  ed.click('bold');
+  results.selectedBoldUnwrap = {
+    placeholder,
+    value: ed.area.value,
+    selected: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-WORD';
+  const ed = openEditor(h, 'a **bold** b');
+  ed.select(4, 8);
+  ed.click('bold');
+  results.boldWordUnwrap = {
+    value: ed.area.value,
+    selected: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-INCLMARKERS';
+  const ed = openEditor(h, 'a **bold** b');
+  ed.select(2, 10);
+  ed.click('bold');
+  results.boldMarkersUnwrap = {
+    value: ed.area.value,
+    selected: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-TRIPLEBOLD';
+  const ed = openEditor(h, '***x***');
+  ed.select(0, 7);
+  ed.click('bold');
+  results.tripleBold = {
+    value: ed.area.value,
+    selected: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-TRIPLEITALIC';
+  const ed = openEditor(h, '***x***');
+  ed.select(0, 7);
+  ed.click('italic');
+  results.tripleItalic = {
+    value: ed.area.value,
+    selected: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-ITALICBOLDSEL';
+  const ed = openEditor(h, 'a **bold** b');
+  ed.select(2, 10);
+  ed.click('italic');
+  results.italicBoldMarkersWrap = {
+    value: ed.area.value,
+    selected: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-BOLDITALICSEL';
+  const ed = openEditor(h, 'a *ital* b');
+  ed.select(2, 8);
+  ed.click('bold');
+  results.boldItalicMarkersWrap = {
+    value: ed.area.value,
+    selected: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-MARKERSACROSSLINE';
+  const ed = openEditor(h, '**a\nb**');
+  ed.select(0, 7);
+  ed.click('bold');
+  results.markersAcrossLine = {
+    value: ed.area.value,
+    selected: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-ASTRALPAIR';
+  const body = '\U0001F600 **bold** x';
+  const ed = openEditor(h, body);
+  ed.select(body.indexOf('bold'), body.indexOf('bold') + 4);
+  ed.click('bold');
+  results.astralPairUnwrap = {
+    value: ed.area.value,
+    want: '\U0001F600 bold x',
+    selected: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  drafts.clearDraft(h);
+}
+{
   const h = 'FB-STRIKE';
   const ed = openEditor(h, 'a b');
   ed.select(2, 3);
@@ -364,6 +548,10 @@ const results = {};
   results.codeWrap = { value: ed.area.value, sel: [ed.area.selectionStart, ed.area.selectionEnd] };
   ed.select(0, 0);
   ed.click('code');
+  results.codeAtCaret = {
+    value: ed.area.value,
+    placeholderSelected: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd) === 'code',
+  };
   drafts.clearDraft(h);
 }
 
@@ -518,6 +706,7 @@ const results = {};
     value: ed.area.value,
     // the rule is blank-line separated from the YAML-key-shaped line
     blankSeparated: ed.area.value === '---\n\nkey: value',
+    fences: (ed.area.value.match(/^```/gm) || []).length,
   };
   drafts.clearDraft(h);
 }
@@ -639,16 +828,18 @@ const results = {};
   await tick(5);
   const n0 = execCalls.length;
   const sel0 = [ed.area.selectionStart, ed.area.selectionEnd];
+  const draft0 = drafts.getDraft(h).body;
   ed.click('bold');
   ed.area.dispatch('keydown', { key: 'b', code: 'KeyB', ctrlKey: true });
   results.savingGate = {
     value: ed.area.value,
     unchanged: ed.area.value === 'body x!',
     selUnchanged: ed.area.selectionStart === sel0[0] && ed.area.selectionEnd === sel0[1],
+    draft: drafts.getDraft(h).body,
+    draftUnchanged: drafts.getDraft(h).body === draft0,
     execs: execCalls.length - n0,
     posts: editPosts.length,
   };
-  // the image picker's insert (insertIntoBody) is gated too
   await settleEdit({ revision: 'rev-1' });
   drafts.clearDraft(h);
 }
@@ -776,6 +967,38 @@ const results = {};
   drafts.clearDraft(h);
 }
 
+// ---------- the image picker's insertIntoBody is inert mid-save
+{
+  const h = 'FB-IMGS';
+  const ed = openEditor(h, 'body');
+  ed.editor.node.appendChild(ed.editor.imagePicker);
+  await tick(20);
+  ed.area.value = 'body!';
+  ed.area.dispatch('input');
+  const save = find(ed.editor.node, 'save');
+  save.disabled = false;
+  save.click();
+  await tick(5);
+  const n0 = execCalls.length;
+  const posts0 = editPosts.length;
+  const d0 = drafts.getDraft(h).body;
+  ed.select(5, 5);
+  const sel0 = [ed.area.selectionStart, ed.area.selectionEnd];
+  const add = find(ed.editor.node, 'image-insert');
+  add.click();
+  results.imageSavingGate = {
+    value: ed.area.value,
+    unchanged: ed.area.value === 'body!',
+    selUnchanged: ed.area.selectionStart === sel0[0] && ed.area.selectionEnd === sel0[1],
+    draft: drafts.getDraft(h).body,
+    draftUnchanged: drafts.getDraft(h).body === d0,
+    execs: execCalls.filter((_, i) => i >= n0 && execCalls[i] === 'insertText').length,
+    newPosts: editPosts.length - posts0,
+  };
+  await settleEdit({ revision: 'rev-1' });
+  drafts.clearDraft(h);
+}
+
 // ---------- live-calc coexistence: an insert feeds the panel's input path
 {
   const h = 'FB-LIVE';
@@ -848,6 +1071,28 @@ def test_the_format_bar_mutates_the_body_through_the_shared_case_a_b_contract(tm
     assert bp["value"] == "**bold text**", bp
     assert bp["selIsPlaceholder"] is True, "the placeholder must be selected (typing replaces it)"
 
+    iab = results["italicAfterBold"]
+    assert iab["value"] == "***bold text***", iab
+    assert iab["inner"] == "bold text", iab
+
+    for name, value, text in (
+        ("italicPlaceholder", "*italic text*", "italic text"),
+        ("strikePlaceholder", "~~text~~", "text"),
+        ("codePlaceholder", "`code`", "code"),
+    ):
+        result = results[name]
+        assert result["value"] == value, result
+        assert result["placeholderSelected"] is True, result
+
+    for name, value, text in (
+        ("italicUnwrap", "go ital end", "ital"),
+        ("strikeUnwrap", "go strike end", "strike"),
+        ("codeUnwrap", "go code end", "code"),
+    ):
+        result = results[name]
+        assert result["value"] == value, result
+        assert result["inner"] == text, result
+
     bu = results["boldUnwrap"]
     assert bu["value"] == "go bold end", bu
     assert bu["innerSelected"] is True, "toggle-off reselects the inner text"
@@ -860,12 +1105,53 @@ def test_the_format_bar_mutates_the_body_through_the_shared_case_a_b_contract(tm
     )
     assert results["italicInsideBold"]["inner"] == "italic text", results["italicInsideBold"]
 
+    su = results["selectedBoldUnwrap"]
+    assert su["placeholder"]["value"] == "a**bold text**b", su
+    assert su["placeholder"]["selected"] == "bold text", su
+    assert su["value"] == "abold textb", su
+    assert su["selected"] == "bold text", su
+
+    bwu = results["boldWordUnwrap"]
+    assert bwu["value"] == "a bold b", bwu
+    assert bwu["selected"] == "bold", bwu
+
+    imu = results["boldMarkersUnwrap"]
+    assert imu["value"] == "a bold b", imu
+    assert imu["selected"] == "bold", imu
+
+    tb = results["tripleBold"]
+    assert tb["value"] == "*x*", tb
+    assert tb["selected"] == "*x*", tb
+
+    ti = results["tripleItalic"]
+    assert ti["value"] == "**x**", ti
+    assert ti["selected"] == "**x**", ti
+
+    ibm = results["italicBoldMarkersWrap"]
+    assert ibm["value"] == "a ***bold*** b", ibm
+    assert ibm["selected"] == "**bold**", ibm
+
+    bim = results["boldItalicMarkersWrap"]
+    assert bim["value"] == "a ***ital*** b", bim
+    assert bim["selected"] == "*ital*", bim
+
+    mal = results["markersAcrossLine"]
+    assert mal["value"] == "****a\nb****", mal
+    assert mal["selected"] == "**a\nb**", mal
+
+    ap = results["astralPairUnwrap"]
+    assert ap["value"] == ap["want"], ap
+    assert ap["selected"] == "bold", ap
+
     sw = results["strikeWrap"]
     assert sw["value"] == "a ~~b~~", sw
     assert sw["sel"] == [4, 5], sw
     cw = results["codeWrap"]
     assert cw["value"] == "`x = 1` is 4 V", cw
     assert cw["sel"] == [1, 6], cw
+    cac = results["codeAtCaret"]
+    assert cac["value"] == "`code``x = 1` is 4 V", cac
+    assert cac["placeholderSelected"] is True, cac
 
     # -- heading: the exact §B cycle, caret at the line content start
     hc = results["headingCycle"]
@@ -914,6 +1200,7 @@ def test_the_format_bar_mutates_the_body_through_the_shared_case_a_b_contract(tm
     assert tb["fences"] == 0
     assert tb["execs"] == 1
     assert results["hrBeforeKey"]["blankSeparated"] is True, results["hrBeforeKey"]
+    assert results["hrBeforeKey"]["fences"] == 0, results["hrBeforeKey"]
     fb = results["blockAfterFence"]
     assert fb["fenceKept"] is True, fb
     assert fb["tableAfter"] is True, "a block insert with the caret inside a fence lands AFTER it"
@@ -955,8 +1242,18 @@ def test_the_format_bar_mutates_the_body_through_the_shared_case_a_b_contract(tm
     sg = results["savingGate"]
     assert sg["unchanged"] is True, sg
     assert sg["selUnchanged"] is True, sg
+    assert sg["draft"] == "body x!", sg
+    assert sg["draftUnchanged"] is True, sg
     assert sg["execs"] == 0, "no mutation attempt at all mid-save"
     assert sg["posts"] == 1, "the gate does not mint a second save"
+
+    isg = results["imageSavingGate"]
+    assert isg["unchanged"] is True, isg
+    assert isg["selUnchanged"] is True, isg
+    assert isg["draft"] == "body!", isg
+    assert isg["draftUnchanged"] is True, isg
+    assert isg["execs"] == 0, isg
+    assert isg["newPosts"] == 0, isg
 
     # -- shortcuts: exactly the §B bindings; nothing the browser reserves
     sc = results["shortcuts"]

@@ -166,33 +166,117 @@ function markerRuns(line, marker) {
   return runs;
 }
 
-function unwrapInlineRange(text, caret, marker) {
-  const [lineStart, lineEnd] = lineRange(text, caret);
-  const line = text.slice(lineStart, lineEnd);
-  const runs = markerRuns(line, marker).filter((run) => run.length === marker.length);
-  let left = null;
-  for (const run of runs) {
-    if (run.start + marker.length <= caret - lineStart) left = run;
-  }
-  if (!left) return null;
-  const right = runs.find((run) => run.start >= caret - lineStart);
-  if (!right) return null;
-  const start = lineStart + left.start;
-  const openEnd = start + marker.length;
-  const closeStart = lineStart + right.start;
-  const end = closeStart + marker.length;
-  if (!(openEnd <= caret && caret <= closeStart)) return null;
-  const inner = text.slice(openEnd, closeStart);
-  return { start, end, inner, selectStart: start, selectEnd: start + inner.length };
+function leadingMarkerRun(text, marker) {
+  let length = 0;
+  while (text.startsWith(marker, length)) length += marker.length;
+  return length;
 }
 
-function applyInline(area, marker, placeholder, opts) {
+function trailingMarkerRun(text, marker) {
+  let length = 0;
+  while (text.startsWith(marker, text.length - length - marker.length)) length += marker.length;
+  return length;
+}
+
+function markerRunEndingAt(text, pos, marker) {
+  let length = 0;
+  while (pos - length - marker.length >= 0
+    && text.startsWith(marker, pos - length - marker.length)) {
+    length += marker.length;
+  }
+  return length;
+}
+
+function markerRunStartingAt(text, pos, marker) {
+  let length = 0;
+  while (text.startsWith(marker, pos + length)) length += marker.length;
+  return length;
+}
+
+function hasMarkerLayer(op, length, markerLength = 1) {
+  if (op === 'bold') return length >= 2;
+  if (op === 'italic') return length > 0 && length % 2 === 1;
+  return length === markerLength;
+}
+
+function unwrapInlineRange(text, caret, op, marker) {
+  const [lineStart, lineEnd] = lineRange(text, caret);
+  const line = text.slice(lineStart, lineEnd);
+  const runs = markerRuns(line, marker);
+  const caretInLine = caret - lineStart;
+  let left = null;
+  for (const run of runs) {
+    if (run.start + run.length <= caretInLine) left = run;
+  }
+  if (!left) return null;
+  const right = runs.find((run) => run.start >= caretInLine);
+  if (!right
+    || !hasMarkerLayer(op, left.length, marker.length)
+    || !hasMarkerLayer(op, right.length, marker.length)) return null;
+  const start = lineStart + left.start;
+  const openEnd = start + left.length;
+  const closeStart = lineStart + right.start;
+  const end = closeStart + right.length;
+  if (!(openEnd <= caret && caret <= closeStart)) return null;
+  const inner = text.slice(openEnd, closeStart);
+  const openRun = text.slice(start, start + left.length - marker.length);
+  const closeRun = text.slice(closeStart + marker.length, end);
+  const replacement = openRun + inner + closeRun;
+  const selectStart = start + openRun.length;
+  return {
+    start,
+    end,
+    replacement,
+    selectStart,
+    selectEnd: selectStart + inner.length,
+  };
+}
+
+function unwrapInlineSelection(text, start, end, op, marker) {
+  if (start >= end) return null;
+  const chosen = text.slice(start, end);
+  if (chosen.includes('\n')) return null;
+
+  const leading = leadingMarkerRun(chosen, marker);
+  const trailing = trailingMarkerRun(chosen, marker);
+  if (leading >= marker.length && trailing >= marker.length
+    && hasMarkerLayer(op, leading, marker.length)
+    && hasMarkerLayer(op, trailing, marker.length)) {
+    const inner = chosen.slice(marker.length, chosen.length - marker.length);
+    return {
+      start,
+      end,
+      replacement: inner,
+      selectStart: start,
+      selectEnd: start + inner.length,
+    };
+  }
+
+  const left = markerRunEndingAt(text, start, marker);
+  const right = markerRunStartingAt(text, end, marker);
+  if (left >= marker.length && right >= marker.length
+    && hasMarkerLayer(op, left, marker.length)
+    && hasMarkerLayer(op, right, marker.length)) {
+    const rangeStart = start - marker.length;
+    const rangeEnd = end + marker.length;
+    return {
+      start: rangeStart,
+      end: rangeEnd,
+      replacement: chosen,
+      selectStart: rangeStart,
+      selectEnd: rangeStart + chosen.length,
+    };
+  }
+  return null;
+}
+
+function applyInline(area, op, marker, placeholder, opts) {
   const text = area.value;
   const { start, end } = selectionIn(area);
   if (start === end) {
-    const off = unwrapInlineRange(text, start, marker);
+    const off = unwrapInlineRange(text, start, op, marker);
     if (off) {
-      applyEdit(area, off.start, off.end, off.inner, off.selectStart, off.selectEnd, opts);
+      applyEdit(area, off.start, off.end, off.replacement, off.selectStart, off.selectEnd, opts);
       return;
     }
     const chunk = marker + placeholder + marker;
@@ -208,15 +292,13 @@ function applyInline(area, marker, placeholder, opts) {
     return;
   }
 
-  const chosen = text.slice(start, end);
-  if (chosen.length >= marker.length * 2
-    && chosen.startsWith(marker)
-    && chosen.endsWith(marker)) {
-    const inner = chosen.slice(marker.length, chosen.length - marker.length);
-    applyEdit(area, start, end, inner, start, start + inner.length, opts);
+  const off = unwrapInlineSelection(text, start, end, op, marker);
+  if (off) {
+    applyEdit(area, off.start, off.end, off.replacement, off.selectStart, off.selectEnd, opts);
     return;
   }
 
+  const chosen = text.slice(start, end);
   const chunk = marker + chosen + marker;
   applyEdit(area, start, end, chunk, start + marker.length, start + marker.length + chosen.length, opts);
 }
@@ -318,10 +400,10 @@ function applyRule(area, opts) {
 }
 
 const OPS = {
-  bold: (area, opts) => applyInline(area, '**', 'bold text', opts),
-  italic: (area, opts) => applyInline(area, '*', 'italic text', opts),
-  strike: (area, opts) => applyInline(area, '~~', 'text', opts),
-  code: (area, opts) => applyInline(area, '`', 'code', opts),
+  bold: (area, opts) => applyInline(area, 'bold', '**', 'bold text', opts),
+  italic: (area, opts) => applyInline(area, 'italic', '*', 'italic text', opts),
+  strike: (area, opts) => applyInline(area, 'strike', '~~', 'text', opts),
+  code: (area, opts) => applyInline(area, 'code', '`', 'code', opts),
   heading: applyHeading,
   list: (area, opts) => applyLineMarker(area, '- ', /^\s*[-*+]\s+/, opts),
   numbered: (area, opts) => applyLineMarker(area, '1. ', /^\s*\d+\.\s+/, opts, true),
