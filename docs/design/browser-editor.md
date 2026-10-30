@@ -437,6 +437,11 @@ and `[[fig:id]]` resolution remain document-dependent
 (`src/refdes/build.py:1654-1740`); the preview labels which context it is
 showing, defaulting to the standalone item page.
 
+The calc half of that paragraph has landed: `POST /api/item/<ref>/calc`
+evaluates the unsaved draft's inline-calc spans and the editor shows the rows
+in a panel under the body textarea (`in-prog-logs/inline-calc-live-editor-design-20261020.md`,
+PRs #386 and #388); the rendered-fragment half above is not implemented.
+
 Existing images resolve relative to the item's source file and are
 content-hashed into site assets (`docs/markdown.md:86-112`). Figure attributes
 and references use the existing syntax (`docs/markdown.md:113-152`). The
