@@ -2,7 +2,10 @@
 // (in-prog-logs/inline-calc-live-editor-design-20261020.md §3.1-§3.8): the
 // textarea's current text goes to `POST /api/item/<ref>/calc` on a 400 ms
 // debounce, the computed rows come back, and stale result slots can be
-// filled. The client interprets no grammar: the route owns the parse, the
+// filled. A field edit on the form schedules the same request (fields are
+// calc inputs, §3.2/§6.4): the request carries the draft's field bag
+// (§3.3), so the panel rows follow what the author typed. The client
+// interprets no grammar: the route owns the parse, the
 // statuses and every message, and the response carries line-relative
 // columns only (§3.3) — converting them to document offsets of the text it
 // sent is this module's alone (§3.5). Text mutates only through the focused
@@ -431,6 +434,14 @@ export function createLiveCalc(handle, { getRevision, isSaving, getFields,
         inflight = null;
       }
       if (area) ctrl.detachFrom(area);
+    },
+    // A field edit is a calc input (design §3.2/§6.4, slice C): the same
+    // debounced request re-fires through the identical closure, and the
+    // fresh bag rides it (§3.3). With the textarea unfocused the response
+    // is display-only by §3.5's focus rule -- rows and Fill refresh, no
+    // text mutates.
+    fieldsChanged() {
+      if (area) schedule();
     },
   };
   // The teardown sweep of the item view looks up the controller from the mounted

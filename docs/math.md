@@ -390,6 +390,12 @@ is the ordinary "assigned twice" error citing both lines, and a forward use
 is an ordinary unknown-name error. The span itself stays literal code in
 the published page.
 
+In the `refdes serve` browser editor, the live panel computes an item's spans
+from the unsaved draft: typing in the body *or* in a form field input moves
+the panel's rows, with the edited item's own `$field` references reading the
+drafted value and cross-item references reading the saved item — nothing on
+disk moves until you save.
+
 A cross-item reference or a `source()` call in a span is read exactly as it
 is in a fence: the build evaluates the referenced item first, `refdes fetch`
 pins the key the span names, and a moved upstream value or a re-pinned
