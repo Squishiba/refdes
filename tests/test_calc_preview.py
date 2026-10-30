@@ -4,9 +4,11 @@
 The route is the pass's only caller, so the unit tests are the contract:
 status/message parity with the real build (the panel teaches `refdes check`'s
 vocabulary, never a second one), `computed` at the project's sigfigs, ranges
-in `body_text` coordinates, the 200-span cap, the fields bag's
-accepted-and-unused posture, and -- the property the whole read-only design
-rests on -- the pass leaves the project, every item, and the disk untouched.
+in `body_text` coordinates, the 200-span cap, the fields bag's consumed
+posture (the edited item's own field refs read the draft overlaid on the
+saved fields; cross-item refs read saved), and -- the property the whole
+read-only design rests on -- the pass leaves the project, every item, and
+the disk untouched.
 The fidelity pin is the oracle test: the same text through
 `loader.load_readonly(overlay=...)` (a real full build) must report exactly
 what the narrow pass reported.
@@ -292,13 +294,252 @@ def test_cap_stops_at_span_limit(tmp_path):
     assert rows[0]["name"] == "A0" and rows[-1]["name"] == "A199"
 
 
-def test_fields_bag_is_inert(tmp_path):
-    # §3.4 accepted-and-unused, pinned until the field-reference slice (G1)
-    # lands: the bag is carried, never consulted.
+def test_fields_bag_carries_no_effect_for_this_fixture(tmp_path):
+    # This fixture's DEC-001 declares no fields: every bag key is undeclared,
+    # so the consumed bag changes nothing here (the unit layer accepts any
+    # value shape -- the scalar rule is the ROUTE's, tested in
+    # test_serve_calc_preview.py). The bag's real effect lives in the
+    # field-reference section below.
     project = _build(tmp_path)
     rows = _preview(project, OK_STALE)
     assert _preview(project, OK_STALE, fields={}) == rows
     assert _preview(project, OK_STALE, fields={"anything": 5, "n": None}) == rows
+
+
+# -------------------------------------------------- the draft field bag (G1)
+#
+# Design §3.2/§3.3 (in-prog-logs/inline-calc-live-editor-design-20261020.md):
+# a span of the EDITED item that names its own field (`DEC-001.$rds_on`)
+# reads the draft bag overlaid on the saved fields -- the unsaved edit is
+# what the panel must compute with. Cross-item `$` references keep reading
+# the saved target. Error vocabulary is the build's verbatim (empty field,
+# non-quantity, unit assertion, non-identifier name with the declared-fields
+# listing); the differential test below pins the agreement with `check`.
+
+FIELD_CONFIG = (
+    "site: { title: T, out: _site }\n"
+    "sigfigs: 4\n"
+    "types:\n"
+    "  decision:\n"
+    "    prefix: DEC\n"
+    "    fields:\n"
+    "      rds_on: { type: text }\n"
+    "      limit: { type: text }\n"
+    "      V_in: { type: text }\n"
+    "      blank: { type: text }\n"
+    "      tags: { type: list }\n"
+    "      rds-on: { type: text }\n"
+    "  req:\n"
+    "    prefix: REQ\n"
+    "    fields:\n"
+    "      V_in: { type: text }\n"
+    "      limit: { type: text }\n"
+)
+
+
+def _setup_fields(tmp_path):
+    """DEC-001 saves `rds_on: 18 mohm`, `limit: 5 V` (blank/V_in/tags/rds-on
+    declared, unsaved). REQ-001 saves `V_in: 3.3 V` AND fences a calc
+    `V_in = 5.1 V` -- the collision target for the bare-reference case."""
+    write_project_config(tmp_path, FIELD_CONFIG)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\nrds_on: 18 mohm\nlimit: 5 V\n"
+        "---\n\nBaseline.\n",
+        encoding="utf-8",
+    )
+    (items / "req.md").write_text(
+        "---\nid: REQ-001\ntype: req\nV_in: 3.3 V\n---\n\n"
+        "```calc\nV_in = 5.1 V\n```\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    return project
+
+
+def _preview_dec(project, text, **kw):
+    item = next(i for i in project.local_items if i.id == "DEC-001")
+    return build_mod.preview_inline_spans(project, item, text, **kw)
+
+
+def test_own_field_ref_reads_the_draft_bag(tmp_path):
+    project = _setup_fields(tmp_path)
+    text = "Draught `Rds := DEC-001.$rds_on | mohm = 18 mohm`\n"
+    assert _preview_dec(project, text)[0]["status"] == "ok"
+    rows = _preview_dec(project, text, fields={"rds_on": "20 mohm"})
+    assert rows[0]["status"] == "stale"
+    assert rows[0]["computed"] == "20 m\u03a9"
+    assert rows[0]["message"] == (
+        "inline calc Rds: stored result says 18 mohm, now computes 20 m\u03a9"
+    )
+
+
+def test_draft_only_value_feeds_a_blank_field(tmp_path):
+    # `blank` is declared and unsaved: the saved item gives the empty-field
+    # error; the draft value feeds the span.
+    project = _setup_fields(tmp_path)
+    text = "Fill `B := DEC-001.$blank | V = 3 V`\n"
+    saved = _preview_dec(project, text)
+    assert saved[0]["status"] == "error"
+    assert "is empty -- give it a quantity" in saved[0]["message"]
+    rows = _preview_dec(project, text, fields={"blank": "3 V"})
+    assert rows[0]["status"] == "ok"
+    assert rows[0]["computed"] == "3 V"
+
+
+def test_cleared_in_the_draft_is_the_empty_error(tmp_path):
+    # The form writes "" for a cleared input: overlaying it over a SAVED
+    # value must give the same empty-field error a saved-empty item reports
+    # (the differential test pins the check parity).
+    project = _setup_fields(tmp_path)
+    text = "Cleared `Rds := DEC-001.$rds_on | mohm = 18 mohm`\n"
+    rows = _preview_dec(project, text, fields={"rds_on": ""})
+    assert rows[0]["status"] == "error"
+    assert "'rds_on' is empty -- give it a quantity" in rows[0]["message"]
+    rows = _preview_dec(project, text, fields={"rds_on": "   "})
+    assert "is empty -- give it a quantity" in rows[0]["message"]
+
+
+def test_non_quantity_draft_field_names_the_field(tmp_path):
+    project = _setup_fields(tmp_path)
+    text = "Text `Rds := DEC-001.$rds_on | mohm = 18 mohm`\n"
+    rows = _preview_dec(project, text, fields={"rds_on": "approved"})
+    assert rows[0]["status"] == "error"
+    assert "'rds_on' is 'approved', not a quantity" in rows[0]["message"]
+
+
+def test_unit_assertion_against_a_draft_field(tmp_path):
+    project = _setup_fields(tmp_path)
+    text = "Unit `L := DEC-001.$limit | V = 5 V`\n"
+    rows = _preview_dec(project, text, fields={"limit": "18 mohm"})
+    assert rows[0]["status"] == "error"
+    assert "declared as V" in rows[0]["message"]
+
+
+def test_hyphenated_field_error_lists_declared_fields(tmp_path):
+    # The preview must carry the declared-fields listing the check pass
+    # appends (calc.FIELD_FIELDS_KEY): same suffix, identifier-style names
+    # only, sorted.
+    project = _setup_fields(tmp_path)
+    text = "Hyphen `R := DEC-001.$rds-on | mohm = 18 mohm`\n"
+    rows = _preview_dec(project, text)
+    assert rows[0]["status"] == "error"
+    assert "cannot be referenced with $" in rows[0]["message"]
+    assert "the item type declares: V_in, blank, limit, rds_on, tags" in (
+        rows[0]["message"]
+    )
+
+
+def test_cross_item_field_ref_reads_the_saved_target(tmp_path):
+    # The bag is the EDITED item's fields: REQ-001.$V_in keeps reading the
+    # saved REQ-001 even when the bag carries a same-named key.
+    project = _setup_fields(tmp_path)
+    text = "Cross `V := REQ-001.$V_in | V = 3.3 V`\n"
+    rows = _preview_dec(project, text, fields={"V_in": "99 V"})
+    assert rows[0]["status"] == "ok"
+    assert rows[0]["computed"] == "3.3 V"
+
+
+def test_collision_reference_computes_the_calc_value(tmp_path):
+    # REQ-001 has a calc V_in (5.1 V) AND a field V_in (3.3 V): the bare
+    # reference reads the calc value; the collision WARNING is not surfaced
+    # by the three-status row (the check pass agrees on the VALUE -- the
+    # differential test pins that, and shows the WARNING there).
+    project = _setup_fields(tmp_path)
+    text = "Coll `V := REQ-001.V_in = 5.1 V`\n"
+    rows = _preview_dec(project, text, fields={"V_in": "7.7 V"})
+    assert rows[0]["status"] == "ok"
+    assert rows[0]["computed"] == "5.1 V"
+    assert rows[0]["message"] == ""
+
+
+def test_undeclared_bag_keys_are_ignored(tmp_path):
+    project = _setup_fields(tmp_path)
+    text = "Rail `Rds := DEC-001.$rds_on | mohm = 18 mohm`\n"
+    assert _preview_dec(project, text, fields={"nope": "5 V", "id": "X"}) == (
+        _preview_dec(project, text)
+    )
+
+
+def test_bag_does_not_mutate_the_project(tmp_path):
+    project = _setup_fields(tmp_path)
+    dec = next(i for i in project.local_items if i.id == "DEC-001")
+    saved_fields = dict(dec.fields)
+    diags_before = list(project.diagnostics)
+    text = "Draught `Rds := DEC-001.$rds_on | mohm = 20 mohm`\n"
+    for _ in range(3):
+        _preview_dec(
+            project, text, fields={"rds_on": "20 mohm", "blank": "1 V"}
+        )
+    assert dec.fields == saved_fields
+    assert project.diagnostics == diags_before
+
+
+# The matrix: (draft bag, one-span body). Preview-with-bag vs. the same
+# fields SAVED to disk and built -- the §3.3/§6.5 parity claim.
+DIFFERENTIAL = [
+    ({"rds_on": "20 mohm"}, "Draught `Rds := DEC-001.$rds_on | mohm = 18 mohm`\n"),
+    ({"blank": "3 V"}, "Fill `B := DEC-001.$blank | V = 3 V`\n"),
+    ({"rds_on": ""}, "Cleared `Rds := DEC-001.$rds_on | mohm = 18 mohm`\n"),
+    ({"rds_on": "   "}, "Ws `Rds := DEC-001.$rds_on | mohm = 18 mohm`\n"),
+    ({"rds_on": "approved"}, "Text `Rds := DEC-001.$rds_on | mohm = 18 mohm`\n"),
+    ({"limit": "18 mohm"}, "Unit `L := DEC-001.$limit | V = 5 V`\n"),
+    ({}, "Hyphen `R := DEC-001.$rds-on | mohm = 18 mohm`\n"),
+    ({"V_in": "99 V"}, "Cross `V := REQ-001.$V_in | V = 3.3 V`\n"),
+    ({"V_in": "7.7 V"}, "Coll `V := REQ-001.V_in = 5.1 V`\n"),
+    ({"nope": "5 V"}, "Rail `Rds := DEC-001.$rds_on | mohm = 18 mohm`\n"),
+    ({"rds_on": "1e999 mohm"}, "Big `Rds := DEC-001.$rds_on | mohm = 18 mohm`\n"),
+]
+
+
+def test_preview_with_bag_equals_check_after_saving_the_same_fields(tmp_path):
+    # G1's parity claim, per case and per row: an ok row's `computed` IS the
+    # built item's calc value verbatim; a stale row's message is the build's
+    # WARNING verbatim; an error row's message is the build's ERROR verbatim.
+    # The collision WARNING stays the build's (three-status rows, pinned
+    # above), and the collision row is an ok row here -- agreeing on value.
+    for index, (bag, text) in enumerate(DIFFERENTIAL):
+        root = tmp_path / f"case{index}"
+        root.mkdir()
+        project = _setup_fields(root)
+        rows = _preview_dec(project, text, fields=bag)
+        assert len(rows) == 1, (bag, text, rows)
+        row = rows[0]
+
+        saved = {"rds_on": "18 mohm", "limit": "5 V"} | bag
+        lines = ["id: DEC-001", "type: decision"]
+        for name in ("rds_on", "limit", "V_in", "blank", "rds-on"):
+            if name in saved:
+                value = str(saved[name])
+                lines.append(f"{name}: {value}" if value.strip() else f"{name}:")
+        (root / "items" / "dec.md").write_text(
+            "---\n" + "\n".join(lines) + "\n---\n\n" + text, encoding="utf-8"
+        )
+        built = load_project(config_path=str(root / "refdes-project.yaml"))
+        parse.load_items(built)
+        build_mod.build(built)
+        dec = next(i for i in built.local_items if i.id == "DEC-001")
+        label_diags = [
+            (d.level, d.message)
+            for d in built.diagnostics
+            if d.item_id == "DEC-001"
+            and d.message.startswith(f"inline calc {row['name']}: ")
+        ]
+        if row["status"] == "ok":
+            assert dec.calc_values.get(row["name"]) == row["computed"], (
+                bag, text, row, label_diags
+            )
+            assert [
+                m for lvl, m in label_diags if lvl == "error"
+            ] == [], (bag, text, row, label_diags)
+        else:
+            expected = "error" if row["status"] == "error" else "warning"
+            assert (expected, row["message"]) in label_diags, (
+                bag, text, row, label_diags
+            )
 
 
 # ----------------------------------------------------------- read-only

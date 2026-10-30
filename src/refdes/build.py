@@ -1632,7 +1632,10 @@ def _calc_ref_display(target_str: str, target) -> str:
 
 
 def _make_calc_resolver(
-    project: Project, by_key: dict[str, Item], warnings: list[str] | None = None
+    project: Project,
+    by_key: dict[str, Item],
+    warnings: list[str] | None = None,
+    fields_overlay: tuple[Item, dict] | None = None,
 ):
     """The resolver a cross-item reference line calls, bound to the referring
     item's evaluation. Resolution is by key half only (`resolve_link_target`,
@@ -1650,7 +1653,14 @@ def _make_calc_resolver(
     loud errors naming the field. With ``warnings``, a bare reference whose
     target has BOTH a calc value and a field of that name appends the
     collision warning here (the calc value is what resolves -- the field
-    needs the explicit `$` spelling)."""
+    needs the explicit `$` spelling).
+
+    ``fields_overlay`` is the live preview's draft bag (design §3.2/§3.4,
+    item G1): an `(item, fields)` pair whose field reads, and ONLY its,
+    resolve against `{**saved, **fields}` -- the item being edited, read as
+    the author has typed it. Identity, not id-matching: a reference to a
+    composite key of the same item resolves to the same object through
+    `by_key` and is overlaid. Every other target reads saved."""
 
     def field_value(target, display: str, reference: str, field: str) -> calc.Value:
         spec = project.types.get(target.type)
@@ -1670,7 +1680,10 @@ def _make_calc_resolver(
                 f"{field!r} is a list-valued field; field references read a "
                 "single quantity, and lists are out of scope"
             )
-        value = (target.fields or {}).get(field)
+        fields = target.fields or {}
+        if fields_overlay is not None and target is fields_overlay[0]:
+            fields = {**fields, **fields_overlay[1]}
+        value = fields.get(field)
         if value is None or (isinstance(value, str) and not value.strip()):
             raise calc.CalcError(
                 f"cross-item reference {reference!r}: {display}'s field "
@@ -2097,10 +2110,13 @@ def preview_inline_spans(
     project. Cross-item references resolve against the snapshot's cached
     `_env`s, exactly as a build resolves them.
 
-    `fields` is the editor's draft-field bag (§3.3): accepted from day one
-    so the field-reference slice (§4, item G1) needs no signature change,
-    and ignored until that slice lands -- today's arithmetic reads body
-    text, snapshot envs and the lockfile, nothing field-derived.
+    `fields` is the editor's draft-field bag (§3.3): the item being edited
+    is read with it overlaid on its saved fields -- a span of this item
+    naming its own field (`DEC-001.$rds_on`) computes with the value the
+    author typed, not the value on disk -- while every other item keeps
+    reading saved (§3.2's limit: the bag describes THIS item). The overlay
+    is a local merge inside the resolver; `item.fields` is never mutated,
+    and the pass stays as side-effect-free as the rest of the preview.
 
     `line`/`start`/`end` are coordinates within `body_text` (the route's
     contract), not file lines. The one deliberate message divergence from
@@ -2115,7 +2131,27 @@ def preview_inline_spans(
     not. At most the first `PREVIEW_SPAN_LIMIT` triggered spans are
     evaluated, in source order; the route reports the truncation (§3.3).
     """
-    del fields  # accepted-and-unused until G1 (the §3.4 contract)
+    by_key = _key_index(project)
+    # The collision warnings and the declared-fields listing ride the same
+    # env hooks `_run_item_calcs` installs, so the resolver's vocabulary --
+    # the hyphenated-field-name error's "the item type declares: ..." --
+    # is the build's here too. Warnings are collected and dropped: the row
+    # schema is three-status (§3.3), and the overlay never feeds the
+    # collision check, which reads the target's SAVED fields (the check
+    # pass warns on the same reference the same way).
+    calc_warnings: list[str] = []
+
+    def field_fields(target_str: str) -> list[str]:
+        target = resolve_link_target(by_key, project, target_str)
+        spec = project.types.get(target.type) if target is not None else None
+        if spec is None:
+            return []
+        return sorted(
+            name
+            for name in spec.fields
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
+        )
+
     records = getattr(project, "_source_lock", None)
     if records is None:
         # An unbuilt project has no memo. Reading the lockfile is itself
@@ -2123,8 +2159,13 @@ def preview_inline_spans(
         # memoises onto the project.
         records, _problem = citations_mod.read_lockfile(project)
     env: dict[str, calc.Value] = {
-        calc.RESOLVER_KEY: _make_calc_resolver(project, _key_index(project)),
+        calc.RESOLVER_KEY: _make_calc_resolver(
+            project, by_key, calc_warnings,
+            fields_overlay=(item, fields) if fields else None,
+        ),
         calc.SOURCE_RESOLVER_KEY: _make_source_resolver(project, item, records, {}, []),
+        calc.CALC_WARNINGS_KEY: calc_warnings,
+        calc.FIELD_FIELDS_KEY: field_fields,
     }
     origins: dict[str, int | None] = {}
     events: list[tuple[int, tuple]] = [

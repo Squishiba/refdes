@@ -17,6 +17,9 @@ Scenarios, one node process:
 - debounce: a keystroke schedules one request 400 ms later; a second
   keystroke resets it (§3.1); the request carries the textarea text and the
   draft's ``fields`` bag (§3.3).
+- a FIELD keystroke schedules the same debounced request carrying the
+  drafted bag (slice C, §6.4); the response renders rows and mutates an
+  unfocused body not at all (§3.5 focus rule).
 - supersede: typing after a request fires discards the response silently --
   no panel update, no text change -- and the next debounce re-requests (§3.6).
 - revision guard: a payload whose ``revision`` is not the form's own is
@@ -599,6 +602,39 @@ function cpSpan(text, stored, computed, name = 'Vbad', line = 0) {
   results.debounce = {
     firedOnKeystroke, at399, at401, midReset, afterReset,
     sentText: sent.text, sentFields: sent.fields,
+  };
+  drafts.clearDraft(h);
+}
+
+// -- a FIELD keystroke drives the same debounced request (slice C, §3.2/§6.4):
+//    typing in the form's own fieldControl schedules /calc carrying the
+//    drafted bag; the body text is unchanged, so the response renders rows
+//    and -- textarea unfocused -- mutates nothing (§3.5 focus rule).
+{
+  const h = 'DEC-FIELDFIRE';
+  const item = editItem(h);
+  item.edit.fields = { status: { editable: true, type: 'text' } };
+  const editor = createEditor(item, h, () => {}, () => {});
+  const area = editor.bodyControl(T1, null);
+  const calls = () => calcCalls.filter((c) => c.path.includes(encodeURIComponent(h)));
+  await settleCalc(calls()[0], payload([]));
+  const base = calls().length;
+  const field = editor.fieldControl('status', '', null);
+  field.value = 'open';
+  field.dispatch('input');
+  const firedOnKeystroke = calls().length; // scheduled, not fired
+  await advance(399);
+  const at399 = calls().length;
+  await advance(2);
+  const after = calls().length;
+  const sent = calls()[base].body;
+  await settleCalc(calls()[base], payload([spanOn(T1, '5 V', '4 V')]));
+  results.fieldFire = {
+    firedOnKeystroke, at399, after,
+    sentFields: sent.fields,
+    sentText: sent.text,
+    rows: findAll(editor.liveCalcPanel, 'live-calc-row').length,
+    textKept: area.value === T1,
   };
   drafts.clearDraft(h);
 }
@@ -1253,6 +1289,25 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node(tmp_
     assert db["sentText"].endswith("xyz") and db["sentFields"] == {"status": "open"}, (
         "the request must carry the textarea text and the draft's fields bag "
         "verbatim (§3.3): a constant empty bag passes the old shape check"
+    )
+
+    ff = results["fieldFire"]
+    assert ff["firedOnKeystroke"] == 1 and ff["at399"] == 1 and ff["after"] == 2, (
+        "typing in the FIELD input must schedule the same debounced /calc "
+        "request (§6.4): it fired immediately, never, on the wrong clock"
+    )
+    assert ff["sentFields"] == {"status": "open"}, (
+        "the field-triggered request must carry the drafted field value "
+        "verbatim (§3.3)"
+    )
+    assert ff["sentText"] == T1, (
+        "the field-triggered request must carry the body text unchanged: "
+        "the author typed in the field, not the body"
+    )
+    assert ff["rows"] == 1, "the field-triggered response did not render its row"
+    assert ff["textKept"] is True, (
+        "the field-edit response mutated the body text: the textarea is "
+        "unfocused, so §3.5's focus rule keeps it display-only"
     )
 
     sup = results["supersede"]

@@ -58,8 +58,8 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
   // for an editable form: it reads the form's own revision through the
   // accessor below (§3.6 guard 2 -- never app.js's unassigned openRevision,
   // which is never assigned), stays quiet while a save round-trip is in
-  // flight (§3.1), and sends the draft field bag with every request
-  // (carried, inert, until the field-reference slice).
+  // flight (§3.1), and sends the draft field bag with every request -- a
+  // field edit schedules one too (fieldsChanged, §3.2/§6.4).
   let saving = false;
   const liveCalc = createLiveCalc(handle, {
     getRevision: () => revision,
@@ -204,6 +204,9 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
       setDraftField(handle, name, node.value);
       note('');
       refreshStatus();
+      // A field is a calc input (design §3.2/§6.4): the panel re-reads the
+      // draft bag on the same debounced request the body keystrokes use.
+      liveCalc.fieldsChanged();
     };
     const node = applyControl(existing, spec, shown, writeDraft)
       || fieldControlNode(spec, shown, writeDraft);
