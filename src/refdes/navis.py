@@ -1274,23 +1274,45 @@ def mint_keys(project: Project, write: bool = True) -> list[tuple[Item, str]]:
 
     rewrites: list[FileRewrite] = []
     assignments: list[tuple[Item, str]] = []
+    yaml_rel: set[str] = set()
     for rel, entries in by_file.items():
         path = os.path.join(project.root, rel)
         source = textio.SourceText.of(path)
         text = source.text
         lines = source.lines
+        markdown_entries = [(item, occ, key) for item, occ, key in entries if item.body_line is not None]
+        yaml_entries = [(item, occ, key) for item, occ, key in entries if item.body_line is None]
+        if yaml_entries:
+            if rel.endswith(".md"):
+                for item, _occ, _key in yaml_entries:
+                    project.warn(
+                        "navi marker has no key, and its body has no source "
+                        "line in its own file -- refdes mints keys only where "
+                        "the marker's bytes can be located exactly; the marker "
+                        "stays keyless",
+                        file=rel, line=item.source_line, item_id=item.id,
+                        code=NAVI_MINT_REFUSED_CODE,
+                    )
+            else:
+                from .navis_yaml import plan_yaml_mints
+
+                file_items = [i for i in project.local_items if i.source_file == rel]
+                plan = plan_yaml_mints(text, yaml_entries, file_items)
+                for item, reason in plan.refused:
+                    project.warn(
+                        "navi marker has no key, and its body is a `body:` "
+                        f"scalar in a YAML list file -- {reason}; refdes mints "
+                        "keys only where the marker's bytes can be located "
+                        "exactly; the marker stays keyless",
+                        file=rel, line=item.source_line, item_id=item.id,
+                        code=NAVI_MINT_REFUSED_CODE,
+                    )
+                assignments.extend(plan.minted)
+                if plan.after is not None:
+                    rewrites.append(FileRewrite(path=path, rel=rel, before=text, after=plan.after))
+                    yaml_rel.add(rel)
         by_line: dict[int, list[tuple[_Occurrence, str]]] = {}
-        for item, occ, key in entries:
-            if item.body_line is None:
-                project.warn(
-                    "navi marker has no key, and its body is a `body:` scalar "
-                    "in a YAML list file -- refdes mints keys only into "
-                    "markdown item bodies, where the marker's bytes can be "
-                    "located exactly; the marker stays keyless",
-                    file=rel, line=item.source_line, item_id=item.id,
-                    code=NAVI_MINT_REFUSED_CODE,
-                )
-                continue
+        for item, occ, key in markdown_entries:
             li = item.body_line - 1 + occ.line
             raw_line = _split_raw(item.body)[occ.line][0]
             if li >= len(lines) or lines[li] != raw_line:
@@ -1317,7 +1339,7 @@ def mint_keys(project: Project, write: bool = True) -> list[tuple[Item, str]]:
                 line = line[:open_end] + key + " " + line[ws:]
             lines[li] = line
         minted_ids = {id(occ) for splices in by_line.values() for occ, _ in splices}
-        for _item, occ, key in entries:
+        for _item, occ, key in markdown_entries:
             if id(occ) in minted_ids:
                 assignments.append((_item, key))
         after = source.render(lines)

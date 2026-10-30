@@ -300,36 +300,34 @@ def test_inert_markers_are_not_minted_file_stays_byte_identical(tmp_path):
     assert _bytes(tmp_path, "note-a.md") == before
 
 
-def test_yaml_list_body_scalar_refuses_mint(tmp_path):
+def test_yaml_list_body_scalar_mints(tmp_path):
+    # A literal block scalar's marker bytes are exact file bytes, so the
+    # mint lands there too (navis_yaml); see tests/test_navis_mint_yaml.py
+    # for the full shape matrix.
     yaml_file = (
         f"items:\n  - id: NOTE-001\n    key: {_item_key()}\n    type: note\n"
         "    title: T\n    body: |\n"
         "      line one\n      <!--navi: reminder-->\n"
     )
     config = _setup(tmp_path, {"items.yaml": yaml_file})
-    before = _bytes(tmp_path, "items.yaml")
     project = _load(config)
-    assert _bytes(tmp_path, "items.yaml") == before  # bytes intact
-    assert project.load_writes.minted_navi_keys == 0
-    refusals = [
-        d for d in project.diagnostics
-        if d.code == "NAVI_MINT_REFUSED" and "items.yaml" in (d.file or "")
-    ]
-    assert refusals, [str(d) for d in project.diagnostics]
-    assert "navi" in str(refusals[0]).lower()
+    assert project.load_writes.minted_navi_keys == 1
+    assert re.search(r"<!--navi:[0-9a-z]{11} reminder-->", _bytes(tmp_path, "items.yaml").decode())
 
 
-def test_yaml_quoted_scalar_refuses_mint(tmp_path):
+def test_yaml_quoted_scalar_mints(tmp_path):
+    # A single-line quoted scalar decodes exactly (navis_yaml); the
+    # escape bytes stay untouched.
     yaml_file = (
         f"items:\n  - id: NOTE-001\n    key: {_item_key()}\n    type: note\n"
         "    title: T\n"
         '    body: "line one <!--navi: rem --> with \\u00e9scapes"\n'
     )
     config = _setup(tmp_path, {"items.yaml": yaml_file})
-    before = _bytes(tmp_path, "items.yaml")
     project = _load(config)
-    assert _bytes(tmp_path, "items.yaml") == before
-    assert project.load_writes.minted_navi_keys == 0
+    assert project.load_writes.minted_navi_keys == 1
+    text = _bytes(tmp_path, "items.yaml").decode()
+    assert re.search(r'body: "line one <!--navi:[0-9a-z]{11} rem --> with \\u00e9scapes"', text)
 
 
 def test_yaml_folded_scalar_refuses_mint(tmp_path):
@@ -348,8 +346,8 @@ def test_yaml_folded_scalar_refuses_mint(tmp_path):
 def test_refused_marker_still_lists_keyless(tmp_path):
     yaml_file = (
         f"items:\n  - id: NOTE-001\n    key: {_item_key()}\n    type: note\n"
-        "    title: T\n    body: |\n"
-        "      <!--navi: reminder-->\n"
+        "    title: T\n    body: >\n"
+        "      folded <!--navi: reminder--> text\n"
     )
     config = _setup(tmp_path, {"items.yaml": yaml_file})
     project = _load(config)
