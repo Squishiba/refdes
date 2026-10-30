@@ -13,7 +13,10 @@ announced, idempotent, and never on `--no-write`.
 
 from __future__ import annotations
 
+import random
 import re
+
+import pytest
 
 from conftest import write_project_config
 
@@ -469,3 +472,132 @@ def test_yaml_marker_text_survives_the_mint(tmp_path):
     key = KEYED_RE.findall(_bytes(tmp_path, "items.yaml").decode())[0]
     project = _load(config, write=False)
     assert project.item_by_id("NOTE-001").body == f"x  <!--navi:{key} spaced  -->  y\n"
+
+
+# ---------------------------------------------------------------------------
+# fuzz: randomized shapes, invariants only (no golden bytes)
+# ---------------------------------------------------------------------------
+
+_WORDS = ("alpha", "beta", "gamma", "delta", "keep", "x", "y", "z")
+_MINTABLE = ("literal", "strip", "dq", "sq")
+
+
+def _fuzz_body(rng, shape, markers):
+    """One item body in one shape; markers are marker strings placed on
+    content lines."""
+    w = lambda: rng.choice(_WORDS)
+    if shape in ("literal", "strip"):
+        ind = " " * rng.choice((6, 7, 8))
+        lines = [f"{w()} {w()}"]
+        line = " ".join([w(), markers[0], w()])
+        if len(markers) > 1:
+            line = " ".join([w(), markers[0], w(), markers[1], w()])
+        lines.append(ind + line)
+        lines.append(f"{w()}")
+        body = "|\n" if shape == "literal" else "|-\n"
+        return body + "".join(f"{ind}{line}\n" for line in lines)
+    if shape == "dq":
+        esc = "".join(rng.choice(["", "", r"\u00e9", r"\t", r"\\", r"\u0041"]) for _ in range(3))
+        text = f"{w()} {esc}{markers[0]} {esc} {w()}"
+        if len(markers) > 1:
+            text = f"{w()} {markers[0]} {w()} {markers[1]} {w()}"
+        return '"' + text + '"\n'
+    if shape == "sq":
+        text = f"{w()} ''{w()} {markers[0]} {w()}"
+        if len(markers) > 1:
+            text = f"{w()} {markers[0]} '' {markers[1]} {w()}"
+        return "'" + text + "'\n"
+    # folded (refused): one content line, the marker text intact in it
+    line = f"{w()} {markers[0]} {w()}"
+    if len(markers) > 1:
+        line = f"{w()} {markers[0]} {w()} {markers[1]} {w()}"
+    return ">\n      " + line + "\n"
+
+
+def _fuzz_key(rng):
+    return "".join(rng.choice(keys_mod.ALPHABET) for _ in range(11))
+
+
+def _fuzz_file(rng):
+    n_items = rng.choice((1, 1, 2))
+    out = ["items:"]
+    shapes, bodies = [], []
+    for i in range(n_items):
+        shape = rng.choice(_MINTABLE + ("folded",))
+        markers = []
+        for _ in range(rng.choice((1, 1, 2))):
+            if rng.random() < 0.3:
+                markers.append(f"<!--navi:{_fuzz_key(rng)} {rng.choice(_WORDS)}-->")
+            else:
+                markers.append(f"<!--navi: {rng.choice(_WORDS)} {rng.choice(_WORDS)}-->")
+        body = _fuzz_body(rng, shape, markers)
+        shapes.append(shape)
+        bodies.append(body)
+        out.append(f"  - id: NOTE-{i + 1:03d}")
+        out.append(f"    key: {keys_mod.mint()}")
+        out.append("    type: note")
+        out.append("    title: T")
+        indented = body.split("\n")
+        head = indented[0]
+        out.append(f"    body: {head}")
+        for line in indented[1:-1]:
+            out.append(line)
+    return "\n".join(out) + "\n", shapes
+
+
+@pytest.mark.parametrize("seed", range(150))
+def test_fuzz_yaml_mint_invariants(tmp_path, seed):
+    rng = random.Random(seed)
+    text, shapes = _fuzz_file(rng)
+    config = _setup(tmp_path, {"items.yaml": text})
+    name = "items.yaml"
+    before = _bytes(tmp_path, name)
+
+    # posture: --no-write never touches the bytes
+    cold = _load(config, write=False)
+    assert _bytes(tmp_path, name) == before
+    assert not cold.load_writes
+
+    old_bodies = {
+        item.id: item.body
+        for item in cold.local_items
+        if item.id
+    }
+
+    # writable load
+    project = _load(config)
+    after = _bytes(tmp_path, name)
+    minted_any = any(
+        s in _MINTABLE
+        and any(
+            not o.key and o.error is None
+            for o in navis.analyze_navis(old_bodies[f"NOTE-{i + 1:03d}"]).occurrences
+        )
+        for i, s in enumerate(shapes)
+    )
+    assert (project.load_writes.minted_navi_keys > 0) == minted_any
+    if not minted_any:
+        assert after == before  # refusal keeps bytes intact
+        return
+
+    # reload: every marker survives, keyless markers are validly keyed
+    warm = _load(config, write=False)
+    for i, shape in enumerate(shapes):
+        old = navis.analyze_navis(old_bodies[f"NOTE-{i + 1:03d}"]).occurrences
+        item = warm.item_by_id(f"NOTE-{i + 1:03d}")
+        assert item is not None
+        new = navis.analyze_navis(item.body).occurrences
+        assert len(new) == len(old), (seed, shape)
+        for o, n in zip(old, new):
+            assert n.text == o.text, (seed, shape)
+            if shape in _MINTABLE and not o.key and o.error is None:
+                assert n.key
+                assert keys_mod.malformed_key_message(n.key) is None
+            else:
+                assert n.key == o.key
+
+    # idempotence: a second writable load writes nothing
+    state = _bytes(tmp_path, name)
+    again = _load(config)
+    assert not again.load_writes
+    assert _bytes(tmp_path, name) == state
