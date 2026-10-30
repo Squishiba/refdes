@@ -1211,7 +1211,7 @@ def test_the_format_bar_mutates_the_body_through_the_shared_case_a_b_contract(tm
     hc = results["headingCycle"]
     want = [f"{'#' * n} Title here" for n in range(1, 7)] + ["Title here"]
     assert [s["line"] for s in hc["seq"]] == want, hc["seq"]
-    assert [s["caret"] for s in hc["seq"]] == [1, 3, 4, 5, 6, 7, 0], hc["seq"]
+    assert [s["caret"] for s in hc["seq"]] == [2, 3, 4, 5, 6, 7, 0], hc["seq"]
     assert hc["secondLine"] == "second para", "the heading op touches the caret line only"
     assert results["headingWithSel"]["value"] == "# alpha\nbeta", results["headingWithSel"]
 
@@ -1542,6 +1542,10 @@ const t5 = 'before\n> ```\n> x\n> ```\nafter';
 const end5 = lineEndBeforeAfter(t5);
 const close5 = t5.indexOf('> ```', t5.indexOf('x') + 1);
 const t6 = 'before\n```\nx\nafter';
+const t7 = 'before\n```\nx\n   ```\nafter';
+const end7 = lineEndBeforeAfter(t7);
+const t8 = 'before\n```\nx\n    ```\nafter';
+const t9 = 'before\n```\nx\n\t```\nafter';
 
 const cases = [
   { name: 'backtick info opener line', text: t1, caret: t1.indexOf('python'), fenceEnd: end1, want: 'afterFence' },
@@ -1556,6 +1560,9 @@ const cases = [
   { name: 'blockquoted content line', text: t5, caret: t5.indexOf('x'), fenceEnd: end5, want: 'afterFence' },
   { name: 'blockquoted closing line', text: t5, caret: close5 + 2, fenceEnd: end5, want: 'afterFence' },
   { name: 'unclosed fence content line', text: t6, caret: t6.indexOf('x'), want: 'end' },
+  { name: 'closer indented 3 closes', text: t7, caret: t7.indexOf('x'), fenceEnd: end7, want: 'afterFence' },
+  { name: 'closer indented 4 does not close', text: t8, caret: t8.indexOf('x'), want: 'end' },
+  { name: 'closer tab-indented does not close', text: t9, caret: t9.indexOf('x'), want: 'end' },
   { name: 'caret before fence', text: t1, caret: 0, want: 'beforeFence' },
 ];
 
@@ -1563,7 +1570,7 @@ function fenceCount(text) {
   let count = 0;
   for (const raw of text.split('\n')) {
     const line = raw.replace(/^[ \t]*(?:>[ \t]?)+/, '');
-    if (/^[ \t]{0,3}(?:`{3,}|~{3,})/.test(line)) count += 1;
+    if (/^[ ]{0,3}(?:`{3,}|~{3,})/.test(line)) count += 1;
   }
   return count;
 }
@@ -1786,7 +1793,7 @@ function applyHeadingExpected(text, caret) {
   let offset;
   if (!hashes) {
     replacement = '# ' + line;
-    offset = 1;
+    offset = 2;
   } else if (hashes[1].length < 6) {
     const more = '#'.repeat(hashes[1].length + 1);
     replacement = `${more} ${line.slice(hashes[1].length + 1)}`;
@@ -1858,7 +1865,7 @@ function strippedFenceLineExpected(line) {
 
 function fenceCloserExpected(marker) {
   const char = marker[0] === '~' ? '\\~' : '`';
-  return new RegExp(`^[ \t]*${char}{${marker.length},}[ \t]*$`);
+  return new RegExp(`^[ ]{0,3}${char}{${marker.length},}[ \t]*$`);
 }
 
 function fenceBlocksExpected(text) {
@@ -1873,7 +1880,7 @@ function fenceBlocksExpected(text) {
   const blocks = [];
   let i = 0;
   while (i < lines.length) {
-    const opener = /^[ \t]{0,3}(`{3,}|~{3,})([^\n]*)$/.exec(stripped[i]);
+    const opener = /^[ ]{0,3}(`{3,}|~{3,})([^\n]*)$/.exec(stripped[i]);
     if (opener && !(opener[1][0] === '`' && opener[2].includes('`'))) {
       const closer = fenceCloserExpected(opener[1]);
       let j = i + 1;
@@ -2022,7 +2029,7 @@ def test_the_format_bar_inline_toggles_terminate_on_marker_only_selections(tmp_p
 @pytest.mark.skipif(NODE is None, reason="no node on PATH to run the served formatbar module")
 def test_the_format_bar_block_inserts_land_outside_every_fence_shape(tmp_path):
     cases = _node_json(tmp_path, FENCE_HARNESS, timeout=FENCE_TIMEOUT_S)
-    assert len(cases) == 13
+    assert len(cases) == 16
     for case in cases:
         assert case["execs"] == 1, case
         assert case["inserted"] >= 0, case

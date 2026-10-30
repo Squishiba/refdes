@@ -11,7 +11,7 @@
 const FALLBACK_KEY = 'refdes.live-calc.fallback';
 const FALLBACK_NOTE = 'Undo may need more than one step in this browser.';
 const TABLE = '| a | b |\n|---|---|\n|   |   |';
-const FENCE_OPEN = new RegExp('^[ \\t]{0,3}(`{3,}|~{3,})([^\\n]*)$');
+const FENCE_OPEN = new RegExp('^[ ]{0,3}(`{3,}|~{3,})([^\\n]*)$');
 const BLOCKQUOTE_PREFIX = new RegExp('^[ \\t]*(?:>[ \\t]?)+');
 const HEADING = new RegExp('^(#{1,6})\\s+([\\s\\S]*)$');
 const URL = new RegExp('^https?:\\/\\/', 'i');
@@ -122,7 +122,7 @@ function strippedFenceLine(line) {
 
 function fenceCloser(marker) {
   const char = marker[0] === '~' ? '\\~' : '`';
-  return new RegExp(`^[ \\t]*${char}{${marker.length},}[ \\t]*$`);
+  return new RegExp(`^[ ]{0,3}${char}{${marker.length},}[ \\t]*$`);
 }
 
 // CommonMark fence scan: a line opener (up to 3 spaces, ``` or ~~~, blockquote
@@ -396,7 +396,7 @@ function applyHeading(area, opts) {
   let caret;
   if (!match) {
     replacement = '# ' + line;
-    caret = 1;
+    caret = 2;
   } else if (match[1].length < 6) {
     const hashes = '#'.repeat(match[1].length + 1);
     replacement = hashes + ' ' + match[2];

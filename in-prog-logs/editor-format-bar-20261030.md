@@ -18,7 +18,7 @@ mutator behavior before the real-browser checklist.
   - core toolbar: bold, italic, strike, code, heading, list, numbered list,
     quote, link, table, horizontal rule;
   - real buttons with `aria-label`, mousedown focus preservation, save gate,
-    and the five bounded shortcuts.
+    and the four bounded shortcuts.
 - Wired `editor.js`: imports `createFormatBar`, `applyEdit`, and
   `blockInsertPlan`; creates the bar with the save-window flag; attaches it in
   `bodyControl`; converts `insertIntoBody` and `insertSourceLine` to the shared
@@ -33,7 +33,7 @@ mutator behavior before the real-browser checklist.
   placeholder, caret, draft, fence, and localStorage checks. It red-first on
   the missing toggle behavior, then failed on a duplicated Case A insertion
   found by the harness.
-- Strengthened static checks to pin the exact five shortcuts, their modifier
+- Strengthened static checks to pin the exact four shortcuts, their modifier
   conditions, every button against `OPS`, and the formatbar's own save gates.
 
 ## Verification
@@ -117,3 +117,23 @@ checks line caret behavior.
   coexistence cases pass.
 - `python -m pytest -q`: 5552 passed, 2 skipped.
 - CI: pending at the time this round's code was staged.
+
+## Review round 5
+
+Fixed the heading first-cycle caret. Red: `Title here` at caret 3 became
+`# Title here` with caret 1, so typing `x` produced `#xTitle here`. The first
+cycle now puts the caret at 2; node expects `[2, 3, 4, 5, 6, 7, 0]`, and
+Chromium/Firefox type `X` after the first click and get `# XTitle here`.
+
+Capped fence openers and closers at three spaces. Red with the old unbounded
+closer: a line indented four spaces or by a tab closed the fence, so an HR
+inserted at content caret `x` landed after that line. Green: a three-space
+closer still closes; four spaces and a tab are fence content, moving the
+insert after the whole block. The sweep's local expected fence rules changed
+in lockstep.
+
+Added browser assertions for empty `execCommand('insertText')` toggles.
+Marker-only and list toggle-offs produce the expected empty/marker-stripped
+text with `refdes.live-calc.fallback` null and the fallback note hidden in
+both browsers. The three-newline after-fence block-insert nit is intentionally
+left as is: it follows the existing block-padding rule.

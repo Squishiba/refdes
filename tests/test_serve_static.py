@@ -990,11 +990,11 @@ def test_the_format_bar_fence_scan_follows_the_markdown_renderer():
 
     The production renderer is markdown-it's CommonMark/gfm-like parser, which
     recognizes ``` and ~~~ fences (build.py:_FENCE_LINE_RE mirrors the same
-    ```/~~~ shape), including blockquoted fences and a closer at least as long
-    as the opener.
+    ```/~~~ shape), including blockquoted fences, a closer at least as long
+    as the opener, and at most three spaces of indentation on fence lines.
     """
     bar = js_code("formatbar.js")
-    assert r"const FENCE_OPEN = new RegExp('^[ \\t]{0,3}(`{3,}|~{3,})([^\\n]*)$');" in bar
+    assert r"const FENCE_OPEN = new RegExp('^[ ]{0,3}(`{3,}|~{3,})([^\\n]*)$');" in bar
     assert r"const BLOCKQUOTE_PREFIX = new RegExp('^[ \\t]*(?:>[ \\t]?)+');" in bar
     assert "const FENCE = new RegExp(" not in bar
     assert "FENCE.lastIndex" not in bar
@@ -1007,7 +1007,7 @@ def test_the_format_bar_fence_scan_follows_the_markdown_renderer():
     assert "const end = j < lines.length ? lines[j].end : text.length;" in fence
     assert "blocks.push({ start: lines[i].start, end, endLine: end });" in fence
     assert r"const char = marker[0] === '~' ? '\\~' : '`';" in bar
-    assert r"new RegExp(`^[ \\t]*${char}{${marker.length},}[ \\t]*$`)" in bar
+    assert r"new RegExp(`^[ ]{0,3}${char}{${marker.length},}[ \\t]*$`)" in bar
 
 
 def test_the_font_setting_is_wired_into_the_editor():
