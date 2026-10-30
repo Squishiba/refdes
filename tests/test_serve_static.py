@@ -836,3 +836,78 @@ def test_the_auto_fill_toggles_on_one_persisted_preference():
     # Case A goes through execCommand, which mutates natively)
     assert panel.count("area.value = ") == 1
     assert "innerHTML" not in panel
+
+
+# ------------------------------------------------------------ formatting bar (slice 1)
+
+
+def test_the_format_bar_is_wired_into_the_body():
+    """The bar has to reach the page the same way the pickers and the live-calc
+    panel do: the module exists, editor.js imports and attaches it to the body
+    textarea, and item.js mounts it immediately above that textarea."""
+    assert os.path.isfile(os.path.join(STATIC, "formatbar.js"))
+    editor = js_code("editor.js")
+    item = js_code("item.js")
+    assert "from './formatbar.js'" in editor
+    assert "createFormatBar(handle, { isSaving: () => saving })" in editor
+    assert "area._refdesFormatBar = formatBar.node;" in editor
+    assert "formatBar.attach(area);" in editor
+    assert editor.index("if (!edit.editable)") < editor.index("const formatBar = createFormatBar")
+    assert editor.count("area._refdesFormatBar = formatBar.node;") == 1
+    assert editor.count("formatBar.attach(area);") == 1
+
+    assert "body.appendChild(bodyArea._refdesFormatBar);" in item
+    assert item.index("body.appendChild(bodyArea._refdesFormatBar);") < item.index(
+        "body.appendChild(bodyArea);"
+    )
+
+    with open(os.path.join(STATIC, "style.css"), encoding="utf-8") as fh:
+        css = fh.read()
+    assert ".format-bar" in css
+    assert ".fmt-core" in css
+    assert ".fmt-btn" in css
+    assert ".format-bar-note" in css
+
+
+def test_the_format_bar_shares_the_case_a_b_mutator_and_save_gate():
+    """The bar must mutate through one shared path, not by writing to the
+    textarea ad hoc: Case A tries the native insertion once, Case B splices and
+    dispatches exactly one synthetic input event. The same save-window gate as
+    live-calc must stop both the bar and the editor's insertion helpers."""
+    bar = js_code("formatbar.js")
+    editor = js_code("editor.js")
+
+    assert "export function applyEdit(" in bar
+    assert "export function blockInsertPlan(" in bar
+    assert "export function createFormatBar(" in bar
+    assert "export const SHORTCUTS = [" in bar
+    assert bar.count("document.execCommand('insertText', false, text)") == 1
+    assert bar.count("area.value = ") == 1
+    assert bar.count("area.dispatchEvent(new Event('input', { bubbles: true }))") == 1
+    assert "if (opts.isSaving && opts.isSaving()) return false;" in bar
+    assert "const FALLBACK_KEY = 'refdes.live-calc.fallback'" in bar
+    assert "Undo may need more than one step in this browser." in bar
+    assert "note.hidden = !readFallbackFlag();" in bar
+    assert "if (opts.fallback) opts.fallback();" in bar
+    assert "innerHTML" not in bar
+
+    assert "const plan = blockInsertPlan(area, text);" in editor
+    assert "plan.caret," in editor
+    assert "if (!applyEdit(area, at, at, inserted, after, after, { isSaving: () => saving })) return;" in editor
+
+
+def test_the_format_bar_is_real_buttons_and_only_the_bounded_shortcuts():
+    """§B: real focusable buttons, labels, no focus stealing, and only the
+    shortcuts whose browser-reserved neighbors were explicitly checked."""
+    bar = js_code("formatbar.js")
+    for op in ("bold", "italic", "strike", "code", "heading", "list", "numbered",
+               "quote", "link", "table", "hr"):
+        assert f"op: '{op}'" in bar or f"'{op}'," in bar, op
+    assert "button.type = 'button';" in bar
+    assert "button.setAttribute('aria-label', aria);" in bar
+    assert "addEventListener('mousedown', (event) => event.preventDefault());" in bar
+    assert "addEventListener('click', () => run(op));" in bar
+    assert "(event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey" in bar
+    assert "String(event.code) === 'Digit5'" in bar
+    assert "event.preventDefault();" in bar
+    assert bar.count("event.preventDefault()") == 2

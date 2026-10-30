@@ -15,6 +15,7 @@ import { createLinksSection } from './links.js';
 import { createImagePicker } from './images.js';
 import { createSourcePicker } from './sourcepicker.js';
 import { createLiveCalc } from './live-calc.js';
+import { createFormatBar, applyEdit, blockInsertPlan } from './formatbar.js';
 import { fieldControlNode, applyControl } from './controls.js';
 
 function el(tag, cls, text) {
@@ -76,6 +77,11 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     getFields: () => draft.fields,
   });
 
+  // The formatting bar shares the same textarea, draft and save window as
+  // typing and the live-calc panel. It is mounted by item.js immediately
+  // above the textarea, via the node stashed on the control in bodyControl.
+  const formatBar = createFormatBar(handle, { isSaving: () => saving });
+
   const bar = el('div', 'edit-bar');
   const status = el('span', 'edit-status muted', 'saved');
   const save = el('button', 'btn save', 'Save');
@@ -126,19 +132,16 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
   function insertIntoBody(text) {
     const area = bodyArea;
     if (!area) return;
-    const at = area.selectionStart === null ? area.value.length : area.selectionStart;
-    const tail = area.selectionEnd === null ? at : area.selectionEnd;
-    const before = area.value.slice(0, at);
-    const after = area.value.slice(tail);
-    const open = before === '' || before.endsWith('\n\n') ? '' : '\n\n';
-    const close = after === '' || after.startsWith('\n\n') ? '' : '\n\n';
-    const chunk = open + text + close;
-    area.value = before + chunk + after;
-    const caret = before.length + chunk.length;
-    area.setSelectionRange(caret, caret);
-    area.focus();
-    if (area._refdesCommit) area._refdesCommit();
-    else setDraftBody(handle, area.value);
+    const plan = blockInsertPlan(area, text);
+    applyEdit(
+      area,
+      plan.start,
+      plan.end,
+      plan.chunk,
+      plan.caret,
+      plan.caret,
+      { isSaving: () => saving },
+    );
   }
 
   // Source lines belong inside an existing calc fence. A caret inside one
@@ -168,10 +171,8 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     const at = nextLine >= 0 && nextLine < chosen.end ? nextLine + 1 : chosen.end;
     const prefix = at > 0 && body[at - 1] !== '\n' ? '\n' : '';
     const inserted = prefix + proposal.line + '\n';
-    area.value = body.slice(0, at) + inserted + body.slice(at);
     const after = at + inserted.length;
-    area.setSelectionRange(after, after);
-    setDraftBody(handle, area.value);
+    if (!applyEdit(area, at, at, inserted, after, after, { isSaving: () => saving })) return;
     addDraftPin(handle, {
       path: proposal.path, key: proposal.key, unit: proposal.unit, name: proposal.name,
       ...(proposal.reader === 'pdf' ? {
@@ -232,10 +233,12 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     area._refdesCommit = writeBody;
     area.addEventListener('input', writeBody);
     bodyArea = area;
+    area._refdesFormatBar = formatBar.node;
     // Bind once per textarea and re-arm here (design §3.8): a re-render
     // carries the node over, so the new editor instance takes it from the
     // previous controller and the live-calc layer re-arms against this form.
     liveCalc.attach(area);
+    formatBar.attach(area);
     return area;
   }
 
