@@ -66,6 +66,8 @@ silent" (rows 0).
 
 - Firefox cold 20 on the fixed tree: **0/20 failed** (`coldfix_*.json`).
 - `tests/test_editor_live_calc.py` green; full suite 5101 passed / 2 skipped.
+- Windows CI failed the first push (WinError 206: the harness outgrew the
+  32k `node -e` command-line limit); fixed by running it from a tmp file.
 
 ## Status
 
