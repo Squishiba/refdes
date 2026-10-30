@@ -1,0 +1,13 @@
+{
+ "validKeylessSave": {
+  "handle": "~items/reqs.yaml:17",
+  "status": 200,
+  "body": "{\"kind\":\"applied\",\"ok\":true,\"message\":\"applied: yaml-item REQ-002: set_body body at items/reqs.yaml:18 [274:303]\",\"path\":\"items/reqs.yaml\",\"revision\":\"cf000f3b1e6969f62b576e5137ee7c470a9ed496676432049",
+  "onDisk": true
+ },
+ "staleHandle": {
+  "status": 422,
+  "body": "{\"kind\":\"refused\",\"ok\":false,\"message\":\"refused: no item '~items/reqs.yaml:14' in this project\",\"reason\":\"no item '~items/reqs.yaml:14' in this project\",\"path\":null}",
+  "patched": false
+ }
+}

@@ -1,0 +1,29 @@
+{
+ "panelVisible": true,
+ "rows": [
+  "okPstage0.44 W",
+  "okRds20 mΩ",
+  "okVinb22 V"
+ ],
+ "autofillChecked": true,
+ "lsAutofill": null,
+ "rowsAfterEdit": [
+  "okPstage0.44 W",
+  "okRds20 mΩ",
+  "okVinb22 V"
+ ],
+ "staleCount": 0,
+ "fillButtons": 0,
+ "fillMissing": true,
+ "fillChangedText": false,
+ "fillSnippet": "T_case = 55 degC + P_stage * Rth | degC",
+ "undoRevertedFill": true,
+ "panelUndoNote": [
+  "native undo may not cover these fills",
+  "auto-fill is off for this session (undo is unavailable here); Fill still works"
+ ],
+ "autofillApplied": true,
+ "lsAfter": null,
+ "fileTouched": false,
+ "postsCount": 4
+}

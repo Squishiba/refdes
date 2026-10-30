@@ -1,0 +1,3 @@
+fetched  analysis/power-budget.csv  sha256=18cd13291366...  hash-only
+         source value changed  analysis/power-budget.csv: tps62913_half_load_eff: 0.93 -> 0.90
+1 citation(s) processed, 0 failed

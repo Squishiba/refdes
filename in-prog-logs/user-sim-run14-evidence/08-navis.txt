@@ -1,0 +1,31 @@
+## keyless navis ls (after mint)
+WARNING items/REQ-010.md:12 [REQ-010] — navi marker key 'ZZZZZZZZZZZ' is not 11 characters of the key alphabet; write `<!--navi: the reminder-->` and the tool will mint the key
+5 Navis:
+  1. cq4f39 Model worst-case copper temperature.  REQ-010 (items/REQ-010.md:9)
+  2. rvet0k Model worst-case copper temperature.  REQ-010 (items/REQ-010.md:10)
+  3. w7ab8v aaaa text with a declared key.  REQ-010 (items/REQ-010.md:11)
+  4. 098ynt fresh keyless marker after stamp.  REQ-010 (items/REQ-010.md:20)
+  5. marker in a list-file body scalar.  REQ-002 (items/reqs.yaml:19)
+exit=0
+## navis all
+  3. w7ab8v aaaa text with a declared key.  REQ-010 (items/REQ-010.md:11)
+  4. 098ynt fresh keyless marker after stamp.  REQ-010 (items/REQ-010.md:20)
+  5. marker in a list-file body scalar.  REQ-002 (items/reqs.yaml:19)
+  archived: none -- archive records land in a later slice (design §13)
+## show prefix
+WARNING items/REQ-010.md:12 [REQ-010] — navi marker key 'ZZZZZZZZZZZ' is not 11 characters of the key alphabet; write `<!--navi: the reminder-->` and the tool will mint the key
+Navi: Model worst-case copper temperature.
+  key: cq4f39mzkpw
+  source: REQ-010 (items/REQ-010.md:9)
+## show keyless ordinal
+WARNING items/REQ-010.md:12 [REQ-010] — navi marker key 'ZZZZZZZZZZZ' is not 11 characters of the key alphabet; write `<!--navi: the reminder-->` and the tool will mint the key
+Navi: fresh keyless marker after stamp.
+  key: 098yntjav52
+  source: REQ-010 (items/REQ-010.md:20)
+## show bogus
+WARNING items/REQ-010.md:12 [REQ-010] — navi marker key 'ZZZZZZZZZZZ' is not 11 characters of the key alphabet; write `<!--navi: the reminder-->` and the tool will mint the key
+no Navi 'ZZZ': `refdes navis ls` numbers them 1..5; a selector is a number, a full key, or a key prefix
+exit=2
+## nonavi ls
+no Navis: no `<!--navi: text-->` marker in any item body
+exit=0

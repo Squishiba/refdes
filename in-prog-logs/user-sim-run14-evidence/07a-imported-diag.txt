@@ -1,0 +1,1 @@
+ERROR   platform:items/interfaces.yaml:7 [REQ-IF001] — refines points at 'REQ-MISSING', which does not exist -- a typo, a deleted item, or an item renamed while this reference was still bare, and a bare reference cannot follow a rename: write the item's new id here. See https://squishiba.github.io/refdes/troubleshooting.html#links.

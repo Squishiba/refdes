@@ -1,0 +1,15 @@
+{
+ "validSave": {
+  "status": 422,
+  "body": "{\"kind\":\"refused\",\"ok\":false,\"message\":\"refused: no item '~items/reqs.yaml:6' in this project\",\"reason\":\"no item '~items/reqs.yaml:6' in this project\",\"path\":null}"
+ },
+ "staleHandle": {
+  "status": 422,
+  "body": "{\"kind\":\"refused\",\"ok\":false,\"message\":\"refused: no item '~items/reqs.yaml:6' in this project\",\"reason\":\"no item '~items/reqs.yaml:6' in this project\",\"path\":null}",
+  "patched": false
+ },
+ "bogusHandle": {
+  "status": 422,
+  "body": "{\"kind\":\"refused\",\"ok\":false,\"message\":\"refused: no item '~items/reqs.yaml:999' in this project\",\"reason\":\"no item '~items/reqs.yaml:999' in this project\",\"path\":null}"
+ }
+}

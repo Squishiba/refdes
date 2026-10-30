@@ -1,0 +1,24 @@
+[
+ {
+  "key": "cq4f39mzkpw",
+  "text": "Model worst-case copper temperature.",
+  "source": {
+   "item": "REQ-010",
+   "key": "dprn1x0k1cn",
+   "file": "items/REQ-010.md",
+   "line": 9
+  }
+ },
+ {
+  "key": "rvet0knp4pn",
+  "text": "Model worst-case copper temperature.",
+  "source": {
+   "item": "REQ-010",
+   "key": "dprn1x0k1cn",
+   "file": "items/REQ-010.md",
+   "line": 10
+  }
+ },
+ {
+  "key": "w7ab8vvkweq",
+  "text": 

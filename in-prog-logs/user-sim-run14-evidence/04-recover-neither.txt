@@ -1,0 +1,7 @@
+exit=2
+--- stdout ---
+
+--- stderr ---
+recover refused: the live file 'items/reqs.yaml' matches neither the recorded replacement nor the recorded original: it changed outside the transaction, so recover refuses to overwrite it (journal kept)
+nothing was changed and the journal is kept. A corrupt manifest means the journal's own record of the interrupted save cannot be trusted -- compare the live files against the manifest by hand.
+

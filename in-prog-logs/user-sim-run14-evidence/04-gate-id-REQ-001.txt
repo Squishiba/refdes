@@ -1,0 +1,8 @@
+exit=2
+--- stdout ---
+
+--- stderr ---
+usage: refdes [-h] [-V] [-c CONFIG] [--no-write]
+              {serve,build,check,revision,release,index,ls,thread,navis,work,id,fetch,audit,recover,init,new,schema,standard,keys,rename,calc-rewrite,stub-tests,former-ids,history} ...
+refdes: error: unrecognized arguments: REQ-001
+
