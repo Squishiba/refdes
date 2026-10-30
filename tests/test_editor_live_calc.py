@@ -128,6 +128,11 @@ class FakeNode {
     this._text = '';
     this.value = '';
     this.dataset = {};
+    this.style = {
+      _props: {},
+      setProperty(name, value) { this._props[name] = String(value); },
+      getPropertyValue(name) { return this._props[name] || ''; },
+    };
     this.disabled = false;
     this.hidden = false;
     this.checked = false;

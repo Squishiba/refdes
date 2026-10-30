@@ -15,6 +15,7 @@ import { createLinksSection } from './links.js';
 import { createImagePicker } from './images.js';
 import { createSourcePicker } from './sourcepicker.js';
 import { createLiveCalc } from './live-calc.js';
+import { createFontSetting } from './fontsetting.js';
 import { fieldControlNode, applyControl } from './controls.js';
 
 function el(tag, cls, text) {
@@ -50,7 +51,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     return {
       node: block, fieldControl: () => null, bodyControl: () => null,
       imagePicker: null, sourcePicker: createSourcePicker(item, handle, null),
-      liveCalcPanel: null,
+      liveCalcPanel: null, fontBar: null,
     };
   }
 
@@ -75,6 +76,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     isSaving: () => saving,
     getFields: () => draft.fields,
   });
+  const fontSetting = createFontSetting();
 
   const bar = el('div', 'edit-bar');
   const status = el('span', 'edit-status muted', 'saved');
@@ -235,6 +237,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     area._refdesCommit = writeBody;
     area.addEventListener('input', writeBody);
     bodyArea = area;
+    fontSetting.applyTo(area);
     // Bind once per textarea and re-arm here (design §3.8): a re-render
     // carries the node over, so the new editor instance takes it from the
     // previous controller and the live-calc layer re-arms against this form.
@@ -382,5 +385,6 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     // The live inline-calc panel, mounted by item.js under the textarea
     // beside the pickers (design §3.5, panel placement §6.3).
     liveCalcPanel: liveCalc.node,
+    fontBar: fontSetting.node,
   };
 }
