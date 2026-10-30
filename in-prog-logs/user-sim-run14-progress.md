@@ -29,6 +29,6 @@ Difficulties:
 - Headless Chromium triggers the panel's undo-unavailable note; auto-fill
   stands down for the session there (documented behavior), which is why
   the 0.77 edit stayed stale with a live Fill button.
-- Serves on 8755/8756 left running at end (PTYs); kill by PID next session.
+- Serves on 8755/8756 killed by PID at the end of the run.
 
 Finished: yes. Report and evidence committed on `user-sim-run14`, PR opened.
