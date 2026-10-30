@@ -2,7 +2,9 @@
 
 **Not under review; direction notes only.** These are the deferred ideas from
 the earlier 839-line proposal. None is implemented or required to ship the
-[first slice](inline-calc.md). Syntax, defaults, and examples here are leads for
+[first slice](inline-calc.md) — with one exception since: the *Live editor
+updates* note has been implemented, and its status line below records the
+decisions it landed with. Syntax, defaults, and examples here are leads for
 later design, not decisions made by that slice.
 
 ## Result-writing command
@@ -19,6 +21,23 @@ baseline/seal handling need a separate review; result-writing is not needed
 for hand-authored first-slice spans.
 
 ## Live editor updates
+
+**Status: implemented 2026-10-30** — PRs #386 (the read-only
+`POST /api/item/<ref>/calc` route), #387 (field references in calc spans)
+and #388 (panel, auto-fill and Fill in the browser editor), designed in
+`in-prog-logs/inline-calc-live-editor-design-20261020.md`. The owner
+decisions it landed with (§6 of that design): evaluation is keystroke-driven
+on a 400 ms debounce, with a flush on blur and on focus; the panel sits
+under the body textarea, beside the pickers; auto-fill fires on the
+checker's `stale` verdict only (never on every computed/stored difference),
+default ON behind a per-browser `localStorage` toggle
+(`refdes.live-calc.autofill`); the manual Fill button stays as the fallback
+and is idempotent; native undo rides `document.execCommand('insertText')`,
+browser-tested on Chromium and Firefox — where it proves unavailable, the
+panel says native undo may not cover the fills and auto-fill stands down
+for the session; the preview pane keeps the as-published view of saved text
+(owner D2), and `check`/`build` remain the verdict. The direction text
+below stands as the record of what was proposed.
 
 The possible editor flow is a debounced request to the Python server for
 replacement ranges, never a browser copy of the calc evaluator (owner D3).

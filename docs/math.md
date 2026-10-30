@@ -365,6 +365,17 @@ resolves to no local item also fails closed.
 `refdes revision` is unaffected: a revision stays a
 checkpoint, not a readiness claim.
 
+The browser editor makes the same verdicts live while you write: the body
+editor posts your draft to the server on a short debounce
+(`POST /api/item/<ref>/calc`) and a panel under the textarea lists each
+triggered span as ok, stale, or error with its computed value. Stale rows
+carry a Fill button, and with the panel's "update results while I type"
+checkbox on — on by default, saved per browser under
+`refdes.live-calc.autofill` — stale result slots fill themselves as you
+pause. A fill edits your unsaved draft only and one Ctrl+Z undoes it; where
+a browser's native undo cannot carry the edit, the panel says so and filling
+stays manual. `check` and `build` remain the verdict.
+
 The trigger is a **single-backtick** code span whose content contains `:=`.
 A span without `:=` is ordinary code (`V_cl = 0.8 V` stays a label), and a
 wider ``double-backtick`` span is never triggered — the escape hatch when
