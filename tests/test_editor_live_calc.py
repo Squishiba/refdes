@@ -913,14 +913,18 @@ console.log(JSON.stringify(results));
 
 
 @pytest.mark.skipif(NODE is None, reason="no node on PATH to run the served editor modules")
-def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node():
+def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node(tmp_path):
     script = (
         HARNESS.replace("__STATIC__", json.dumps(STATIC.replace(os.sep, "/")))
         .replace("__T1__", json.dumps(T1))
         .replace("__T1_FILLED__", json.dumps(T1_FILLED))
     )
+    # Run from a file, not `node -e`: the harness outgrew the 32k Windows
+    # command-line limit (WinError 206 in CI).
+    harness = tmp_path / "harness.mjs"
+    harness.write_text(script, encoding="utf-8")
     proc = subprocess.run(
-        [NODE, "--input-type=module", "-e", script],
+        [NODE, str(harness)],
         capture_output=True,
         text=True,
         timeout=NODE_TIMEOUT_S,
