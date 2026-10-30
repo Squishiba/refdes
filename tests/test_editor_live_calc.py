@@ -1087,6 +1087,9 @@ def test_the_live_calc_layer_debounces_guards_fills_and_persists_under_node(tmp_
         [NODE, str(harness)],
         capture_output=True,
         text=True,
+        # node speaks UTF-8; a Windows runner's locale is cp1252 and would
+        # mojibake the astral fixtures on the way back in.
+        encoding="utf-8",
         timeout=NODE_TIMEOUT_S,
         check=False,
     )
