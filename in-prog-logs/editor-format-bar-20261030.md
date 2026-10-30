@@ -35,8 +35,10 @@ mutator behavior before the real-browser checklist.
 
 All pass.
 
+- Real-browser checklist on Chromium and Firefox: toolbar DOM/a11y, bold
+  selection with one native undo, shortcuts, live-calc coexistence, and the
+  save-window gate all pass.
+
 ## Open
 
-- Real-browser checklist for Chromium and Firefox: native undo, shortcuts,
-  `Ctrl+I`, focus/a11y, save gate, live-calc coexistence.
-- Commit and PR are not created in this log.
+- None for slice 1.
