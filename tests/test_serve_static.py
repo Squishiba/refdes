@@ -174,6 +174,14 @@ def test_the_link_picker_is_wired_into_the_editor():
     assert "createLinksSection" in editor
     assert "'add_link'" in editor and "'remove_link'" in editor
     assert os.path.isfile(os.path.join(STATIC, "links.js"))
+    # slice 2: the candidate machinery is shared in pickers.js -- links.js
+    # imports it (no copy) and so does the bar's reference picker.
+    with open(os.path.join(STATIC, "links.js"), encoding="utf-8") as fh:
+        links = fh.read()
+    with open(os.path.join(STATIC, "formatbar.js"), encoding="utf-8") as fh:
+        bar = fh.read()
+    assert "from './pickers.js'" in links
+    assert "from './pickers.js'" in bar
 
 
 def test_the_link_draft_rides_the_one_draft_mechanism():
@@ -849,7 +857,11 @@ def test_the_format_bar_is_wired_into_the_body():
     editor = js_code("editor.js")
     item = js_code("item.js")
     assert "from './formatbar.js'" in editor
-    assert "createFormatBar({ isSaving: () => saving })" in editor
+    assert "createFormatBar({" in editor
+    assert "isSaving: () => saving" in editor
+    assert "focusPanel" in editor  # the bar's Image/Source buttons focus the panels
+    assert "const imagePicker = createImagePicker(item, handle, insertIntoBody);" in editor
+    assert "const sourcePicker = createSourcePicker(" in editor
     assert "area._refdesFormatBar = formatBar.node;" in editor
     assert "formatBar.attach(area);" in editor
     assert editor.index("if (!edit.editable)") < editor.index("const formatBar = createFormatBar")
@@ -865,6 +877,8 @@ def test_the_format_bar_is_wired_into_the_body():
         css = fh.read()
     assert ".format-bar" in css
     assert ".fmt-core" in css
+    assert ".fmt-refdes" in css
+    assert ".fmt-picker" in css
     assert ".fmt-btn" in css
     assert ".format-bar-note" in css
 
@@ -921,7 +935,15 @@ def test_the_format_bar_is_real_buttons_and_only_the_bounded_shortcuts():
     assert "(event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey" in bar
     assert "String(event.code) === 'Digit5'" in bar
     assert "event.preventDefault();" in bar
-    assert bar.count("event.preventDefault()") == 2
+    # Focus-preserving mousedown preventDefaults: core row, refdes row, picker
+    # rows. The textarea's keydown handler preventDefaults exactly the matched
+    # shortcut; the picker's popover keydown handler owns its own keys (Esc,
+    # arrows, Enter) while the dialog is focused -- never the textarea's.
+    assert bar.count("addEventListener('mousedown', (event) => event.preventDefault());") == 3
+    shortcut_handler = bar[bar.index("boundHandler = (event) => {"):bar.index("areaNode.addEventListener")]
+    assert shortcut_handler.count("event.preventDefault()") == 1
+    picker_handler = bar[bar.index("popover.addEventListener('keydown'"):bar.index("return { node: popover, open, close };")]
+    assert picker_handler.count("event.preventDefault()") == 4
 
 
 def _section(source, marker):

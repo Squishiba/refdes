@@ -1,5 +1,6 @@
 // The formatting bar's body-text mutation layer
-// (in-prog-logs/editor-format-toolbar-design-20261029.md §B, slice 1).
+// (in-prog-logs/editor-format-toolbar-design-20261029.md §B, slice 1;
+// §C refdes row, slice 2).
 //
 // The bar inserts markdown through the same textarea pipeline as typing:
 // Case A uses `execCommand('insertText')` so the native input event fires and
@@ -8,6 +9,8 @@
 // is live-calc's session key, so a browser that has proven `insertText`
 // broken for the panel stands the bar down too.
 
+import { candidatesFor, displayId, matchesFilter, rowLabel } from './pickers.js';
+
 const FALLBACK_KEY = 'refdes.live-calc.fallback';
 const FALLBACK_NOTE = 'Undo may need more than one step in this browser.';
 const TABLE = '| a | b |\n|---|---|\n|   |   |';
@@ -15,6 +18,19 @@ const FENCE_OPEN = new RegExp('^[ ]{0,3}(`{3,}|~{3,})([^\\n]*)$');
 const BLOCKQUOTE_PREFIX = new RegExp('^[ \\t]*(?:>[ \\t]?)+');
 const HEADING = new RegExp('^(#{1,6})\\s+([\\s\\S]*)$');
 const URL = new RegExp('^https?:\\/\\/', 'i');
+
+// The refdes skeletons (design §C/§H-4). The span and fence skeletons are
+// DECIDED to fail the build on purpose -- "the author cannot forget to fill
+// it in" -- and tests/test_editor_skeletons.py parses THESE constants, runs
+// the parsed strings through the real build, and pins the measured messages
+// (`inline calc name := 0 | V: stored result missing; write '= <quantity>'`
+// and `calc 'name': unknown name 'expr'`). Editing a string here fails that
+// test; the strings are the contract. The figure/value skeletons stay below
+// error (warnings only, design §C).
+export const SPAN_SKELETON = '`name := 0 | V`';
+export const FENCE_SKELETON = '```calc\nname = expr | V\n```';
+export const FIGURE_SKELETON = '[[fig:]]';
+export const VALUE_SKELETON = '{{}}';
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -494,6 +510,183 @@ function applyRule(area, opts) {
   applyEdit(area, plan.start, plan.end, plan.chunk, plan.caret, plan.caret, opts);
 }
 
+// refdes row (slice 2, design §C). Every op runs through the same applyEdit
+// pipeline as the core row; the skeletons place their `name` placeholder
+// SELECTED (typing replaces it) and the figure/value skeletons leave the
+// caret INSIDE the brackets.
+function applySpan(area, opts) {
+  const { start, end } = selectionIn(area);
+  // SPAN_SKELETON is `name := 0 | V`: the name sits at offset 1, four chars.
+  applyEdit(area, start, end, SPAN_SKELETON, start + 1, start + 5, opts);
+}
+
+function applyCalcFence(area, opts) {
+  // Block insert: blank-line padded, and AFTER the enclosing fence when the
+  // caret sits inside one (the §B fence rule) -- fences stay balanced.
+  const plan = blockInsertPlan(area, FENCE_SKELETON);
+  const textStart = plan.start + plan.open.length;
+  const nameAt = textStart + '```calc\n'.length;
+  applyEdit(area, plan.start, plan.end, plan.chunk, nameAt, nameAt + 'name'.length, opts);
+}
+
+function applyFigure(area, opts) {
+  const { start, end } = selectionIn(area);
+  const chosen = area.value.slice(start, end);
+  const chunk = '[[fig:' + chosen + ']]';
+  const idStart = start + '[[fig:'.length;
+  applyEdit(area, start, end, chunk, idStart, idStart + chosen.length, opts);
+}
+
+function applyValue(area, opts) {
+  const { start, end } = selectionIn(area);
+  const chosen = area.value.slice(start, end);
+  const chunk = '{{' + chosen + '}}';
+  const nameStart = start + 2;
+  applyEdit(area, start, end, chunk, nameStart, nameStart + chosen.length, opts);
+}
+
+export const REFDES_OPS = {
+  figure: applyFigure,
+  calc: applyCalcFence,
+  span: applySpan,
+  value: applyValue,
+};
+
+// The `[[ID]]` reference picker (design §C/§H-5): a popover over ALL items
+// with a type-ahead filter -- the links.js convention, now shared in
+// pickers.js. It shows display ids (`row.id || row.handle`) and never the
+// `@key` composite half (docs/design/keys.md: body refs are plain display
+// ids). Picking inserts at the textarea's current selection: `[[ID]]` with
+// a caret, `[[ID|sel]]` with a selection. Focus returns to the textarea on
+// pick, on Escape, and on close.
+function createReferencePicker({ getArea, isSaving, fallback, setExpanded }) {
+  const popover = el('div', 'fmt-picker fmt-picker-reference');
+  popover.hidden = true;
+  popover.setAttribute('role', 'dialog');
+  popover.setAttribute('aria-label', 'Insert a reference: pick an item');
+
+  const filter = el('input', 'fmt-picker-filter');
+  filter.type = 'search';
+  filter.placeholder = 'filter items…';
+  const list = el('div', 'fmt-picker-list');
+  popover.appendChild(filter);
+  popover.appendChild(list);
+
+  let all = [];
+  let total = null;
+  let visible = [];
+  let activeIndex = -1;
+
+  function render() {
+    list.textContent = '';
+    visible = [];
+    activeIndex = -1;
+    const want = filter.value.trim().toLowerCase();
+    for (const row of all) {
+      if (want && !matchesFilter(row, want)) continue;
+      const line = el('button', 'fmt-picker-row', rowLabel(row));
+      line.type = 'button';
+      line.addEventListener('mousedown', (event) => event.preventDefault());
+      line.addEventListener('click', () => pick(row));
+      list.appendChild(line);
+      visible.push(line);
+    }
+    if (!visible.length) list.appendChild(el('p', 'muted', 'no items match'));
+    // Count what is pickable against the full list (the links.js rule):
+    // rows past the page are unreachable, and the filter cannot find them.
+    if (total !== null && all.length < total) {
+      list.appendChild(el('p', 'muted', `showing the first ${all.length} of ${total} items -- the filter searches only these`));
+    }
+  }
+
+  function setActive(index) {
+    if (activeIndex >= 0 && visible[activeIndex]) visible[activeIndex].className = 'fmt-picker-row';
+    activeIndex = index;
+    if (activeIndex >= 0 && visible[activeIndex]) visible[activeIndex].className = 'fmt-picker-row active';
+  }
+
+  function load() {
+    all = [];
+    total = null;
+    visible = [];
+    activeIndex = -1;
+    list.textContent = '';
+    list.appendChild(el('p', 'muted', 'loading items…'));
+    candidatesFor(null)
+      .then((found) => {
+        all = found.items;
+        total = found.total;
+        render();
+      })
+      .catch((err) => {
+        list.textContent = '';
+        list.appendChild(el('p', 'banner bad', `items failed: ${err.message}`));
+      });
+  }
+
+  function pick(row) {
+    const area = getArea();
+    if (!area || isSaving()) return;
+    close();
+    // The selection the author had when the picker opened is still the
+    // textarea's selection (blur preserves it); read it fresh at pick time.
+    const { start, end } = selectionIn(area);
+    const chosen = area.value.slice(start, end);
+    const id = displayId(row);
+    const chunk = chosen ? `[[${id}|${chosen}]]` : `[[${id}]]`;
+    const caret = start + chunk.length;
+    applyEdit(area, start, end, chunk, caret, caret, { isSaving, fallback });
+    area.focus();
+  }
+
+  function open() {
+    if (!getArea()) return;
+    popover.hidden = false;
+    filter.value = '';
+    load();
+    filter.focus();
+    setExpanded(true);
+  }
+
+  function close() {
+    popover.hidden = true;
+    setExpanded(false);
+    const area = getArea();
+    if (area) area.focus();
+  }
+
+  filter.addEventListener('input', () => render());
+  popover.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close();
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (visible.length) setActive(Math.min(visible.length - 1, activeIndex + 1));
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (visible.length) setActive(Math.max(0, activeIndex - 1));
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      const target = visible[activeIndex >= 0 ? activeIndex : 0];
+      if (target) target.click(); // Enter activates like a click on the row
+      else close();
+    }
+  });
+
+  return { node: popover, open, close };
+}
+
+const REFDES_BUTTONS = [
+  ['reference', '[[ID]]', 'Reference: pick an item and insert [[ID]]'],
+  ['figure', '[[fig:]]', 'Figure reference [[fig:]]'],
+  ['calc', 'calc', 'Calc fence skeleton (fill the name and expression)'],
+  ['span', ':=', 'Inline calc span skeleton (fill the name and result)'],
+  ['value', '{{}}', 'Calc value {{name}}'],
+  ['image', 'Image', 'Open the images panel'],
+  ['source', 'Source', 'Open the sources panel'],
+];
+
 export const OPS = {
   bold: (area, opts) => applyInline(area, 'bold', '**', 'bold text', opts),
   italic: (area, opts) => applyInline(area, 'italic', '*', 'italic text', opts),
@@ -549,7 +742,7 @@ const BUTTONS = [
   ['hr', 'HR', 'Horizontal rule'],
 ];
 
-export function createFormatBar({ isSaving = () => false } = {}) {
+export function createFormatBar({ isSaving = () => false, focusPanel = null } = {}) {
   const node = el('div', 'format-bar');
   const core = el('div', 'fmt-core');
   node.appendChild(core);
@@ -565,9 +758,29 @@ export function createFormatBar({ isSaving = () => false } = {}) {
     note.hidden = false;
   }
 
+  const reference = createReferencePicker({
+    getArea: () => area,
+    isSaving,
+    fallback: showFallbackNote,
+    setExpanded: (open) => {
+      if (referenceButton) referenceButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+    },
+  });
+
   function run(op) {
     if (!area || (isSaving && isSaving())) return;
-    OPS[op](area, { isSaving, fallback: showFallbackNote });
+    if (op === 'reference') {
+      reference.open();
+      return;
+    }
+    if (op === 'image' || op === 'source') {
+      // Reuse the panels below the textarea (design §C: a second image/source
+      // picker is a non-goal); these buttons focus/open, never mutate.
+      if (focusPanel) focusPanel(op === 'image' ? 'images' : 'source');
+      return;
+    }
+    const apply = REFDES_OPS[op] || OPS[op];
+    apply(area, { isSaving, fallback: showFallbackNote });
   }
 
   for (const [op, label, aria] of BUTTONS) {
@@ -579,10 +792,30 @@ export function createFormatBar({ isSaving = () => false } = {}) {
     core.appendChild(button);
   }
 
+  // The refdes row sits in the same bar, visually separated (design §B).
+  const refdes = el('div', 'fmt-refdes');
+  node.appendChild(refdes);
+  node.appendChild(reference.node);
+  let referenceButton = null;
+  for (const [op, label, aria] of REFDES_BUTTONS) {
+    const button = el('button', `fmt-btn fmt-${op}`, label);
+    button.type = 'button';
+    button.setAttribute('aria-label', aria);
+    if (op === 'reference') {
+      button.setAttribute('aria-haspopup', 'dialog');
+      button.setAttribute('aria-expanded', 'false');
+      referenceButton = button;
+    }
+    button.addEventListener('mousedown', (event) => event.preventDefault());
+    button.addEventListener('click', () => run(op));
+    refdes.appendChild(button);
+  }
+
   function detach() {
     if (boundArea && boundHandler) boundArea.removeEventListener('keydown', boundHandler);
     boundArea = null;
     boundHandler = null;
+    if (!reference.node.hidden) reference.close();
   }
 
   const ctrl = {
