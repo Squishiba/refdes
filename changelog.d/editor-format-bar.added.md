@@ -11,5 +11,5 @@ panel stand down together. In Case B the bar says undo may need more than one
 step in that browser. The bar uses real focusable buttons with labels,
 prevents focus stealing on mousedown, gates clicks and shortcuts while a save
 is in flight, and binds only the checked shortcuts: `Ctrl/Cmd+B`,
-`Ctrl/Cmd+I`, `Ctrl/Cmd+K`, `Alt+Shift+5`, and `Ctrl/Cmd+Alt+C`.
+`Ctrl/Cmd+I`, `Ctrl/Cmd+K`, and `Alt+Shift+5`.
 `insertIntoBody` and `insertSourceLine` now use the same mutator.

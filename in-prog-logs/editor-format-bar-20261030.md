@@ -82,4 +82,38 @@ design-carved-out `Ctrl/Cmd+Alt+C` code binding.
 
 ## Open
 
-- None for round 3.
+- Awaiting round 4 CI.
+
+## Review round 4
+
+Fixed the astral test escapes and added a surrogate-pair guard. The generated
+JavaScript had literal Python `\U0001F600` text; it now uses `\u{1F600}`. A
+scratch mutation that treats UTF-16 offsets as code-point offsets makes the
+astral wrap/unwrap cases fail, proving the guard is not vacuous.
+
+Resolved the design's Ctrl/Cmd+Alt+C contradiction by removing that shortcut
+from slice 1. The bound set is Ctrl+B, Ctrl+I, Ctrl+K, and Alt+Shift+5; the
+fence shortcut is deferred to slice 2 pending Jared. Updated the design table,
+changelog, static audit, and code comments.
+
+Fixed `lineRange()` at caret 0 and blank first lines. Replaced the link scan
+with a bounded balanced scan that rejects unbalanced brackets and wiki-ref link
+text. Red cases showed blank-line ops hitting the second line, wiki refs
+leaving a stray bracket, and nested links collapsing to `[a b`.
+
+Removed the dead `handle` parameter. The sweep harness derives its expected
+case count. Added node coverage for all four line ops at caret 0 and blank
+first lines, plus wiki, nested, and ordinary links. Browser coverage now tests
+all four bound shortcuts, records `defaultPrevented` and textarea focus, and
+checks line caret behavior.
+
+## Round 4 verification
+
+- Main format-bar node test: passed.
+- Format-bar static audit: 5 passed.
+- Format-bar/font-targeted suite: 9 passed.
+- Exhaustive sweep: 50,890,818 cases, expected count derived, no failures.
+- Chromium and Firefox: all main, marker-only, shortcut, line-caret, and font
+  coexistence cases pass.
+- `python -m pytest -q`: 5552 passed, 2 skipped.
+- CI: pending at the time this round's code was staged.

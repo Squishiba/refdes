@@ -82,7 +82,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
   // The formatting bar shares the same textarea, draft and save window as
   // typing and the live-calc panel. It is mounted by item.js immediately
   // above the textarea, via the node stashed on the control in bodyControl.
-  const formatBar = createFormatBar(handle, { isSaving: () => saving });
+  const formatBar = createFormatBar({ isSaving: () => saving });
 
   const bar = el('div', 'edit-bar');
   const status = el('span', 'edit-status muted', 'saved');

@@ -29,10 +29,10 @@ Scenarios, one node process:
   Case B: splice, exactly one synthetic input, fallback key set and honored
   (the next op skips execCommand), the bar's one-line note shows.
 - the isSaving() gate: a click and a shortcut mid-save mutate nothing.
-- shortcuts: the SHORTCUTS array walks to exactly the §B bindings
-  (Ctrl/Cmd+B/I/K, Alt+Shift+5, Ctrl/Cmd+Alt+C); nothing browser-reserved
-  (Ctrl+Z, Ctrl+Shift+I, Ctrl+T, Ctrl+digits, bare letters) matches; a bound
-  keydown fires the op and preventDefaults.
+- shortcuts: the SHORTCUTS array walks to exactly the slice 1 bindings
+  (Ctrl/Cmd+B/I/K, Alt+Shift+5); nothing browser-reserved
+  (Ctrl+Z, Ctrl+Shift+I, Ctrl+T, Ctrl digits, Ctrl/Cmd+Alt letters, bare
+  letters) matches; a bound keydown fires the op and preventDefaults.
 - a11y: every button is ``<button type="button">`` with a non-empty
   aria-label; a mousedown preventDefaults (focus/selection stay in the
   textarea); the keydown listener is taken over (not stacked) across a
@@ -69,6 +69,7 @@ NODE_TIMEOUT_S = 120
 HARNESS = r"""
 const STATIC = __STATIC__;
 const url = (name) => `file://${STATIC}/${name}`;
+const hasSurrogatePair = (value) => value.length !== [...value].length;
 
 // ---------- storage stubs
 const sessionStore = new Map();
@@ -526,13 +527,14 @@ const results = {};
 }
 {
   const h = 'FB-ASTRALPAIR';
-  const body = '\U0001F600 **bold** x';
+  const body = '\u{1F600} **bold** x';
   const ed = openEditor(h, body);
   ed.select(body.indexOf('bold'), body.indexOf('bold') + 4);
   ed.click('bold');
   results.astralPairUnwrap = {
     value: ed.area.value,
-    want: '\U0001F600 bold x',
+    want: '\u{1F600} bold x',
+    surrogatePair: hasSurrogatePair(ed.area.value),
     selected: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
   };
   drafts.clearDraft(h);
@@ -637,6 +639,36 @@ const results = {};
   results.quote = { prefixed, stripped: ed.area.value };
   drafts.clearDraft(h);
 }
+{
+  const cases = {
+    heading: ['alpha\nbeta', '# alpha\nbeta'],
+    list: ['alpha\nbeta', '- alpha\nbeta'],
+    numbered: ['alpha\nbeta', '1. alpha\nbeta'],
+    quote: ['alpha\nbeta', '> alpha\nbeta'],
+  };
+  const blankCases = {
+    heading: ['\nbeta', '# \nbeta'],
+    list: ['\nbeta', '- \nbeta'],
+    numbered: ['\nbeta', '1. \nbeta'],
+    quote: ['\nbeta', '> \nbeta'],
+  };
+  for (const [op, [body, want]] of Object.entries(cases)) {
+    const h = `FB-LEADING-${op}`;
+    const ed = openEditor(h, body);
+    ed.select(0, 0);
+    ed.click(op);
+    results[`lineOpAtCaret0-${op}`] = { value: ed.area.value, want };
+    drafts.clearDraft(h);
+  }
+  for (const [op, [body, want]] of Object.entries(blankCases)) {
+    const h = `FB-BLANK-${op}`;
+    const ed = openEditor(h, body);
+    ed.select(0, 0);
+    ed.click(op);
+    results[`blankLineOpAtCaret0-${op}`] = { value: ed.area.value, want };
+    drafts.clearDraft(h);
+  }
+}
 
 // ---------- link
 {
@@ -682,6 +714,28 @@ const results = {};
     text: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
   };
   drafts.clearDraft(h);
+}
+{
+  const cases = [
+    ['wikiRefUrl', '[[REF]](url)', 9, '[[REF]](u[link text](url)rl)', true, true],
+    ['nestedLink', '[a [b] c](url)', 11, 'a [b] c', false, false],
+    ['plainLink', '[x](url)', 5, 'x', false, false],
+  ];
+  for (const [name, body, caret, want, wikiKept, inserted] of cases) {
+    const h = `FB-LINK-${name}`;
+    const ed = openEditor(h, body);
+    ed.select(caret, caret);
+    ed.click('link');
+    results[`linkRange-${name}`] = {
+      value: ed.area.value,
+      want,
+      wikiKept: ed.area.value.includes('[[REF]]'),
+      inserted: ed.area.value.includes('[link text](url)'),
+      expectedWikiKept: wikiKept,
+      expectedInserted: inserted,
+    };
+    drafts.clearDraft(h);
+  }
 }
 
 // ---------- table / HR: paragraph padding, fence safety
@@ -734,14 +788,15 @@ const results = {};
 // ---------- caret placement + the UTF-16 (astral) trap
 {
   const h = 'FB-ASTRAL';
-  const body = '\U0001F600 hello world';
+  const body = '\u{1F600} hello world';
   const ed = openEditor(h, body);
   ed.select(body.indexOf('hello'), body.indexOf('hello') + 5);
   ed.click('bold');
   results.astralWrap = {
     value: ed.area.value,
-    want: '\U0001F600 **hello** world',
-    ok: ed.area.value === '\U0001F600 **hello** world',
+    want: '\u{1F600} **hello** world',
+    ok: ed.area.value === '\u{1F600} **hello** world',
+    surrogatePair: hasSurrogatePair(ed.area.value),
     sel: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
   };
   drafts.clearDraft(h);
@@ -871,7 +926,14 @@ const results = {};
     ctrlDigit: fired({ ctrlKey: true, key: '1' }),
     ctrlAltT: fired({ ctrlKey: true, altKey: true, key: 't' }),
     ctrlAltC: fired({ ctrlKey: true, altKey: true, key: 'c' }),
+    ctrlAltB: fired({ ctrlKey: true, altKey: true, key: 'b' }),
+    ctrlAltI: fired({ ctrlKey: true, altKey: true, key: 'i' }),
+    ctrlAltK: fired({ ctrlKey: true, altKey: true, key: 'k' }),
+    ctrlAltDigit: fired({ ctrlKey: true, altKey: true, key: '1' }),
+    metaAltC: fired({ metaKey: true, altKey: true, key: 'c' }),
+    ctrlAltShiftC: fired({ ctrlKey: true, altKey: true, shiftKey: true, key: 'c' }),
     altShift5: fired({ altKey: true, shiftKey: true, code: 'Digit5', key: '%' }),
+    ctrlAltShift5: fired({ ctrlKey: true, altKey: true, shiftKey: true, code: 'Digit5' }),
     bareB: fired({ key: 'b' }),
     tab: fired({ key: 'Tab', ctrlKey: true }),
   };
@@ -1047,21 +1109,7 @@ console.log(JSON.stringify(results));
 
 @pytest.mark.skipif(NODE is None, reason="no node on PATH to run the served editor modules")
 def test_the_format_bar_mutates_the_body_through_the_shared_case_a_b_contract(tmp_path):
-    script = HARNESS.replace("__STATIC__", json.dumps(STATIC.replace(os.sep, "/")))
-    # Run from a file, not `node -e`: the harness outgrew the 32k Windows
-    # command-line limit (WinError 206 in CI).
-    harness = tmp_path / "harness.mjs"
-    harness.write_text(script, encoding="utf-8")
-    proc = subprocess.run(
-        [NODE, str(harness)],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=NODE_TIMEOUT_S,
-        check=False,
-    )
-    assert proc.returncode == 0, f"node harness failed:\n{proc.stdout}\n{proc.stderr}"
-    results = json.loads(proc.stdout.strip().splitlines()[-1])
+    results = _node_json(tmp_path, HARNESS)
 
     # -- wrap: markers land, inner text is selected, one execCommand, the
     #    draft commits through the ordinary input path
@@ -1145,6 +1193,7 @@ def test_the_format_bar_mutates_the_body_through_the_shared_case_a_b_contract(tm
     assert mal["selected"] == "**a\nb**", mal
 
     ap = results["astralPairUnwrap"]
+    assert ap["surrogatePair"] is True, ap
     assert ap["value"] == ap["want"], ap
     assert ap["selected"] == "bold", ap
 
@@ -1197,6 +1246,16 @@ def test_the_format_bar_mutates_the_body_through_the_shared_case_a_b_contract(tm
     unw = results["linkUnwrap"]
     assert unw["value"] == "go see REQ end", unw
     assert unw["text"] == "see REQ", unw
+    for name in ("wikiRefUrl", "nestedLink", "plainLink"):
+        lr = results[f"linkRange-{name}"]
+        assert lr["value"] == lr["want"], (name, lr)
+        assert lr["wikiKept"] is lr["expectedWikiKept"], (name, lr)
+        assert lr["inserted"] is lr["expectedInserted"], (name, lr)
+    for op in ("heading", "list", "numbered", "quote"):
+        caret0 = results[f"lineOpAtCaret0-{op}"]
+        assert caret0["value"] == caret0["want"], (op, caret0)
+        blank = results[f"blankLineOpAtCaret0-{op}"]
+        assert blank["value"] == blank["want"], (op, blank)
 
     # -- table / HR: block inserts keep blank-line padding, fences balanced
     tb = results["table"]
@@ -1213,6 +1272,7 @@ def test_the_format_bar_mutates_the_body_through_the_shared_case_a_b_contract(tm
 
     # -- the UTF-16 trap: the emoji is 2 code units, every offset must agree
     aw = results["astralWrap"]
+    assert aw["surrogatePair"] is True, aw
     assert aw["ok"] is True, (aw["value"], aw["want"])
     assert aw["sel"] == "hello", aw
 
@@ -1262,14 +1322,16 @@ def test_the_format_bar_mutates_the_body_through_the_shared_case_a_b_contract(tm
 
     # -- shortcuts: exactly the §B bindings; nothing the browser reserves
     sc = results["shortcuts"]
-    assert sc["boundOps"] == sorted(["bold", "italic", "link", "strike", "code"]), sc["boundOps"]
+    assert sc["boundOps"] == sorted(["bold", "italic", "link", "strike"]), sc["boundOps"]
     assert sc["ctrlB"] == ["bold"] and sc["metaB"] == ["bold"], sc
     assert sc["ctrlI"] == ["italic"], "Ctrl+I is bound (Jared's decision, §H-3)"
     assert sc["ctrlK"] == ["link"], sc
-    assert sc["ctrlAltC"] == ["code"], sc
+    for unbound in ("ctrlAltC", "ctrlAltB", "ctrlAltI", "ctrlAltK", "ctrlAltDigit",
+                    "metaAltC", "ctrlAltShiftC"):
+        assert sc[unbound] == [], f"{unbound} must not be bound: Ctrl/Cmd+Alt bindings collide"
     assert sc["altShift5"] == ["strike"], sc
     for reserved in ("ctrlShiftI", "ctrlShiftI2", "ctrlZ", "ctrlY", "ctrlT",
-                     "ctrlDigit", "ctrlAltT", "bareB", "tab"):
+                     "ctrlDigit", "ctrlAltT", "ctrlAltShift5", "bareB", "tab"):
         assert sc[reserved] == [], f"{reserved} must not be bound: the browser reserves it"
 
     kf = results["keydownFires"]
@@ -1673,7 +1735,7 @@ function snapSelection(text, start, end) {
 }
 
 function lineRangeLocal(text, caret) {
-  const start = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+  const start = caret === 0 ? 0 : text.lastIndexOf('\n', caret - 1) + 1;
   const end = text.indexOf('\n', start);
   return [start, end === -1 ? text.length : end];
 }
@@ -1742,11 +1804,23 @@ function applyHeadingExpected(text, caret) {
 function linkRangeExpected(text, caret) {
   const pair = text.lastIndexOf('](', Math.max(0, caret - 1));
   if (pair < 0) return null;
-  const open = text.lastIndexOf('[', pair);
+  let depth = 0;
+  let open = -1;
+  for (let i = pair - 1; i >= 0; i -= 1) {
+    if (text[i] === ']') depth += 1;
+    else if (text[i] === '[') {
+      if (depth === 0) {
+        open = i;
+        break;
+      }
+      depth -= 1;
+    }
+  }
   const close = text.indexOf(')', pair + 2);
-  if (open < 0 || close < 0) return null;
+  if (open < 0 || close < 0 || depth !== 0) return null;
   if (!(pair < caret && caret <= close)) return null;
   const inner = text.slice(open + 1, pair);
+  if (inner.startsWith('[')) return null;
   return {
     start: open,
     end: close + 1,
@@ -1871,6 +1945,10 @@ function isSubsequence(needle, haystack) {
 }
 
 const area = new Area();
+const expectedCases = strings.reduce(
+  (sum, text) => sum + ((text.length + 1) * (text.length + 2) / 2) * allOps.length,
+  0,
+);
 let cases = 0;
 const bad = [];
 
@@ -1928,7 +2006,7 @@ for (let si = 0; si < strings.length && bad.length === 0; si += 1) {
   }
 }
 
-console.log(JSON.stringify({ cases, bad }));'''
+console.log(JSON.stringify({ cases, expectedCases, bad }));'''
 
 @pytest.mark.skipif(NODE is None, reason="no node on PATH to run the served formatbar module")
 def test_the_format_bar_inline_toggles_terminate_on_marker_only_selections(tmp_path):
@@ -1963,4 +2041,4 @@ def test_the_format_bar_block_inserts_land_outside_every_fence_shape(tmp_path):
 def test_the_format_bar_survives_the_exhaustive_marker_selection_sweep(tmp_path):
     results = _node_json(tmp_path, SWEEP_HARNESS, timeout=SWEEP_TIMEOUT_S)
     assert results["bad"] == [], results["bad"]
-    assert results["cases"] == 50890818, results["cases"]
+    assert results["cases"] == results["expectedCases"]

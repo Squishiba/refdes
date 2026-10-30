@@ -849,7 +849,7 @@ def test_the_format_bar_is_wired_into_the_body():
     editor = js_code("editor.js")
     item = js_code("item.js")
     assert "from './formatbar.js'" in editor
-    assert "createFormatBar(handle, { isSaving: () => saving })" in editor
+    assert "createFormatBar({ isSaving: () => saving })" in editor
     assert "area._refdesFormatBar = formatBar.node;" in editor
     assert "formatBar.attach(area);" in editor
     assert editor.index("if (!edit.editable)") < editor.index("const formatBar = createFormatBar")
@@ -931,12 +931,12 @@ def _section(source, marker):
 
 
 def test_the_format_bar_binds_exactly_the_collision_audited_shortcuts():
-    """§B binds exactly five shortcuts, and the exact set is the audited one.
+    """Slice 1 binds exactly four shortcuts, and the exact set is the audited one.
 
-    Ctrl/Cmd+Alt+C is the one audited Ctrl+Alt letter exception: the design
-    table explicitly frees it as Gmail's code-block convention, while every
-    other Ctrl+Alt+letter/digit remains never-bound. The five-op length guard
-    rejects any sixth shortcut, colliding or not.
+    The design table's Ctrl/Cmd+Alt+C entry contradicts the section's blanket
+    rule against Ctrl+Alt+letter bindings, and slice 1 has no fence op to bind
+    it to. Slice 1 therefore binds only Ctrl/Cmd+B/I/K and Alt+Shift+5; the
+    code-fence shortcut is deferred to slice 2 pending Jared.
     """
     bar = js_code("formatbar.js")
     start = bar.index("export const SHORTCUTS = [")
@@ -944,44 +944,45 @@ def test_the_format_bar_binds_exactly_the_collision_audited_shortcuts():
     shortcuts = bar[start:end]
 
     ops = re.findall(r"\bop:\s*'([a-z]+)'", shortcuts)
-    assert len(ops) == 5, ops
+    assert len(ops) == 4, ops
 
-    expected_ops = {"bold", "italic", "link", "strike", "code"}
+    expected_ops = {"bold", "italic", "link", "strike"}
     assert set(ops) == expected_ops, ops
 
     seen = {}
     for op, block in zip(ops, re.split(r"\bop:\s*'[a-z]+'", shortcuts)[1:]):
         keys = set(re.findall(r"toLowerCase\(\) === '([a-z0-9]+)'", block))
         codes = set(re.findall(r"String\(event\.code\) === '([^']+)'", block))
-        ctrlmeta = "event.ctrlKey || event.metaKey" in block
-        alt = re.search(r"(?<!!)event\.altKey", block) is not None
-        shift = re.search(r"(?<!!)event\.shiftKey", block) is not None
-        seen[op] = (keys, codes, ctrlmeta, alt, shift)
+        plain_ctrl = re.search(r"(?<!!)event\.ctrlKey", block) is not None
+        plain_meta = re.search(r"(?<!!)event\.metaKey", block) is not None
+        plain_alt = re.search(r"(?<!!)event\.altKey", block) is not None
+        plain_shift = re.search(r"(?<!!)event\.shiftKey", block) is not None
+        seen[op] = (keys, codes, plain_ctrl, plain_meta, plain_alt, plain_shift)
 
     never_bound_keys = {
-        "s", "z", "y", "t", "n", "w", "l", "j", "tab", "f12",
+        "s", "z", "y", "t", "n", "w", "l", "j", "c", "tab", "f12",
         "1", "2", "3", "4", "5", "6", "7", "8", "9", "0",
     }
     assert not ({k for v in seen.values() for k in v[0]} & never_bound_keys), seen
     assert not ({c for v in seen.values() for c in v[1]} - {"Digit5"}), seen
-    assert not {op: v for op, v in seen.items() if v[3] and v[4]
-                and op not in {"strike"}}, "only Alt+Shift+5 binds a shift-key shortcut"
+    assert not {
+        op: v for op, v in seen.items() if v[4] and v[5] and op not in {"strike"}
+    }, "only Alt+Shift+5 binds a shift-key shortcut"
 
     ctrl_plain = {
-        k for op, v in seen.items() if v[2] and not v[3] for k in v[0]
+        k for op, v in seen.items() if v[2] and v[3] and not v[4] for k in v[0]
     }
     ctrl_alt = {
-        k for op, v in seen.items() if v[2] and v[3] for k in v[0]
+        k for op, v in seen.items() if v[2] and v[3] and v[4] for k in v[0]
     }
     assert ctrl_plain == {"b", "i", "k"}, seen
-    assert ctrl_alt == {"c"}, "only Ctrl/Cmd+Alt+C is the audited Ctrl+Alt exception"
-    assert [op for op, v in seen.items() if v[2] and v[3]] == ["code"], seen
+    assert ctrl_alt == set(), "slice 1 binds no Ctrl/Cmd+Alt shortcut"
+    assert "op: 'code'" not in shortcuts
 
-    assert seen["bold"] == ({"b"}, set(), True, False, False)
-    assert seen["italic"] == ({"i"}, set(), True, False, False)
-    assert seen["link"] == ({"k"}, set(), True, False, False)
-    assert seen["strike"] == (set(), {"Digit5"}, False, True, True)
-    assert seen["code"] == ({"c"}, set(), True, True, False)
+    assert seen["bold"] == ({"b"}, set(), True, True, False, False)
+    assert seen["italic"] == ({"i"}, set(), True, True, False, False)
+    assert seen["link"] == ({"k"}, set(), True, True, False, False)
+    assert seen["strike"] == (set(), {"Digit5"}, False, False, True, True)
 
 
 def test_the_format_bar_fence_scan_follows_the_markdown_renderer():

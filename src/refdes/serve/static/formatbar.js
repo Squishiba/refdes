@@ -103,7 +103,7 @@ export function applyEdit(area, start, end, text, selStart, selEnd, opts = {}) {
 }
 
 function lineRange(text, caret) {
-  const start = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+  const start = caret === 0 ? 0 : text.lastIndexOf('\n', caret - 1) + 1;
   const end = text.indexOf('\n', start);
   return [start, end === -1 ? text.length : end];
 }
@@ -432,11 +432,23 @@ function applyLineMarker(area, marker, pattern, opts, numbered = false) {
 function linkRange(text, caret) {
   const pair = text.lastIndexOf('](', Math.max(0, caret - 1));
   if (pair < 0) return null;
-  const open = text.lastIndexOf('[', pair);
+  let depth = 0;
+  let open = -1;
+  for (let i = pair - 1; i >= 0; i -= 1) {
+    if (text[i] === ']') depth += 1;
+    else if (text[i] === '[') {
+      if (depth === 0) {
+        open = i;
+        break;
+      }
+      depth -= 1;
+    }
+  }
   const close = text.indexOf(')', pair + 2);
-  if (open < 0 || close < 0) return null;
+  if (open < 0 || close < 0 || depth !== 0) return null;
   if (!(pair < caret && caret <= close)) return null;
   const inner = text.slice(open + 1, pair);
+  if (inner.startsWith('[')) return null;
   return {
     start: open,
     end: close + 1,
@@ -518,13 +530,8 @@ export const SHORTCUTS = [
   {
     op: 'strike',
     label: 'Strikethrough',
-    match: (event) => event.altKey && event.shiftKey && String(event.code) === 'Digit5',
-  },
-  {
-    op: 'code',
-    label: 'Code',
-    match: (event) => (event.ctrlKey || event.metaKey) && event.altKey && !event.shiftKey
-      && String(event.key).toLowerCase() === 'c',
+    match: (event) => event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey
+      && String(event.code) === 'Digit5',
   },
 ];
 
@@ -542,8 +549,7 @@ const BUTTONS = [
   ['hr', 'HR', 'Horizontal rule'],
 ];
 
-export function createFormatBar(handle, { isSaving = () => false } = {}) {
-  void handle;
+export function createFormatBar({ isSaving = () => false } = {}) {
   const node = el('div', 'format-bar');
   const core = el('div', 'fmt-core');
   node.appendChild(core);
