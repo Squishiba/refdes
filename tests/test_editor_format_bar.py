@@ -1309,3 +1309,658 @@ def test_the_format_bar_mutates_the_body_through_the_shared_case_a_b_contract(tm
     mu = results["mutator"]
     assert mu["result"] is True and mu["value"] == "CHANGEme", mu
     assert mu["sel"] == [0, 6] and mu["focused"] is True, mu
+
+def _decoded(value):
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return str(value)
+
+
+def _node_json(tmp_path, harness_source, timeout=NODE_TIMEOUT_S):
+    script = harness_source.replace(
+        "__STATIC__", json.dumps(STATIC.replace(os.sep, "/"))
+    )
+    harness = tmp_path / "formatbar-node-harness.mjs"
+    harness.write_text(script, encoding="utf-8")
+    try:
+        proc = subprocess.run(
+            [NODE, str(harness)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(
+            "format bar node harness hung: "
+            f"exit={exc.returncode}\nstdout:\n{_decoded(exc.stdout)}\n"
+            f"stderr:\n{_decoded(exc.stderr)}"
+        )
+    assert proc.returncode == 0, (
+        f"format bar node harness failed:\n{proc.stdout}\n{proc.stderr}"
+    )
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+MARKER_TIMEOUT_S = 20
+FENCE_TIMEOUT_S = 20
+SWEEP_TIMEOUT_S = 300
+
+MARKER_HARNESS = r'''
+globalThis.sessionStorage = {
+  getItem: () => null,
+  setItem: () => {},
+  removeItem: () => {},
+};
+
+class Area {
+  constructor() {
+    this.value = '';
+    this.selectionStart = 0;
+    this.selectionEnd = 0;
+  }
+  setSelectionRange(a, b) { this.selectionStart = a; this.selectionEnd = b; }
+  focus() { globalThis.document.activeElement = this; }
+}
+
+let execCount = 0;
+globalThis.document = {
+  activeElement: null,
+  execCommand(name, ui, text) {
+    if (name !== 'insertText') return false;
+    execCount += 1;
+    const a = globalThis.document.activeElement;
+    const start = Math.min(a.selectionStart, a.value.length);
+    const end = Math.max(start, Math.min(a.selectionEnd, a.value.length));
+    a.value = a.value.slice(0, start) + text + a.value.slice(end);
+    a.selectionStart = a.selectionEnd = start + text.length;
+    return true;
+  },
+};
+
+const STATIC = __STATIC__;
+const url = (name) => `file://${STATIC}/${name}`;
+const { OPS } = await import(url('formatbar.js'));
+const area = new Area();
+
+const cases = [
+  { text: '*', op: 'italic', start: 0, end: 1, wantFirst: '', wantSecond: '*italic text*' },
+  { text: '**', op: 'bold', start: 0, end: 2, wantFirst: '', wantSecond: '**bold text**' },
+  { text: '~~', op: 'strike', start: 0, end: 2, wantFirst: '', wantSecond: '~~text~~' },
+  { text: '`', op: 'code', start: 0, end: 1, wantFirst: '', wantSecond: '`code`' },
+  { text: '***', op: 'italic', start: 0, end: 3, wantFirst: '*', wantSecond: '' },
+  { text: '***', op: 'bold', start: 0, end: 3, wantFirst: '*', wantSecond: '*****' },
+  { text: '**', op: 'italic', start: 0, end: 2, wantFirst: '****', wantSecond: '**' },
+  { text: '*', op: 'bold', start: 0, end: 1, wantFirst: '*****', wantSecond: '*' },
+  { text: '~~~', op: 'strike', start: 0, end: 3, wantFirst: '', wantSecond: '~~text~~' },
+  { text: '``', op: 'code', start: 0, end: 2, wantFirst: '````', wantSecond: '``' },
+  { text: '**', op: 'italic', start: 0, end: 1, wantFirst: '*', wantSecond: '*italic text**' },
+  { text: '**', op: 'italic', start: 1, end: 2, wantFirst: '*', wantSecond: '**italic text*' },
+  { text: '***', op: 'bold', start: 1, end: 3, wantFirst: '*', wantSecond: '***bold text**' },
+  { text: '***', op: 'italic', start: 0, end: 2, wantFirst: '*****', wantSecond: '*******' },
+  { text: '~~~', op: 'strike', start: 1, end: 3, wantFirst: '~', wantSecond: '~~~text~~' },
+  { text: '``', op: 'code', start: 0, end: 1, wantFirst: '`', wantSecond: '`code``' },
+];
+
+const out = [];
+for (const c of cases) {
+  area.value = c.text;
+  area.selectionStart = c.start;
+  area.selectionEnd = c.end;
+  execCount = 0;
+  OPS[c.op](area, {});
+  const first = area.value;
+  const sel = [area.selectionStart, area.selectionEnd];
+  const inBounds = Number.isInteger(sel[0]) && sel[0] >= 0 && sel[0] <= first.length
+    && Number.isInteger(sel[1]) && sel[1] >= sel[0] && sel[1] <= first.length;
+  const firstExecs = execCount;
+  OPS[c.op](area, {});
+  out.push({
+    text: c.text, op: c.op, start: c.start, end: c.end,
+    first, sel, second: area.value, execs: firstExecs, inBounds,
+    wantFirst: c.wantFirst, wantSecond: c.wantSecond,
+  });
+}
+console.log(JSON.stringify(out));
+'''
+
+FENCE_HARNESS = r'''
+globalThis.sessionStorage = {
+  getItem: () => null,
+  setItem: () => {},
+  removeItem: () => {},
+};
+
+class Area {
+  constructor() {
+    this.value = '';
+    this.selectionStart = 0;
+    this.selectionEnd = 0;
+  }
+  setSelectionRange(a, b) { this.selectionStart = a; this.selectionEnd = b; }
+  focus() { globalThis.document.activeElement = this; }
+}
+
+let execCount = 0;
+globalThis.document = {
+  activeElement: null,
+  execCommand(name, ui, text) {
+    if (name !== 'insertText') return false;
+    execCount += 1;
+    const a = globalThis.document.activeElement;
+    const start = Math.min(a.selectionStart, a.value.length);
+    const end = Math.max(start, Math.min(a.selectionEnd, a.value.length));
+    a.value = a.value.slice(0, start) + text + a.value.slice(end);
+    a.selectionStart = a.selectionEnd = start + text.length;
+    return true;
+  },
+};
+
+const STATIC = __STATIC__;
+const url = (name) => `file://${STATIC}/${name}`;
+const { OPS } = await import(url('formatbar.js'));
+const area = new Area();
+
+function lineEndBeforeAfter(text) {
+  return text.lastIndexOf('\n', text.indexOf('after') - 1);
+}
+
+const t1 = 'before\n```python\nx\n```\nafter';
+const end1 = lineEndBeforeAfter(t1);
+const t2 = 'before\n```\nx\n```\nafter';
+const end2 = lineEndBeforeAfter(t2);
+const t3 = 'before\n~~~\nx\n~~~\nafter';
+const end3 = lineEndBeforeAfter(t3);
+const t4 = 'before\n````\n```\ninner\n```\n````\nafter';
+const end4 = lineEndBeforeAfter(t4);
+const t5 = 'before\n> ```\n> x\n> ```\nafter';
+const end5 = lineEndBeforeAfter(t5);
+const close5 = t5.indexOf('> ```', t5.indexOf('x') + 1);
+const t6 = 'before\n```\nx\nafter';
+
+const cases = [
+  { name: 'backtick info opener line', text: t1, caret: t1.indexOf('python'), fenceEnd: end1, want: 'afterFence' },
+  { name: 'backtick plain opener line', text: t2, caret: t2.indexOf('```'), fenceEnd: end2, want: 'afterFence' },
+  { name: 'backtick content line', text: t1, caret: t1.indexOf('x'), fenceEnd: end1, want: 'afterFence' },
+  { name: 'backtick closing line', text: t1, caret: t1.lastIndexOf('```', end1) + 1, fenceEnd: end1, want: 'afterFence' },
+  { name: 'tilde opener line', text: t3, caret: t3.indexOf('~~~'), fenceEnd: end3, want: 'afterFence' },
+  { name: 'tilde content line', text: t3, caret: t3.indexOf('x'), fenceEnd: end3, want: 'afterFence' },
+  { name: 'tilde closing line', text: t3, caret: t3.lastIndexOf('~~~', end3) + 1, fenceEnd: end3, want: 'afterFence' },
+  { name: 'nested fence content line', text: t4, caret: t4.indexOf('inner'), fenceEnd: end4, want: 'afterFence' },
+  { name: 'blockquoted opener line', text: t5, caret: t5.indexOf('> ```') + 2, fenceEnd: end5, want: 'afterFence' },
+  { name: 'blockquoted content line', text: t5, caret: t5.indexOf('x'), fenceEnd: end5, want: 'afterFence' },
+  { name: 'blockquoted closing line', text: t5, caret: close5 + 2, fenceEnd: end5, want: 'afterFence' },
+  { name: 'unclosed fence content line', text: t6, caret: t6.indexOf('x'), want: 'end' },
+  { name: 'caret before fence', text: t1, caret: 0, want: 'beforeFence' },
+];
+
+function fenceCount(text) {
+  let count = 0;
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/^[ \t]*(?:>[ \t]?)+/, '');
+    if (/^[ \t]{0,3}(?:`{3,}|~{3,})/.test(line)) count += 1;
+  }
+  return count;
+}
+
+const out = [];
+for (const c of cases) {
+  const originalFences = fenceCount(c.text);
+  area.value = c.text;
+  area.selectionStart = c.caret;
+  area.selectionEnd = c.caret;
+  execCount = 0;
+  OPS.table(area, {});
+  const result = area.value;
+  const inserted = result.indexOf('| a | b |');
+  out.push({
+    name: c.name,
+    inserted,
+    fenceEnd: c.fenceEnd === undefined ? null : c.fenceEnd,
+    textLength: c.text.length,
+    fenceCount: fenceCount(result),
+    originalFences,
+    execs: execCount,
+    want: c.want,
+  });
+}
+console.log(JSON.stringify(out));
+'''
+
+SWEEP_HARNESS = r'''
+globalThis.sessionStorage = {
+  getItem: () => null,
+  setItem: () => {},
+  removeItem: () => {},
+};
+
+class Area {
+  constructor() {
+    this.value = '';
+    this.selectionStart = 0;
+    this.selectionEnd = 0;
+  }
+  setSelectionRange(a, b) {
+    this.selectionStart = a;
+    this.selectionEnd = b;
+  }
+  focus() { globalThis.document.activeElement = this; }
+}
+
+let execCount = 0;
+globalThis.document = {
+  activeElement: null,
+  execCommand(name, ui, text) {
+    if (name !== 'insertText') return false;
+    execCount += 1;
+    const a = globalThis.document.activeElement;
+    const start = Math.min(a.selectionStart, a.value.length);
+    const end = Math.max(start, Math.min(a.selectionEnd, a.value.length));
+    a.value = a.value.slice(0, start) + text + a.value.slice(end);
+    a.selectionStart = a.selectionEnd = start + text.length;
+    return true;
+  },
+};
+
+const STATIC = __STATIC__;
+const url = (name) => `file://${STATIC}/${name}`;
+const { OPS } = await import(url('formatbar.js'));
+
+const chars = ['*', '~', '`', 'a', ' ', '\n', '\u{1F600}'];
+const strings = [];
+function build(prefix, codePoints) {
+  strings.push(prefix);
+  if (codePoints === 6) return;
+  for (const c of chars) build(prefix + c, codePoints + 1);
+}
+build('', 0);
+
+const inlineOps = ['bold', 'italic', 'strike', 'code'];
+const blockOps = ['heading', 'list', 'numbered', 'quote', 'link', 'table', 'hr'];
+const allOps = [...inlineOps, ...blockOps];
+const markerFor = {
+  bold: '*', italic: '*', strike: '~', code: '`',
+};
+
+function codePointBoundary(text, pos) {
+  if (pos <= 0 || pos >= text.length) return pos;
+  const prev = text.charCodeAt(pos - 1);
+  const next = text.charCodeAt(pos);
+  if (prev >= 0xD800 && prev <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) return pos - 1;
+  return pos;
+}
+
+function leadingRun(text, marker) {
+  let length = 0;
+  while (length + marker.length <= text.length
+    && text.startsWith(marker, length)) length += marker.length;
+  return length;
+}
+
+function trailingRun(text, marker) {
+  let length = 0;
+  while (text.length - length - marker.length >= 0
+    && text.startsWith(marker, text.length - length - marker.length)) {
+    length += marker.length;
+  }
+  return length;
+}
+
+function runEndingAt(text, pos, marker) {
+  let length = 0;
+  while (pos - length - marker.length >= 0
+    && text.startsWith(marker, pos - length - marker.length)) {
+    length += marker.length;
+  }
+  return length;
+}
+
+function runStartingAt(text, pos, marker) {
+  let length = 0;
+  while (pos + length + marker.length <= text.length
+    && text.startsWith(marker, pos + length)) {
+    length += marker.length;
+  }
+  return length;
+}
+
+function hasLayer(op, length, layer) {
+  if (op === 'bold') return length >= 2;
+  if (op === 'italic') return length > 0 && length % 2 === 1;
+  return length === layer;
+}
+
+function allMarker(text, start, end, marker) {
+  if (start >= end) return false;
+  for (let i = start; i < end; i += 1) if (text[i] !== marker) return false;
+  return true;
+}
+
+function isWellFormedInline(text, start, end, op) {
+  if (start >= end) return false;
+  if (codePointBoundary(text, start) !== start || codePointBoundary(text, end) !== end) {
+    return false;
+  }
+  const marker = markerFor[op];
+  const layer = marker.length;
+  const chosen = text.slice(start, end);
+  if (chosen.includes('\n') || allMarker(text, start, end, marker)) return false;
+  const leading = leadingRun(chosen, marker);
+  const trailing = trailingRun(chosen, marker);
+  const left = runEndingAt(text, start, marker);
+  const right = runStartingAt(text, end, marker);
+  const leadingExact = leading === layer && trailing === layer
+    && leading + trailing <= chosen.length
+    && left === 0 && right === 0;
+  const surroundingExact = leading === 0 && trailing === 0
+    && left === layer && right === layer;
+  const plain = leading === 0 && trailing === 0 && left === 0 && right === 0;
+  return leadingExact || surroundingExact || plain;
+}
+
+function clampPos(value, length) {
+  return Math.max(0, Math.min(length, value));
+}
+
+function snapSelection(text, start, end) {
+  const length = text.length;
+  const s = codePointBoundary(text, clampPos(start, length));
+  const e = Math.max(s, codePointBoundary(text, clampPos(end, length)));
+  return [s, e];
+}
+
+function lineRangeLocal(text, caret) {
+  const start = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+  const end = text.indexOf('\n', start);
+  return [start, end === -1 ? text.length : end];
+}
+
+function expandedLineRangeLocal(text, start, end) {
+  const [lineStart] = lineRangeLocal(text, start);
+  const probe = end > start ? end - 1 : start;
+  const [, lineEnd] = lineRangeLocal(text, probe);
+  return [lineStart, lineEnd];
+}
+
+function isSpaceAt(line, i) {
+  return line[i] === ' ' || line[i] === '\t';
+}
+
+function listStripEnd(line) {
+  let i = 0;
+  while (i < line.length && isSpaceAt(line, i)) i += 1;
+  if (i >= line.length) return -1;
+  if (line[i] !== '-' && line[i] !== '*' && line[i] !== '+') return -1;
+  i += 1;
+  if (i >= line.length || !isSpaceAt(line, i)) return -1;
+  while (i < line.length && isSpaceAt(line, i)) i += 1;
+  return i;
+}
+
+function applyLineMarkerExpected(text, start, end, marker, numbered = false, list = false) {
+  const [s, e] = snapSelection(text, start, end);
+  const [lineStart, lineEnd] = expandedLineRangeLocal(text, s, e);
+  const lines = text.slice(lineStart, lineEnd).split('\n');
+  const ends = list ? lines.map(listStripEnd) : null;
+  const allFormatted = list ? ends.every((endIndex) => endIndex >= 0) : false;
+  const replacement = allFormatted
+    ? lines.map((line, index) => line.slice(ends[index]))
+    : lines.map((line, index) => (numbered ? `${index + 1}. ${line}` : marker + line));
+  const joined = replacement.join('\n');
+  return {
+    value: text.slice(0, lineStart) + joined + text.slice(lineEnd),
+    selection: [lineStart, lineStart + joined.length],
+  };
+}
+
+function applyHeadingExpected(text, caret) {
+  const [lineStart, lineEnd] = lineRangeLocal(text, snapSelection(text, caret, caret)[0]);
+  const line = text.slice(lineStart, lineEnd);
+  const hashes = /^(#{1,6})\s+/.exec(line);
+  let replacement;
+  let offset;
+  if (!hashes) {
+    replacement = '# ' + line;
+    offset = 1;
+  } else if (hashes[1].length < 6) {
+    const more = '#'.repeat(hashes[1].length + 1);
+    replacement = `${more} ${line.slice(hashes[1].length + 1)}`;
+    offset = more.length + 1;
+  } else {
+    replacement = line.slice(hashes[1].length + 1);
+    offset = 0;
+  }
+  return {
+    value: text.slice(0, lineStart) + replacement + text.slice(lineEnd),
+    selection: [lineStart + offset, lineStart + offset],
+  };
+}
+
+function linkRangeExpected(text, caret) {
+  const pair = text.lastIndexOf('](', Math.max(0, caret - 1));
+  if (pair < 0) return null;
+  const open = text.lastIndexOf('[', pair);
+  const close = text.indexOf(')', pair + 2);
+  if (open < 0 || close < 0) return null;
+  if (!(pair < caret && caret <= close)) return null;
+  const inner = text.slice(open + 1, pair);
+  return {
+    start: open,
+    end: close + 1,
+    replacement: inner,
+    selection: [open, open + inner.length],
+  };
+}
+
+function applyLinkExpected(text, start, end) {
+  const [s, e] = snapSelection(text, start, end);
+  if (s === e) {
+    const off = linkRangeExpected(text, s);
+    if (off) {
+      return {
+        value: text.slice(0, off.start) + off.replacement + text.slice(off.end),
+        selection: off.selection,
+      };
+    }
+    return {
+      value: text.slice(0, s) + '[link text](url)' + text.slice(e),
+      selection: [s + 12, s + 15],
+    };
+  }
+  const chosen = text.slice(s, e);
+  return {
+    value: text.slice(0, s) + `[${chosen}](url)` + text.slice(e),
+    selection: [s + chosen.length + 3, s + chosen.length + 6],
+  };
+}
+
+function strippedFenceLineExpected(line) {
+  const prefix = /^[ \t]*(?:>[ \t]?)+/.exec(line);
+  return prefix ? line.slice(prefix[0].length) : line;
+}
+
+function fenceCloserExpected(marker) {
+  const char = marker[0] === '~' ? '\\~' : '`';
+  return new RegExp(`^[ \t]*${char}{${marker.length},}[ \t]*$`);
+}
+
+function fenceBlocksExpected(text) {
+  const rawLines = text.split('\n');
+  const lines = [];
+  let pos = 0;
+  for (const line of rawLines) {
+    lines.push({ start: pos, end: pos + line.length });
+    pos += line.length + 1;
+  }
+  const stripped = rawLines.map(strippedFenceLineExpected);
+  const blocks = [];
+  let i = 0;
+  while (i < lines.length) {
+    const opener = /^[ \t]{0,3}(`{3,}|~{3,})([^\n]*)$/.exec(stripped[i]);
+    if (opener && !(opener[1][0] === '`' && opener[2].includes('`'))) {
+      const closer = fenceCloserExpected(opener[1]);
+      let j = i + 1;
+      while (j < lines.length && !closer.test(stripped[j])) j += 1;
+      const end = j < lines.length ? lines[j].end : text.length;
+      blocks.push({ start: lines[i].start, end, endLine: end });
+      if (j < lines.length) {
+        i = j + 1;
+        continue;
+      }
+      return blocks;
+    }
+    i += 1;
+  }
+  return blocks;
+}
+
+function fenceInsertAfterExpected(text, caret) {
+  for (const block of fenceBlocksExpected(text)) {
+    if (caret >= block.start && caret < block.end) return block.endLine;
+  }
+  return null;
+}
+
+function blockInsertPlanExpected(text, caret, insert) {
+  const [from] = snapSelection(text, caret, caret);
+  let at = from;
+  const afterFence = fenceInsertAfterExpected(text, at);
+  if (afterFence !== null) at = afterFence;
+  const before = text.slice(0, at);
+  const after = text.slice(at);
+  const open = before === '' || before.endsWith('\n\n') ? '' : '\n\n';
+  const close = after === '' || after.startsWith('\n\n') ? '' : '\n\n';
+  const chunk = open + insert + close;
+  return {
+    value: before + chunk + after,
+    selection: [before.length + chunk.length, before.length + chunk.length],
+  };
+}
+
+function blockExpected(op, text, start, end) {
+  if (op === 'heading') return applyHeadingExpected(text, start);
+  if (op === 'list') return applyLineMarkerExpected(text, start, end, '- ', false, true);
+  if (op === 'numbered') return applyLineMarkerExpected(text, start, end, '1. ', true, false);
+  if (op === 'quote') return applyLineMarkerExpected(text, start, end, '> ', false, false);
+  if (op === 'link') return applyLinkExpected(text, start, end);
+  if (op === 'table') {
+    const [caret] = snapSelection(text, start, end);
+    const plan = blockInsertPlanExpected(text, caret, '| a | b |\n|---|---|\n|   |   |');
+    const textStart = plan.value.indexOf('| a');
+    return { value: plan.value, selection: [textStart + 2, textStart + 3] };
+  }
+  if (op === 'hr') {
+    const [caret] = snapSelection(text, start, end);
+    return blockInsertPlanExpected(text, caret, '---');
+  }
+  return null;
+}
+
+function isSubsequence(needle, haystack) {
+  if (needle === '') return true;
+  let from = 0;
+  for (const c of needle) {
+    const at = haystack.indexOf(c, from);
+    if (at < 0) return false;
+    from = at + c.length;
+  }
+  return true;
+}
+
+const area = new Area();
+let cases = 0;
+const bad = [];
+
+for (let si = 0; si < strings.length && bad.length === 0; si += 1) {
+  const text = strings[si];
+  const baseSeq = text.replace(/[*~`]/g, '');
+  const len = text.length;
+  for (let start = 0; start <= len && bad.length === 0; start += 1) {
+    for (let end = start; end <= len && bad.length === 0; end += 1) {
+      for (let oi = 0; oi < allOps.length; oi += 1) {
+        const op = allOps[oi];
+        const isInline = oi < 4;
+        cases += 1;
+        area.value = text;
+        area.selectionStart = start;
+        area.selectionEnd = end;
+        execCount = 0;
+        OPS[op](area, {});
+        const first = area.value;
+        const s0 = area.selectionStart;
+        const e0 = area.selectionEnd;
+        let problem = '';
+        if (execCount !== 1) problem = `execCount=${execCount}`;
+        else if (!Number.isInteger(s0) || s0 < 0 || s0 > first.length
+          || !Number.isInteger(e0) || e0 < s0 || e0 > first.length) {
+          problem = `selection=[${s0},${e0}] len=${first.length}`;
+        } else if (first.includes('\r')) problem = 'contains CR';
+        else if (isInline) {
+          if (!isSubsequence(baseSeq, first.replace(/[*~`]/g, ''))) {
+            problem = 'original non-marker sequence not preserved';
+          }
+          if (!problem && isWellFormedInline(text, start, end, op)) {
+            OPS[op](area, {});
+            if (area.value !== text) problem = 'same inline op twice changed the text';
+          }
+        } else {
+          const expected = blockExpected(op, text, start, end);
+          if (!expected) {
+            problem = 'missing block expectation';
+          } else if (first !== expected.value) {
+            problem = 'block result not expected';
+          } else if (s0 !== expected.selection[0] || e0 !== expected.selection[1]) {
+            problem = `block selection=[${s0},${e0}] expected=[${expected.selection}]`;
+          }
+        }
+        if (problem) {
+          bad.push({
+            text, start, end, op, first, selection: [s0, e0],
+            twice: isInline ? area.value : undefined, problem,
+          });
+          break;
+        }
+      }
+    }
+  }
+}
+
+console.log(JSON.stringify({ cases, bad }));'''
+
+@pytest.mark.skipif(NODE is None, reason="no node on PATH to run the served formatbar module")
+def test_the_format_bar_inline_toggles_terminate_on_marker_only_selections(tmp_path):
+    cases = _node_json(tmp_path, MARKER_HARNESS, timeout=MARKER_TIMEOUT_S)
+    assert len(cases) == 16
+    for case in cases:
+        assert case["execs"] == 1, case
+        assert case["inBounds"] is True, case
+        assert case["first"] == case["wantFirst"], case
+        assert case["second"] == case["wantSecond"], case
+
+
+@pytest.mark.skipif(NODE is None, reason="no node on PATH to run the served formatbar module")
+def test_the_format_bar_block_inserts_land_outside_every_fence_shape(tmp_path):
+    cases = _node_json(tmp_path, FENCE_HARNESS, timeout=FENCE_TIMEOUT_S)
+    assert len(cases) == 13
+    for case in cases:
+        assert case["execs"] == 1, case
+        assert case["inserted"] >= 0, case
+        assert case["fenceCount"] == case["originalFences"], case
+        if case["want"] == "afterFence":
+            assert case["inserted"] == case["fenceEnd"] + 2, case
+        elif case["want"] == "end":
+            assert case["inserted"] == case["textLength"] + 2, case
+        elif case["want"] == "beforeFence":
+            assert case["inserted"] == 0, case
+        else:
+            raise AssertionError(case)
+
+
+@pytest.mark.skipif(NODE is None, reason="no node on PATH to run the served formatbar module")
+def test_the_format_bar_survives_the_exhaustive_marker_selection_sweep(tmp_path):
+    results = _node_json(tmp_path, SWEEP_HARNESS, timeout=SWEEP_TIMEOUT_S)
+    assert results["bad"] == [], results["bad"]
+    assert results["cases"] == 50890818, results["cases"]

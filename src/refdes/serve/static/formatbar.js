@@ -11,7 +11,8 @@
 const FALLBACK_KEY = 'refdes.live-calc.fallback';
 const FALLBACK_NOTE = 'Undo may need more than one step in this browser.';
 const TABLE = '| a | b |\n|---|---|\n|   |   |';
-const FENCE = new RegExp('^\\x60{3}(calc[^\\n]*)?[ \\t]*\\r?$', 'gm');
+const FENCE_OPEN = new RegExp('^[ \\t]{0,3}(`{3,}|~{3,})([^\\n]*)$');
+const BLOCKQUOTE_PREFIX = new RegExp('^[ \\t]*(?:>[ \\t]?)+');
 const HEADING = new RegExp('^(#{1,6})\\s+([\\s\\S]*)$');
 const URL = new RegExp('^https?:\\/\\/', 'i');
 
@@ -43,20 +44,35 @@ function clamp(value, length) {
   return Math.max(0, Math.min(length, value));
 }
 
+function codePointBoundary(text, pos) {
+  if (pos <= 0 || pos >= text.length) return pos;
+  const prev = text.charCodeAt(pos - 1);
+  const next = text.charCodeAt(pos);
+  if (prev >= 0xD800 && prev <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) {
+    return pos - 1;
+  }
+  return pos;
+}
+
 function selectionIn(area) {
-  const length = area.value.length;
-  const start = clamp(area.selectionStart, length);
-  const end = Math.max(start, clamp(area.selectionEnd, length));
+  const text = area.value;
+  const length = text.length;
+  const start = codePointBoundary(text, clamp(area.selectionStart, length));
+  const end = Math.max(start, codePointBoundary(text, clamp(area.selectionEnd, length)));
   return { start, end };
 }
 
 function setSelection(area, start, end) {
-  const length = area.value.length;
-  const a = clamp(start, length);
-  const b = Math.max(a, clamp(end, length));
+  const text = area.value;
+  const length = text.length;
+  const a = codePointBoundary(text, clamp(start, length));
+  const b = Math.max(a, codePointBoundary(text, clamp(end, length)));
   area.setSelectionRange(a, b);
 }
 
+// The three isSaving() gates (applyEdit, run(), and the keydown handler) are
+// deliberate. applyEdit is exported for editor.js's non-bar insert paths; run()
+// gates button clicks; the keydown handler gates shortcuts before preventDefault.
 export function applyEdit(area, start, end, text, selStart, selEnd, opts = {}) {
   if (opts.isSaving && opts.isSaving()) return false;
 
@@ -99,22 +115,48 @@ function expandedLineRange(text, start, end) {
   return [lineStart, lineEnd];
 }
 
+function strippedFenceLine(line) {
+  const prefix = line.match(BLOCKQUOTE_PREFIX);
+  return prefix ? line.slice(prefix[0].length) : line;
+}
+
+function fenceCloser(marker) {
+  const char = marker[0] === '~' ? '\\~' : '`';
+  return new RegExp(`^[ \\t]*${char}{${marker.length},}[ \\t]*$`);
+}
+
+// CommonMark fence scan: a line opener (up to 3 spaces, ``` or ~~~, blockquote
+// markers stripped for the markdown-it renderer's own rules) owns every line
+// through its closing fence. A backtick fence's info string cannot contain a
+// backtick; a longer same-character run closes. An unclosed opener owns the
+// rest of the body, exactly as markdown renders it. `i` advances monotonically
+// (to j + 1, the text end, or i + 1), so the scan terminates.
 function fenceBlocks(text) {
+  const rawLines = text.split('\n');
+  const lines = [];
+  let pos = 0;
+  for (const line of rawLines) {
+    lines.push({ start: pos, end: pos + line.length });
+    pos += line.length + 1;
+  }
+  const stripped = rawLines.map(strippedFenceLine);
   const blocks = [];
-  let opened = null;
-  FENCE.lastIndex = 0;
-  let match;
-  while ((match = FENCE.exec(text)) !== null) {
-    if (opened === null && match[1]) {
-      opened = match.index + match[0].length;
-    } else if (opened !== null && !match[1]) {
-      blocks.push({
-        start: opened,
-        end: match.index,
-        endLine: match.index + match[0].length,
-      });
-      opened = null;
+  let i = 0;
+  while (i < lines.length) {
+    const opener = FENCE_OPEN.exec(stripped[i]);
+    if (opener && !(opener[1][0] === '`' && opener[2].includes('`'))) {
+      const closer = fenceCloser(opener[1]);
+      let j = i + 1;
+      while (j < lines.length && !closer.test(stripped[j])) j += 1;
+      const end = j < lines.length ? lines[j].end : text.length;
+      blocks.push({ start: lines[i].start, end, endLine: end });
+      if (j < lines.length) {
+        i = j + 1;
+        continue;
+      }
+      return blocks;
     }
+    i += 1;
   }
   return blocks;
 }
@@ -130,7 +172,7 @@ export function blockInsertPlan(area, text, start, end) {
   const value = area.value;
   const current = selectionIn(area);
   let from = typeof start === 'number' ? clamp(start, value.length) : current.start;
-  let to = typeof end === 'number' ? Math.max(from, clamp(end, value.length)) : current.end;
+  let to = typeof end === 'number' ? Math.max(from, clamp(end, value.length)) : from;
   const afterFence = fenceInsertAfter(value, from);
   if (afterFence !== null) {
     from = afterFence;
@@ -150,6 +192,8 @@ export function blockInsertPlan(area, text, start, end) {
   };
 }
 
+// markerRuns: every marker match advances i by a positive run length, and a
+// non-match advances by 1, so the scan terminates.
 function markerRuns(line, marker) {
   const runs = [];
   let i = 0;
@@ -166,15 +210,24 @@ function markerRuns(line, marker) {
   return runs;
 }
 
+// Every marker-run scan below is bounded by a position predicate, not by
+// startsWith()'s silent clamping of negative indices. Each step advances the
+// probe by marker.length, so the loop terminates.
 function leadingMarkerRun(text, marker) {
   let length = 0;
-  while (text.startsWith(marker, length)) length += marker.length;
+  while (length + marker.length <= text.length
+    && text.startsWith(marker, length)) {
+    length += marker.length;
+  }
   return length;
 }
 
 function trailingMarkerRun(text, marker) {
   let length = 0;
-  while (text.startsWith(marker, text.length - length - marker.length)) length += marker.length;
+  while (text.length - length - marker.length >= 0
+    && text.startsWith(marker, text.length - length - marker.length)) {
+    length += marker.length;
+  }
   return length;
 }
 
@@ -189,7 +242,10 @@ function markerRunEndingAt(text, pos, marker) {
 
 function markerRunStartingAt(text, pos, marker) {
   let length = 0;
-  while (text.startsWith(marker, pos + length)) length += marker.length;
+  while (pos + length + marker.length <= text.length
+    && text.startsWith(marker, pos + length)) {
+    length += marker.length;
+  }
   return length;
 }
 
@@ -232,10 +288,37 @@ function unwrapInlineRange(text, caret, op, marker) {
   };
 }
 
+function allMarkerRunReplacement(chosen, op, marker) {
+  if (chosen.length === 0) return null;
+  const markerChar = marker[0];
+  for (let i = 0; i < chosen.length; i += 1) {
+    if (chosen[i] !== markerChar) return null;
+  }
+  if (!hasMarkerLayer(op, chosen.length, marker.length)) return null;
+  const layer = marker.length;
+  const removed = chosen.length >= 2 * layer
+    ? 2 * layer
+    : Math.min(layer, chosen.length);
+  const lead = Math.ceil(removed / 2);
+  const trail = removed - lead;
+  return chosen.slice(lead, chosen.length - trail);
+}
+
 function unwrapInlineSelection(text, start, end, op, marker) {
   if (start >= end) return null;
   const chosen = text.slice(start, end);
   if (chosen.includes('\n')) return null;
+
+  const exactRun = allMarkerRunReplacement(chosen, op, marker);
+  if (exactRun !== null) {
+    return {
+      start,
+      end,
+      replacement: exactRun,
+      selectStart: start,
+      selectEnd: start + exactRun.length,
+    };
+  }
 
   const leading = leadingMarkerRun(chosen, marker);
   const trailing = trailingMarkerRun(chosen, marker);
@@ -399,7 +482,7 @@ function applyRule(area, opts) {
   applyEdit(area, plan.start, plan.end, plan.chunk, plan.caret, plan.caret, opts);
 }
 
-const OPS = {
+export const OPS = {
   bold: (area, opts) => applyInline(area, 'bold', '**', 'bold text', opts),
   italic: (area, opts) => applyInline(area, 'italic', '*', 'italic text', opts),
   strike: (area, opts) => applyInline(area, 'strike', '~~', 'text', opts),

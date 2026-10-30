@@ -890,6 +890,13 @@ def test_the_format_bar_shares_the_case_a_b_mutator_and_save_gate():
     assert "note.hidden = !readFallbackFlag();" in bar
     assert "if (opts.fallback) opts.fallback();" in bar
     assert "innerHTML" not in bar
+    with open(os.path.join(STATIC, "formatbar.js"), encoding="utf-8") as fh:
+        bar_source = fh.read()
+    assert (
+        "// The three isSaving() gates (applyEdit, run(), and the keydown handler) are\n"
+        "// deliberate. applyEdit is exported for editor.js's non-bar insert paths; run()\n"
+        "// gates button clicks; the keydown handler gates shortcuts before preventDefault.\n"
+    ) in bar_source
 
     assert "const plan = blockInsertPlan(area, text);" in editor
     assert "plan.caret," in editor
@@ -924,32 +931,32 @@ def _section(source, marker):
 
 
 def test_the_format_bar_binds_exactly_the_collision_audited_shortcuts():
-    """§B binds exactly five shortcuts and the exact set is the audited one.
-    The never-bound list (Ctrl+S, Ctrl+Z/Y/Shift+Z, Ctrl+Shift+I/J/C, F12,
-    Ctrl+T/N/W/L/J/Tab, Ctrl+1..9, Ctrl+Alt+letter, Ctrl+Alt+digit) must be
-    absent from SHORTCUTS; a sixth colliding shortcut fails here."""
+    """§B binds exactly five shortcuts, and the exact set is the audited one.
+
+    Ctrl/Cmd+Alt+C is the one audited Ctrl+Alt letter exception: the design
+    table explicitly frees it as Gmail's code-block convention, while every
+    other Ctrl+Alt+letter/digit remains never-bound. The five-op length guard
+    rejects any sixth shortcut, colliding or not.
+    """
     bar = js_code("formatbar.js")
     start = bar.index("export const SHORTCUTS = [")
     end = bar.index("\n];", start)
     shortcuts = bar[start:end]
 
-    blocks = re.split(r"\n\s*\{\n", shortcuts)[1:]
-    assert len(blocks) == 5, blocks
+    ops = re.findall(r"\bop:\s*'([a-z]+)'", shortcuts)
+    assert len(ops) == 5, ops
 
     expected_ops = {"bold", "italic", "link", "strike", "code"}
+    assert set(ops) == expected_ops, ops
+
     seen = {}
-    for block in blocks:
-        op_match = re.search(r"op: '([a-z]+)'", block)
-        assert op_match is not None, block
-        op = op_match.group(1)
+    for op, block in zip(ops, re.split(r"\bop:\s*'[a-z]+'", shortcuts)[1:]):
         keys = set(re.findall(r"toLowerCase\(\) === '([a-z0-9]+)'", block))
         codes = set(re.findall(r"String\(event\.code\) === '([^']+)'", block))
         ctrlmeta = "event.ctrlKey || event.metaKey" in block
         alt = re.search(r"(?<!!)event\.altKey", block) is not None
         shift = re.search(r"(?<!!)event\.shiftKey", block) is not None
         seen[op] = (keys, codes, ctrlmeta, alt, shift)
-
-    assert set(seen) == expected_ops, seen
 
     never_bound_keys = {
         "s", "z", "y", "t", "n", "w", "l", "j", "tab", "f12",
@@ -960,11 +967,46 @@ def test_the_format_bar_binds_exactly_the_collision_audited_shortcuts():
     assert not {op: v for op, v in seen.items() if v[3] and v[4]
                 and op not in {"strike"}}, "only Alt+Shift+5 binds a shift-key shortcut"
 
+    ctrl_plain = {
+        k for op, v in seen.items() if v[2] and not v[3] for k in v[0]
+    }
+    ctrl_alt = {
+        k for op, v in seen.items() if v[2] and v[3] for k in v[0]
+    }
+    assert ctrl_plain == {"b", "i", "k"}, seen
+    assert ctrl_alt == {"c"}, "only Ctrl/Cmd+Alt+C is the audited Ctrl+Alt exception"
+    assert [op for op, v in seen.items() if v[2] and v[3]] == ["code"], seen
+
     assert seen["bold"] == ({"b"}, set(), True, False, False)
     assert seen["italic"] == ({"i"}, set(), True, False, False)
     assert seen["link"] == ({"k"}, set(), True, False, False)
     assert seen["strike"] == (set(), {"Digit5"}, False, True, True)
     assert seen["code"] == ({"c"}, set(), True, True, False)
+
+
+def test_the_format_bar_fence_scan_follows_the_markdown_renderer():
+    """§B's fence-safety rule is for ANY fenced code block, not only ```calc.
+
+    The production renderer is markdown-it's CommonMark/gfm-like parser, which
+    recognizes ``` and ~~~ fences (build.py:_FENCE_LINE_RE mirrors the same
+    ```/~~~ shape), including blockquoted fences and a closer at least as long
+    as the opener.
+    """
+    bar = js_code("formatbar.js")
+    assert r"const FENCE_OPEN = new RegExp('^[ \\t]{0,3}(`{3,}|~{3,})([^\\n]*)$');" in bar
+    assert r"const BLOCKQUOTE_PREFIX = new RegExp('^[ \\t]*(?:>[ \\t]?)+');" in bar
+    assert "const FENCE = new RegExp(" not in bar
+    assert "FENCE.lastIndex" not in bar
+
+    start = bar.index("function fenceBlocks(text) {")
+    fence = bar[start:bar.index("function fenceInsertAfter(", start)]
+    assert "const opener = FENCE_OPEN.exec(stripped[i]);" in fence
+    assert "const closer = fenceCloser(opener[1]);" in fence
+    assert "while (j < lines.length && !closer.test(stripped[j])) j += 1;" in fence
+    assert "const end = j < lines.length ? lines[j].end : text.length;" in fence
+    assert "blocks.push({ start: lines[i].start, end, endLine: end });" in fence
+    assert r"const char = marker[0] === '~' ? '\\~' : '`';" in bar
+    assert r"new RegExp(`^[ \\t]*${char}{${marker.length},}[ \\t]*$`)" in bar
 
 
 def test_the_font_setting_is_wired_into_the_editor():

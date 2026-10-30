@@ -51,6 +51,35 @@ selection, nested triple cases, astral characters, markers across a line
 break, Case B fallback wrap/toggle, Ctrl+I, and Ctrl+B in Chromium and
 Firefox. The PR body has the case-by-case table.
 
+## Review round 3
+
+Merged `origin/main` locally (`be0b078`), preserving the font-setting feature
+and DOM order. Reproduced the marker-only tab freeze on the detached
+`2f6db3e` worktree: Node and browser marker cases timed out, and the exhaustive
+sweep timed out. Red fence cases showed generic fences not being respected.
+
+Fixed `formatbar.js`:
+
+- bounded leading/trailing/interior marker-run scans;
+- exact marker-only semantics, including `~~~` strike and `***` cases;
+- CommonMark-shaped fence scan with blockquotes, longer closers, nested fences,
+  and unclosed fences;
+- code-point boundary snapping to avoid splitting astral surrogate pairs;
+- block insertion at the caret start so it preserves selected text;
+- documented the three deliberate `isSaving()` gates.
+
+Added permanent node tests for marker-only cases, fence shapes, and a
+50,890,818-case exhaustive sweep. Updated the shortcut audit to allow the
+design-carved-out `Ctrl/Cmd+Alt+C` code binding.
+
+## Round 3 verification
+
+- Targeted formatbar, static, and font-setting tests: 67 passed.
+- Exhaustive Node sweep: `{"cases":50890818,"bad":[]}` in about 55 seconds.
+- Real-browser Chromium and Firefox: all main cases plus marker-only
+  no-hang cases and font-setting coexistence pass.
+- `python -m pytest -q`: 5552 passed, 2 skipped.
+
 ## Open
 
-- None for slice 1.
+- None for round 3.
