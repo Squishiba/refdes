@@ -124,6 +124,19 @@ function checksBlock(checks) {
   return block;
 }
 
+// Live inline-calc teardown (§3.8): every path that clears a pane holding
+// the item view destroys the mounted panel's controller FIRST (one helper,
+// every clear): a pending 400 ms timer, an in-flight request and the
+// textarea listeners die with the view that owned them -- on a switch to a
+// different item and on a failed fetch exactly as on the normal swap, and
+// on the shell's own clears (app.js: the create form, the empty-selection
+// pane) exactly as here.
+export function destroyLiveCalc(container) {
+  for (const node of container.querySelectorAll('.live-calc')) {
+    if (node._refdesLiveCalc) node._refdesLiveCalc.destroy();
+  }
+}
+
 export async function renderItem(container, handle) {
   // A revision-triggered re-render of the item already on screen keeps the
   // old view up while the fresh one is fetched (keystrokes during the fetch
@@ -132,6 +145,7 @@ export async function renderItem(container, handle) {
   // into the same logical field afterwards (update.js). A first render, or a
   // different item, still shows the loading line.
   if (container.dataset.renderedHandle !== handle || !container.firstChild) {
+    destroyLiveCalc(container);
     container.textContent = '';
     container.appendChild(el('p', 'muted', 'Loading item…'));
   }
@@ -139,6 +153,7 @@ export async function renderItem(container, handle) {
   try {
     item = await api(`/api/item/${encodeURIComponent(handle)}`);
   } catch (err) {
+    destroyLiveCalc(container);
     container.textContent = '';
     container.dataset.renderedHandle = '';
     container.appendChild(el('p', 'banner bad', `Could not load the item: ${err.message}`));
@@ -146,6 +161,7 @@ export async function renderItem(container, handle) {
   }
   const focus = captureFocus(container);
   const controls = collectControls(container);
+  destroyLiveCalc(container);
   container.textContent = '';
 
   const head = section(`${item.id || item.handle} — ${item.title}`);
@@ -182,6 +198,10 @@ export async function renderItem(container, handle) {
     // writes is the same one a field edit uses).
     if (editor.imagePicker) body.appendChild(editor.imagePicker);
     if (editor.sourcePicker) body.appendChild(editor.sourcePicker);
+    // The live inline-calc panel sits under the textarea, beside the
+    // pickers (design §3.5, placement §6.3): rows and Fill buttons for the
+    // text the author is typing into the control right above.
+    if (editor.liveCalcPanel) body.appendChild(editor.liveCalcPanel);
   } else {
     body.appendChild(el('pre', 'body-text', item.body || '(empty)'));
     const info = item.edit && item.edit.body;

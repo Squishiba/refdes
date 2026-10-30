@@ -14,6 +14,7 @@ import {
 import { createLinksSection } from './links.js';
 import { createImagePicker } from './images.js';
 import { createSourcePicker } from './sourcepicker.js';
+import { createLiveCalc } from './live-calc.js';
 import { fieldControlNode, applyControl } from './controls.js';
 
 function el(tag, cls, text) {
@@ -49,8 +50,31 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     return {
       node: block, fieldControl: () => null, bodyControl: () => null,
       imagePicker: null, sourcePicker: createSourcePicker(item, handle, null),
+      liveCalcPanel: null,
     };
   }
+
+  // The live inline-calc layer (live-calc.js, design §3.1-§3.8), built only
+  // for an editable form: it reads the form's own revision through the
+  // accessor below (§3.6 guard 2 -- never app.js's unassigned openRevision,
+  // which is never assigned), stays quiet while a save round-trip is in
+  // flight (§3.1), and sends the draft field bag with every request
+  // (carried, inert, until the field-reference slice).
+  let saving = false;
+  const liveCalc = createLiveCalc(handle, {
+    getRevision: () => revision,
+    // Guard 3's recovery signal (round 7) is for baselines that came from
+    // the VIEW (the ff1 boot race). A baseline from a persisted
+    // draft.revision (dropAppliedOp after a partial save + 409: the form
+    // INTENTIONALLY trails the model while the conflict is resolved) must
+    // not fire it -- the re-render keeps the same draft-backed baseline,
+    // destroys the conflict box and re-fires the drop forever. The draft
+    // object is live (drafts.js hands out the shared object), so this
+    // tracks dropAppliedOp/clearDraft as they happen.
+    revisionFromDraft: () => !!draft.revision,
+    isSaving: () => saving,
+    getFields: () => draft.fields,
+  });
 
   const bar = el('div', 'edit-bar');
   const status = el('span', 'edit-status muted', 'saved');
@@ -208,6 +232,10 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     area._refdesCommit = writeBody;
     area.addEventListener('input', writeBody);
     bodyArea = area;
+    // Bind once per textarea and re-arm here (design §3.8): a re-render
+    // carries the node over, so the new editor instance takes it from the
+    // previous controller and the live-calc layer re-arms against this form.
+    liveCalc.attach(area);
     return area;
   }
 
@@ -246,6 +274,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
 
   async function saveAll(ops, atRevision) {
     save.disabled = true;
+    saving = true; // the live-calc layer asks no questions and applies nothing in this window
     note('Saving…', 'muted');
     try {
       await postAll(ops || pendingOps(), atRevision || revision);
@@ -261,6 +290,8 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
       else if (err.status === 422) showBlocked(err.payload || {});
       else note(`The save failed: ${err.message}`, 'bad');
       return false;
+    } finally {
+      saving = false;
     }
   }
 
@@ -336,9 +367,17 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     node: block,
     fieldControl,
     bodyControl,
+    // The form's own revision (advanced by each save response): the same
+    // string the save sends as expected_revision. Exported for the
+    // createLiveCalc wiring above (the §3.6 revision guard); no consumer
+    // outside this module's wiring.
+    getRevision: () => revision,
     // Built here (it needs the insert callback) and placed by item.js in the
     // Body section, under the textarea it writes into.
     imagePicker: createImagePicker(item, handle, insertIntoBody),
     sourcePicker: createSourcePicker(item, handle, edit.body && edit.body.editable ? acceptSource : null),
+    // The live inline-calc panel, mounted by item.js under the textarea
+    // beside the pickers (design §3.5, panel placement §6.3).
+    liveCalcPanel: liveCalc.node,
   };
 }

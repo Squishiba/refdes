@@ -6,7 +6,7 @@
 import { api } from './api.js';
 import { parseFilters, filterQuery, renderSidebar } from './filters.js';
 import { renderList } from './list.js';
-import { renderItem } from './item.js';
+import { renderItem, destroyLiveCalc } from './item.js';
 import { createForm } from './create.js';
 
 const banner = document.getElementById('banner');
@@ -54,6 +54,7 @@ async function renderRoute() {
   });
   renderList(listPane, payload, route.filters);
   if (route.name === 'create') {
+    destroyLiveCalc(detailPane); // the pane may still hold the item view's live panel (§3.8)
     detailPane.textContent = '';
     detailPane.appendChild(createForm({
       type: route.params.get('type'),
@@ -66,6 +67,7 @@ async function renderRoute() {
   } else if (payload.items.length === 1) {
     renderItem(detailPane, payload.items[0].handle);
   } else {
+    destroyLiveCalc(detailPane); // empty selection: same clear, same teardown (§3.8)
     detailPane.textContent = '';
     const p = document.createElement('p');
     p.className = 'muted';
@@ -75,7 +77,6 @@ async function renderRoute() {
 }
 
 window.addEventListener('hashchange', renderRoute);
-renderRoute();
 
 const gitBadge = document.getElementById('git-badge');
 let openRevision = null;   // the revision the current view was loaded against
@@ -124,5 +125,27 @@ export async function poll() {
 // live in drafts.js, not in the DOM the re-render replaces.
 window.addEventListener('refdes:rebuilt', renderRoute);
 
-poll();
+// live-calc dropped a response as stale-model: the form's baseline trails
+// the served model (the rebuild raced between the view's GET and the
+// baseline capture). Re-render now — the draft survives — and let the next
+// poll re-capture the baseline from the model the view was just refetched
+// against. This cannot storm (round 7): live-calc never fires it for a
+// draft-backed baseline (a conflict form INTENTIONALLY trails the model —
+// re-rendering keeps the same baseline and only destroys the conflict box),
+// and never twice for the same dropped server revision — if the re-sync
+// did not fix it, it will not. A genuinely new model revision fires again.
+window.addEventListener('refdes:stale-calc', () => {
+  lastServed = null;
+  renderRoute();
+});
+
+// The baseline serial must be captured before the first view is fetched.
+// The serve answers the two boot fetches on parallel handler threads, so a
+// watcher rebuild landing between them is ordered by arrival: poll-first
+// leaves lastServed at or behind the view's build (a rebuild between them
+// fires `refdes:rebuilt` on the next poll and the view re-renders);
+// view-first can capture a serial NEWER than the view's build, and then no
+// rebuild event ever fires — live-calc's revision guard drops every
+// response for the life of the draft, silently.
+poll().then(renderRoute);
 setInterval(poll, 2000);

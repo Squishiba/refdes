@@ -29,10 +29,59 @@ def js_files():
     return sorted(n for n in os.listdir(STATIC) if n.endswith(".js"))
 
 
+def strip_js_comments(text):
+    """Blank out `//` and `/* */` comments, string-aware. The regex scans in
+    this file are naive (no parser), so prose in a comment -- a possessive
+    apostrophe, the word "evaluate", an `on...` mention -- used to trip them,
+    which bent production comments into awkward phrasings. Scan code, not
+    prose: strip the comments first, then assert on what the engine runs.
+    Backtick templates are treated as plain strings (house style, naive)."""
+    out = []
+    i = 0
+    n = len(text)
+    in_string = None
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == in_string:
+                in_string = None
+            i += 1
+            continue
+        if ch in "'\"`":
+            in_string = ch
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "/" and i + 1 < n:
+            if text[i + 1] == "/":
+                while i < n and text[i] != "\n":
+                    i += 1
+                continue
+            if text[i + 1] == "*":
+                end = text.find("*/", i + 2)
+                i = n if end == -1 else end + 2
+                out.append(" ")
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def js_code(name):
+    """A served module's code with comments stripped: the surface the
+    behavioral pins in this file assert against (see strip_js_comments)."""
+    with open(os.path.join(STATIC, name), encoding="utf-8") as fh:
+        return strip_js_comments(fh.read())
+
+
 @pytest.mark.parametrize("name", js_files())
 def test_no_inline_handlers_or_dynamic_code_in_served_js(name):
-    with open(os.path.join(STATIC, name), encoding="utf-8") as fh:
-        text = fh.read()
+    text = js_code(name)
     assert not INLINE_HANDLER.search(text), f"{name}: an inline event handler is a CSP violation"
     assert not DYNAMIC_CODE.search(text), f"{name}: no eval/new Function in the editor"
     assert "javascript:" not in text
@@ -86,8 +135,7 @@ def test_served_js_parses_as_es2020_modules():
     top-level scope -- the class of mistake that turns a module into a blank
     page with one console line."""
     for name in js_files():
-        with open(os.path.join(STATIC, name), encoding="utf-8") as fh:
-            text = fh.read()
+        text = js_code(name)
         depth = {"(": ")", "[": "]", "{": "}"}
         stack = []
         in_string = None
@@ -647,3 +695,144 @@ def test_pdf_confirm_uses_the_existing_save_path_and_persists_its_session_select
     assert "setDraftBody(handle, area.value)" in editor
     assert "addDraftPin(handle, {" in editor
     assert "quoted: proposal" not in editor and "value: proposal.entry" not in editor
+
+
+# ------------------------------------------------------------ live inline calc (slice B)
+
+
+def test_the_live_calc_panel_is_wired_into_the_body():
+    """Slice B's panel has to reach the page the same way every earlier panel
+    did: the module exists, editor.js imports and attaches it to the body
+    textarea, item.js places it under that textarea beside the pickers, and a
+    teardown sweep destroys it before the container it lives in is cleared."""
+    assert os.path.isfile(os.path.join(STATIC, "live-calc.js"))
+    editor = js_code("editor.js")
+    item = js_code("item.js")
+    assert "from './live-calc.js'" in editor
+    assert "createLiveCalc(handle, {" in editor
+    assert "liveCalc.attach(area)" in editor
+    assert "liveCalcPanel: liveCalc.node" in editor
+    assert "editor.liveCalcPanel" in item
+    # under the textarea, beside the pickers (the image/source placement rule)
+    body_at = item.index("const bodyArea = editor.bodyControl(")
+    assert body_at < item.index("editor.liveCalcPanel")
+    assert body_at < item.index("editor.imagePicker")
+    # and destroyed with the view it lives in, not left listening: EVERY
+    # path that clears the container destroys the panel first -- the helper
+    # is defined before the first clear, and there is a destroy call for
+    # every clear (item switch, fetch error, normal swap).
+    assert item.index("destroyLiveCalc(container)") < item.index("container.textContent = ''")
+    assert item.count("destroyLiveCalc(container);") == item.count("container.textContent = '';")
+    assert "querySelectorAll('.live-calc')" in item
+    assert "_refdesLiveCalc.destroy()" in item
+    assert item.index("_refdesLiveCalc.destroy()") < item.index("restoreFocus(container, focus)")
+    # the shell's own clears of the same pane (create form, empty selection)
+    # tear the panel down too -- the helper is exported for exactly this
+    assert "export function destroyLiveCalc" in item
+    app = js_code("app.js")
+    assert "renderItem, destroyLiveCalc } from './item.js'" in app
+    assert app.count("destroyLiveCalc(detailPane)") == 2  # create form, empty selection
+    # the controller is built only for an editable form (after the early
+    # return), and both return shapes carry the same keys
+    assert editor.index("if (!edit.editable)") < editor.index("const liveCalc = createLiveCalc")
+    assert editor.count("liveCalcPanel: null") == 1
+
+
+def test_the_panel_reads_the_forms_own_revision_and_the_save_window():
+    """The §3.6 guards read the editor's own state through accessors -- the
+    form's live `revision` variable (the same string saveAll sends as
+    expected_revision) and a flag set for the whole save round-trip. A panel
+    with a stale copy of either would discard live responses or stomp a save."""
+    editor = js_code("editor.js")
+    assert "getRevision: () => revision" in editor
+    assert "isSaving: () => saving" in editor
+    assert "getFields: () => draft.fields" in editor
+    assert editor.index("let saving = false") < editor.index("const liveCalc = createLiveCalc")
+    assert "saving = true" in editor
+    # the flag drops in `finally`: a failed save must not silence the panel
+    assert "saving = false" in editor and "} finally {" in editor
+    assert editor.index("} finally {") < editor.index("\n      saving = false;")
+    panel = js_code("live-calc.js")
+    assert "export function createLiveCalc" in panel
+    # the guard is the editor's revision, never app.js's openRevision
+    assert "openRevision" not in panel
+    assert "payload.revision !== getRevision()" in panel
+    # the second guard: the textarea's text as of the REQUEST (the response
+    # path: typing during the network beat discards the response silently)
+    assert "area.value !== sent" in panel
+    # ... and as of the visible rows (the apply path: Fill is inert against
+    # a snapshot it no longer describes)
+    assert "area.value !== snapshotText" in panel
+
+
+def test_the_calc_request_is_debounced_carries_the_bag_and_is_abortable():
+    """§3.1/§3.3: a 400 ms trailing debounce, the request body is
+    `{text, fields}` with the draft's live bag, and each request owns an
+    AbortController signal threaded through api.js (guard 1: the in-flight
+    request of superseded text is aborted, not awaited)."""
+    panel = js_code("live-calc.js")
+    assert "const DEBOUNCE_MS = 400" in panel
+    assert "setTimeout(" in panel and "clearTimeout(" in panel
+    assert "/calc`," in panel
+    assert "body: { text, fields: getFields() }" in panel
+    assert "new AbortController()" in panel
+    assert "signal: controller.signal" in panel
+    apijs = js_code("api.js")
+    assert "{ method = 'GET', body, signal } = {}" in apijs
+    assert "init.signal = signal" in apijs
+
+
+def test_the_auto_fill_toggles_on_one_persisted_preference():
+    """§3.5/§6.1: one localStorage key, default ON (absence is on), and the
+    gate reads `stale` -- never `computed !== stored`, the D1 rule an
+    ok-within-window literal (`4.4 V` vs computed `4.436 V`) survives."""
+    panel = js_code("live-calc.js")
+    assert "refdes.live-calc.autofill" in panel
+    assert "!== 'off'" in panel  # default on: only an explicit 'off' turns it off
+    assert "status === 'stale'" in panel
+    # auto-fill's gate is the same gate, phrased as a skip (the Fill-button
+    # check alone would let a scheduled auto-fill mutate a non-stale row)
+    assert "span.status !== 'stale'" in panel
+    # the pair is enforced, not just one boundary: a span missing its
+    # result_end is display-only everywhere (Fill button, auto-fill gate,
+    # and the offset conversion itself, which has no half-pair path)
+    assert panel.count("span.result_end !== undefined") == 1
+    assert panel.count("span.result_end === undefined") == 2
+    # the Case B stand-down is SESSION-scoped (a browser session outlives
+    # every controller: the flag lives in sessionStorage, not in the closure)
+    assert "refdes.live-calc.fallback" in panel
+    assert "sessionStorage.getItem(FALLBACK_KEY)" in panel
+    assert "let sessionFallback = readFallbackFlag();" in panel
+    assert "writeFallbackFlag();" in panel
+    # it says so, in a line that survives the controller rebuild
+    assert "auto-fill is off for this session (undo is unavailable here); Fill still works" in panel
+    assert "sessionOff.hidden = !sessionFallback;" in panel
+    # the checkbox shows the EFFECTIVE state, never a lying ON
+    assert "readAutofillPref() && !sessionFallback" in panel
+    # the author's live selection (non-collapsed) blocks fills it overlaps
+    assert "const e = area.selectionEnd" in panel
+    assert "s < off.resultEnd && e > off.resultStart" in panel
+    # the offset conversion computes the line starts ONCE per batch
+    assert "function toOffsets" not in panel
+    assert panel.count("lineStarts(") == 3  # definition + one call per apply path
+    assert "const starts = lineStarts(text);" in panel
+    # the truncation footer mirrors the server's limit, not a magic number
+    js_limit = re.search(r"const PREVIEW_SPAN_LIMIT = (\d+)", panel)
+    assert js_limit is not None, "the panel must name the span limit as a constant"
+    build_py = os.path.join(os.path.dirname(os.path.dirname(STATIC)), "build.py")
+    with open(build_py, encoding="utf-8") as fh:
+        py = fh.read()
+    py_limit = re.search(r"PREVIEW_SPAN_LIMIT = (\d+)", py)
+    assert py_limit is not None and js_limit.group(1) == py_limit.group(1), (
+        "the panel's truncation footer no longer mirrors build.PREVIEW_SPAN_LIMIT"
+    )
+    assert "showing the first ${PREVIEW_SPAN_LIMIT} spans" in panel
+    # fills go through the native undo path first (Case A), splice as Case B
+    assert "execCommand('insertText'" in panel
+    # a Case B splice fires no input event: the apply path schedules the
+    # recalculation the browser commit cannot
+    assert "if (spliced) schedule();" in panel
+    # the panel writes text through exactly one path (the Case B splice;
+    # Case A goes through execCommand, which mutates natively)
+    assert panel.count("area.value = ") == 1
+    assert "innerHTML" not in panel
