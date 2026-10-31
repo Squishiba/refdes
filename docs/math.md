@@ -339,10 +339,22 @@ span's line; the source is never rewritten:
 WARNING items/log.md:7 [LOG-001] — inline calc Vout: stored result says 4.52 V, now computes 4.436 V
 ```
 
-The warning never shows a number that looks accepted: when the project's
-rounding of the computed value would itself fit the stored literal's window
-— a raw 3.4495 displayed as `3.45`, inside the window of a stored `3.5` —
-the warning shows the raw value instead.
+The warning never shows a number that looks accepted. When the project's
+rounding of the computed value would itself be read as passing the stored
+literal's window — a raw 3.4495 displayed as `3.45`, which rounds to the
+stored `3.5` — the warning shows the raw value instead, normalised to a
+readable number of figures (the raw float behind 3.4495 prints as
+`3.4495000000000005`, so it is rounded to a clean `3.4495`):
+
+```
+WARNING items/log.md:7 [LOG-001] — inline calc x: stored result says 3.5 V, now computes 3.4495 V
+```
+
+A displayed value that already reads as stale is shown as-is, with its
+ordinary rounding: stored `4.3 W` against a computed value the project
+rounds to `4.4 W` shows `4.4 W`, not the raw `4.3999999999999995 W` the
+binary float carries — the gap to `4.3` is plain in the rounded display.
+
 
 A stale result is a readiness fact too: by default `refdes release` fails on
 one (`release_gate.inline_calc_results: { release: true, revision: false }` —

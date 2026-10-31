@@ -492,6 +492,42 @@ def test_stale_display_never_shows_a_value_that_looks_accepted(tmp_path):
     )
 
 
+def test_run14_stale_span_displays_when_the_value_clearly_reads_stale(tmp_path):
+    # F14-1: computed 4.8 W - 0.4 W = 4.3999999999999995, stored 4.3 W at
+    # sigfigs 2. The display `4.4 W` touches the stored window's edge
+    # (4.35) -- touching, not inside -- and reads plainly as stale (4.4 vs
+    # 4.3), so the raw binary float must NOT be shown.
+    project = _build(
+        tmp_path,
+        "`Pin := 4.8 W - 0.4 W | W = 4.3 W`\n",
+        config=BASIC_CONFIG + "sigfigs: 2\n",
+    )
+    warns = _inline_warnings(project)
+    assert len(warns) == 1
+    assert warns[0].message == (
+        "inline calc Pin: stored result says 4.3 W, now computes 4.4 W"
+    )
+
+
+def test_run14_raw_display_is_normalised_not_a_binary_dump(tmp_path):
+    # F14-1, the part the acceptance fix does NOT remove: when the rounded
+    # display IS accepted (so the raw value is shown, per F12-4), a binary
+    # float's 17-digit repr is normalised with a significant-figure cap.
+    # 6.899000000000001 V / 2 = 3.4495000000000005; at 3 sigfigs that
+    # displays `3.45 V`, which is accepted against stored `3.5 V` (tie
+    # rounds to 3.5), so the raw shows -- as 3.4495, not the binary tail.
+    project = _build(
+        tmp_path,
+        "`x := 6.899000000000001 V / 2 | V = 3.5 V`\n",
+        config=BASIC_CONFIG + "sigfigs: 3\n",
+    )
+    warns = _inline_warnings(project)
+    assert len(warns) == 1
+    assert warns[0].message == (
+        "inline calc x: stored result says 3.5 V, now computes 3.4495 V"
+    )
+
+
 def test_span_only_cross_item_reference_creates_an_ordering_edge(tmp_path):
     # F12-5, closed by slice 2 (docs/design/inline-calc.md section 3): the
     # scheduler's edges come from fence lines and inline spans alike, so a

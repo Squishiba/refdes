@@ -575,17 +575,17 @@ def unclosed_comment_offset(body: str) -> int | None:
 _PLAIN_NUMBER_RE = re.compile(r"[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?")
 
 
-def _half_of_place(text: str) -> Decimal:
-    """Half of one unit of a decimal text's last written place: `4.436`
-    -> 0.0005, `4` -> 0.5, `1.235e+06` -> 500. This is the rounding
-    interval a reader reads a displayed number with."""
-    mantissa, _, exp_text = text.partition("e")
-    if not exp_text:
-        mantissa, _, exp_text = text.partition("E")
-    whole, dot, frac = mantissa.lstrip("+-").partition(".")
-    decimals = len(frac) if dot else 0
-    exp = int(exp_text) if exp_text else 0
-    return Decimal(5).scaleb(exp - decimals - 1)
+def _clean_raw(dec: Decimal, cap: int = 12) -> Decimal:
+    """A raw value for display, rounded to at most `cap` significant
+    figures. The computed magnitude is a binary float; its exact decimal
+    text runs to 17 digits (`4.3999999999999995`), which is what the
+    author's calc produced numerically but is unreadable. Capping to
+    `cap` significant figures collapses that binary tail to the clean
+    decimal the author would write (`4.4`), while leaving a genuine
+    gap -- 3.4495, 5 sigfigs -- untouched (run-14 F14-1)."""
+    with localcontext() as ctx:
+        ctx.prec = cap
+        return (+dec).normalize()
 
 
 def _stale_message(
@@ -596,24 +596,37 @@ def _stale_message(
     half: Decimal,
 ) -> str:
     """The stale-result warning. The displayed computed value must not
-    read as accepted: when the rounded display lands inside the stored
-    literal's window -- run-12 F12-4, a raw 3.4495 shown as `3.45 V`
-    against stored `3.5 V`, which the author then reads as passing the
-    3.5 +/- 0.05 window -- the raw value replaces it, and the gap is
-    visible. What is *accepted* is the window rule above, decided on
-    full values; this decides only what is *shown*."""
+    read as accepted: when a reader who reads the *displayed* value at
+    the stored literal's own place would accept it as matching -- run-12
+    F12-4, a raw 3.4495 shown as `3.45 V` against stored `3.5 V`, which
+    the author then reads as passing the 3.5 +/- 0.05 window -- the raw
+    value replaces it, and the gap is visible. The test is the window
+    rule applied to the displayed value, not an interval overlap: a
+    displayed value whose rounded form lands outside the window (4.4
+    against 4.3, windows merely touching at 4.35) already reads as stale
+    and is shown as-is, so the raw float is not needed (run-14 F14-1).
+    What is *accepted* is the window rule above, decided on full values;
+    this decides only what is *shown*."""
     text = computed_text.strip()
     number = _PLAIN_NUMBER_RE.match(text)
     if number is not None:
         shown = Decimal(number.group())
-        shown_half = _half_of_place(number.group())
-        inside_window = not (
-            shown + shown_half < stored_dec - half
-            or shown - shown_half > stored_dec + half
-        )
-        if inside_window:
-            text = f"{computed_dec.normalize():f}{text[number.end():]}"
+        diff = shown - stored_dec
+        if abs(diff) < half:
+            accepted = True
+        elif abs(diff) > half:
+            accepted = False
+        else:
+            # Boundary tie, decided the same way `compare_stored` decides
+            # it: round the displayed value to the stored place (twice
+            # the stored half-window), halves away from zero, accept an
+            # exact match.
+            rounded = shown.quantize((half * 2).normalize(), rounding=ROUND_HALF_UP)
+            accepted = rounded == stored_dec
+        if accepted:
+            text = f"{_clean_raw(computed_dec):f}{text[number.end():]}"
     return f"stored result says {span.result}, now computes {text}"
+
 
 
 def compare_stored(value: calc.Value, span: InlineSpan, computed_text: str) -> str | None:
