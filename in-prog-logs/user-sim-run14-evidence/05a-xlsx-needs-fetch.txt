@@ -1,0 +1,1 @@
+ERROR   items/thermal/thermal-estimate.md:24 [LOG-THM-001] — calc 'rise': source('analysis/thermal-model.xlsx', 'Sheet1!case_rise') has no locked value -- run 'refdes fetch --path analysis/thermal-model.xlsx' to extract and pin it

@@ -1,0 +1,3 @@
+WARNING items/thermal/thermal-estimate.md:16 [LOG-THM-001] — inline calc Rds: stored result says 18 mohm, now computes 20 mΩ
+WARNING items/thermal/thermal-estimate.md:17 [LOG-THM-001] — inline calc Vinb: RES-001 has both a calc value 'vin' and a field 'vin'; the reference reads the calc value -- write RES-001.$vin to read the field
+WARNING items/power/resistors.yaml:6 [RES-001] — item is on board 'power' (token 'PWR'), but its id prefix 'RES' does not contain that token

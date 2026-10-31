@@ -1,0 +1,5 @@
+ERROR   items/power/rail-budget.md:2 [LOG-PWR-003] — P_diss violates BND-PWR-001: worst case 0.44 W vs <= 0.42 W
+WARNING items/power/rail-budget.md:30 [LOG-PWR-003] — inline calc Pdiss: stored result says 0.30 W, now computes 0.44 W
+WARNING items/power/rail-budget.md:31 [LOG-PWR-003] — inline calc Pin: stored result says 4.3 W, now computes 4.3999999999999995 W
+WARNING items/thermal/thermal-estimate.md:15 [LOG-THM-001] — inline calc Pstage: stored result says 0.30 W, now computes 0.44 W
+WARNING items/thermal/thermal-estimate.md:17 [LOG-THM-001] — inline calc Vinb: RES-001 has both a calc value 'vin' and a field 'vin'; the reference reads the calc value -- write RES-001.$vin to read the field

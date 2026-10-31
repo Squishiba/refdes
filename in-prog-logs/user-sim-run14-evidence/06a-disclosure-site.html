@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOG-PWR-003 — QSC-1 Power Board — Design Reference</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/taskpane.css">
+</head>
+<body>
+<aside class="sidenav">
+  <a class="brand" href="index.html">QSC-1 Power Board — Design Reference</a>
+  <input type="checkbox" id="sidenav-toggle" class="sidenav-toggle-input">
+  <label for="sidenav-toggle" class="sidenav-toggle-label">☰ Navigation</label>
+  <nav>
+        <a href="overview.html">Overview</a>
+
+        <a href="summary.html">Summary</a>
+
+        <a href="index.html">Items</a>
+
+        <a href="coverage.html">Coverage</a>
+
+        <a href="log.html">Design log</a>
+
+        <a href="references.html">References</a>
+
+        <a href="parts.html">Parts</a>
+
+        <a href="document.html">Full record</a>
+
+        <a href="tree.html">Tree</a>
+
+        <a href="vocabulary.html">Vocabulary</a>
+
+        <a href="items.json">JSON</a>
+
+        <details>
+      <summary>Power stage</summary>
+          <a href="summary-power.html">Summary</a>
+
+          <a href="coverage-power.html">Coverage</a>
+
+          <a href="log-power.html">Design log</a>
+
+          <a href="references-power.html">References</a>
+
+          <a href="parts-power.html">Parts</a>
+
+          <a href="document-power.html">Full record</a>
+
+          <a href="tree-power.html">Tree</a>
+
+    </details>
+
+        <details>
+      <summary>Thermal</summary>
+          <a href="summary-thermal.html">Summary</a>
+
+          <a href="coverage-thermal.html">Coverage</a>
+
+          <a href="log-thermal.html">Design log</a>
+
+          <a href="references-thermal.html">References</a>
+
+          <a href="document-thermal.html">Full record</a>
+
+          <a href="tree-thermal.html">Tree</a>
+
+    </details>
+
+  </nav>
+</aside>
+
+<div class="content">
+<main>
+
+<article class="item" data-refdes-thread="LOG-PWR-001">
+
+<div class="item-head">
+  <span class="type-badge">Log entry</span>
+  <h1>LOG-PWR-003</h1>
+<span class="pill pill-pass">pass</span><span class="pill pill-sealed">append-only</span></div>
+<p class="item-title">3V3 rail budget at 55 C</p>
+
+
+
+<section class="thread">
+  <h2>Thread</h2>
+  <div class="thread-concludes">
+    <h3>Currently concludes</h3>
+    <dl>
+      <dt>status</dt>
+      <dd>accepted
+        <span class="thread-source">from
+          <a class="ref" href="log-pwr-003.html" data-ref="LOG-PWR-003">LOG-PWR-003</a></span>
+      </dd>
+      <dt>checks</dt>
+      <dd>value: P_diss, against: BND-PWR-001@4nch7dbgtwa
+        <span class="thread-source">from
+          <a class="ref" href="log-pwr-003.html" data-ref="LOG-PWR-003">LOG-PWR-003</a></span>
+      </dd>
+      <dt>satisfies</dt>
+      <dd>BND-PWR-001
+        <span class="thread-source">from
+          <a class="ref" href="log-pwr-003.html" data-ref="LOG-PWR-003">LOG-PWR-003</a></span>
+      </dd>
+      <dt>selects</dt>
+      <dd>CMP-PWR-001
+        <span class="thread-source">from
+          <a class="ref" href="log-pwr-003.html" data-ref="LOG-PWR-003">LOG-PWR-003</a></span>
+      </dd>
+    </dl>
+  </div>
+  <ol class="timeline thread-timeline">
+    <li class="tl-entry">
+      <div class="tl-meta">
+        <span class="tl-date">2026-10-20</span>
+        <a class="ref tl-id" href="log-pwr-001.html" data-ref="LOG-PWR-001">LOG-PWR-001</a>
+      </div>
+      <div class="tl-summary">Rail architecture chosen for QSC-1.</div>
+    </li>
+    <li class="tl-entry">
+      <div class="tl-meta">
+        <span class="tl-date">2026-10-24</span>
+        <a class="ref tl-id" href="log-pwr-002.html" data-ref="LOG-PWR-002">LOG-PWR-002</a>
+      </div>
+      <div class="tl-summary">Input range confirmed with the customer.</div>
+    </li>
+    <li class="tl-entry tl-current">
+      <div class="tl-meta">
+        <span class="tl-date">2026-10-28</span>
+        <a class="ref tl-id" href="log-pwr-003.html" data-ref="LOG-PWR-003">LOG-PWR-003</a>
+      </div>
+      <div class="tl-summary">3V3 rail budget at 55 C</div>
+    </li>
+  </ol>
+</section>
+
+<table class="fields">
+  <tbody>
+    <tr id="field-source" class="field-anchor"><td colspan="3"></td></tr>
+    <tr id="field-note" class="field-anchor"><td colspan="3"></td></tr>
+    <tr id="field-tags" class="field-anchor"><td colspan="3"></td></tr>
+    <tr id="field-date">
+      <th>date</th>
+      <td>
+2026-10-28      </td>
+      <td class="on-change" title="on_change policy for this field">invalidate</td>
+    </tr>
+    <tr id="field-summary">
+      <th>summary</th>
+      <td>
+3V3 rail budget at 55 C
+      </td>
+      <td class="on-change" title="on_change policy for this field">invalidate</td>
+    </tr>
+    <tr id="field-author" class="field-anchor"><td colspan="3"></td></tr>
+    <tr id="field-status">
+      <th>status</th>
+      <td>
+accepted
+      </td>
+      <td class="on-change" title="on_change policy for this field">invalidate</td>
+    </tr>
+    <tr id="field-rationale" class="field-anchor"><td colspan="3"></td></tr>
+    <tr id="field-options" class="field-anchor"><td colspan="3"></td></tr>
+    <tr id="field-tasks" class="field-anchor"><td colspan="3"></td></tr>
+  </tbody>
+</table>
+
+<div class="body"><p>Input from the platform contract is 24 V nominal. The rail budget:</p>
+<table class="calc"><tr class="calc-row"><td class="calc-name">V_in</td><td class="calc-expr">24 V</td><td class="calc-result">24 V </td><td></td></tr><tr class="calc-row"><td class="calc-name">V_out</td><td class="calc-expr">3.3 V</td><td class="calc-result">3.3 V </td><td></td></tr><tr class="calc-row"><td class="calc-name">I_out</td><td class="calc-expr">1.2 A</td><td class="calc-result">1.2 A </td><td></td></tr><tr class="calc-row"><td class="calc-name">eff<span class="calc-annotation">| 1</span></td><td class="calc-expr">source(&quot;analysis/power-budget.csv&quot;, &quot;tps62913_half_load_eff&quot;)<span class="calc-source">source: analysis/power-budget.csv &middot; tps62913_half_load_eff = 0.90</span></td><td class="calc-result">0.9 </td><td></td></tr><tr class="calc-row"><td class="calc-name">P_in<span class="calc-annotation">| W</span></td><td class="calc-expr">V_out * I_out / eff</td><td class="calc-result">4.4 W </td><td></td></tr><tr class="calc-row"><td class="calc-name">P_diss<span class="calc-annotation">| W</span></td><td class="calc-expr">P_in - V_out * I_out</td><td class="calc-result">0.44 W </td><td></td></tr></table>
+<p>The converter dissipates <code>Pdiss := P_diss | W = 0.44 W</code> inside the envelope,
+and the rail draws <code>Pin := P_in | W = 4.4 W</code> at half load.</p>
+</div>
+<section class="history-disclosure">
+  <h2>History</h2>
+  <details class="fields">
+    <summary class="small">rev-a <span class="muted">(revision)</span></summary>
+<p class="small muted">edited after captured</p>    <pre class="small">&lt;!--navi:e1xa7w7qhm3 Confirm copper stackup assumption with the fab.--&gt; Input from the platform contract is 24 V nominal. The rail budget: ```calc V_in = 24 V V_out = 3.3 V I_out = 1.2 A eff = source(&#34;analysis/power-budget.csv&#34;, &#34;tps62913_half_load_eff&#34;) | 1 P_in = V_out * I_out / eff | W P_diss = P_in - V_out * I_out | W ``` The converter dissipates `Pdiss := P_diss | W = 0.30 W` inside the envelope, and the rail draws `Pin := P_in | W = 4.3 W` at half load.</pre>
+  </details>
+  <details class="fields">
+    <summary class="small">rel-1 <span class="muted">(release)</span></summary>
+<p class="small muted">edited after captured</p>    <pre class="small">&lt;!--navi:e1xa7w7qhm3 Confirm copper stackup assumption with the fab.--&gt; Input from the platform contract is 24 V nominal. The rail budget: ```calc V_in = 24 V V_out = 3.3 V I_out = 1.2 A eff = source(&#34;analysis/power-budget.csv&#34;, &#34;tps62913_half_load_eff&#34;) | 1 P_in = V_out * I_out / eff | W P_diss = P_in - V_out * I_out | W ``` The converter dissipates `Pdiss := P_diss | W = 0.30 W` inside the envelope, and the rail draws `Pin := P_in | W = 4.3 W` at half load.</pre>
+  </details>
+  <details class="fields">
+    <summary class="small">rev-b <span class="muted">(revision)</span></summary>
+    <pre class="small">&lt;!--navi:e1xa7w7qhm3 Confirm copper stackup assumption with the fab.--&gt; Input from the platform contract is 24 V nominal. The rail budget: ```calc V_in = 24 V V_out = 3.3 V I_out = 1.2 A eff = source(&#34;analysis/power-budget.csv&#34;, &#34;tps62913_half_load_eff&#34;) | 1 P_in = V_out * I_out / eff | W P_diss = P_in - V_out * I_out | W ``` The converter dissipates `Pdiss := P_diss | W = 0.44 W` inside the envelope, and the rail draws `Pin := P_in | W = 4.4 W` at half load.</pre>
+  </details>
+  <details class="fields" open>
+    <summary class="small">rev-c <span class="muted">(revision)</span></summary>
+    <pre class="small">&lt;!--navi:e1xa7w7qhm3 Confirm copper stackup assumption with the fab.--&gt; Input from the platform contract is 24 V nominal. The rail budget: ```calc V_in = 24 V V_out = 3.3 V I_out = 1.2 A eff = source(&#34;analysis/power-budget.csv&#34;, &#34;tps62913_half_load_eff&#34;) | 1 P_in = V_out * I_out / eff | W P_diss = P_in - V_out * I_out | W ``` The converter dissipates `Pdiss := P_diss | W = 0.44 W` inside the envelope, and the rail draws `Pin := P_in | W = 4.4 W` at half load.</pre>
+  </details>
+</section>
+
+
+<section class="checks" id="field-checks">
+  <h2>Checks</h2>
+  <table class="grid">
+    <thead><tr><th></th><th>Value</th><th>Result</th><th>Against</th><th>Detail</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>✓</td>
+        <td class="mono">P_diss</td>
+        <td class="mono good">0.44 W</td>
+        <td><a class="ref" href="bnd-pwr-001.html" data-ref="BND-PWR-001">BND-PWR-001</a></td>
+        <td class="small">worst case 0.44 W vs &lt;= 0.60 W</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="citations" id="field-citations">
+  <h2>Citations</h2>
+  <table class="grid">
+    <thead><tr><th></th><th>Path</th><th>Rev</th><th>Page</th><th>Part #</th><th>Copy</th><th>Detail</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>
+<span class="pill pill-pass">ok</span>
+        </td>
+        <td>
+          <a href="assets/citations/18cd13291366869ab875b1d4797e885a7eca6d02139484543627afeed396e00a.csv">analysis/power-budget.csv</a>
+        </td>
+        <td class="mono">—</td>
+        <td class="mono">—</td>
+        <td class="mono">—</td>
+        <td>no</td>
+        <td class="small"></td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+
+<section class="traces">
+  <h2>Traceability</h2>
+  <div class="trace-cols">
+    <div>
+      <h3>Outgoing</h3>
+      <ul class="tight">
+        <li><span class="rel">Follows</span>
+          <a class="ref" href="log-pwr-002.html" data-ref="LOG-PWR-002">LOG-PWR-002</a>        </li>
+        <li><span class="rel">Selects</span>
+          <a class="ref" href="cmp-pwr-001.html" data-ref="CMP-PWR-001">CMP-PWR-001</a>        </li>
+        <li><span class="rel">Satisfies</span>
+          <a class="ref" href="bnd-pwr-001.html" data-ref="BND-PWR-001">BND-PWR-001</a>        </li>
+      </ul>
+    </div>
+    <div>
+      <h3>Incoming</h3>
+<p class="muted">Nothing links here.</p>    </div>
+  </div>
+</section>
+
+<footer class="provenance">
+  <span>source <code>items/power/rail-budget.md:2</code></span>
+  <span>content hash <code>1405a4ddce062719</code> <span class="muted">(over <code>invalidate</code> fields only)</span></span>
+</footer>
+
+</article>
+<button type="button" class="refdes-taskpane-toggle" id="refdes-taskpane-toggle" aria-controls="refdes-taskpane" aria-expanded="false" hidden>Tasks</button>
+<aside class="refdes-taskpane" id="refdes-taskpane" data-refdes-taskpane="LOG-PWR-001" aria-label="Thread tasks" hidden>
+  <header class="refdes-taskpane-head">
+    <h2 class="refdes-taskpane-title">Tasks <span class="mono">LOG-PWR-001</span></h2>
+    <button type="button" class="refdes-taskpane-close" aria-label="Close task pane">&times;</button>
+  </header>
+  <div class="refdes-taskpane-panel" id="refdes-taskpane-panel-1" data-refdes-panel="1">
+    <p class="refdes-taskpane-tip small"><span class="mono">LOG-PWR-003</span> 2026-10-28 — 3V3 rail budget at 55 C</p>
+    <p class="refdes-taskpane-verdict">Verdict: accepted (LOG-PWR-003, 2026-10-28)</p>
+    <p class="refdes-taskpane-heading">Tasks at tip: none (never declared)</p>
+  </div>
+  <details class="refdes-taskpane-derived">
+    <summary>Derived (auto clears when fixed)</summary>
+    <h3>Coverage</h3>
+    <ul class="small mono">
+      <li>BND-PWR-001  unverified</li>
+      <li>REQ-PWR-001  unverified</li>
+      <li>REQ-PWR-003  unverified</li>
+    </ul>
+  </details>
+</aside>
+</main>
+
+<footer class="footer">
+  Generated by Refdes.
+The machine-readable source of truth is
+  <a href="items.json">items.json</a>.</footer>
+</div>
+
+<div id="preview-card" role="tooltip" hidden></div>
+<script id="preview-data" type="application/json">{"BND-PWR-001": {"id": "BND-PWR-001", "type": "Bound", "title": "Total 3V3 rail dissipation shall stay under this bound.", "href": "bnd-pwr-001.html", "fields": [{"name": "status", "value": "active"}, {"name": "limit", "value": "\u003c= 0.60 W"}], "check": "none"}, "CMP-PWR-001": {"id": "CMP-PWR-001", "type": "Component", "title": "TPS62913 buck regulator", "href": "cmp-pwr-001.html", "fields": [{"name": "status", "value": "selected"}, {"name": "title", "value": "TPS62913 buck regulator"}, {"name": "part_number", "value": "TPS62913DRVR"}], "check": "none"}, "CMP-PWR-002": {"id": "CMP-PWR-002", "type": "Component", "title": "AMS1117-3.3 LDO", "href": "cmp-pwr-002.html", "fields": [{"name": "status", "value": "candidate"}, {"name": "title", "value": "AMS1117-3.3 LDO"}, {"name": "part_number", "value": "AMS1117-3.3"}], "check": "none"}, "LOG-PWR-001": {"id": "LOG-PWR-001", "type": "Log entry", "title": "Rail architecture chosen for QSC-1.", "href": "log-pwr-001.html", "fields": [{"name": "date", "value": "2026-10-20"}, {"name": "status", "value": "accepted"}, {"name": "summary", "value": "Rail architecture chosen for QSC-1."}], "check": "none"}, "LOG-PWR-002": {"id": "LOG-PWR-002", "type": "Log entry", "title": "Input range confirmed with the customer.", "href": "log-pwr-002.html", "fields": [{"name": "date", "value": "2026-10-24"}, {"name": "status", "value": "accepted"}, {"name": "summary", "value": "Input range confirmed with the customer."}], "check": "none"}, "LOG-PWR-003": {"id": "LOG-PWR-003", "type": "Log entry", "title": "3V3 rail budget at 55 C", "href": "log-pwr-003.html", "fields": [{"name": "date", "value": "2026-10-28"}, {"name": "status", "value": "accepted"}, {"name": "summary", "value": "3V3 rail budget at 55 C"}], "check": "pass"}, "REQ-PWR-001": {"id": "REQ-PWR-001", "type": "Requirement", "title": "The unit shall operate from an input supply of 9 V to 36 V.", "href": "req-pwr-001.html", "fields": [{"name": "status", "value": "active"}], "check": "none"}, "REQ-PWR-002": {"id": "REQ-PWR-002", "type": "Requirement", "title": "The 3V3 rail shall supply 1.2 A continuous at 55 C ambient.", "href": "req-pwr-002.html", "fields": [{"name": "status", "value": "active"}], "check": "none"}, "REQ-PWR-003": {"id": "REQ-PWR-003", "type": "Requirement", "title": "The 3V3 rail sequencing shall meet the platform debug contract.", "href": "req-pwr-003.html", "fields": [{"name": "status", "value": "active"}], "check": "none"}, "RES-001": {"id": "RES-001", "type": "Resistor", "title": "```calc\nvin = 22 V\n```", "href": "res-001.html", "fields": [], "check": "none"}, "CMP-COM-001": {"id": "CMP-COM-001", "type": "Component", "title": "Common TVS diode used on both boards", "href": "cmp-com-001.html", "fields": [{"name": "status", "value": "selected"}, {"name": "title", "value": "Common TVS diode used on both boards"}, {"name": "part_number", "value": "SMAJ26A"}], "check": "none"}, "REQ-THM-001": {"id": "REQ-THM-001", "type": "Requirement", "title": "The converter case temperature shall stay below 105 C at 55 C ambient.", "href": "req-thm-001.html", "fields": [{"name": "status", "value": "active"}], "check": "none"}, "LOG-THM-001": {"id": "LOG-THM-001", "type": "Log entry", "title": "Thermal estimate for the converter at 55 C", "href": "log-thm-001.html", "fields": [{"name": "date", "value": "2026-10-29"}, {"name": "status", "value": "accepted"}, {"name": "summary", "value": "Thermal estimate for the converter at 55 C"}], "check": "none"}, "REQ-IF001": {"id": "REQ-IF001", "type": "Requirement", "title": "REQ-IF001", "href": "req-if001.html", "fields": [{"name": "status", "value": "active"}], "check": "none"}, "REQ-IF002": {"id": "REQ-IF002", "type": "Requirement", "title": "REQ-IF002", "href": "req-if002.html", "fields": [{"name": "status", "value": "active"}], "check": "none"}}</script>
+<script src="assets/app.js"></script>
+<script src="assets/taskpane.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+exit=0
+--- stdout ---
+no editor transaction journal: nothing to recover
+
+--- stderr ---
+

@@ -1,0 +1,11 @@
+## F14-4a keyless title projection (req-010.html):
+<h1>REQ-010</h1>
+
+## F14-4b pwr log-thm-001.html history-disclosure snapshot:
+navi:r5kd3ys7wsh Model worst-case copper temperature.--&gt;&lt;!--navi:whpbqst3wrt Recheck decoupling near U14.--&gt; &lt;!--navi:--&gt; &lt;!--navi:ZZZZZZZZZZZ key head outside the key alphabet--&gt; The stage power is the power board&#39;s number, read inline: `Pstage := LOG-PWR-003@vpff4sjssj5.P_diss | W = 0.30 W`. The sense resistor is `Rds := RES-001@v5e4zsg4z8x.$rds_on | mohm = 18 mohm`, and the collision case reads `Vinb := RES-001@v5e4zsg4z8x.vin | V = 22 V`. A fence reference would say the same: ```calc P_stage = LOG-PWR-003@vpff4sjssj5.P_diss | W Rth = 42 delta_degC/W T_case = 55 degC + P_stage * Rth | degC ``` &lt;!--navi:ydaptvf3m1t inert inside a fence, must not count--&gt; Inert occurrences: ```text &lt;!--navi: inside fenced code, inert--&gt; ``` `&lt;!--navi: inside a code span, inert--&gt;` stays literal.
+navi:r5kd3ys7wsh Model worst-case copper temperature.--&gt;&lt;!--navi:whpbqst3wrt Recheck decoupling near U14.--&gt; &lt;!--navi:--&gt; &lt;!--navi:ZZZZZZZZZZZ key head outside the key alphabet--&gt; The stage power is the power board&#39;s number, read inline: `Pstage := LOG-PWR-003@vpff4sjssj5.P_diss | W = 0.30 W`. The sense resistor is `Rds := RES-001@v5e4zsg4z8x.$rds_on | mohm = 18 mohm`, and the collision case reads `Vinb := RES-001@v5e4zsg4z8x.vin | V = 22 V`. A fence reference would say the same: ```calc P_stage = LOG-PWR-003@vpff4sjssj5.P_diss | W Rth = 42 delta_degC/W T_case = 55 degC + P_stage * Rth | degC ``` &lt;!--navi:ydaptvf3m1t inert inside a fence, must not count--&gt; Inert occurrences: ```text &lt;!--navi: inside fenced code, inert--&gt; ``` `&lt;!--navi: inside a code span, inert--&gt;` stays literal.
+
+## body main content has no marker bytes (grep in article):
+0
+## F14-4c keyless index.html summary projection (REQ-010 row):
+navi:cq4f39mzkpw Model worst-case copper tempera…

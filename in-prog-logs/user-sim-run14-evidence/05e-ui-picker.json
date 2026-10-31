@@ -1,0 +1,95 @@
+{
+ "net": [
+  [
+   "console",
+   "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  [
+   200,
+   "http://127.0.0.1:8755/api/item/LOG-THM-001/sources/entries?path=analysis%2Fthermal-model.xlsx&q="
+  ],
+  [
+   200,
+   "http://127.0.0.1:8755/api/item/LOG-THM-001/sources/propose?path=analysis%2Fthermal-model.xlsx&key=rail_eff"
+  ],
+  [
+   200,
+   "http://127.0.0.1:8755/api/item/LOG-THM-001/sources/propose?path=analysis%2Fthermal-model.xlsx&key=rail_eff&unit=1&name=rail_eff"
+  ]
+ ],
+ "fileButtons": [
+  "analysis/thermal-model.xlsx"
+ ],
+ "rows": [
+  {
+   "key": "rail_eff",
+   "preview": "0.93",
+   "bad": "",
+   "pickEnabled": true
+  },
+  {
+   "key": "Sheet1!case_rise",
+   "preview": "13.25",
+   "bad": "",
+   "pickEnabled": true
+  },
+  {
+   "key": "Sheet1!text_val",
+   "preview": "n/a",
+   "bad": "analysis/thermal-model.xlsx: key 'Sheet1!text_val': Sheet1!C1 is not a numeric cell",
+   "pickEnabled": false
+  },
+  {
+   "key": "Sheet1!blank_val",
+   "preview": "",
+   "bad": "analysis/thermal-model.xlsx: key 'Sheet1!blank_val': Sheet1!D1 is blank",
+   "pickEnabled": false
+  },
+  {
+   "key": "Sheet1!range_name",
+   "preview": "Sheet1!$E$1:$F$1",
+   "bad": "analysis/thermal-model.xlsx: key 'Sheet1!range_name': defined name must refer to one cell:",
+   "pickEnabled": false
+  },
+  {
+   "key": "Sheet1!form_noval",
+   "preview": "",
+   "bad": "analysis/thermal-model.xlsx: key 'Sheet1!form_noval': Sheet1!G1 has no cached numeric valu",
+   "pickEnabled": false
+  },
+  {
+   "key": "Sheet1!merged_tl",
+   "preview": "5",
+   "bad": "",
+   "pickEnabled": true
+  },
+  {
+   "key": "Sheet2!case_rise",
+   "preview": "99",
+   "bad": "",
+   "pickEnabled": true
+  },
+  {
+   "key": "HiddenSheet!hid_val",
+   "preview": "7",
+   "bad": "",
+   "pickEnabled": true
+  }
+ ],
+ "confirmHtml": "Confirm source valueKeyrail_effRaw cell text0.93Canonical decimal0.93Line1Other columnscellSheet1!B1Pinned valuenoneCalc lineChoose a unit to see the line.UnitSuggestions: 1VWdegCdelta_degCmohmVariable nameAccept and save",
+ "unitPresent": true,
+ "composedBeforeUnit": "Choose a unit to see the line.",
+ "suggestedName": "rail_eff",
+ "suggestionChips": [
+  "1",
+  "V",
+  "W",
+  "degC",
+  "delta_degC",
+  "mohm"
+ ],
+ "composedWithUnit": "rail_eff = source(\"analysis/thermal-model.xlsx\", \"rail_eff\") | 1",
+ "acceptEnabled": true,
+ "acceptInsertsLine": true,
+ "saved": true
+}

@@ -1,0 +1,13 @@
+
+release 'rel-x' blocked -- not stamped:
+  pass     draft_items
+  pass     unpinned_citations
+  pass     missing_kept_copies
+  pass     uncovered_requirements
+  skipped  unverified_requirements
+  skipped  info_check_failures
+  pass     unaccepted_board_moves
+  pass     unaccepted_workspace_moves
+  skipped  open_tasks
+  skipped  captured_edits
+  FAIL     inline_calc_results  LOG-PWR-003: inline calc Pdiss (items/power/rail-budget.md:30), LOG-PWR-003: inline calc Pin (items/power/rail-budget.md:31), LOG-THM-001: inline calc Pstage (items/thermal/thermal-estimate.md:15), LOG-THM-001: inline calc Rds (items/thermal/thermal-estimate.md:16)

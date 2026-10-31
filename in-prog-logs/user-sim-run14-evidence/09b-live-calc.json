@@ -1,0 +1,65 @@
+{
+ "posts": 8,
+ "rowsInitial": [
+  "okPstage0.44 W",
+  "okRds20 mΩ",
+  "okVinb22 V",
+  "okReff0.93"
+ ],
+ "lsOff": "off",
+ "rowsStale": [
+  "okPstage0.44 W",
+  "okRds20 mΩ",
+  "okVinb22 V",
+  "staleReff0.88inline calc Reff: stored result says 0.93, now computes 0.88Fill"
+ ],
+ "staleRows": 1,
+ "fillButtons": 1,
+ "lineAfterFill": "Case rise across the pad: `Reff := rail_eff | 1 = 0.88`.",
+ "rowsAfterFill": [
+  "okPstage0.44 W",
+  "okRds20 mΩ",
+  "okVinb22 V",
+  "okReff0.88"
+ ],
+ "undoRestoredFill": true,
+ "notes": [
+  "native undo may not cover these fills",
+  "auto-fill is off for this session (undo is unavailable here); Fill still works"
+ ],
+ "lsOn": "on",
+ "lineAutoFilled": "Case rise across the pad: `Reff := rail_eff | 1 = 0.93`.",
+ "rowsAuto": [
+  "okPstage0.44 W",
+  "okRds20 mΩ",
+  "okVinb22 V",
+  "staleReff0.77inline calc Reff: stored result says 0.93, now computes 0.77Fill"
+ ],
+ "popoverOpen": true,
+ "radioAttrs": [
+  "<input class=\"font-family font-family-mono\" type=\"radio\" data-family=\"mono\"",
+  "<input class=\"font-family font-family-sans\" type=\"radio\" data-family=\"sans\"",
+  "<input class=\"font-family font-family-serif\" type=\"radio\" data-family=\"serif\"",
+  "<input class=\"font-line-height font-line-height-compact\" type=\"radio\" data-line-height=\"co",
+  "<input class=\"font-line-height font-line-height-normal\" type=\"radio\" data-line-height=\"nor",
+  "<input class=\"font-line-height font-line-height-loose\" type=\"radio\" data-line-height=\"loos"
+ ],
+ "fontClick": {
+  "clicked": true,
+  "checked": true,
+  "familySample": "font-sample font-sample-mono:Mono,font-sample font-sample-sans:Sans,font-sample font-sample-serif:Serif,font-sample font-sample-compact:Compact,font-sample font-sample-normal:Normal,font-sample font-sample-loose:Loose"
+ },
+ "lsFont": "{\"family\":\"sans\",\"size\":14,\"lineHeight\":1.5}",
+ "applied": "system-ui, sans-serif/14px",
+ "lsFontAfterReload": "{\"family\":\"sans\",\"size\":14,\"lineHeight\":1.5}",
+ "appliedAfterReload": "system-ui, sans-serif/14px",
+ "autofillAfterReload": "on",
+ "resRows": [
+  "okRdsf20 mΩ"
+ ],
+ "fieldEdit": "ok",
+ "resRowsAfterField": [
+  "okRdsf25 mΩ"
+ ],
+ "filesTouched": false
+}
