@@ -474,6 +474,27 @@ Verified working out of the box: `thou`, `degC`, `delta_degC`, `dBm`, `ppm`, `uF
 `uH`, `GHz`, `mAh`, `oz`, `ohm`, `kWh`. **`AWG` is not a unit** — it is a gauge
 scale, not a measure, so write the actual diameter or area.
 
+`degC` is an *offset* unit (its zero is not physical zero), so it cannot be
+multiplied, divided, or scaled — only added to, or subtracted from, an
+absolute temperature. A thermal resistance written in `K/W` (kelvin per watt,
+a temperature *rise* per watt) multiplied by a power is a scaling of a
+temperature difference, not of an absolute temperature, so put the difference
+in a `delta_` unit:
+
+```calc
+P_stage = 0.30 W
+Rth = 42 delta_degC/W
+T_case = 55 degC + P_stage * Rth | degC
+```
+
+Writing `Rth = 42 K/W` in the same expression fails: adding a scaled `K/W`
+to `55 degC` mixes an offset unit with a product, and the message is the
+underlying units library's own — `calc 'T_case': Ambiguous operation with
+offset unit (degree_Celsius, kelvin)`. Use `delta_degC` for any rise, drop,
+or per-watt temperature. `K` and `delta_degC` are the same size and
+interconvert; `degC` is `K` with a 273.15 offset, and it is that offset that
+refuses the multiply.
+
 ### Brackets are the escape hatch
 
 `[...]` makes a unit explicit, and anything goes inside — including `*`:
