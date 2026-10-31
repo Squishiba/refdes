@@ -1,0 +1,21 @@
+  in "<unicode string>", line 1, column 10:
+    this is: [not valid yaml
+             ^
+expected ',' or ']', but got '<stream end>'
+  in "<unicode string>", line 2, column 1:
+    
+    ^))
+15 items, 0 errors, 12 warnings
+
+release 'rel-x' blocked -- not stamped:
+  pass     draft_items
+  pass     unpinned_citations
+  pass     missing_kept_copies
+  pass     uncovered_requirements
+  skipped  unverified_requirements
+  skipped  info_check_failures
+  pass     unaccepted_board_moves
+  pass     unaccepted_workspace_moves
+  skipped  open_tasks
+  skipped  captured_edits
+  FAIL     inline_calc_results  stale inline-calc gate: cannot read the history store .refdes/history (/home/jorb/.paseo/worktrees/16msma8v/user-sim-run14-1/.scratch/run14/gate368/.refdes/history/events/01527582-0aae-5c34-8f2b-203b3841424d.yaml: event file does not parse (while parsing a flow sequence in "<unicode string>", line 1, column 10: this is: [not valid yaml ^ expected ',' or ']', but got '<stream end>' in "<unicode string>", line 2, column 1: ^)) -- failing closed, LOG-PWR-003: inline calc Pdiss (items/power/rail-budget.md:30), LOG-PWR-003: inline calc Pin (items/power/rail-budget.md:31), LOG-THM-001: inline calc Pstage (items/thermal/thermal-estimate.md:15), LOG-THM-001: inline calc Rds (items/thermal/thermal-estimate.md:16)

@@ -1,0 +1,3 @@
+2
+WARNING pages/ov1.md:3 — invalid page front-matter: while scanning a quoted scalar; found unexpected end of stream
+WARNING pages/ov2.md:2 — invalid page front-matter: while scanning a quoted scalar; found unexpected end of stream

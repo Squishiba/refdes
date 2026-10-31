@@ -1,0 +1,6 @@
+exit=0
+--- stdout ---
+removed the journal directory left by a save that died before it recorded anything: the journal is cleared; the project can be loaded again
+
+--- stderr ---
+
