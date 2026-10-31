@@ -171,7 +171,9 @@ def test_add_link_writes_the_composite_the_anchor_pass_would_write(project_root)
     assert "# keep me" in read(str(project_root / "items" / "reqs.yaml"))
 
 
-@pytest.mark.parametrize("spelling", ["REQ-002", K_REQ2])
+@pytest.mark.parametrize(
+    "spelling", ["REQ-002", pytest.param(K_REQ2, id="surrogate-key")]
+)
 def test_the_target_may_be_named_by_display_id_or_surrogate_key(project_root, spelling):
     result = apply(project_root, "DEC-001", AddLink("satisfies", spelling))
     assert isinstance(result, Applied), result.message

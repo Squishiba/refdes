@@ -406,6 +406,7 @@ downstream should read that, not the HTML.
 
 ```bash
 ./.venv/bin/python -m pytest tests/ -q
+# Parallel: ./.venv/bin/python -m pytest -q -n 4 --dist worksteal
 # Windows (PowerShell): .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
