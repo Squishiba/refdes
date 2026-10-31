@@ -125,3 +125,9 @@ Merge follow-up (2026-10-31)
   `test_archive_of_a_keyless_marker_names_the_writable_load` expects a
   literal-block YAML marker to stay keyless, but the merged mint code mints
   it and archive succeeds; this conflicts with #398's implemented behavior.
+- Follow-up changed that keyless archive case to a folded scalar and added
+  an end-to-end CLI case proving literal-block minting and archive succeed.
+- Updated the `Navi` model docstring to describe keyless markers by mint
+  refusal, without the stale slice-1/later-slice claim. Source grep leaves
+  only refusal messages and unrelated editor wording.
+- Final requested suite: 634 passed. `tests/test_model.py` is absent here.
