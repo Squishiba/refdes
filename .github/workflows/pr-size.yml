@@ -1,0 +1,47 @@
+# PR size gate: fails a PR over BUDGET added lines under src/, waivable
+# with the `size-exempt` label. Why: single-PR features of 600-1500 added
+# src lines (#382, #393) needed 2-3 review rounds; small slices review in
+# one pass, so "keep PRs small" is enforced mechanically. PRs below
+# FIRST_ENFORCED_PR in tools/pr_size.py are grandfathered. Deliberately
+# independent of the test matrix so a size verdict never waits on (or is
+# masked by) test jobs. See docs/dev-process.md "PR size gate".
+name: pr-size
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-size-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-size:
+    name: pr-size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@8635ed3fe7f0c3951efd9f22e986836b14fb0a65
+        with:
+          python-version: "3.12"
+      # checks API for labels needs a token: GITHUB_TOKEN works in Actions.
+      - name: PR number and labels
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          gh pr view "${{ github.event.pull_request.number }}" --json labels \
+            --jq '[.labels[].name] | join(",")' >> "$GITHUB_OUTPUT"
+      - name: pr-size
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_LABELS: ${{ steps.pr.outputs.labels }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python tools/pr_size.py
