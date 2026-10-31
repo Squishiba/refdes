@@ -72,10 +72,20 @@ Substitutes a calc value from the same item.
 
 A **Navi** is one flying note: a single-line HTML comment on the `navi:`
 prefix, written by hand inside an item's body. The published page consumes
-it — the marker's bytes never appear in the rendered HTML — while the tool
-scans every body into one project-wide list you can read with
+it — the marker's bytes never appear in the rendered HTML, in the item body
+or in any projection of it (list-page title/summary, tree, hover preview) —
+while the tool scans every body into one project-wide list you can read with
 [`refdes navis ls`](cli-reference.md#refdes-navis-ls-all-show), and the
 `index` payload carries it under its top-level `navis` key.
+
+The one place a marker's bytes can appear in the built site is the History
+disclosure's captured-snapshot body (see
+[baseline snapshot events](lifecycle.md#baseline-snapshot-events)): a
+baseline's snapshot event stores the item's body verbatim, and the
+disclosure quotes that stored text as written, so a marker the item carried
+at stamp time shows in the snapshot's `<pre>` block. That block is the
+historical record as captured, deliberately unedited — it is what the item
+said, not a projection of what it says now.
 
 The grammar is closed and strict:
 
@@ -675,6 +685,63 @@ named, not selectable; PDFs open as page text and need
 the optional extra (`pip install refdes[pdf]`). A citation the panel cannot
 offer — a remote URL with no kept copy, a type with no reader, a
 missing file — is listed with the reason, and the fix, under the list.
+
+The panel is the browser over four `serve` API reads — loopback-only and
+token-gated like every other call
+([`refdes serve`](cli-reference.md#refdes-serve)):
+`GET /api/item/<ref>/sources` lists the item's own citations with each file's
+`reader` (`csv`, `xlsx`, `pdf`) and `browse: "rows"`;
+`GET /api/item/<ref>/sources/entries?path=&q=` lists one file's entries — a
+CSV's rows, a workbook's defined names, a PDF's pages — and is the list behind
+the XLSX picker above; `GET /api/item/<ref>/sources/propose?path=&key=&unit=&name=`
+composes the calc line; and accepting saves through
+`POST /api/item/<ref>/edit` (`op: "set_body"`, plus `pin`), the one write that
+lands body and pin together. A real `…/sources/entries` response, fetched from
+`refdes serve --no-open --port 8757` against an item citing
+`analysis/power-budget.csv`:
+
+```json
+{
+  "path": "analysis/power-budget.csv",
+  "reader": "csv",
+  "entries": [
+    {
+      "key": "rail_3v3_power",
+      "raw": "1.85",
+      "value": "1.85",
+      "line": 2,
+      "context": [],
+      "selectable": true,
+      "problem": "",
+      "pinned": "1.85",
+      "changed": false
+    },
+    {
+      "key": "rail_5v_power",
+      "raw": "3.3",
+      "value": "3.3",
+      "line": 3,
+      "context": [],
+      "selectable": true,
+      "problem": "",
+      "pinned": null,
+      "changed": false
+    }
+  ],
+  "truncated": false,
+  "rows": 2,
+  "problems": [],
+  "query": "",
+  "limits": { "max_rows": 5000, "max_bytes": 1048576 }
+}
+```
+
+Each entry carries the raw cell text (`raw`), the canonical decimal
+(`value`), the row number, the lockfile pin and a `changed` flag; a row
+`refdes fetch` would refuse (text, blank, a range, an uncached formula) is
+`selectable: false` with the reader's words in `problem`; `q` filters, and
+`limits` with `truncated` report the 5000-row / 1 MiB caps. The same shape
+carries XLSX defined names and PDF pages.
 
 For a CSV, click a file and its keys load into a filterable list; a row
 whose value does not read as a plain decimal is shown, with its problem
