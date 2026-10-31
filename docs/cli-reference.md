@@ -736,7 +736,9 @@ marker whose body is not the item's own markdown file (a list file's
 `body:` scalar stays keyless), and never rewrites a declared key. A
 declared key that fails key validation is reported on stderr as corrupt
 input, never repaired. A keyless marker cannot be archived (the record is
-named by the key) — the refusal names the minting writable command. A
+named by the key) — the refusal says the key comes from the next writable
+command and points at the mint warnings (a `body:`-scalar marker is exactly
+the marker mint refuses). A
 record the tool cannot read (not gzip, not YAML, a foreign
 `archive_format`, a key that is not its own file's name) is a
 `navis.archive_corrupt` warning naming the file; it is skipped, not

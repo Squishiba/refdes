@@ -127,7 +127,8 @@ A Navi is removable one by one, and **removal is archival**:
 [`refdes navis archive`](cli-reference.md#refdes-navis-ls-all-show-archive-restore)
 archives the *pointer* — a gzip record of the Navi lands under
 `.refdes/navis/`, the Navi leaves the active list (`ls`), and
-`all` shows it labelled with its snapshot
+`all` reveals it labelled `[archived]` — the Show-all row prints the
+marker's live text; `show` is what adds the record's snapshot
 ([`refdes navis restore`](cli-reference.md#refdes-navis-ls-all-show-archive-restore)
 brings it back, showing its current text). Archive and restore never
 touch your file: the marker stays exactly where you wrote it, and no

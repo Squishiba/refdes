@@ -1510,7 +1510,9 @@ def archive_diagnostics(project: Project) -> list:
                     "Show-all reveals it by snapshot; restore refuses "
                     "(§9) -- hand-restore the marker to re-pair them by key"
                 ),
-                file=os.path.relpath(record.path, str(project.root)),
+                file=os.path.relpath(record.path, str(project.root)).replace(
+                    "\\", "/"
+                ),
                 line=record.source["line"],
                 code=navis_archive.NAVI_ARCHIVED_ORPHAN_CODE,
             )

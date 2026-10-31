@@ -21,7 +21,8 @@ before the module existed.
   temp files are skipped as not-yet-committed.
   `archive_record` / `restore_record` run under `project_write_lock`,
   refuse when `.refdes/editor-transaction/` exists (`JournalPending`), and
-  land every write as temp file + `os.replace` (0600->final mode). A
+  land every write as temp file + `os.replace` (plain `open(tmp, "wb")`,
+  so the file mode is the umask default, then the rename). A
   gzip write that fails mid-stream deletes the temp and re-raises.
 - `navis.projection(project)` merges marker rows with store records:
   active rows first (file/line order) then archived rows; rows carry
@@ -37,7 +38,8 @@ before the module existed.
   clean 0; selector names nothing 2; archive-already-archived 0; restore
   of a non-archived Navi 2; restore of an orphan 1 (refuses — writing a
   marker back would edit a body); `--no-write` refusal 2; keyless marker
-  2 (names the minting writable command); journal in flight 2; `OSError`
+  2 (says the key comes from the next writable command, points at the
+  mint warnings); journal in flight 2; `OSError`
   → "could not write", exit 2, no traceback. `ls` lists active rows;
   `all` is the Show-all (active, then `[archived]`); `show` on an archived
   Navi adds the archived lines.
@@ -64,6 +66,16 @@ before the module existed.
   subprocess during `os.replace`) → store unchanged, no temp files, CLI
   exits 2 "could not write", no traceback.
 - Huge marker (1 MB single line) archives and restores.
+- Platform: the local full-suite run above is Linux. PR CI runs
+  Linux/macOS/Windows; the first Windows run failed
+  `test_state_record_without_marker_is_archived_orphan` — the store
+  diagnostics' `file` field was a raw `os.path.relpath`, so Windows got
+  `.refdes\navis\...` where every other diagnostic in the repo
+  (`boards.py`, `build.py`, `history.py`, `cli.py`) normalizes to forward
+  slashes. Fixed in production (`navis_archive._corrupt`,
+  `navis.archive_diagnostics`), not by loosening the test; the tests'
+  filesystem-walk keys use `os.path.join`/`os.sep`, which stay
+  platform-correct.
 
 ## Notes / decisions
 

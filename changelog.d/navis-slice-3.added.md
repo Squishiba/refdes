@@ -26,5 +26,6 @@ the file: skipped, not deleted, the rest of the store loads. A record with
 no live marker is `navis.archived_orphan`; restore refuses it (writing a
 marker back would edit a body), exit 1.
 
-The published site keeps its read-only posture: it lists archived Navis
-with restore disabled.
+The published site keeps its read-only posture: it carries the projection
+(archived rows included) in the `index` payload; the site panel that lists
+archived Navis with restore disabled is the next slice.
