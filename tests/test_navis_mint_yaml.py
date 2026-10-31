@@ -39,15 +39,20 @@ KEYED_RE = re.compile(r"<!--navi:([0-9a-z]{11}) ")
 
 
 def _setup(tmp_path, files):
+    """Write the fixtures as BYTES: the bytes are exactly the text's, on
+    every platform (a text-mode write would turn the LF fixtures into
+    CRLF on Windows, and the LF assertions would be testing the writer).
+    """
     config = write_project_config(tmp_path, SCHEMA)
     items = tmp_path / "items"
     items.mkdir(exist_ok=True)
     for name, text in files.items():
-        (items / name).write_text(text, encoding="utf-8")
+        (items / name).write_bytes(text.encode("utf-8"))
     return str(config)
 
 
 def _setup_bytes(tmp_path, files):
+    """Same, for fixtures whose content is raw bytes (the CRLF case)."""
     config = write_project_config(tmp_path, SCHEMA)
     items = tmp_path / "items"
     items.mkdir(exist_ok=True)
@@ -410,7 +415,28 @@ def test_crlf_yaml_literal_block_keeps_terminators(tmp_path):
     assert project.load_writes.minted_navi_keys == 1
     raw = _bytes(tmp_path, "items.yaml")
     assert raw.count(b"\n") == raw.count(b"\r\n")  # every break is CRLF
-    assert b"<!--navi:" in raw and b"-->\r\n" in raw
+    key = KEYED_RE.findall(raw.decode("utf-8"))[0]
+    # the whole change, as bytes: the key (plus its space) in the marker,
+    # nothing else -- terminators, indentation, every other byte kept.
+    assert raw == body.replace(
+        b"      <!--navi: one-->",
+        f"      <!--navi:{key} one-->".encode("utf-8"),
+    )
+
+
+def test_crlf_yaml_quoted_mints_key_bytes_only(tmp_path):
+    text = _yaml('"a <!--navi: q--> b"\n')
+    body = text.replace("\n", "\r\n").encode("utf-8")
+    config = _setup_bytes(tmp_path, {"items.yaml": body})
+    project = _load(config)
+    assert project.load_writes.minted_navi_keys == 1
+    raw = _bytes(tmp_path, "items.yaml")
+    assert raw.count(b"\n") == raw.count(b"\r\n")  # every break is CRLF
+    key = KEYED_RE.findall(raw.decode("utf-8"))[0]
+    assert raw == body.replace(
+        b"<!--navi: q-->",
+        f"<!--navi:{key} q-->".encode("utf-8"),
+    )
 
 
 def test_yaml_mint_changes_hash_and_lists_keyed(tmp_path):
