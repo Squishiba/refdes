@@ -67,15 +67,16 @@ before the module existed.
   exits 2 "could not write", no traceback.
 - Huge marker (1 MB single line) archives and restores.
 - Platform: the local full-suite run above is Linux. PR CI runs
-  Linux/macOS/Windows; the first Windows run failed
-  `test_state_record_without_marker_is_archived_orphan` — the store
-  diagnostics' `file` field was a raw `os.path.relpath`, so Windows got
-  `.refdes\navis\...` where every other diagnostic in the repo
+  ubuntu/windows at the floor version plus an ubuntu py3.13 job; the first
+  Windows run failed `test_state_record_without_marker_is_archived_orphan`
+  — the store diagnostics' `file` field was a raw `os.path.relpath`, so
+  Windows got `.refdes\navis\...` where every other diagnostic in the repo
   (`boards.py`, `build.py`, `history.py`, `cli.py`) normalizes to forward
   slashes. Fixed in production (`navis_archive._corrupt`,
   `navis.archive_diagnostics`), not by loosening the test; the tests'
   filesystem-walk keys use `os.path.join`/`os.sep`, which stay
-  platform-correct.
+  platform-correct. All three CI jobs (ubuntu, windows, py3.13) are green
+  on the follow-up commit.
 
 ## Notes / decisions
 
@@ -87,4 +88,7 @@ before the module existed.
 - `cli.py:3:1 I001` is pre-existing on `origin/main` and left alone per
   AGENTS.md; ruff is clean on every file this slice touched.
 
-Status: complete. PR title/body/decisions per the task brief.
+Status: complete. PR title/body/decisions per the task brief. One review
+round (Windows path-separator diagnostics + doc/log/changelog wording,
+§Verified above), fixed in a single follow-up commit; CI green on ubuntu,
+windows, and py3.13.
