@@ -1,0 +1,111 @@
+navis slice 2b: mint Navi keys inside YAML list-file `body:` scalars
+========================================================================
+
+Task (branch feat/navis-yaml-mint, from #390 slice-2 leftovers): slice 2
+minted keys only into markdown bodies, because the splice writes at
+`Item.body_line + occ.line` and list files have `body_line = None` --
+their `body:` scalar's parsed text is not its source text. The task:
+mint where the marker's bytes CAN be located exactly; refuse, byte-intact,
+everywhere else. No approximate rewrites.
+
+Design (src/refdes/navis_yaml.py, new)
+--------------------------------------
+`plan_yaml_mints(text, entries, file_items)` composes the file with the
+PURE `yaml.SafeLoader` (the C loader's `mark.index` diverges from the raw
+string at a BOM; the pure loader's marks agree, verified by probe), maps
+each item to its entry mapping by `source_line`, finds the `body:` node,
+and resolves the marker's byte position per style:
+
+- literal block (`|`, any chomping/indent indicator): body line i is
+  file line `header + 1 + i` at column `content_indent + col`, with the
+  content indent honoring the explicit `|N` indicator (mapping indent
+  + N). Verified by full byte reconstruction of every body line.
+- single-line quoted (`"` / `'`): decoded by a mirror of PyYAML's
+  flow-scalar escape tables with a per-character source map; gated on
+  the decoded text equalling the parsed body, the decoder's source map
+  contiguous across the marker, and the raw source carrying `<!--navi:`
+  at the mapped position.
+
+Refusals (warning code unchanged, message names the shape): folded `>`,
+plain (a keyless marker's `: ` cannot even be written plain -- the probe
+showed the file does not load), multi-line quoted (folds join with
+spaces), flow style (mapping nodes carry no style flag; the `{` at the
+mapping's start mark is the test), merge-key/`defaults:`-supplied bodies
+(no `body` key in the entry mapping), alias-shared body nodes (parent
+count > 1: minting one name would edit every bound body), any
+reconstruction/equality failure.
+
+Splice: `key + " "` after the 9-char marker open, consuming the author's
+whitespace run (slice-2 posture), applied right-to-left on the RAW text
+via a normalized-index -> raw-index map (CRLF/lone-CR/BOM/astral safe:
+the splice only touches one-raw-char characters). Gate: re-parse the
+spliced text; every named item's body must equal the expected string
+(original with exactly the spliced keys); any failure => no rewrite.
+
+Wiring (src/refdes/navis.py mint_keys)
+--------------------------------------
+`body_line is None` entries in non-markdown files route to
+`plan_yaml_mints`; the whole-file plan is one FileRewrite. Markdown
+entries keep the per-line splice path untouched.
+
+Tests
+-----
+- tests/test_navis_mint_yaml.py: 26 targeted tests (literal indicators,
+  second/mid-line markers, two markers one body, double/single quotes
+  with escapes, every refusal shape incl. merge/alias/defaults/flow,
+  idempotence, --no-write, CRLF, hash-change, announcement) + a seeded
+  fuzz over 150 generated files (shapes x keyed/keyless markers) asserting
+  the invariants: --no-write never writes, refusal keeps bytes, marker
+  texts survive, keyless markers in mintable shapes come back validly
+  keyed, second writable load writes nothing.
+- tests/test_navis_mint.py: the three list-file refusal tests flipped to
+  mint assertions (literal, double-quoted); the folded and keyless-list
+  refusals kept.
+
+Hard-won details
+----------------
+- The first gate run failed because the expected body inserted the key at
+  the marker OPEN, not after it -- the gate caught its own bug, which is
+  the posture working.
+- MappingNode has no `style` attribute (ScalarNode only) -- flow
+  detection reads the `{` at the mapping's start mark.
+- Quoted decode must use ABSOLUTE marks (`line_starts[line] + column`);
+  the scalar's mark column is per-line.
+- The fuzz harness must be fully seeded -- an unseeded `keys.mint()` for
+  marker keys made failures non-reproducible (102 failed, seeds passing
+  in isolation); the marker key inside the text is seeded from
+  `keys_mod.ALPHABET`.
+- `parse_marker` reports a keyless marker as `key == ""` (not None);
+  fuzz invariants test truthiness.
+
+Verification
+------------
+- Full suite: 5718 passed, 2 skipped.
+- Differential proof (.scratch/nm/diffproof.py): fixture with every
+  shape (literal, strip, quoted, folded, plain, merge-key, alias,
+  defaults, md) keyed -- marker-free for minting; run `navis ls` twice
+  under base `7acb47f` (origin/main worktree) and under HEAD: all 6
+  project files byte-identical, no mints announced.
+
+Status: complete. Docs (cli-reference.md mint paragraph, markdown.md
+mint bullet), changelog fragment, and this log land with the PR.
+
+Review round (manual reviewer, CHANGES REQUESTED on 3946be3; CI was green):
+- MEDIUM, reproduced: a file whose `defaults:` supplies `body:` had every
+  item in the re-parse gate; the `defaults:`-bodied sibling entry has no
+  own `body` key, so the gate compared "" against the real body and
+  refused the WHOLE file with a false corruption alarm. Fixed: the gate
+  compares only entries carrying their own `body:` key (an inherited body
+  is not a splice target -- its own item is refused upstream). Red-first
+  tests for the defaults- and merge-key-sibling shapes.
+- LOW: legacy body fields (requirement/bound `text:`, test `method:` --
+  parse._RENAMED_FIELDS) were refused with a message naming merge-key/
+  defaults, which is false for them. They are the item's body on the
+  entry's own line: they mint now (_body_key takes the alias when the
+  type renames it into body; a real `body:` key wins, matching the
+  loader's rename rule). Mint + docs + changelog updated.
+- LOW: BOM and lone-CR fixture tests added (the byte-equality posture;
+  both green on first run -- regression coverage for the claimed map).
+- NIT: dead `yaml_rel` set removed from mint_keys; over-long lines
+  wrapped; fuzz `w = lambda` made a def (E731 in the touched file).
+Full suite green again after the round; CI re-watched on the new head.

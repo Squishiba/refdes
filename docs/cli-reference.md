@@ -700,12 +700,21 @@ command exits 1 (like `ls`). The listing writes nothing of its own: like
 and the build runs with no seal write.
 
 Keys are minted by the writable load (slice 2): the mint writes at the
-marker's exact source position, refuses — with a warning, bytes untouched —
-any marker whose body is not the item's own markdown file (a list file's
-`body:` scalar stays keyless), and never rewrites a declared key. A
-declared key that fails key validation is reported on stderr as corrupt
-input, never repaired. Archive records land in a later slice of the
-design, not slice 2 — `all` can only print the active list.
+marker's exact source position and never rewrites a declared key. In a
+markdown body the mint writes at the marker's line; in a YAML list file it
+reaches a `body:` scalar whose bytes it can point at exactly — a literal
+block (`body: |`, any chomping/indent indicator) and a single-line quoted
+scalar (`body: "..."` / `body: '...'`) — and refuses, with a warning and
+bytes untouched, the shapes where a marker's bytes are not file bytes:
+folded (`>`) scalars, plain scalars, multi-line quoted scalars, flow
+style, a `body:` supplied by a merge key (`<<:`) or the file's
+`defaults:`, and a body scalar an alias shares. A legacy body field a
+standard renamed into `body:` (`text:` on a requirement/bound, `method:`
+on a test) IS the item's body, on the entry's own line, and mints the
+same. A refused marker stays keyless and lists keyless. A declared key that fails key validation is
+reported on stderr as corrupt input, never repaired. Archive records land
+in a later slice of the design, not slice 2 — `all` can only print the
+active list.
 
 ---
 
