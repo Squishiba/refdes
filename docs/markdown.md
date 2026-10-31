@@ -686,6 +686,63 @@ the optional extra (`pip install refdes[pdf]`). A citation the panel cannot
 offer — a remote URL with no kept copy, a type with no reader, a
 missing file — is listed with the reason, and the fix, under the list.
 
+The panel is the browser over four `serve` API reads — loopback-only and
+token-gated like every other call
+([`refdes serve`](cli-reference.md#refdes-serve)):
+`GET /api/item/<ref>/sources` lists the item's own citations with each file's
+`reader` (`csv`, `xlsx`, `pdf`) and `browse: "rows"`;
+`GET /api/item/<ref>/sources/entries?path=&q=` lists one file's entries — a
+CSV's rows, a workbook's defined names, a PDF's pages — and is the list behind
+the XLSX picker above; `GET /api/item/<ref>/sources/propose?path=&key=&unit=&name=`
+composes the calc line; and accepting saves through
+`POST /api/item/<ref>/edit` (`op: "set_body"`, plus `pin`), the one write that
+lands body and pin together. A real `…/sources/entries` response, fetched from
+`refdes serve --no-open --port 8757` against an item citing
+`analysis/power-budget.csv`:
+
+```json
+{
+  "path": "analysis/power-budget.csv",
+  "reader": "csv",
+  "entries": [
+    {
+      "key": "rail_3v3_power",
+      "raw": "1.85",
+      "value": "1.85",
+      "line": 2,
+      "context": [],
+      "selectable": true,
+      "problem": "",
+      "pinned": "1.85",
+      "changed": false
+    },
+    {
+      "key": "rail_5v_power",
+      "raw": "3.3",
+      "value": "3.3",
+      "line": 3,
+      "context": [],
+      "selectable": true,
+      "problem": "",
+      "pinned": null,
+      "changed": false
+    }
+  ],
+  "truncated": false,
+  "rows": 2,
+  "problems": [],
+  "query": "",
+  "limits": { "max_rows": 5000, "max_bytes": 1048576 }
+}
+```
+
+Each entry carries the raw cell text (`raw`), the canonical decimal
+(`value`), the row number, the lockfile pin and a `changed` flag; a row
+`refdes fetch` would refuse (text, blank, a range, an uncached formula) is
+`selectable: false` with the reader's words in `problem`; `q` filters, and
+`limits` with `truncated` report the 5000-row / 1 MiB caps. The same shape
+carries XLSX defined names and PDF pages.
+
 For a CSV, click a file and its keys load into a filterable list; a row
 whose value does not read as a plain decimal is shown, with its problem
 named, and is not selectable. **Review** opens the confirmation panel: the
