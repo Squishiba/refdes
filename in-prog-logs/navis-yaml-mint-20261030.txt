@@ -89,3 +89,23 @@ Verification
 
 Status: complete. Docs (cli-reference.md mint paragraph, markdown.md
 mint bullet), changelog fragment, and this log land with the PR.
+
+Review round (manual reviewer, CHANGES REQUESTED on 3946be3; CI was green):
+- MEDIUM, reproduced: a file whose `defaults:` supplies `body:` had every
+  item in the re-parse gate; the `defaults:`-bodied sibling entry has no
+  own `body` key, so the gate compared "" against the real body and
+  refused the WHOLE file with a false corruption alarm. Fixed: the gate
+  compares only entries carrying their own `body:` key (an inherited body
+  is not a splice target -- its own item is refused upstream). Red-first
+  tests for the defaults- and merge-key-sibling shapes.
+- LOW: legacy body fields (requirement/bound `text:`, test `method:` --
+  parse._RENAMED_FIELDS) were refused with a message naming merge-key/
+  defaults, which is false for them. They are the item's body on the
+  entry's own line: they mint now (_body_key takes the alias when the
+  type renames it into body; a real `body:` key wins, matching the
+  loader's rename rule). Mint + docs + changelog updated.
+- LOW: BOM and lone-CR fixture tests added (the byte-equality posture;
+  both green on first run -- regression coverage for the claimed map).
+- NIT: dead `yaml_rel` set removed from mint_keys; over-long lines
+  wrapped; fuzz `w = lambda` made a def (E731 in the touched file).
+Full suite green again after the round; CI re-watched on the new head.

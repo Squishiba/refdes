@@ -1274,14 +1274,17 @@ def mint_keys(project: Project, write: bool = True) -> list[tuple[Item, str]]:
 
     rewrites: list[FileRewrite] = []
     assignments: list[tuple[Item, str]] = []
-    yaml_rel: set[str] = set()
     for rel, entries in by_file.items():
         path = os.path.join(project.root, rel)
         source = textio.SourceText.of(path)
         text = source.text
         lines = source.lines
-        markdown_entries = [(item, occ, key) for item, occ, key in entries if item.body_line is not None]
-        yaml_entries = [(item, occ, key) for item, occ, key in entries if item.body_line is None]
+        markdown_entries = [
+            (item, occ, key) for item, occ, key in entries if item.body_line is not None
+        ]
+        yaml_entries = [
+            (item, occ, key) for item, occ, key in entries if item.body_line is None
+        ]
         if yaml_entries:
             if rel.endswith(".md"):
                 for item, _occ, _key in yaml_entries:
@@ -1310,7 +1313,6 @@ def mint_keys(project: Project, write: bool = True) -> list[tuple[Item, str]]:
                 assignments.extend(plan.minted)
                 if plan.after is not None:
                     rewrites.append(FileRewrite(path=path, rel=rel, before=text, after=plan.after))
-                    yaml_rel.add(rel)
         by_line: dict[int, list[tuple[_Occurrence, str]]] = {}
         for item, occ, key in markdown_entries:
             li = item.body_line - 1 + occ.line

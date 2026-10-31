@@ -66,7 +66,10 @@ _ESCAPE_CODES = {"x": 2, "u": 4, "U": 8}
 
 OPEN_LEN = len(MARKER_OPEN)
 
-REFUSE_FOLDED = "folded (>) scalar: its lines fold into single spaces, so the marker's bytes are not a line of the file"
+REFUSE_FOLDED = (
+    "folded (>) scalar: its lines fold into single spaces, so the marker's "
+    "bytes are not a line of the file"
+)
 REFUSE_PLAIN = (
     "plain scalar: a keyless marker's `: ` cannot be written in a plain scalar at all "
     "(it parses as a mapping) -- a file that loads does not carry the marker this way"
@@ -193,18 +196,44 @@ def _is_flow(node: yaml.MappingNode, n_lines: list[str]) -> bool:
     return line[node.start_mark.column : node.start_mark.column + 1] == "{"
 
 
-def _body_key(entry: yaml.MappingNode):
+def _renamed_fields() -> dict:
+    """``parse._RENAMED_FIELDS``, imported lazily: navis imports this module
+    inside ``mint_keys`` for the same cycle-avoiding reason."""
+    from .parse import _RENAMED_FIELDS
+
+    return _RENAMED_FIELDS
+
+
+def _body_key(entry: yaml.MappingNode, item_type: str = ""):
     """The entry's own ``body:`` value node, or None.
+
+    A legacy body field on its way out (hardware@2's ``text:`` on
+    requirement/bound, ``method:`` on test -- ``parse._RENAMED_FIELDS``
+    folds the value into ``item.body`` with a rename warning) IS this
+    item's body, sits on the entry's own line, and mints the same. A
+    real ``body:`` key anywhere in the entry wins over an alias,
+    matching the loader's rule that a rename "never silently overwrites
+    real body content".
 
     None is the merge-key/defaults answer: ``<<:`` is flattened by the
     constructor, not the composed graph, so an entry that inherits its
-    body has no ``body`` key node -- and neither has one the file-wide
+    body has no body-key node -- and neither has one the file-wide
     ``defaults:`` supplies, which is exactly the refusal wanted.
     """
+    aliases = {
+        old
+        for (type_name, old), new in _renamed_fields().items()
+        if type_name == item_type and new == "body"
+    }
+    fallback = None
     for key, value in entry.value:
-        if isinstance(key, yaml.ScalarNode) and key.value == "body":
+        if not isinstance(key, yaml.ScalarNode):
+            continue
+        if key.value == "body":
             return value
-    return None
+        if fallback is None and key.value in aliases:
+            fallback = value
+    return fallback
 
 
 def _decode_quoted(text: str, lo: int, hi: int, style: str):
@@ -382,7 +411,7 @@ def plan_yaml_mints(text: str, entries, file_items) -> YamlPlan:
         if _is_flow(entry, n_lines):
             plan.refused.append((item, REFUSE_FLOW))
             continue
-        node = _body_key(entry)
+        node = _body_key(entry, item.type)
         if node is None:
             plan.refused.append((item, REFUSE_MERGED))
             continue
@@ -529,7 +558,12 @@ def _gate(raw_text: str, expected: dict) -> bool:
         seen += 1
         if str(item_id) not in expected:
             continue
-        body = entry.get("body")
+        if "body" not in entry:
+            # The body comes from `<<:`/`defaults:` -- this entry carries
+            # no body bytes to compare, and the loader's inherited value
+            # is not a splice target (its own item is refused upstream).
+            continue
+        body = entry["body"]
         if (str(body) if body is not None else "") != expected[str(item_id)]:
             return False
     return seen >= len(expected)

@@ -33,6 +33,16 @@ SCHEMA = (
     "    fields:\n"
     "      title: { type: text, required: true, on_change: invalidate }\n"
     "    body: { on_change: invalidate }\n"
+    "  requirement:\n"
+    "    prefix: REQ\n"
+    "    fields:\n"
+    "      title: { type: text, required: true, on_change: invalidate }\n"
+    "    body: { on_change: invalidate }\n"
+    "  test:\n"
+    "    prefix: TST\n"
+    "    fields:\n"
+    "      title: { type: text, required: true, on_change: invalidate }\n"
+    "    body: { on_change: invalidate }\n"
 )
 
 KEYED_RE = re.compile(r"<!--navi:([0-9a-z]{11}) ")
@@ -258,6 +268,48 @@ def _refused(tmp_path, name, text, id_="NOTE-001"):
     return project
 
 
+def test_legacy_text_alias_body_mints(tmp_path):
+    # `text:` on requirement/bound and `method:` on test ARE the body
+    # (parse._RENAMED_FIELDS, hardware@2 -> v3): the scalar sits on the
+    # entry's own line, so the mint reaches it like any `body:`.
+    config = _setup(
+        tmp_path,
+        {
+            "items.yaml": (
+                f"items:\n  - id: REQ-001\n    key: {_item_key()}\n"
+                "    type: requirement\n    title: R\n"
+                "    text: |\n      <!--navi: spec-->\n"
+            )
+        },
+    )
+    project = _load(config)
+    assert project.load_writes.minted_navi_keys == 1
+    assert not [d for d in project.diagnostics if d.code == navis.NAVI_MINT_REFUSED_CODE]
+    text = _bytes(tmp_path, "items.yaml").decode()
+    m = KEYED_RE.search(text)
+    assert m is not None, text
+    assert "      <!--navi:" + m.group(1) + " spec-->\n" in text
+
+
+def test_legacy_method_alias_body_mints(tmp_path):
+    config = _setup(
+        tmp_path,
+        {
+            "items.yaml": (
+                f"items:\n  - id: TST-001\n    key: {_item_key()}\n"
+                '    type: test\n    title: T\n    method: "probe <!--navi: m-->"\n'
+            )
+        },
+    )
+    project = _load(config)
+    assert project.load_writes.minted_navi_keys == 1
+    assert not [d for d in project.diagnostics if d.code == navis.NAVI_MINT_REFUSED_CODE]
+    text = _bytes(tmp_path, "items.yaml").decode()
+    m = KEYED_RE.search(text)
+    assert m is not None, text
+    assert 'method: "probe <!--navi:' + m.group(1) + ' m-->"\n' in text
+
+
 def test_folded_scalar_refuses(tmp_path):
     _refused(
         tmp_path,
@@ -339,6 +391,56 @@ def test_defaults_supplied_body_refuses(tmp_path):
     project = _load(config)
     assert _bytes(tmp_path, "items.yaml") == before
     assert project.load_writes.minted_navi_keys == 0
+
+
+def test_defaults_bodied_sibling_does_not_block_the_mint(tmp_path):
+    # The gate compares only entries that carry their OWN `body:` key:
+    # an item inheriting body from `defaults:` has none, and comparing
+    # it against the inherited body made the gate cry corruption and
+    # refuse the whole file. (The per-item refusal for an entry whose
+    # OWN body comes from defaults stays: test_defaults_supplied_body_refuses.)
+    config = _setup(
+        tmp_path,
+        {
+            "items.yaml": (
+                "defaults:\n  type: note\n  title: T\n  body: supplied body\n"
+                f"items:\n  - id: NOTE-001\n    key: {_item_key()}\n    type: note\n"
+                "    title: M\n    body: |\n      <!--navi: reminder-->\n"
+                f"  - id: NOTE-002\n    key: {_item_key()}\n"
+            )
+        },
+    )
+    project = _load(config)
+    assert project.load_writes.minted_navi_keys == 1
+    assert not [d for d in project.diagnostics if d.code == navis.NAVI_MINT_REFUSED_CODE]
+    text = _bytes(tmp_path, "items.yaml").decode()
+    m = KEYED_RE.search(text)
+    assert m is not None, text
+    assert "      <!--navi:" + m.group(1) + " reminder-->\n" in text
+    assert project.item_by_id("NOTE-002").body == "supplied body"
+
+
+def test_merge_key_sibling_does_not_block_the_mint(tmp_path):
+    config = _setup(
+        tmp_path,
+        {
+            "items.yaml": (
+                "items:\n"
+                "  - &base\n    id: NOTE-001\n    key: " + _item_key() + "\n"
+                "    type: note\n    title: T\n    body: supplied body\n"
+                "  - id: NOTE-002\n    key: " + _item_key() + "\n    type: note\n"
+                "    title: M\n    body: |\n      <!--navi: reminder-->\n"
+                "  - id: NOTE-003\n    key: " + _item_key() + "\n    <<: *base\n"
+            )
+        },
+    )
+    project = _load(config)
+    assert project.load_writes.minted_navi_keys == 1
+    assert not [d for d in project.diagnostics if d.code == navis.NAVI_MINT_REFUSED_CODE]
+    text = _bytes(tmp_path, "items.yaml").decode()
+    m = KEYED_RE.search(text)
+    assert m is not None, text
+    assert "      <!--navi:" + m.group(1) + " reminder-->\n" in text
 
 
 def test_multi_line_quoted_refuses(tmp_path):
@@ -439,6 +541,40 @@ def test_crlf_yaml_quoted_mints_key_bytes_only(tmp_path):
     )
 
 
+def test_bom_yaml_literal_block_mints(tmp_path):
+    # The pure-loader composition (and the n2raw map) is BOM-safe: the
+    # BOM survives, the key bytes are the only change.
+    text = _yaml("|\n      <!--navi: bom-->\n")
+    body = text.encode("utf-8")
+    config = _setup_bytes(tmp_path, {"items.yaml": b"\xef\xbb\xbf" + body})
+    project = _load(config)
+    assert project.load_writes.minted_navi_keys == 1
+    raw = _bytes(tmp_path, "items.yaml")
+    assert raw.startswith(b"\xef\xbb\xbf")
+    m = KEYED_RE.search(raw.decode("utf-8-sig"))
+    assert m is not None, raw
+    assert raw == b"\xef\xbb\xbf" + body.replace(
+        b"      <!--navi: bom-->", f"      <!--navi:{m.group(1)} bom-->".encode("utf-8")
+    )
+
+
+def test_lone_cr_yaml_literal_block_mints(tmp_path):
+    # Lone-CR terminators (the map covers all three terminator kinds):
+    # the key bytes are the only change; no terminator is rewritten.
+    text = _yaml("|\n      <!--navi: cr-->\n").replace("\n", "\r")
+    body = text.encode("utf-8")
+    config = _setup_bytes(tmp_path, {"items.yaml": body})
+    project = _load(config)
+    assert project.load_writes.minted_navi_keys == 1
+    raw = _bytes(tmp_path, "items.yaml")
+    assert b"\n" not in raw
+    m = KEYED_RE.search(raw.decode("utf-8").replace("\r", "\n"))
+    assert m is not None, raw
+    assert raw == body.replace(
+        b"\r      <!--navi: cr-->", f"\r      <!--navi:{m.group(1)} cr-->".encode("utf-8")
+    )
+
+
 def test_yaml_mint_changes_hash_and_lists_keyed(tmp_path):
     config = _setup(
         tmp_path,
@@ -511,7 +647,8 @@ _MINTABLE = ("literal", "strip", "dq", "sq")
 def _fuzz_body(rng, shape, markers):
     """One item body in one shape; markers are marker strings placed on
     content lines."""
-    w = lambda: rng.choice(_WORDS)
+    def w() -> str:
+        return rng.choice(_WORDS)
     if shape in ("literal", "strip"):
         ind = " " * rng.choice((6, 7, 8))
         lines = [f"{w()} {w()}"]

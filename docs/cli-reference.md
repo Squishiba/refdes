@@ -708,8 +708,10 @@ scalar (`body: "..."` / `body: '...'`) — and refuses, with a warning and
 bytes untouched, the shapes where a marker's bytes are not file bytes:
 folded (`>`) scalars, plain scalars, multi-line quoted scalars, flow
 style, a `body:` supplied by a merge key (`<<:`) or the file's
-`defaults:`, and a body scalar an alias shares. A refused marker stays
-keyless and lists keyless. A declared key that fails key validation is
+`defaults:`, and a body scalar an alias shares. A legacy body field a
+standard renamed into `body:` (`text:` on a requirement/bound, `method:`
+on a test) IS the item's body, on the entry's own line, and mints the
+same. A refused marker stays keyless and lists keyless. A declared key that fails key validation is
 reported on stderr as corrupt input, never repaired. Archive records land
 in a later slice of the design, not slice 2 — `all` can only print the
 active list.
