@@ -1,9 +1,0 @@
-[
-  {
-    "id": "permission-exec-redacted",
-    "agentId": "agent-permission-001",
-    "agentShortId": "agent-p",
-    "name": "CodexBash",
-    "description": "May I write the requested implementation to pkg/mathx.py? The workspace is mounted read-only without escalation."
-  }
-]
