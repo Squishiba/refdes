@@ -48,8 +48,10 @@ jobs:
       - run: pip install -e ".[dev,xlsx]"
       - name: Ruff (E9,F)
         run: ruff check --select E9,F src tests
+      # ~5.5k tests take ~11 min serially and ~105 s with -n 8 worksteal on a
+      # 20-core box; runner core count is unmeasured, so let xdist choose `auto`.
       - name: pytest
-        run: python -m pytest -q
+        run: python -m pytest -q -n auto --dist worksteal
 
   # A second interpreter, not a third OS. pip resolves `pint>=0.23` to the
   # newest release each interpreter can install, and those sets differ: pint
@@ -84,4 +86,4 @@ jobs:
           python-version: "3.13"
       - run: pip install -e ".[dev,xlsx]"
       - name: pytest
-        run: python -m pytest -q
+        run: python -m pytest -q -n auto --dist worksteal
