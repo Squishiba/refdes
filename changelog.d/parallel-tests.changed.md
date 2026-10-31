@@ -1,0 +1,1 @@
+- CI runs the test suite in parallel with pytest-xdist; install it with the `dev` extra to use the same parallel test command locally.
