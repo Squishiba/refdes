@@ -730,19 +730,25 @@ command exits 1 (like `ls`). The read verbs write nothing of their own:
 like `thread`, the load's own key minting/expansions are announced on
 **stderr**, and the build runs with no seal write.
 
-Keys are minted by the writable load: the mint writes at the marker's
-exact source position, refuses — with a warning, bytes untouched — any
-marker whose body is not the item's own markdown file (a list file's
-`body:` scalar stays keyless), and never rewrites a declared key. A
+Keys are minted by the writable load: the mint writes at the marker's exact
+source position and never rewrites a declared key. In a markdown body it
+writes at the marker's line; in a YAML list file it can mint in a `body:`
+scalar whose bytes it can point at exactly — a literal block (`body: |`, with
+any chomping or indentation indicator) or a single-line quoted scalar
+(`body: "..."` / `body: '...'`). Legacy body fields a standard renames to
+`body:` (`text:` on a requirement or bound, `method:` on a test) also mint.
+Mint refuses, with a warning and bytes untouched, folded (`>`) scalars, plain
+scalars, multi-line quoted scalars, flow style, a `body:` supplied by a merge
+key (`<<:`) or the file's `defaults:`, and a body scalar shared by an alias;
+a marker in any of these refused shapes stays keyless and lists keyless. A
 declared key that fails key validation is reported on stderr as corrupt
-input, never repaired. A keyless marker cannot be archived (the record is
-named by the key) — the refusal says the key comes from the next writable
-command and points at the mint warnings (a `body:`-scalar marker is exactly
-the marker mint refuses). A
-record the tool cannot read (not gzip, not YAML, a foreign
-`archive_format`, a key that is not its own file's name) is a
-`navis.archive_corrupt` warning naming the file; it is skipped, not
-deleted, and the rest of the store loads.
+input, never repaired. A keyless marker cannot be archived because the record
+is named by its key; the refusal points to the next writable command and the
+mint warnings. A marker in a refused `body:` shape is the one mint refuses;
+literal-block and single-line-quoted markers do mint. A record the tool
+cannot read (not gzip, not YAML, a foreign `archive_format`, or a key that is
+not its own file's name) produces a `navis.archive_corrupt` warning naming
+the file; it is skipped, not deleted, and the rest of the store loads.
 
 ---
 

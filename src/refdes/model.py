@@ -567,8 +567,8 @@ class Navi:
     the containing item is its source, so it carries no item reference.
 
     `key` is the marker's own 11-character identity -- "" for a keyless
-    marker (slice 1 never mints; a later slice writes the minted key into
-    the marker, §5/§7.2). `text` is the reminder, single line. `line_offset`
+    marker (for example, when mint refuses its source shape; §5/§7.2).
+    `text` is the reminder, single line. `line_offset`
     is 0-indexed within `Item.body` (add `Item.body_line` for the absolute
     source line, the `inline_calc` pattern).
     """

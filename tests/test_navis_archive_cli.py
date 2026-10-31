@@ -209,14 +209,14 @@ def test_restore_of_an_archived_orphan_refuses(tmp_path, capsys):
 
 
 def test_archive_of_a_keyless_marker_names_the_writable_load(tmp_path, capsys):
-    # a marker in a YAML list file's `body:` scalar: mint refuses it (slice
-    # 2), so `archive` must refuse it too, loudly, not mint around it
+    # A folded YAML list-file body cannot be spliced at the marker's source
+    # position, so it remains keyless and archive must refuse it.
     config = _setup(
         tmp_path,
         {
             "entries.yaml": (
                 "items:\n  - id: NOTE-100\n    type: note\n    title: L\n"
-                "    body: |\n      list body\n      <!--navi: list marker-->\n"
+                "    body: >\n      list body\n      <!--navi: list marker-->\n"
             )
         },
     )
@@ -224,8 +224,30 @@ def test_archive_of_a_keyless_marker_names_the_writable_load(tmp_path, capsys):
     assert _run(config, "navis", "archive", "1") == 2
     err = capsys.readouterr().err
     assert "no key" in err
-    assert "writable" in err  # names the minting load's posture
+    assert "next writable command" in err
+    assert "this marker's body is one refdes will not mint into" in err
+    assert "see the mint warnings above" in err
     assert not (tmp_path / ".refdes" / "navis").exists()
+
+
+def test_archive_mints_and_archives_literal_block_yaml_marker(tmp_path, capsys):
+    config = _setup(
+        tmp_path,
+        {
+            "entries.yaml": (
+                "items:\n  - id: NOTE-100\n    type: note\n    title: L\n"
+                "    body: |\n      list body\n"
+                "      <!--navi: literal marker-->\n"
+            )
+        },
+    )
+
+    assert _run(config, "navis", "archive", "1") == 0
+    out = capsys.readouterr().out
+    assert "archived Navi" in out
+    assert "literal marker" in out
+    key = _navi_keys(tmp_path)[0]
+    assert (tmp_path / ".refdes" / "navis" / f"{key}.yaml.gz").exists()
 
 
 # ---------------------------------------------------------------------------

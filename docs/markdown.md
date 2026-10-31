@@ -90,8 +90,14 @@ The grammar is closed and strict:
   (`<!--navi:k7f3q2x8d0f Model worst-case copper temperature.-->`); you
   never write one by hand — the tool mints it into the marker on the next
   writable command, at the marker's exact position in your file, and
-  announces it. A declared key that fails key validation is reported,
-  never repaired;
+  announces it. In a YAML list file the mint reaches a `body:` scalar
+  whose bytes it can point at exactly — a literal block (`body: |`, any
+  indicator) or a single-line quoted scalar; the shapes where a marker's
+  bytes are not file bytes (folded `>`, plain, multi-line quoted, flow
+  style, a `body:` supplied by a merge key or `defaults:`, an
+  alias-shared body) keep the marker keyless with a warning naming the
+  shape, bytes untouched. A declared key that fails key validation is
+  reported, never repaired;
 - a marker is inert exactly where the page's own Markdown renderer says
   it is literal text: inside a fenced code block, an indented code
   block, an inline code span (however many lines the span covers), or an
