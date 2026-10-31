@@ -72,10 +72,20 @@ Substitutes a calc value from the same item.
 
 A **Navi** is one flying note: a single-line HTML comment on the `navi:`
 prefix, written by hand inside an item's body. The published page consumes
-it — the marker's bytes never appear in the rendered HTML — while the tool
-scans every body into one project-wide list you can read with
+it — the marker's bytes never appear in the rendered HTML, in the item body
+or in any projection of it (list-page title/summary, tree, hover preview) —
+while the tool scans every body into one project-wide list you can read with
 [`refdes navis ls`](cli-reference.md#refdes-navis-ls-all-show), and the
 `index` payload carries it under its top-level `navis` key.
+
+The one place a marker's bytes can appear in the built site is the History
+disclosure's captured-snapshot body (see
+[baseline snapshot events](lifecycle.md#baseline-snapshot-events)): a
+baseline's snapshot event stores the item's body verbatim, and the
+disclosure quotes that stored text as written, so a marker the item carried
+at stamp time shows in the snapshot's `<pre>` block. That block is the
+historical record as captured, deliberately unedited — it is what the item
+said, not a projection of what it says now.
 
 The grammar is closed and strict:
 
