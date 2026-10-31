@@ -222,6 +222,41 @@ def test_strip_markers_noop_is_the_same_string():
     assert navis.strip_markers(body) is body
 
 
+def test_title_projection_carries_no_marker_bytes(tmp_path):
+    # F14-4: the title of a marker-bearing item (when the title is the body
+    # fallback, i.e. no title field) is a projection of the body, so it must
+    # not carry marker bytes -- the list page's summary column, the tree,
+    # the hover preview and the item page's <h1> all read it.
+    project = _project(
+        tmp_path,
+        {
+            "note-001.md": (
+                "---\nid: NOTE-001\ntype: note\n---\n\n"
+                "<!--navi: check the copper temperature-->\n"
+                "The stage power is 0.30 W and this is a long enough body to project.\n"
+            )
+        },
+    )
+    item = project.item_by_id("NOTE-001")
+    assert "navi" not in item.title
+    assert item.title.startswith("The stage power")
+
+
+def test_title_projection_unchanged_for_a_no_marker_item(tmp_path):
+    # Byte-identity: an item with no markers titles exactly as before.
+    project = _project(
+        tmp_path,
+        {
+            "note-001.md": (
+                "---\nid: NOTE-001\ntype: note\n---\n\n"
+                "The stage power is 0.30 W and this is a long enough body to project.\n"
+            )
+        },
+    )
+    item = project.item_by_id("NOTE-001")
+    assert item.title.startswith("The stage power")
+
+
 def test_strip_markers_removes_only_the_marker():
     body = "before <!--navi: gone--> after\nsecond line\n"
     out = navis.strip_markers(body)

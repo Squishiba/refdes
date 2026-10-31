@@ -10,12 +10,15 @@ get distinct keys. A declared key is never rewritten and never repaired:
 one that fails key validation is reported as corrupt input (the
 `keys.malformed_key_message` posture for item keys, now also for marker
 keys), and minting mints around it.
-
 Minting is exact-provenance or nothing: a marker whose bytes cannot be
 located losslessly in the item's own source file (a list file's `body:`
 scalar; a file that changed under the parse) refuses the mint with a
-`NAVI_MINT_REFUSED` warning and leaves every byte untouched. Keys are a
-fresh namespace, minted unique against the project's declared marker keys.
+warning carrying the `NAVI_MINT_REFUSED` diagnostic code — the same
+machine-readable tag every other diagnostic exposes (on the diagnostic,
+surfaced as the `code` field of the serve API's `diagnostics`, not
+printed in the warning line) — and leaves every byte untouched. Keys are
+a fresh namespace, minted unique against the project's declared marker
+keys.
 
 `refdes navis ls` now shows each key's 6-character prefix; `show` accepts
 a 6-to-10-character key prefix as a selector (unique match; an ambiguous

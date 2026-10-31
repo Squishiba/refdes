@@ -695,8 +695,16 @@ class Item:
         # sentence itself once text: no longer exists to hold it (hardware@3).
         # `title`, when present, still wins above: a caption is meant to be
         # the short label, not competing with the full sentence for the slot.
+        # Navis marker bytes are stripped first: the body render removes them
+        # (docs/markdown.md, "the marker's bytes never appear in the rendered
+        # HTML"), and the title is the body projected, so it must not be the
+        # one place they reappear (run-14 F14-4). `strip_markers` returns the
+        # *same* string object for a marker-free body, so a project with no
+        # markers titles exactly as before. Deferred import: navis imports
+        # this module for `Item`, so the cycle is broken at the call site.
+        from . import navis as _navis
         if self.body:
-            text = self.body.strip()
+            text = _navis.strip_markers(self.body).strip()
             if text:
                 return text if len(text) <= 90 else text[:87].rstrip() + "…"
         return self.id
