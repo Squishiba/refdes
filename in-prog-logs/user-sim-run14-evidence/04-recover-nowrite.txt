@@ -1,0 +1,6 @@
+exit=2
+--- stdout ---
+
+--- stderr ---
+--no-write: recover writes the journal (.refdes/editor-transaction/) and every file it journaled -- there is no read-only recovery; refusing to run it under --no-write. Drop --no-write to run it for real.
+

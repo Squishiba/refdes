@@ -109,3 +109,19 @@ Review round (manual reviewer, CHANGES REQUESTED on 3946be3; CI was green):
 - NIT: dead `yaml_rel` set removed from mint_keys; over-long lines
   wrapped; fuzz `w = lambda` made a def (E731 in the touched file).
 Full suite green again after the round; CI re-watched on the new head.
+
+Merge follow-up (2026-10-31)
+---------------------------
+- Merged the current local `origin/main` (#396 archive store) into the
+  YAML mint branch; `git fetch` could not update shared `FETCH_HEAD`.
+- Resolved the `docs/cli-reference.md` conflict by combining YAML mint
+  shape support/refusals with archive behavior and corruption reporting.
+- Removed the obsolete claim that archiving is future work and clarified
+  that only refused `body:` shapes remain keyless; supported literal-block
+  and single-line quoted markers mint.
+- Phrase search found no other contradictory docs claim. `src/refdes/model.py`
+  still has an outdated slice-1 mint docstring; left source unchanged.
+- Requested verification: 632 passed, 1 failed. The archive CLI test
+  `test_archive_of_a_keyless_marker_names_the_writable_load` expects a
+  literal-block YAML marker to stay keyless, but the merged mint code mints
+  it and archive succeeds; this conflicts with #398's implemented behavior.

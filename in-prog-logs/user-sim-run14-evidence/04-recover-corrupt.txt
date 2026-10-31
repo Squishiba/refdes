@@ -1,0 +1,7 @@
+exit=2
+--- stdout ---
+
+--- stderr ---
+recover refused: journal manifest at /home/jorb/.paseo/worktrees/16msma8v/user-sim-run14-1/.scratch/run14/keyless/.refdes/editor-transaction/manifest.json is not valid JSON (Expecting property name enclosed in double quotes: line 1 column 3 (char 2)); begin() publishes it atomically and complete() deletes it first, so a visible journal whose manifest does not parse is damage, not a crash inside begin: refusing to clear it
+nothing was changed and the journal is kept. A corrupt manifest means the journal's own record of the interrupted save cannot be trusted -- compare the live files against the manifest by hand.
+

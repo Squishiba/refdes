@@ -1,0 +1,36 @@
+{
+ "listHandles": [
+  "~items/reqs.yaml:6",
+  "~items/reqs.yaml:8",
+  "~items/REQ-010.md:2"
+ ],
+ "saveYaml": {
+  "status": 200,
+  "message": "applied: yaml-item REQ-001: set_body body at items/reqs.yaml:7 [78:103]",
+  "onDisk": true,
+  "keysAppeared": false,
+  "before": "defaults:\n  type: requirement\n  prefix: REQ\n\nitems:\n  - id: REQ-001\n    body: The rail shall be 3.3 V.\n  - id: REQ-002\n    body: The rail shall source 1.2 A.\n",
+  "after": "defaults:\n  type: requirement\n  prefix: REQ\n\nitems:\n  - id: REQ-001\n    body: |\n      The rail shall be 3.3 V. Measured at 25 C.\n  - id: REQ-002\n    body: The rail shall source 1.2 A.\n"
+ },
+ "saveMd": {
+  "handle": "~items/REQ-010.md:2",
+  "status": 200,
+  "message": "applied: md-body REQ-010: set_body body at items/REQ-010.md:6 [53:87]",
+  "onDisk": true,
+  "after": "---\nid: REQ-010\ntype: requirement\nstatus: active\n---\nThe debug header shall be 10-pin. Confirmed with platform.\n"
+ },
+ "conflict": {
+  "status": 409,
+  "message": "{\"kind\":\"conflict\",\"ok\":false,\"message\":\"conflict: items/reqs.yaml changed since this edit was planned (expected 6aded430b2ba, found b40899ed11e3)\",\"path\":\"items/reqs.yaml\",\"expected_revision\":\"6aded430b2baf59587d4814d69513c125d72447b779d4dbb3debe04210a003c2\",\"current_revision\":\"b40899ed11e3bf087691f1f0aeb833a305c0041ce1d01c747c5854e729537e0a\",\"current_text\":\"|\\n      The rail shall be 3.31 V. Measured at 25 C.\\n\",\"diff\":\"--- items/reqs.yaml (on disk)\\n+++ items/reqs.yaml (your edit)\\n@@ -5,6 +5",
+  "hasAbsPath": false,
+  "showsRelative": true
+ },
+ "stale-handle": {
+  "pass": false,
+  "error": "res.status is not a function"
+ },
+ "bogus-handle": {
+  "pass": false,
+  "error": "res.status is not a function"
+ }
+}

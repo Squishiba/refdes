@@ -74,7 +74,7 @@ A **Navi** is one flying note: a single-line HTML comment on the `navi:`
 prefix, written by hand inside an item's body. The published page consumes
 it — the marker's bytes never appear in the rendered HTML — while the tool
 scans every body into one project-wide list you can read with
-[`refdes navis ls`](cli-reference.md#refdes-navis-ls-all-show), and the
+[`refdes navis ls`](cli-reference.md#refdes-navis-ls-all-show-archive-restore), and the
 `index` payload carries it under its top-level `navis` key.
 
 The grammar is closed and strict:
@@ -128,6 +128,17 @@ The comment form is the point: any standard Markdown renderer already
 hides the marker, and it cannot trigger an inline calc span under it.
 Markers are scanned in **item bodies** only — narrative pages keep the
 plain-comment behavior.
+
+A Navi is removable one by one, and **removal is archival**:
+[`refdes navis archive`](cli-reference.md#refdes-navis-ls-all-show-archive-restore)
+archives the *pointer* — a gzip record of the Navi lands under
+`.refdes/navis/`, the Navi leaves the active list (`ls`), and
+`all` reveals it labelled `[archived]` — the Show-all row prints the
+marker's live text; `show` is what adds the record's snapshot
+([`refdes navis restore`](cli-reference.md#refdes-navis-ls-all-show-archive-restore)
+brings it back, showing its current text). Archive and restore never
+touch your file: the marker stays exactly where you wrote it, and no
+body, hash, seal, or history content changes.
 
 ### Cross-references
 

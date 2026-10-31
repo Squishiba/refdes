@@ -1,0 +1,1 @@
+{"item":"LOG-THM-901","files":[{"path":"analysis/corrupt.xlsx","reader":"xlsx","browse":"rows","open_page":null,"state":"unpinned","detail":"citation to analysis/corrupt.xlsx has no fetched record; run 'refdes fetch --path analysis/corrupt.xlsx' to pin it","sha256":"","fetched":"","pinned_values":{}}],"problems":[]}

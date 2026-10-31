@@ -22,7 +22,8 @@ const AUTOFILL_KEY = 'refdes.live-calc.autofill';
 // the whole SESSION -- and a browser session outlives every controller (a
 // save, a poll rebuild and an item switch each build a new one), so the flag
 // lives in sessionStorage, not in a closure. sessionStorage is per-tab and
-// dies with the tab: exactly the session §3.5 names.
+// dies with the tab: exactly the session §3.5 names. The formatting bar shares
+// this session truth (formatbar.js); one detection serves both consumers.
 const FALLBACK_KEY = 'refdes.live-calc.fallback';
 // Mirrors build.PREVIEW_SPAN_LIMIT (src/refdes/build.py); the static test
 // pins the two numbers against each other.

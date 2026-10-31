@@ -1,0 +1,5 @@
+Since last release (rel-1, 2026-10-30T21:38:48Z):
+  changed   4   BND-PWR-001, LOG-PWR-003, LOG-THM-001, RES-001
+    LOG-THM-001 -- referenced LOG-PWR-003.P_diss: 0.2981 W -> 0.44 W
+  added     0
+  removed   0

@@ -1,0 +1,1 @@
+{"item":"LOG-THM-902","files":[{"path":"analysis/big.xlsx","reader":"xlsx","browse":"rows","open_page":null,"state":"unpinned","detail":"citation to analysis/big.xlsx has no fetched record; run 'refdes fetch --path analysis/big.xlsx' to pin it","sha256":"","fetched":"","pinned_values":{}}],"problems":[]}
