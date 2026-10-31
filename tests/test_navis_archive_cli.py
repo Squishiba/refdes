@@ -45,7 +45,11 @@ def _setup(tmp_path, files=None):
     config = write_project_config(tmp_path, SCHEMA)
     items = tmp_path / "items"
     items.mkdir(exist_ok=True)
-    for name, text in (files if files is not None else {"note-a.md": NOTE_A, "note-b.md": NOTE_B}).items():
+    files = files if files is not None else {
+        "note-a.md": NOTE_A,
+        "note-b.md": NOTE_B,
+    }
+    for name, text in files.items():
         (items / name).write_text(text, encoding="utf-8")
     return str(config)
 

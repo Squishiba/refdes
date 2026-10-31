@@ -60,11 +60,19 @@ before the module existed.
 - Invariant tests: item bytes/hashes/seals/history content frozen across
   archive+restore (incl. sealed append-only entry); differential build of
   a Navi-free project vs `origin/main` tree is byte-identical with and
-  without a pre-existing `.refdes/`.
+  without a pre-existing `.refdes/` — `_site` included (the build is
+  deterministic: two fresh builds of one tree, and a rebuild of one
+  project, hash-identical). It skips when `origin/main` is not
+  fetchable — a fresh clone with the full history has it.
 - Concurrency: two processes archiving the same Navi → one record;
-  distinct Navis → both records; kill-mid-write (real SIGKILL of a
-  subprocess during `os.replace`) → store unchanged, no temp files, CLI
-  exits 2 "could not write", no traceback.
+  distinct Navis → both records. Crash posture, two tests: a simulated
+  write failure (`os.replace` patched to raise `OSError` in a subprocess
+  → CLI exits 2 "could not write", no traceback, previous record intact,
+  temp cleaned) and a real kill — the writer subprocess signals "ready"
+  from a patched `os.replace` after the gzip temp is fsynced, the test
+  SIGKILLs it (POSIX; skipped on Windows), and asserts the previous
+  record is intact, the dot-prefixed temp left behind is skipped by
+  readers (clean `navis ls`), and re-archiving that Navi lands.
 - Huge marker (1 MB single line) archives and restores.
 - Platform: the local full-suite run above is Linux. PR CI runs
   ubuntu/windows at the floor version plus an ubuntu py3.13 job; the first

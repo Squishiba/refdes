@@ -3207,24 +3207,6 @@ def cmd_navis(args) -> int:
         print("  archived: none")
     return 1 if load_errors else 0
 
-    verb = args.navis_command
-    if not rows:
-        print("no Navis: no `<!--navi: text-->` marker in any item body")
-        return 1 if load_errors else 0
-    if verb == "all":
-        print(f"{len(rows)} Navis (active):")
-    else:
-        print(f"{len(rows)} Navis:")
-    for number, row in enumerate(rows, 1):
-        src = row["source"]
-        # The 6-char key prefix is the Navi's display name (§5); a keyless
-        # marker (a --no-write run) shows no key column.
-        short = f"{row['key'][:6]} " if row["key"] else ""
-        print(f"  {number}. {short}{row['text']}  {src['item']} ({src['file']}:{src['line']})")
-    if verb == "all":
-        print("  archived: none -- archive records land in a later slice (design §13)")
-    return 1 if load_errors else 0
-
 
 def _version_line() -> str:
     """The `--version` output: the installed package's own version, or an

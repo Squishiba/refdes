@@ -21,6 +21,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import os
+import signal
 import subprocess
 import sys
 import tarfile
@@ -34,7 +35,6 @@ from refdes import cli as cli_mod
 from refdes import keys as keys_mod
 from refdes import loader, navis, navis_archive
 
-SRC = str((os.path.dirname(__file__) + "/../src").replace("\\", "/"))
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -120,10 +120,13 @@ def _record_dict(tmp_path, key):
 def _store_paths(root):
     """Every regular file under the project, {relpath: sha256}, the lock
     file excluded (`.refdes-write.lock` is the lock primitive's own, not
-    project content)."""
+    project content). The published site IS compared: the build is
+    deterministic (verified: two fresh builds of the same tree, and a
+    rebuild of one project, hash-identical), so `_site` is project output
+    like any other."""
     out = {}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in (".git", "_site")]
+        dirnames[:] = [d for d in dirnames if d != ".git"]
         for name in filenames:
             path = os.path.join(dirpath, name)
             rel = os.path.relpath(path, root)
@@ -625,6 +628,58 @@ def test_kill_mid_write_leaves_the_previous_record_intact(tmp_path):
     assert not (tmp_path / ".refdes" / "navis" / f"{keys[1]}.yaml.gz").exists()
     store = tmp_path / ".refdes" / "navis"
     assert [p.name for p in store.iterdir() if p.name.startswith(".")] == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGKILL is POSIX-only")
+def test_sigkill_between_write_and_replace_leaves_the_store_readable(tmp_path, capsys):
+    # the real crash: the gzip temp lands fully (open/close/fsync are the
+    # writer's), then the writer is SIGKILLed at os.replace -- announced
+    # from the patched hook, so the kill is a handshake, not a race. The
+    # temp is dot-prefixed, so readers skip it (§8), the live records are
+    # untouched, and archiving that Navi again lands.
+    config = _setup(tmp_path)
+    _load(config)
+    keys = _navi_keys(tmp_path)
+    assert _run(config, "navis", "archive", keys[0]) == 0
+    first_before = _record_bytes(tmp_path, keys[0])
+    script = (
+        "import os, sys, time\n"
+        f"sys.path.insert(0, {SRC!r})\n"
+        "import refdes.cli as cli\n"
+        "def hooked(a, b):\n"
+        "    print('ready', flush=True)\n"
+        "    deadline = time.monotonic() + 30\n"
+        "    while time.monotonic() < deadline:\n"
+        "        time.sleep(0.05)\n"
+        "    os._exit(9)\n"
+        "os.replace = hooked\n"
+        f"sys.exit(cli.main(['-c', {config!r}] + sys.argv[1:]))\n"
+    )
+    path = tmp_path / "killer.py"
+    path.write_text(script, encoding="utf-8")
+    proc = subprocess.Popen(
+        [sys.executable, str(path), "navis", "archive", keys[1]],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        assert proc.stdout.readline().strip() == "ready"  # temp fsynced
+        os.kill(proc.pid, signal.SIGKILL)
+        assert proc.wait(timeout=10) < 0  # died of the signal
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=10)
+    store = tmp_path / ".refdes" / "navis"
+    assert _record_bytes(tmp_path, keys[0]) == first_before  # intact
+    assert not (store / f"{keys[1]}.yaml.gz").exists()
+    temps = [p.name for p in store.iterdir() if p.name.startswith(".")]
+    assert len(temps) == 1  # the interrupted write's temp, left in place
+    assert _run(config, "--no-write", "navis", "ls") == 0
+    assert "navis archive record is unreadable" not in capsys.readouterr().err
+    assert _run(config, "navis", "archive", keys[1]) == 0
+    assert _record_dict(tmp_path, keys[1])["text"] == (
+        "Recheck decoupling near U14."
+    )
 
 
 # ---------------------------------------------------------------------------
