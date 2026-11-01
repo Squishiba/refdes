@@ -24,7 +24,6 @@ task-pane data, PR #197 review P4) -- the render-site test counts the calls.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import subprocess
 import sys
