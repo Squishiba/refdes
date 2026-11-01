@@ -720,6 +720,16 @@ def missing_assignments(project: Project) -> list[tuple[Item, str]]:
     return [(item, mint()) for item in candidates]
 
 
+def _flow_style_key_hint(flow_shape: str, remedy: str = "") -> str:
+    """Shared wording for the two shapes whose key has nowhere to be
+    written. The markdown text is load-bearing (tests and docs quote it);
+    the YAML list one gained its shape name in the run-15 F15-1 fix."""
+    return (
+        f"key cannot be added to this flow-style {flow_shape}; "
+        f"rewrite it in block style{remedy}"
+    )
+
+
 def plan_missing(
     project: Project,
     source_texts: Mapping[str, str] | None = None,
@@ -764,8 +774,7 @@ def plan_missing(
                 if updated is None:
                     project.error(
                         f"could not write key {new_key} back into the source: "
-                        "key cannot be added to this flow-style front matter; "
-                        "rewrite it in block style",
+                        + _flow_style_key_hint("front matter"),
                         file=rel, line=item.source_line,
                     )
                     failed.add(id(item))
@@ -775,7 +784,10 @@ def plan_missing(
                 updated = ids_mod.insert_into_list(lines, item.source_line, "key", new_key)
                 if updated is None:
                     project.error(
-                        f"could not write key {new_key} back into the source",
+                        f"could not write key {new_key} back into the source: "
+                        + _flow_style_key_hint(
+                            "list", " (one `- id:` entry per line)"
+                        ),
                         file=rel, line=item.source_line,
                     )
                     failed.add(id(item))
