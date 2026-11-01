@@ -66,6 +66,14 @@ lockfile-compatibility blockers were found.
   runs of the three new tests (the monkeypatch is a no-op there, so
   they assert real `os.path.relpath` output -- the windows job proves
   the actual separator behaviour).
+- Full-suite triage: two `test_no_write.py` argparse-help parsing
+  tests (`...lists_calc_rewrite_among_the_reporting_commands`,
+  `...lists_every_command_the_docs_table_lists_as_reporting`) failed
+  (IndexError) in both full-suite runs here. Reproduced identically
+  at the base commit d9719a9 under the same full-suite command in
+  this environment, and they fail at `COLUMNS<=75` serially on base --
+  pre-existing terminal-width sensitivity of the phrase split, not
+  this diff. Both pass in isolation on this branch (serial and -n 4).
 
 Status: complete. Commits: citations fix + test, lifecycle fix + test,
 scaffold normalisation (behaviour-neutral) + baseline, py311
