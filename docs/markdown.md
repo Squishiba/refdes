@@ -291,7 +291,9 @@ and produces a build error.
 ### Uploading an image from the browser editor
 
 When editing an item with `refdes serve`, the image panel can also upload a
-local PNG, JPEG, GIF, or WebP file. The editor previews the picked bytes before
+local PNG, JPEG, GIF, or WebP file (the editor's formatting bar and its
+**Image** button are in [the browser editor guide](browser-editor.md)). The
+editor previews the picked bytes before
 uploading. By default, the file is written beside the item's source file; the
 server accepts an explicit existing project directory as an alternate
 destination. It does not create directories. The filename must be a single
@@ -685,8 +687,9 @@ and [output formats](output.md).
 ## Picking a source value in the browser editor
 
 With `refdes serve`, an item's page shows an **Insert source value** panel
-below the body textarea. It reads the files that *this* item cites (see
-[Citing a datasheet](#citing-a-datasheet)) and composes
+below the body textarea (reached from the bar's **Source** button — see
+[the browser editor guide](browser-editor.md)). It reads the files that
+*this* item cites (see [Citing a datasheet](#citing-a-datasheet)) and composes
 `name = source("path", "key") | unit` lines for a ` ```calc``` ` fence, so
 you never type a path, a key, or a number by hand — the line's semantics are
 in [math](math.md#reading-a-value-from-a-source-file).
