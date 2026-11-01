@@ -30,19 +30,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # checks API for labels needs a token: GITHUB_TOKEN works in Actions.
-      - name: PR number and labels
-        id: pr
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
-          gh pr view "${{ github.event.pull_request.number }}" --json labels \
-            --jq '[.labels[].name] | join(",")' >> "$GITHUB_OUTPUT"
+      # Number and labels come straight from the event payload — the
+      # pull_request object in labeled/unlabeled events carries the
+      # current label set, so no API call, token, or extra step is needed.
       - name: pr-size
         env:
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-          PR_LABELS: ${{ steps.pr.outputs.labels }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python tools/pr_size.py
