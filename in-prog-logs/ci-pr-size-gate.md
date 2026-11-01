@@ -20,10 +20,13 @@ Approved by Jared 2026-10-31; spec decided in the handoff.
   missing.
 - `.github/workflows/pr-size.yml` (new): on pull_request (opened,
   synchronize, reopened, labeled, unlabeled), permissions contents: read,
-  concurrency group, checkout@v5.0.0 pinned (same SHA as tests.yml) with
-  fetch-depth: 0, PR number+labels via `gh pr view --json labels` with
+  concurrency group, checkout@v4 with fetch-depth: 0, setup-python@v5,
+  PR number+labels via `gh pr view --json labels` with
   GITHUB_TOKEN, base/head shas from the event payload. No dependency on
-  the test matrix.
+  the test matrix. First CI run FAILED at Set up job: the brief's claim
+  that tests.yml pins action SHAs is false at current main (it and
+  docs.yml use tags), and the SHA I had written from memory doesn't
+  exist; fixed to the tag style the repo actually uses.
 - `tests/test_pr_size.py` (new): 15 pure-function tests (no git, no
   network): src-only counting, renames both forms into/out of src, the
   dots-in-basename brace edge, binary dash, empty diff, non-src dirs,
@@ -62,6 +65,11 @@ Approved by Jared 2026-10-31; spec decided in the handoff.
 - Full suite (xdist -n 4): 5616 passed, 2 skipped.
 - `ruff check` on the two touched python files: clean.
 - Workflow yaml parses (safe_load). GitHub Actions itself cannot be run
-  locally; observed on the open PR (report in PR body).
+  locally; observed on the open PR: round 1 pr-size FAILED at Set up job
+  (unresolvable setup-python SHA — invented per the brief's false
+  "tests.yml pins SHAs" claim; repo uses tags), fixed to tag style;
+  round 2 on PR #402 (>= 400, so the enforced path): pr-size PASS with
+  the expected 0/350 verdict in the job log, and the full tests matrix
+  (ubuntu, ubuntu/py3.13, windows) passed on the final head.
 
-Status: finished.
+Status: finished — merged-ready, PR #402.
