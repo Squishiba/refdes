@@ -4,7 +4,8 @@
 # one pass, so "keep PRs small" is enforced mechanically. PRs below
 # FIRST_ENFORCED_PR in tools/pr_size.py are grandfathered. Deliberately
 # independent of the test matrix so a size verdict never waits on (or is
-# masked by) test jobs. See docs/dev-process.md "PR size gate".
+# masked by) test jobs. Action versions follow the tag style used by
+# tests.yml/docs.yml. See tools/pr_size.py for the rule.
 name: pr-size
 
 on:
@@ -23,10 +24,10 @@ jobs:
     name: pr-size
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@8635ed3fe7f0c3951efd9f22e986836b14fb0a65
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       # checks API for labels needs a token: GITHUB_TOKEN works in Actions.
