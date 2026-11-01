@@ -10,13 +10,15 @@ group of its own.
   fetched page is a prefix of the project, and an honest banner when the
   fetch fails. Picking inserts `[[ID]]` at the caret, or `[[ID|selection]]`
   wrapping the current selection; focus returns to the textarea.
-- The skeleton buttons insert the §H-4 snippets that intentionally fail the
-  gate until completed: `` `name := 0 | V` `` (name selected), a
-  `` ```calc `` block landed after the enclosing fence (name selected),
-  `[[fig:]]` and `{{}}` with the caret inside the brackets (a selection is
-  wrapped and kept selected). The live-calc panel guides completion; a
-  skeleton save is blocked with the gate's own message, and the text
-  survives.
+- The skeleton buttons insert the §H-4 snippets: `` `name := 0 | V` ``
+  (name selected), a `` ```calc `` block landed after the enclosing fence
+  (name selected), `[[fig:]]` and `{{}}` with the caret inside the
+  brackets (a selection is wrapped and kept selected). The two calc
+  skeletons are the §H-4 placeholders that intentionally fail the gate
+  until completed -- a skeleton save is blocked with the gate's own
+  message, and the text survives. `[[fig:]]` and `{{}}` insert literal
+  text and save cleanly (an empty figure reference warns at build); the
+  live-calc panel guides completion of the calc skeletons.
 - Image and Source buttons focus the existing panels below the textarea.
 
 All seven buttons are real `<button>`s with aria-labels, share the bar's
