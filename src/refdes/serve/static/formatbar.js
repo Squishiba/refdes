@@ -31,6 +31,11 @@ export const SPAN_SKELETON = '`name := 0 | V`';
 export const FENCE_SKELETON = '```calc\nname = expr | V\n```';
 export const FIGURE_SKELETON = '[[fig:]]';
 export const VALUE_SKELETON = '{{}}';
+// The Navi skeleton is KEYLESS on purpose: the next writable command mints
+// the key (navis.py). JS never mints -- tests/test_editor_skeletons.py runs
+// this string through the real parser, which recognises it as one closed
+// single-line marker with an empty key.
+export const NAVI_SKELETON = '<!--navi: text-->';
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -545,11 +550,30 @@ function applyValue(area, opts) {
   applyEdit(area, start, end, chunk, nameStart, nameStart + chosen.length, opts);
 }
 
+function applyNavi(area, opts) {
+  const { start, end } = selectionIn(area);
+  const chosen = area.value.slice(start, end);
+  // A Navi is a one-line HTML comment: `--` (hence `-->`) inside the text
+  // and a newline inside the selection both make an unsafe marker. The
+  // refusal is the bar's silent no-op (the run()/gate convention): the
+  // text, the selection and the draft stay untouched.
+  if (chosen.includes('--') || chosen.includes('\n')) return;
+  if (start === end) {
+    // NAVI_SKELETON is `<!--navi: text-->`: `text` sits at offset 10, four chars.
+    applyEdit(area, start, end, NAVI_SKELETON, start + 10, start + 14, opts);
+    return;
+  }
+  const chunk = '<!--navi: ' + chosen + '-->';
+  const textStart = start + 10;
+  applyEdit(area, start, end, chunk, textStart, textStart + chosen.length, opts);
+}
+
 export const REFDES_OPS = {
   figure: applyFigure,
   calc: applyCalcFence,
   span: applySpan,
   value: applyValue,
+  navi: applyNavi,
 };
 
 // The `[[ID]]` reference picker (design §C/§H-5): a popover over ALL items
@@ -683,6 +707,7 @@ const REFDES_BUTTONS = [
   ['calc', 'calc', 'Calc fence skeleton (fill the name and expression)'],
   ['span', ':=', 'Inline calc span skeleton (fill the name and result)'],
   ['value', '{{}}', 'Calc value {{name}}'],
+  ['navi', 'Navi', 'Navi: insert a <!--navi: text--> marker'],
   ['image', 'Image', 'Open the images panel'],
   ['source', 'Source', 'Open the sources panel'],
 ];

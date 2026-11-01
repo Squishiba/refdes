@@ -982,7 +982,7 @@ const results = {};
   results.a11y.ops = ['bold', 'italic', 'strike', 'code', 'heading', 'list', 'numbered',
     'quote', 'link', 'table', 'hr']
     .map((op) => Boolean(findAll(ed.bar, `fmt-${op}`).length));
-  results.a11y.refdesOps = ['reference', 'figure', 'calc', 'span', 'value', 'image', 'source']
+  results.a11y.refdesOps = ['reference', 'figure', 'calc', 'span', 'value', 'navi', 'image', 'source']
     .map((op) => Boolean(findAll(ed.bar, `fmt-${op}`).length));
   results.a11y.refdesGroup = findAll(ed.bar, 'fmt-refdes').length;
   drafts.clearDraft(h);
@@ -1347,7 +1347,7 @@ def test_the_format_bar_mutates_the_body_through_the_shared_case_a_b_contract(tm
     )
 
     a = results["a11y"]
-    assert a["count"] == 18, a  # 11 core + 7 refdes-row buttons
+    assert a["count"] == 19, a  # 11 core + 8 refdes-row buttons
     assert all(a["ops"]) and all(a["refdesOps"]), a
     assert a["refdesGroup"] == 1, "the refdes row is its own group in the bar"
     assert a["allButtons"] is True and a["allTyped"] is True, "real <button type=button>"
