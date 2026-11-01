@@ -6,6 +6,7 @@ Split out of the original monolithic tests/test_refdes.py.
 from __future__ import annotations
 
 import hashlib
+import ntpath
 import os
 
 import pytest
@@ -325,6 +326,25 @@ def test_kept_copy_citation_cache_missing_when_blob_absent(citation_project):
     status = project.item_by_id("CMP-001").citations[0]
     assert status.state == "cache_missing"
     assert any("is missing at" in d.message for d in project.warnings)
+
+
+def test_cache_missing_diagnostic_names_the_copy_with_forward_separators(citation_project, monkeypatch):
+    """Windows `os.path.relpath` answers with backslashes; this diagnostic
+    is user-visible text and must read the same on every platform.
+
+    `ntpath.relpath` is pure string arithmetic -- patching it in runs the
+    exact Windows separator computation on any OS (on Windows the patch is
+    a no-op, so the same assertion proves the native behavior)."""
+    _write_citation_lockfile(
+        citation_project,
+        {"https://example.com/ds.pdf": {"sha256": "b" * 64, "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
+    )
+    monkeypatch.setattr(os.path, "relpath", ntpath.relpath)
+    project = _cite_build(citation_project)
+    diag = [d for d in project.warnings if "is missing at" in d.message]
+    assert diag
+    assert "\\" not in diag[0].message
+    assert ".refdes/copies/" in diag[0].message
 
 
 def test_kept_copy_citation_hash_mismatch_is_always_an_error(citation_project):
@@ -1510,6 +1530,28 @@ def test_case_mismatch_between_path_and_disk_warns(tmp_path):
         pytest.skip("case-sensitive filesystem: the path is simply missing there")
     project = _cite_build(tmp_path)
     assert any("differs in case" in d.message for d in project.warnings)
+
+
+def test_case_mismatch_warning_names_the_disk_path_with_forward_separators(tmp_path, monkeypatch):
+    """The warning interpolates `os.path.relpath(on_disk, root)` -- on
+    Windows a backslashed string -- and it is user-visible text.
+
+    `case_mismatch` is patched to answer the hit directly so the branch
+    runs on case-sensitive file systems too (the sibling test above skips
+    there); `ntpath.relpath` is pure string arithmetic, so patching it in
+    runs the exact Windows separator computation on any OS."""
+    _local_project(tmp_path)
+    monkeypatch.setattr(
+        citations_mod,
+        "case_mismatch",
+        lambda root, rel: os.path.join(str(tmp_path), "docs", "SCH.pdf"),
+    )
+    monkeypatch.setattr(os.path, "relpath", ntpath.relpath)
+    project = _cite_build(tmp_path)
+    diag = [d for d in project.warnings if "differs in case" in d.message]
+    assert diag
+    assert "\\" not in diag[0].message
+    assert "(docs/SCH.pdf)" in diag[0].message
 
 
 REFUSED_PATH_CASES = [

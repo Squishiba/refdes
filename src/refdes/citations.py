@@ -2037,7 +2037,7 @@ def _resolve(project, item, spec, record, severity, unpinned_severity, changed_l
         status.state = "cache_missing"
         status.detail = (
             f"local copy of {spec.path} is missing at "
-            f"{os.path.relpath(blob, project.root)}"
+            f"{os.path.relpath(blob, project.root).replace('\\', '/')}"
         )
         severity(status.detail, file=item.source_file, line=item.source_line, item_id=item.id)
         return status
@@ -2104,7 +2104,7 @@ def _resolve_local(project, item, spec, canon, record, status, unpinned_severity
     if on_disk:
         project.warn(
             f"citation path {spec.path!r} differs in case from the file on disk "
-            f"({os.path.relpath(on_disk, project.root)}); a case-sensitive "
+            f"({os.path.relpath(on_disk, project.root).replace('\\', '/')}); a case-sensitive "
             f"checkout (e.g. Linux CI) would not find it",
             file=item.source_file, line=item.source_line, item_id=item.id,
         )
