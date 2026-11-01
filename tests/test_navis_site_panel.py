@@ -24,6 +24,7 @@ task-pane data, PR #197 review P4) -- the render-site test counts the calls.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -35,7 +36,7 @@ from test_navis_archive import SRC, REPO
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
-from refdes import keys, navis as navis_mod, parse, render
+from refdes import keys, navis as navis_mod, navis_panel as navis_panel_mod, parse, render
 from refdes.schema import load_project
 
 SCHEMA = (
@@ -146,6 +147,11 @@ def test_active_rows_show_text_short_key_and_source_link(site):
     assert ACTIVE_TEXT in html
     row = html[html.index(ACTIVE_TEXT) - 400 : html.index(ACTIVE_TEXT)]
     assert 'href="note-001.html"' in row  # the source item's page
+    # The 6-char short key (§7), read back from the rendered payload's own
+    # first (active) row -- independent of how the fixture minted the key.
+    with open(os.path.join(out, "items.json"), encoding="utf-8") as fh:
+        active_key = json.load(fh)["navis"][0]["key"]
+    assert f'<span class="mono">{active_key[:navis_panel_mod.KEY_PREFIX]}</span>' in row
     assert 'href="note-003.html"' in _page(out, "note-001.html")  # archived link
 
 

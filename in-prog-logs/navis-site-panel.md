@@ -52,6 +52,9 @@ has at least one Navi (active marker or archive record), slice 4a of
 ## Verification
 
 - Red-first run: 9 failed / 5 gate-guards passed; green: 15 passed.
+- Review round 1 (Luna chunk-2): the short-key test never asserted the
+  key; the gap is closed (the row's `<span class="mono">` key is now
+  checked against the active key read back from `items.json`).
 - Neighbour suites (navis*, render_assets, task_pane,
   threads_render, package_data): 552 passed.
 - Full suite: 5641 passed, 2 skipped, 1 failed — the failure is
