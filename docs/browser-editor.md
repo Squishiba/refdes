@@ -52,7 +52,10 @@ Keyboard shortcuts, handled while the body textarea is focused:
 **Alt+Shift+5** (strikethrough). There are no shortcuts for the heading,
 list, quote, table, or rule buttons. Every insertion — button, shortcut, or
 picker — goes into the textarea the way typing does, so the browser's own
-**Ctrl+Z** undoes it as a single step.
+**Ctrl+Z** undoes it as a single step. (In a browser where the insertion
+can't go through the native text path, the bar edits the textarea value
+directly and shows the note: *Undo may need more than one step in this
+browser.*)
 
 ## refdes buttons
 
@@ -60,12 +63,15 @@ Seven more buttons sit in the same bar, visually separated. They insert the
 project's own syntax (the full syntax is in [markdown](markdown.md) and
 [math](math.md)):
 
-- **`[[ID]]`** opens a picker over every item in the project: a
+- **`[[ID]]`** opens a picker over the project's items — a
   `filter items…` box, one row per item labelled `ID — title`. Type to
   filter, use arrow keys and Enter to pick (Escape closes; focus always
-  returns to the textarea). A pick inserts `[[ID]]` at the caret, or
-  `[[ID|your text]]` when text was selected — a labelled cross-reference,
-  as in [links](links.md).
+  returns to the textarea). The picker loads a page of at most 5000
+  items; on a larger project it says so —
+  `showing the first N of total items -- the filter searches only these` —
+  and the filter only reaches the loaded rows. A pick inserts `[[ID]]` at
+  the caret, or `[[ID|your text]]` when text was selected — a labelled
+  cross-reference, as in [links](links.md).
 - **`[[fig:]]`** inserts a figure reference with the caret between the
   brackets, so you can type the image name.
 - **`calc`** inserts a calc fence skeleton as its own block:
@@ -160,8 +166,14 @@ entry, not this edit.*
 
 ## Where it is verified
 
-The editor is exercised in automated checks on Chromium and Firefox; the
-behaviours above were re-verified in both on a live `refdes serve`
-instance, including the native-undo single-step insertions, the font
-round-trip, the skeleton save gate, the live-calc panel, and the read-only
-rendering.
+The committed checks run the real served modules (the same
+`formatbar.js`, `fontsetting.js`, `live-calc.js` the browser loads) under
+node with a stubbed DOM — see `tests/test_editor_format_bar.py` and its
+sibling `tests/test_editor_*.py` files — plus HTTP-level tests against a
+live `refdes serve` (`tests/test_serve_editor_e2e.py` and friends); CI has
+no browser job. The behaviours on this page were additionally verified by
+hand, on 2026-11-01, in Chromium and Firefox against a live `refdes serve`
+instance: the button set and shortcuts, insert/selection/placeholder
+behaviour and native-undo single-step insertions, the picker, the skeleton
+save gate, live-calc autofill and Fill, the font round-trip, and the
+read-only rendering of a sealed entry.

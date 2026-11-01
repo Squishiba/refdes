@@ -1187,7 +1187,9 @@ points and are not polish.
    `[[ID]]`, `[[fig:id]]`, and calc-fence insertion helpers are
    **shipped** — the formatting bar, the picker, the skeletons, and the font
    setting are documented for authors in
-   [the browser editor guide](../browser-editor.md); no upload.
+   [the browser editor guide](../browser-editor.md); image upload has since
+   shipped as well ([markdown
+   reference](../markdown.md#uploading-an-image-from-the-browser-editor)).
 6. **Structured links, add and remove.** Per-verb pickers filtered to the
    allowed target types, composite writes from a selected key, imported keyed
    targets supported, and every supported list style preserved on disk.

@@ -69,3 +69,18 @@ Docs-only PR slice 4. Branch docs/browser-editor-user-guide, base d9719a9
 
 Finished. Chromium 23/23, Firefox 9/9. Server stopped at PR time.
 Screenshots intentionally not committed.
+
+## Review round (PR #406, plugin reviewer 109c9cc) — CHANGES REQUESTED, 4 fixes
+
+1. 'Where it is verified' claimed automated browser checks in the repo —
+   false (grep puppeteer/playwright/chromium in tests/ and .github/ is
+   empty; committed editor tests run the real served modules under node
+   with stubbed DOM, 'no browser'). Rewritten to say what is committed
+   (node-driven module tests + HTTP-level serve tests) and mark the
+   browser runs as hand verification dated 2026-11-01.
+2. Picker 'over every item' overclaimed past the first page — PICKER_LIMIT
+   = 5000 (pickers.js), note text quoted verbatim. Fixed.
+3. Native-undo claim: added the fallback caveat quoting formatbar.js's
+   exact note string 'Undo may need more than one step in this browser.'
+4. Design doc item 5 kept the stale '; no upload' — upload shipped;
+   replaced with a pointer to markdown.md's upload section.
