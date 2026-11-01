@@ -1,0 +1,200 @@
+{
+ "suiteA": {
+  "barButtons": [
+   "Bold",
+   "Italic",
+   "Strikethrough",
+   "Code",
+   "Heading",
+   "Bulleted list",
+   "Numbered list",
+   "Block quote",
+   "Link",
+   "Table",
+   "Horizontal rule",
+   "Reference: pick an item and insert [[ID]]",
+   "Figure reference [[fig:]]",
+   "Calc fence skeleton (fill the name and expression)",
+   "Inline calc span skeleton (fill the name and result)",
+   "Calc value {{name}}",
+   "Open the images panel",
+   "Open the sources panel"
+  ],
+  "Bold": {
+   "wrapped": true,
+   "toggledOff": true,
+   "undoRestores": true
+  },
+  "Italic": {
+   "wrapped": true,
+   "toggledOff": true,
+   "undoRestores": true
+  },
+  "Strikethrough": {
+   "wrapped": true,
+   "toggledOff": true,
+   "undoRestores": true
+  },
+  "Code": {
+   "wrapped": true,
+   "toggledOff": true,
+   "undoRestores": true
+  },
+  "Heading": {
+   "prefixed": true,
+   "toggledOff": false
+  },
+  "Bulleted list": {
+   "prefixed": true,
+   "toggledOff": true
+  },
+  "Numbered list": {
+   "prefixed": true,
+   "toggledOff": true
+  },
+  "Block quote": {
+   "prefixed": true,
+   "toggledOff": true
+  },
+  "Link": {
+   "inserted": false,
+   "sample": "[rail](url) draws up to 1.2 A in a sealed enclosure. REQ-A-P",
+   "undoRestores": true
+  },
+  "Table": {
+   "inserted": true,
+   "head": "| a | b |\n|---|---|\n|   |   |\n\n\nThe 3V3 rail draws up to 1.2 A in a sealed enclosure. REQ-A-PWR-002 sets the load;\nBND-THM-001 sets what we "
+  },
+  "HR": {
+   "inserted": true,
+   "head": "---\n\n\nThe 3V3 rail draws up to 1.2 A in "
+  },
+  "shortcutKeyB": {
+   "applied": true,
+   "undoRestores": true
+  },
+  "shortcutKeyI": {
+   "applied": true,
+   "undoRestores": true
+  },
+  "shortcutAltShift5": {
+   "applied": true,
+   "undoRestores": true
+  },
+  "shortcutCtrlK": {
+   "applied": true,
+   "sample": "[rail](url) draws up to 1.2 A in a sealed enclosure. REQ-A-P",
+   "undoRestores": true
+  },
+  "focusStealing": {
+   "activeAfterMousedown": "textarea"
+  },
+  "insideFence": {
+   "changed": true,
+   "fencedBold": true,
+   "head": "```calc\n**V_out**            = 3.3 V\nI_load           = 1.2 A\neff     "
+  },
+  "oneUndoOneStep": true,
+  "fileUntouched": true
+ },
+ "suiteB": {
+  "refdesLabels": [
+   "Reference: pick an item and insert [[ID]]",
+   "Figure reference [[fig:]]",
+   "Calc fence skeleton (fill the name and expression)",
+   "Inline calc span skeleton (fill the name and result)",
+   "Calc value {{name}}",
+   "Open the images panel",
+   "Open the sources panel"
+  ],
+  "pickerOpen": {
+   "visible": true,
+   "hasInput": true,
+   "inputFocused": true,
+   "rowCount": 21,
+   "rows": [
+    "BND-THM-001 — Board power density",
+    "IFC-CAN-001 — IFC-CAN-001",
+    "IFC-PWR-001 — 3V3 rail delivered to daughter boards via J1, 500 mA per",
+    "LOG-A-PWR-001 — 3V3 rail regulator topology"
+   ]
+  },
+  "pickerSorted": {
+   "ids": [
+    "BND-THM-001",
+    "IFC-CAN-001",
+    "IFC-PWR-001",
+    "LOG-A-PWR-001",
+    "LOG-B-DEF-001",
+    "LOG-B-FLOW-001",
+    "LOG-B-MERGE-001",
+    "LOG-B-SEN-001"
+   ],
+   "sorted": true
+  },
+  "pickerFilter": [
+   "REQ-A-PWR-001 — The unit shall operate from an input supply of 9 V to ",
+   "REQ-A-PWR-002 — The 3V3 rail shall supply 1.2 A continuous."
+  ],
+  "pickerEnter": {
+   "inserted": true,
+   "sample": "[[REQ-A-PWR-001]]",
+   "focusBack": "body-edit"
+  },
+  "pickerSelection": {
+   "wrapped": true,
+   "sample": "[[BND-THM-001|rail]]"
+  },
+  "pickerEscape": true,
+  "skeletons": {
+   "inline": {
+    "head": "`name := 0 | V`\nThe 3V3 rail draws up to 1.2 A in a sealed enclosure. REQ-A-PWR-002 sets t",
+    "selText": "name"
+   },
+   "block": {
+    "head": "\nThe 3V3 rail draws up to 1.2 A in a sealed enclosure. REQ-A-PWR-002 sets the lo",
+    "atFence": "\n```calc\nV_out            = 3.3 V\nI_load ",
+    "sel": [
+     535,
+     539
+    ]
+   },
+   "fig": {
+    "head": "\nThe 3V3 r[[fig:]]ail draws up to 1.2 A in a sealed enclosure. REQ-A-PWR-002 set",
+    "caret": 16,
+    "around": " r[[fig:]]ail "
+   },
+   "braces": {
+    "head": "\nThe 3V3 r{{}}ail draws up to 1.2 A in a sealed enclosure. REQ-A-PWR-002 sets th",
+    "caret": 12,
+    "around": " r{{}}ail draw"
+   },
+   "bracesSelection": {
+    "around": "e {{converter}} l",
+    "selText": "rail"
+   }
+  },
+  "skelSave": {
+   "msgs": [
+    "ERROR P_dens violates BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2 (items/board-a/log/regulator.md:2)"
+   ],
+   "status": "saved",
+   "textKept": true
+  },
+  "skelSaveDraftText": "\nThe 3V3 {{rail}} draws up to 1.2 A in a sealed enclosure. REQ-A-PWR-002 sets th"
+ },
+ "suiteD": {
+  "imagePanel": {
+   "active": "image-filter",
+   "activeText": ""
+  },
+  "sourcePanel": {
+   "active": "source-picker",
+   "activeText": "Insert source valueThis item cites no br"
+  }
+ },
+ "suiteC": {
+  "bar": false,
+  "textarea": false
+ }
+}

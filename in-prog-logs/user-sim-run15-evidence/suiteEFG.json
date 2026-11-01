@@ -1,0 +1,59 @@
+{
+ "barNote": {
+  "cls": "format-bar-note warn",
+  "text": "Undo may need more than one step in this browser.",
+  "visible": false
+ },
+ "itemBody0": "{{}}[[fig:]]The 3V3 rail shall supply 1.2 A continuous.\n",
+ "suiteE": {
+  "inline": {
+   "status": "unsaved",
+   "msgs": [
+    "errorname := 0 | Vinline calc name := 0 | V: stored result missing; write '= <quantity>'",
+    "error",
+    "inline calc name := 0 | V: stored result missing; write '= <quantity>'",
+    "blocked: the edit would leave 1 error(s): inline calc name := 0 | V: stored result missing; write '= <quantity>'",
+    "ERROR inline calc name := 0 | V: stored result missing; write '= <quantity>' (items/board-a/requirements/power.yaml:14)"
+   ],
+   "textKept": true,
+   "draftHead": "`name := 0 | V`{{}}[[fig:]]The 3V3 rail shall supply 1.2 A continuous.\n"
+  },
+  "fence": {
+   "status": "unsaved",
+   "msgs": [
+    "blocked: the edit would leave 1 error(s): calc 'name': unknown name 'expr'",
+    "ERROR calc 'name': unknown name 'expr' (items/board-a/requirements/power.yaml:14)"
+   ],
+   "textKept": true,
+   "draftHead": "```calc\nname = expr | V\n```\n\n{{}}[[fig:]]The 3V3 rail shall supply 1.2 A continuous.\n"
+  },
+  "fig": {
+   "status": "saved",
+   "msgs": [],
+   "textKept": true,
+   "draftHead": "[[fig:]]{{}}[[fig:]]The 3V3 rail shall supply 1.2 A continuous.\n"
+  },
+  "braces": {
+   "status": "saved",
+   "msgs": [],
+   "textKept": true,
+   "draftHead": "{{}}[[fig:]]{{}}[[fig:]]The 3V3 rail shall supply 1.2 A continuous.\n"
+  },
+  "fileAfter": "CHANGED"
+ },
+ "suiteF": {
+  "text": "items failed: Failed to fetch",
+  "banner": [
+   "items failed: Failed to fetch"
+  ]
+ },
+ "suiteG": {
+  "status": "unsaved",
+  "textDuringFlight": "{{}}[[fig:]]{{}}[[fig:]]The 3V3 Z shall supply 1.2 A continuous.\n",
+  "boldApplied": false,
+  "italicApplied": false,
+  "boldDisabled": false,
+  "statusAfter": "saved",
+  "textAfter": "{{}}[[fig:]]{{}}[[fig:]]The 3V3 Z shall supply 1.2 A continu"
+ }
+}
