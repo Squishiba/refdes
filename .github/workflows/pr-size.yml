@@ -1,0 +1,42 @@
+# PR size gate: fails a PR over BUDGET added lines under src/, waivable
+# with the `size-exempt` label. Why: single-PR features of 600-1500 added
+# src lines (#382, #393) needed 2-3 review rounds; small slices review in
+# one pass, so "keep PRs small" is enforced mechanically. PRs below
+# FIRST_ENFORCED_PR in tools/pr_size.py are grandfathered. Deliberately
+# independent of the test matrix so a size verdict never waits on (or is
+# masked by) test jobs. Action versions follow the tag style used by
+# tests.yml/docs.yml. See tools/pr_size.py for the rule.
+name: pr-size
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-size-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-size:
+    name: pr-size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Number and labels come straight from the event payload — the
+      # pull_request object in labeled/unlabeled events carries the
+      # current label set, so no API call, token, or extra step is needed.
+      - name: pr-size
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python tools/pr_size.py
