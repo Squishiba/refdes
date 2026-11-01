@@ -60,4 +60,12 @@ the red/green proof crisp.
   (`write_text(json.dumps(x))` unflagged); byte-read gate is module-wide;
   R2 accepts any enclosing `as_posix()`. All recorded in the module
   docstring.
-- Full suite, ruff (E9,F + default on my two files): see below.
+- Full suite: 5613 passed, 2 skipped (xdist -n 4). ruff: clean on my two
+  files under E9,F and under the default set.
+
+## Finished
+
+PR #403; CI green on ubuntu-latest, the py3.13 job, and windows-latest —
+the lint itself ran on the Windows runner as part of the suite (no
+per-test timing output from -q, so runtime on Windows is bounded by the
+passing job, not measured).
