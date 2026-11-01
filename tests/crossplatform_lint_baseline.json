@@ -51,8 +51,5 @@
     "tests/test_threads_projection.py": 5,
     "tests/test_work.py": 9,
     "tests/test_write_lock.py": 3
-  },
-  "R2-relpath-not-normalized": {
-    "src/refdes/scaffold.py": 3
   }
 }
