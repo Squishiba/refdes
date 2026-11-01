@@ -14,39 +14,53 @@ project, and the CLI directly against copies of the same project.
 
 | # | Sev | Surface | One-line summary |
 |---|-----|---------|------------------|
-| F15-1 | Medium | YAML mint / exit codes | a Navi marker in a flow-style `body:` makes every writable command mint a fresh key, report `ERROR … could not write key … back into the source`, and exit 1 — `navis ls` included; docs promise keyless + warning, exit 0 |
-| F15-2 | Low | refdes skeletons / docs | the `[[fig:]]` and `{{}}` skeletons do not fail the gate (both saved cleanly as literal text); the changelog claims all four snippets "intentionally fail the gate until completed" |
+| F15-1 | Medium | keys / exit codes | an item entry inside a flow-sequence `items: [ {…} ]` makes every writable command mint a fresh item key, report `ERROR … could not write key … back into the source`, and exit 1 — `navis ls` included; no marker involved, no warning emitted |
+| F15-2 | Low | refdes skeletons / docs | the `[[fig:]]` and `{{}}` skeletons do not fail the gate (both saved cleanly; `[[fig:]]` renders as an empty `ref-missing` span, `{{}}` as literal text); the changelog claims all four snippets "intentionally fail the gate until completed" |
 | F15-3 | Info | navis CLI / docs | corrupt archive records warn as `navis archive record is unreadable …` with no `navis.archive_corrupt` code in the output (the docs say the warning is `navis.archive_corrupt`); the sibling orphan warning *does* print its code |
-| F15-4 | Low | test suite / README | the two `--no-write` help-text pins in `tests/test_no_write.py` fail with `IndexError` when `COLUMNS` is narrow (≤75) or wide (85–95, ≥160) — the README's documented `pytest -q -n 4 --dist worksteal` command is not terminal-width independent |
+| F15-4 | Low | test suite / README | the two `--no-write` help-text pins in `tests/test_no_write.py` fail with `IndexError` at many terminal widths (fail 40–76, pass 77–81, fail 82–98, scattered passes up to 180, fail 159+ and 200) — the README's documented `pytest -q -n 4 --dist worksteal` command is not terminal-width independent |
 
-## F15-1 — flow-style Navi marker: mint churn + exit 1
+## F15-1 — flow-sequence item entry: key-mint churn + exit 1
 
-Project: `items/board-b/flow-shape.yaml` — one item whose whole list entry
-is flow style, `body: "Flow body. <!--navi: …-->"`. docs/markdown.md: flow
-style is a *refused* mint shape — "keep the marker keyless with a warning
-naming the shape, bytes untouched". The refusal warning is emitted, and
-then the mint also writes and reports a hard ERROR:
+Mechanism: the **item** surrogate-key mint, not the Navi marker mint.
+`keys.py` (write-back loop, ~line 775) calls `ids_mod.insert_into_list`
+to add `key:` to the item's list entry; for an entry inside a flow
+*sequence* — `items: [ {…} ]` — that returns `None`, the mint reports a
+hard ERROR, and the key is never written. The Navi marker is irrelevant
+to the churn; it reproduces with **no marker at all**:
+
+```yaml
+# items/board-a/flow.yaml — no navi marker anywhere
+items: [{id: LOG-A-FLOW-001, date: 2026-06-03, summary: flow item, body: "plain text"}]
+```
 
 ```
-$ refdes navis ls            # a READ verb, on a project with one flow marker
-ERROR   items/board-b/flow-shape.yaml:6 — could not write key pmg7b5tnnzq back into the source
-... (13 Navis listed)
+$ refdes navis ls          # every run: a NEW key, never written, exit 1
+ERROR   items/board-a/flow.yaml:5 — could not write key 5e11tagpfpt back into the source
+no Navis: no `<!--navi: text-->` marker in any item body
 exit=1
+$ refdes navis ls
+ERROR   items/board-a/flow.yaml:5 — could not write key shgfhj63ewp back into the source   # run 2
+ERROR   items/board-a/flow.yaml:5 — could not write key 2a39b5n4h03 back into the source   # run 3
 ```
 
-Every writable run mints a *new* key and re-reports it (observed over ten
-runs: `pmg7b5tnnzq`, `gr9kc1jk781`, `few8120q5gd`, `82whfbnd9r9`,
-`c2xvkjsj77s`, `hg71jbrzzfj`, `5bvv9e44c0j`, `cw8e1kh9znt`,
-`whngj3we1qn` — none ever written). Consequences measured:
+A flow *map* inside a block list (`items:` then `- {…}`) is fine: the
+key mints once, is written, and the next run is clean
+(`(minted 1 key(s) while loading)`, exit 0, `key: kqtq6f20s8x` in the
+file). The Navi mint itself honors its flow-shape refusal (the marker in
+`flow-shape.yaml` stayed keyless and listed in `navis ls` all ten runs). Consequences measured:
 `navis ls` exits 1 (docs: exit 0; `--no-write` exits 0, confirming the mint
 is the cause); a successful `navis archive` exits 1; `check` exits 1 with
 0 real gate errors; `build` is the same. A project carrying one
 flow-style-marker item cannot exit-0 any writable command, and the churn
-tells the author nothing they can act on. This is the run-13
-keyless-handle shape (F13-2) in the mint itself: refused shape, write
-still attempted, hard failure. The mint plan (slice 2, #398) refuses the
-write for this shape in the warning — the error path shows the refusal is
-not honored by the writer.
+tells the author nothing they can act on. Two mints are in play and the
+docs promise is about the other one: docs/markdown.md:106-108 says a
+refused *marker* shape keeps the marker "keyless with a warning naming
+the shape, bytes untouched" — the slice-2 Navi mint (#398) honors that
+refusal for the marker. The failing mint is the item key mint, and for
+its refused shape (`items: [ {…} ]`) there is no such warning — the
+warning is never emitted, and the only user-visible output is the hard
+ERROR. (In the no-marker repro, `--no-write build` emits no mint warning
+at all; the mint is the cause.)
 
 ## F15-2 — two of the four skeletons don't fail the gate
 
@@ -62,8 +76,12 @@ real editor, then Save (Chromium on 8758):
 - ```` ```calc name = expr | V ``` ```` → blocked, gate message
   `calc 'name': unknown name 'expr'`, draft survives ✓
 - `[[fig:]]` → **saved** (`status: saved`, no message). The literal
-  `[[fig:]]` lands in the file and renders as text in the published page.
-- `{{}}` → **saved** (same).
+  `[[fig:]]` lands in the file; the build renders it as an **empty
+  `ref-missing` span** (`<span class="ref ref-missing"
+  title="unknown figure"></span>` in `log-a-pwr-001.html` after adding
+  the skeleton to `LOG-A-PWR-001`'s body and rebuilding), not as text.
+- `{{}}` → **saved** (same), and it is the one that renders as literal
+  text in the published page.
 
 The claim holds for the two calc skeletons and overstates the other two.
 A user who clicks Image→Source→save after inserting `[[fig:]]` gets no
@@ -106,9 +124,17 @@ Both full-suite runs in this gate's PTY reproduced it:
 `2 failed, 5626 passed, 2 skipped`. The failures are pure terminal
 width, not product behavior — the same suite is green at a standard
 width (`COLUMNS=100 pytest -q -n 4 --dist worksteal` → 5628 passed,
-2 skipped), and the pins' sweep fails at COLUMNS=50/55/65/75/85/95/160/200
-while passing at 77–83/100–140. Nothing in the CLI changes across widths;
-the pins assert on a rendering argparse itself reflows. The README tells
+2 skipped), and the pins themselves fail at many other widths. Measured
+with the exact whole-file run `COLUMNS=N python -m pytest -q
+tests/test_no_write.py` on this base: fail at 40/50/55/60/65/70/75/76,
+pass at 77–81, fail at 82/83/84/85/95/96/97/98, pass at 90/99–102/105/
+110/115, fail at 120, pass at 125/130, fail at 138, pass at 139–141,
+one of the two pins fails at 142–144, pass at 150/158, fail at
+159/160/161/162/170, pass at 180, fail at 200. There is no single safe
+band: the pass set is scattered, 77–81 is the only wide-enough run of
+passes, and the README's default terminal width (80) lands in it by
+luck. Nothing in the CLI changes across widths; the pins assert on a
+rendering argparse itself reflows. The README tells
 users to run this command verbatim; the suite at base `d9719a9` carries
 the brittleness (not introduced by any in-scope PR).
 
