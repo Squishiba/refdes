@@ -1,0 +1,59 @@
+=== A. ls (writable) ===
+ERROR   items/board-b/flow-shape.yaml:6 — could not write key q6ser640tch back into the source
+WARNING .refdes/navis/foreign.yaml.gz — navis archive record is unreadable (archive_format 99 is not this version's 1 (a future refdes wrote it, or the file is damaged)) -- it is skipped, not deleted; the rest of the store loads
+WARNING .refdes/navis/garbage.yaml.gz — navis archive record is unreadable (the file is not readable as gzip (truncated, corrupt, or never compressed)) -- it is skipped, not deleted; the rest of the store loads
+WARNING .refdes/navis/mismatch.yaml.gz — navis archive record is unreadable (archive_format 'navis-archive@1' is not this version's 1 (a future refdes wrote it, or the file is damaged)) -- it is skipped, not deleted; the rest of the store loads
+WARNING .refdes/navis/notyaml.yaml.gz — navis archive record is unreadable (the file is not readable as gzip (truncated, corrupt, or never compressed)) -- it is skipped, not deleted; the rest of the store loads
+WARNING .refdes/navis/d29thgjvt8v.yaml.gz:7 — navis.archived_orphan: Navi d29thgjvt8v is archived with no marker found at its stored source (items/board-b/yaml-shapes.yaml:7) -- the marker was hand-deleted or moved out of scope. Show-all reveals it by snapshot; restore refuses (§9) -- hand-restore the marker to re-pair them by key
+12 Navis:
+  1. cyek3t Model worst-case copper temperature.  LOG-A-PWR-001 (items/board-a/log/regulator.md:25)
+  2. Defaults-supplied body must stay keyless.  LOG-B-DEF-001 (items/board-b/defaults-shape.yaml:8)
+  3. Flow-style body must stay keyless.  LOG-B-FLOW-001 (items/board-b/flow-shape.yaml:6)
+  4. bbr029 Check the self-heating delta at 3.3 V, worst case.  LOG-B-SEN-001 (items/board-b/log/thermistor.md:15)
+  5. Merge-key body must stay keyless.  LOG-B-MERGE-001 (items/board-b/merge-shape.yaml:12)
+  6. jf3w2g marker deleted by hand  LOG-B-YAML-002 (items/board-b/yaml-shapes.yaml:15)
+  7. 2sjw90 Confirm sense-point placement with layout.  LOG-B-YAML-003 (items/board-b/yaml-shapes.yaml:22)
+  8. Refolded note that must stay keyless.  LOG-B-YAML-004 (items/board-b/yaml-shapes.yaml:28)
+  9. Plain-scalar note that must stay keyless.  LOG-B-YAML-005 (items/board-b/yaml-shapes.yaml:36)
+  10. Quoted continuation that must stay keyless.  LOG-B-YAML-006 (items/board-b/yaml-shapes.yaml:42)
+  11. Aliased body must stay keyless.  LOG-B-YAML-007 (items/board-b/yaml-shapes.yaml:49)
+  12. Aliased body must stay keyless.  LOG-B-YAML-008 (items/board-b/yaml-shapes.yaml:55)
+exit=1
+=== B. --no-write ls ===
+WARNING .refdes/navis/foreign.yaml.gz — navis archive record is unreadable (archive_format 99 is not this version's 1 (a future refdes wrote it, or the file is damaged)) -- it is skipped, not deleted; the rest of the store loads
+WARNING .refdes/navis/garbage.yaml.gz — navis archive record is unreadable (the file is not readable as gzip (truncated, corrupt, or never compressed)) -- it is skipped, not deleted; the rest of the store loads
+WARNING .refdes/navis/mismatch.yaml.gz — navis archive record is unreadable (archive_format 'navis-archive@1' is not this version's 1 (a future refdes wrote it, or the file is damaged)) -- it is skipped, not deleted; the rest of the store loads
+WARNING .refdes/navis/notyaml.yaml.gz — navis archive record is unreadable (the file is not readable as gzip (truncated, corrupt, or never compressed)) -- it is skipped, not deleted; the rest of the store loads
+WARNING .refdes/navis/d29thgjvt8v.yaml.gz:7 — navis.archived_orphan: Navi d29thgjvt8v is archived with no marker found at its stored source (items/board-b/yaml-shapes.yaml:7) -- the marker was hand-deleted or moved out of scope. Show-all reveals it by snapshot; restore refuses (§9) -- hand-restore the marker to re-pair them by key
+12 Navis:
+exit=0
+=== archive/restore round trip ===
+WARNING .refdes/navis/d29thgjvt8v.yaml.gz:7 — navis.archived_orphan: Navi d29thgjvt8v is archived with no marker found at its stored source (items/board-b/yaml-shapes.yaml:7) -- the marker was hand-deleted or moved out of scope. Show-all reveals it by snapshot; restore refuses (§9) -- hand-restore the marker to re-pair them by key
+navis archive: archived Navi cyek3t (cyek3tcks9c): 'Model worst-case copper temperature.'  LOG-A-PWR-001 (items/board-a/log/regulator.md:25)
+cyek3tcks9c.yaml.gz
+d29thgjvt8v.yaml.gz
+foreign.yaml.gz
+garbage.yaml.gz
+mismatch.yaml.gz
+notyaml.yaml.gz
+Navi: Model worst-case copper temperature.
+  key: cyek3tcks9c
+  source: LOG-A-PWR-001 (items/board-a/log/regulator.md:25)
+  archived: yes -- restore with `refdes navis restore`
+  archived: snapshot: Model worst-case copper temperature.  (at 2026-11-01T06:15:32Z)
+Navi cyek3t (cyek3tcks9c) is already archived -- `refdes navis restore cyek3t` reactivates it
+navis restore: restored Navi cyek3t (cyek3tcks9c) -- the marker at items/board-a/log/regulator.md:25 is active again, showing its current text
+=== restore not archived -> exit 2 ===
+ERROR   items/board-b/flow-shape.yaml:6 — could not write key whngj3we1qn back into the source
+WARNING .refdes/navis/foreign.yaml.gz — navis archive record is unreadable (archive_format 99 is not this version's 1 (a future refdes wrote it, or the file is damaged)) -- it is skipped, not deleted; the rest of the store loads
+WARNING .refdes/navis/garbage.yaml.gz — navis archive record is unreadable (the file is not readable as gzip (truncated, corrupt, or never compressed)) -- it is skipped, not deleted; the rest of the store loads
+WARNING .refdes/navis/mismatch.yaml.gz — navis archive record is unreadable (archive_format 'navis-archive@1' is not this version's 1 (a future refdes wrote it, or the file is damaged)) -- it is skipped, not deleted; the rest of the store loads
+WARNING .refdes/navis/notyaml.yaml.gz — navis archive record is unreadable (the file is not readable as gzip (truncated, corrupt, or never compressed)) -- it is skipped, not deleted; the rest of the store loads
+WARNING .refdes/navis/d29thgjvt8v.yaml.gz:7 — navis.archived_orphan: Navi d29thgjvt8v is archived with no marker found at its stored source (items/board-b/yaml-shapes.yaml:7) -- the marker was hand-deleted or moved out of scope. Show-all reveals it by snapshot; restore refuses (§9) -- hand-restore the marker to re-pair them by key
+navis restore: Navi bbr029 (bbr0294easn) is not archived -- nothing to restore
+exit=2
+=== keyless archive refusal ===
+navis archive: this Navi has no key -- keys are minted by the next writable command, and this marker's body is one refdes will not mint into (see the mint warnings above), so it cannot be archived
+=== corrupt-record warnings ===
+0
+4
