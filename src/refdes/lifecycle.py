@@ -1019,11 +1019,14 @@ def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOu
                 item_count=len(items_map), stamped_at=existing.stamped_at,
                 stamped_by=existing.stamped_by, uncomparable=uncomparable,
             )
+        baseline_rel = os.path.relpath(
+            baseline_path(project, name), project.root
+        ).replace("\\", "/")
         raise_detail = (
             f"{name!r} is already stamped as a {existing.kind} "
             f"(at {existing.stamped_at}) with different content. Baseline "
             f"names are permanent once written -- delete "
-            f"{os.path.relpath(baseline_path(project, name), project.root)} "
+            f"{baseline_rel} "
             f"first if that was intentional, or choose a new name."
         )
         return StampOutcome(

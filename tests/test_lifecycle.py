@@ -5,6 +5,7 @@ Split out of the original monolithic tests/test_refdes.py.
 
 from __future__ import annotations
 
+import ntpath
 import os
 
 import pytest
@@ -341,6 +342,26 @@ def test_rerun_same_name_different_content_is_a_conflict(lifecycle_project):
     assert outcome.status == "conflict"
     assert "different content" in outcome.conflict_detail
     assert "rev-a" in outcome.conflict_detail
+
+
+def test_conflict_detail_names_the_baseline_with_forward_separators(lifecycle_project, monkeypatch):
+    """The conflict remedy interpolates `os.path.relpath(baseline_path,
+    root)` -- on Windows a backslashed string -- and the CLI prints the
+    whole sentence to stderr. `ntpath.relpath` is pure string arithmetic,
+    so patching it in runs the exact Windows separator computation on any
+    OS (on Windows the patch is a no-op, proving the native behavior)."""
+    project = _lc_build(lifecycle_project)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+    (lifecycle_project / "items" / "reqs.yaml").write_text(
+        LIFECYCLE_ITEMS.replace("Uncovered active requirement.", "Edited text."),
+        encoding="utf-8",
+    )
+    project2 = _lc_build(lifecycle_project)
+    monkeypatch.setattr(os.path, "relpath", ntpath.relpath)
+    outcome = lifecycle.stamp(project2, kind="revision", name="rev-a")
+    assert outcome.status == "conflict"
+    assert "\\" not in outcome.conflict_detail
+    assert ".refdes/baselines/rev-a.yaml" in outcome.conflict_detail
 
 
 def test_release_and_revision_are_peers_no_special_handling(lifecycle_project):

@@ -1183,9 +1183,13 @@ points and are not polish.
 5. **Editing Markdown bodies with an authoritative preview.** Source-text
    editing of both body forms, insertion helpers for `[[ID]]`, `[[fig:id]]`,
    images, and calc fences, and a preview produced by the real build pipeline
-   with the document context labelled. Existing images by picker (**shipped** —
-   the image half of this item; the `[[ID]]`, `[[fig:id]]`, and calc-fence
-   insertion helpers are still outstanding); no upload.
+   with the document context labelled. Existing images by picker and the
+   `[[ID]]`, `[[fig:id]]`, and calc-fence insertion helpers are
+   **shipped** — the formatting bar, the picker, the skeletons, and the font
+   setting are documented for authors in
+   [the browser editor guide](../browser-editor.md); image upload has since
+   shipped as well ([markdown
+   reference](../markdown.md#uploading-an-image-from-the-browser-editor)).
 6. **Structured links, add and remove.** Per-verb pickers filtered to the
    allowed target types, composite writes from a selected key, imported keyed
    targets supported, and every supported list style preserved on disk.

@@ -2380,7 +2380,9 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
 
 The editor is served from `/edit/` as plain JavaScript and CSS packaged with
 refdes; no Node or build step is involved, and none of it is ever part of the
-generated site.
+generated site. The editing surface — formatting bar, refdes buttons, live
+calc panel, font setting — is documented in
+[the browser editor guide](browser-editor.md).
 
 ---
 

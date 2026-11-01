@@ -2035,10 +2035,8 @@ def _resolve(project, item, spec, record, severity, unpinned_severity, changed_l
     blob = kept_copy_path(project, status.sha256, spec.path)
     if not os.path.isfile(blob):
         status.state = "cache_missing"
-        status.detail = (
-            f"local copy of {spec.path} is missing at "
-            f"{os.path.relpath(blob, project.root)}"
-        )
+        missing = os.path.relpath(blob, project.root).replace("\\", "/")
+        status.detail = f"local copy of {spec.path} is missing at {missing}"
         severity(status.detail, file=item.source_file, line=item.source_line, item_id=item.id)
         return status
 
@@ -2102,9 +2100,10 @@ def _resolve_local(project, item, spec, canon, record, status, unpinned_severity
         return status
     on_disk = case_mismatch(project.root, canon)
     if on_disk:
+        on_disk_rel = os.path.relpath(on_disk, project.root).replace("\\", "/")
         project.warn(
             f"citation path {spec.path!r} differs in case from the file on disk "
-            f"({os.path.relpath(on_disk, project.root)}); a case-sensitive "
+            f"({on_disk_rel}); a case-sensitive "
             f"checkout (e.g. Linux CI) would not find it",
             file=item.source_file, line=item.source_line, item_id=item.id,
         )

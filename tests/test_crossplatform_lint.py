@@ -28,9 +28,10 @@ R2 (src/refdes/**/*.py)
     slashes in the same expression: accepted normalizations are
     ``.replace(os.sep, "/")``, ``.replace("\\\\", "/")`` and an enclosing
     ``.as_posix()`` call (``Path(os.path.relpath(...)).as_posix()``).
-    Normalizing in a later statement (the scaffold.py pattern) is a
-    baseline hit; ``parse._relpath`` call sites are clean by construction
-    since they contain no ``relpath`` call.
+    Normalizing in a later statement is a hit (the six it froze were
+    all normalised into the expression in the PR that lowered the
+    baseline to zero); ``parse._relpath`` call sites are clean by
+    construction since they contain no ``relpath`` call.
 
 Known limits, by design: R1 does not follow content through call
 expressions (``write_text(json.dumps(x))`` is not flagged) and the
