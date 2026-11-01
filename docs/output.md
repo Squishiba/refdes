@@ -294,6 +294,27 @@ The scroll-spy that highlights the section in view belongs to
 
 The print stylesheet hides all of this.
 
+## The Navis panel
+
+A project that has Navis — `<!--navi: ... -->` markers in item bodies,
+see [Navis markers](markdown.md#navis-markers) — gets a small **fixed
+panel** on every
+page: a `Navis (n)` pill in the top-right corner that opens over the
+active list, each row showing the Navi's 6-character key, a link to the
+item it lives in, and its text. A **Show all** disclosure inside the
+panel adds the archived Navis, marked `[archived]` and reading from
+their archive snapshot; a row whose live marker text has since been
+edited carries a `marker text has changed since archived` note, and an
+archived Navi whose marker was hand-deleted is labelled
+`marker not found`. The panel is **read-only**: the restore control is
+rendered disabled and names the command that acts
+(`refdes navis restore <key>`).
+
+It ships with the site like the task pane does: the `navis.css` asset
+and its `<link>` are written only for projects that have Navis, the
+panel data is embedded in the page (it fetches nothing), the open/close
+is a plain `<details>` (no JavaScript), and it prints hidden.
+
 ## An item page
 
 - Type badge, ID, check state, and — where relevant — `imported` or `append-only`

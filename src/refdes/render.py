@@ -21,6 +21,7 @@ from . import ids as ids_mod
 from . import lifecycle as lifecycle_mod
 from . import nav as nav_mod
 from . import navis as navis_mod
+from . import navis_panel as navis_panel_mod
 from . import task_pane as task_pane_mod
 from . import theme as theme_mod
 from . import threads as threads_mod
@@ -749,6 +750,7 @@ def items_json(
     graph: chains_mod.ChainGraph | None = None,
     captures: dict | None = None,
     threads: list[dict] | None = None,
+    navis: list[dict] | None = None,
 ) -> dict:
     """The machine-readable export. Anything downstream should read this, not HTML.
 
@@ -826,8 +828,10 @@ def items_json(
     # has Navis at all -- the same "absent key, not null" convention as
     # `boards` and `threads`, so a Navi-free project's payload stays
     # byte-identical. navis.projection is the one service; the CLI reads
-    # the same rows.
-    navi_rows = navis_mod.projection(project)
+    # the same rows. `navis` is the same one-projection-per-render rule as
+    # `threads` above: `render_site` computes the rows once (it needs them
+    # for the site panel) and hands the same list here.
+    navi_rows = navis if navis is not None else navis_mod.projection(project)
     if navi_rows:
         payload["navis"] = navi_rows
     # `doc` appears only where a definition was actually declared (finding 38),
@@ -1007,7 +1011,11 @@ def _copy_source_refused(exc: OSError, src: str, dest: str) -> bool:
 
 
 def _copy_project_assets(
-    project: Project, out_dir: str, written: set[str], taskpane_enabled: bool = False
+    project: Project,
+    out_dir: str,
+    written: set[str],
+    taskpane_enabled: bool = False,
+    navis_enabled: bool = False,
 ) -> None:
     """Copy `project.assets` into `_site/assets/`: source path -> destination
     path (relative to assets/), the latter content-hashed for a resolved
@@ -1029,7 +1037,7 @@ def _copy_project_assets(
         set(os.listdir(ASSET_DIR)) if os.path.isdir(ASSET_DIR) else set()
     ) | {theme_mod.THEME_CSS_NAME} | (
         set(TASKPANE_ASSET_NAMES) if taskpane_enabled else set()
-    )
+    ) | (set(NAVIS_ASSET_NAMES) if navis_enabled else set())
     asset_out = os.path.join(out_dir, "assets")
     for rel, dest_rel in sorted(project.assets.items()):
         top = dest_rel.split("/", 1)[0]
@@ -1185,6 +1193,28 @@ def _write_taskpane_assets(out_dir: str, written: set[str], enabled: bool) -> No
         written.add(f"assets/{name}")
 
 
+#: The Navis panel's stylesheet (design §11, slice 4a). Outside `ASSET_DIR`
+#: for the task pane's own reason: the whole-site copytree is unconditional
+#: and this must not be. CSS only -- the panel is a `<details>`, so it has
+#: no script to ship.
+NAVIS_DIR = os.path.join(TEMPLATE_DIR, "navis")
+NAVIS_ASSET_NAMES = ("navis.css",)
+
+
+def _write_navis_assets(out_dir: str, written: set[str], enabled: bool) -> None:
+    """Emit the panel's stylesheet only when this render shows a panel
+    anywhere (`enabled` = the projection had at least one Navi). Same
+    posture as `_write_taskpane_assets`: a Navi-free project publishes
+    neither the file nor the `<link>`, byte-identical output."""
+    if not enabled:
+        return
+    asset_out = os.path.join(out_dir, "assets")
+    os.makedirs(asset_out, exist_ok=True)
+    for name in NAVIS_ASSET_NAMES:
+        shutil.copyfile(os.path.join(NAVIS_DIR, name), os.path.join(asset_out, name))
+        written.add(f"assets/{name}")
+
+
 def _prune_stale_output(out_dir: str, written: set[str]) -> None:
     """Delete output from a previous build that this build no longer produces.
 
@@ -1321,6 +1351,19 @@ def render_site(project: Project, draft: bool = False) -> str:
     )
     taskpane_assets = bool(task_panes)
     env.globals["taskpane_assets"] = taskpane_assets
+    # Navis site panel (slice 4a, design §11): the panel's model, computed
+    # from the same `navis.projection` the index payload's `navis` key
+    # carries and the CLI prints -- hoisted here on the standing
+    # one-projection-per-render rule (PR #197 review P4) and handed to
+    # `items_json` below as `navis=`, so one render projects once. Gated on
+    # `project.items` for the C6 reason above: a project with no items
+    # cannot own a Navi, and the store read on that path would feed a panel
+    # no page renders. None (not an empty model) for a Navi-free project:
+    # no panel, no panel asset, no `<link>` -- byte-identical output.
+    navi_rows = navis_mod.projection(project) if project.items else []
+    env.globals["navis_panel"] = navis_panel_mod.panel_model(project, navi_rows)
+    navis_assets = bool(navi_rows)
+    env.globals["navis_assets"] = navis_assets
     env.globals["part_anchor"] = _part_anchor
     citations_by_path = citations_mod.by_path(project)
     parts_by_number = citations_mod.by_part_number(project)
@@ -1417,10 +1460,11 @@ def render_site(project: Project, draft: bool = False) -> str:
         if os.path.isdir(ASSET_DIR):
             shutil.copytree(ASSET_DIR, os.path.join(out_dir, "assets"), dirs_exist_ok=True)
             written.update(_asset_file_list(ASSET_DIR))
-        _copy_project_assets(project, out_dir, written, taskpane_assets)
+        _copy_project_assets(project, out_dir, written, taskpane_assets, navis_assets)
         _copy_datasheet_assets(project, out_dir, written)
         _write_theme_css(project, out_dir, written)
         _write_taskpane_assets(out_dir, written, taskpane_assets)
+        _write_navis_assets(out_dir, written, navis_assets)
         _prune_stale_output(out_dir, written)
         return out_dir
 
@@ -1702,6 +1746,7 @@ def render_site(project: Project, draft: bool = False) -> str:
                 graph=thread_graph,
                 captures=capture_index,
                 threads=thread_rows,
+                navis=navi_rows,
             ),
             fh,
             indent=2,
@@ -1713,10 +1758,11 @@ def render_site(project: Project, draft: bool = False) -> str:
     if os.path.isdir(ASSET_DIR):
         shutil.copytree(ASSET_DIR, asset_out, dirs_exist_ok=True)
         written.update(_asset_file_list(ASSET_DIR))
-    _copy_project_assets(project, out_dir, written, taskpane_assets)
+    _copy_project_assets(project, out_dir, written, taskpane_assets, navis_assets)
     _copy_datasheet_assets(project, out_dir, written)
     _write_theme_css(project, out_dir, written)
     _write_taskpane_assets(out_dir, written, taskpane_assets)
+    _write_navis_assets(out_dir, written, navis_assets)
 
     _prune_stale_output(out_dir, written)
     return out_dir

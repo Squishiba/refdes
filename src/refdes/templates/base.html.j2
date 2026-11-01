@@ -9,6 +9,8 @@
 {% endif %}
 {% if taskpane_assets %}<link rel="stylesheet" href="assets/taskpane.css">
 {% endif %}
+{% if navis_assets %}<link rel="stylesheet" href="assets/navis.css">
+{% endif %}
 </head>
 <body>
 <aside class="sidenav">
@@ -60,6 +62,48 @@
 </footer>
 </div>
 
+{% if navis_panel %}
+{# Navis site panel (slice 4a, design §11): read-only, `<details>`-based
+   (no JS, no fetch -- the data rides the page, the task pane's contract),
+   stacked above the task pane in the z-order (§11) in the corner it does
+   not own. The published site cannot write (PR #396 decision 4): restore
+   is shown DISABLED with the CLI command that does act. #}
+<details class="refdes-navis">
+  <summary class="refdes-navis-toggle">Navis <span class="mono">({{ navis_panel.active | length }})</span></summary>
+  <div class="refdes-navis-panel">
+    {% if navis_panel.active %}
+    <ul class="refdes-navis-list">
+      {% for row in navis_panel.active %}
+      <li>
+        <span class="mono">{{ row.key6 }}</span>
+        {% if row.href %}<a href="{{ row.href }}">{{ row.item }}</a>{% endif %}
+        {{ row.text }}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="refdes-navis-empty">No active Navis.</p>
+    {% endif %}
+    {% if navis_panel.archived %}
+    <details class="refdes-navis-all" id="refdes-navis-all">
+      <summary>Show all ({{ navis_panel.count }})</summary>
+      <ul class="refdes-navis-list">
+        {% for row in navis_panel.rows %}
+        <li>
+          <span class="mono">{{ row.key6 }}</span>
+          {% if row.href %}<a href="{{ row.href }}">{{ row.item }}</a>{% endif %}
+          {% if row.orphan %}<span class="refdes-navis-note">marker not found ({{ row.file }})</span>{% endif %}
+          {{ row.text }}
+          {% if row.archived %}<span class="refdes-navis-tag">[archived]</span> <button type="button" class="refdes-navis-restore" disabled title="the published site is read-only — run: refdes navis restore {{ row.key6 }}">Restore</button>{% endif %}
+          {% if row.changed %}<span class="refdes-navis-note">{{ navis_panel.changed_note }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+  </div>
+</details>
+{% endif %}
 <div id="preview-card" role="tooltip" hidden></div>
 <script id="preview-data" type="application/json">{{ previews_json | safe }}</script>
 <script src="assets/app.js"></script>

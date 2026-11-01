@@ -1,0 +1,115 @@
+/* The published site's read-only Navis panel (design §11, slice 4a).
+
+   Fixed, top-right: the task pane owns the bottom-right corner (toggle
+   `z-index: 63`, pane `62`, taskpane.css:21,36) and the serve bar takes
+   that corner's offsets on the preview (bar.css:41-42), so the panel
+   stacks in the §11 z-order above them -- 65 -- in the one corner where
+   it can never cover them. `<details>` is the toggle: no JavaScript, and
+   the panel data rides the page server-side (the task pane's "fetches
+   nothing" contract, taskpane.js:1-13). Colours are the site's own
+   tokens, so dark mode and themes recolor it for free; this file is
+   emitted only for projects that actually show a panel. */
+
+.refdes-navis {
+  position: fixed;
+  top: var(--space-16);
+  right: var(--space-16);
+  z-index: 65; /* above the task pane's 62/63 stack (§11) */
+  width: min(23rem, calc(100vw - var(--space-32)));
+}
+
+.refdes-navis-toggle {
+  display: block;
+  width: max-content;
+  margin-left: auto;
+  padding: var(--space-6) var(--space-14);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: #fff;
+  font: var(--weight-medium) var(--text-sm) var(--sans-simple);
+  cursor: pointer;
+  box-shadow: 0 var(--space-2) var(--space-8) rgba(0, 0, 0, 0.25);
+  list-style: none; /* the disclosure triangle; summary's own marker */
+}
+
+.refdes-navis-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.refdes-navis-panel {
+  margin-top: var(--space-8);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2xl);
+  background: var(--panel);
+  color: var(--fg);
+  padding: var(--space-4) var(--space-16) var(--space-10);
+  box-shadow: 0 var(--space-4) var(--space-24) rgba(0, 0, 0, 0.22);
+  max-height: min(60vh, 36rem);
+  overflow-y: auto;
+  font-size: var(--text-sm);
+}
+
+.refdes-navis-panel .mono {
+  /* taskpane.css:53-62, same reason: style.css puts `.mono` a step above
+     the panel body's --text-sm; put it back on the container's step. */
+  font-size: inherit;
+}
+
+.refdes-navis-list {
+  list-style: none;
+  margin: var(--space-2) var(--space-0) var(--space-6);
+  padding-left: var(--space-0);
+}
+
+.refdes-navis-list li {
+  margin: var(--space-6) var(--space-0);
+}
+
+.refdes-navis-tag,
+.refdes-navis-note {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.refdes-navis-note {
+  display: block;
+}
+
+.refdes-navis-empty {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.refdes-navis-all {
+  border-top: 1px solid var(--line);
+  margin-top: var(--space-8);
+  padding-top: var(--space-6);
+}
+
+.refdes-navis-all > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+}
+
+.refdes-navis-restore {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-10);
+  cursor: not-allowed;
+}
+
+.refdes-navis-restore[disabled] {
+  opacity: 0.55;
+}
+
+@media print {
+  .refdes-navis {
+    display: none;
+  }
+}

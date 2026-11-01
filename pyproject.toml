@@ -80,7 +80,7 @@ where = ["src"]
 # files per version) -- resolved live from the installed package on every
 # load_project() call, so it has to ship too. See standards.py.
 [tool.setuptools.package-data]
-refdes = ["templates/*.j2", "templates/assets/*", "templates/taskpane/*", "standards/**/*.yaml", "serve/static/*"]
+refdes = ["templates/*.j2", "templates/assets/*", "templates/taskpane/*", "templates/navis/*", "standards/**/*.yaml", "serve/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
