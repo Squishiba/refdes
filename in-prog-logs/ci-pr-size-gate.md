@@ -21,12 +21,20 @@ Approved by Jared 2026-10-31; spec decided in the handoff.
 - `.github/workflows/pr-size.yml` (new): on pull_request (opened,
   synchronize, reopened, labeled, unlabeled), permissions contents: read,
   concurrency group, checkout@v4 with fetch-depth: 0, setup-python@v5,
-  PR number+labels via `gh pr view --json labels` with
-  GITHUB_TOKEN, base/head shas from the event payload. No dependency on
-  the test matrix. First CI run FAILED at Set up job: the brief's claim
-  that tests.yml pins action SHAs is false at current main (it and
-  docs.yml use tags), and the SHA I had written from memory doesn't
-  exist; fixed to the tag style the repo actually uses.
+  PR number/labels/base-sha/head-sha all read from the event payload
+  (`join(github.event.pull_request.labels.*.name, ',')`) — no API call,
+  no token. No dependency on the test matrix. First CI run FAILED at Set
+  up job: the brief's claim that tests.yml pins action SHAs is false at
+  current main (it and docs.yml use tags), and the SHA I had written from
+  memory doesn't exist; fixed to the tag style the repo actually uses.
+  Review round 1 found one real bug in my first payload approach (a gh
+  labels step appending raw jq to $GITHUB_OUTPUT without a `labels=` key
+  — invalid format whenever any label exists, waiver could never work;
+  label-less CI run couldn't catch it), fixed by the event-payload read
+  above and proven on real CI with a throwaway draft probe PR (#404,
+  400 src lines: fail with OVER BUDGET; +size-exempt: labeled-event
+  re-run pass with the loud notice; closed and branch deleted after
+  capture).
 - `tests/test_pr_size.py` (new): 15 pure-function tests (no git, no
   network): src-only counting, renames both forms into/out of src, the
   dots-in-basename brace edge, binary dash, empty diff, non-src dirs,
@@ -70,6 +78,9 @@ Approved by Jared 2026-10-31; spec decided in the handoff.
   "tests.yml pins SHAs" claim; repo uses tags), fixed to tag style;
   round 2 on PR #402 (>= 400, so the enforced path): pr-size PASS with
   the expected 0/350 verdict in the job log, and the full tests matrix
-  (ubuntu, ubuntu/py3.13, windows) passed on the final head.
+  (ubuntu, ubuntu/py3.13, windows) passed on the final head. Probe PR
+  #404 (throwaway, closed): oversized PR fails with OVER BUDGET, and
+  adding size-exempt passes the re-run with the LOUD NOTICE — waiver
+  proven on real CI, event-payload label read confirmed.
 
 Status: finished — merged-ready, PR #402.
