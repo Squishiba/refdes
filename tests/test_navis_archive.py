@@ -460,6 +460,23 @@ def test_corrupt_record_is_a_clear_diagnostic_never_a_crash(tmp_path, capsys, ca
     assert needle.lower() in capsys.readouterr().err.lower()
 
 
+def test_corrupt_record_warning_prints_its_code(tmp_path, capsys):
+    """docs/cli-reference.md promises a `navis.archive_corrupt` warning; the
+    rendered line must carry the code, the way the sibling
+    `navis.archived_orphan` warning does (run-15 finding F15-3)."""
+    _setup(tmp_path)
+    _corrupt_store(tmp_path, b"not gzip at all, just text")
+    records, diagnostics = navis_archive.load_records(str(tmp_path))
+    assert records == []
+    assert len(diagnostics) == 1
+    rendered = str(diagnostics[0])
+    assert "navis.archive_corrupt: navis archive record is unreadable" in rendered
+    assert "skipped, not deleted" in rendered
+    assert _run(str(tmp_path / "refdes-project.yaml"), "--no-write", "navis", "all") == 0
+    err = capsys.readouterr().err
+    assert "navis.archive_corrupt: navis archive record is unreadable" in err
+
+
 def test_corrupt_record_does_not_eclipse_the_good_ones(tmp_path):
     _setup(tmp_path)
     project = _load(str(tmp_path / "refdes-project.yaml"))

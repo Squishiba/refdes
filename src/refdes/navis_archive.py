@@ -109,7 +109,8 @@ def _record_doc(record: NaviRecord) -> dict:
 def _corrupt(path: str, message: str, root: str = "") -> Diagnostic:
     return Diagnostic(
         level="warning",
-        message=f"navis archive record is unreadable ({message}) -- it is "
+        message=f"{NAVI_ARCHIVE_CORRUPT_CODE}: navis archive record is "
+        f"unreadable ({message}) -- it is "
         "skipped, not deleted; the rest of the store loads",
         file=(
             os.path.relpath(path, root).replace("\\", "/") if root else path

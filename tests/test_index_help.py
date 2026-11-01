@@ -13,11 +13,14 @@ behaviour is asserted beyond that: P13 changed none.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from conftest import write_project_config
 
 from refdes import cli as cli_mod
+
+_HYPHEN_WRAP = re.compile(r"-\s*\n\s*")
 
 SCHEMA = (
     "site: { title: T, out: _site }\n"
@@ -50,7 +53,11 @@ def _project(root) -> str:
 def _index_help(capsys) -> str:
     with pytest.raises(SystemExit):
         cli_mod.main(["index", "--help"])
-    return " ".join(capsys.readouterr().out.split())
+    # argparse re-wraps help to the terminal width (COLUMNS) and may break
+    # inside a hyphenated word; rejoin those breaks and collapse whitespace
+    # runs so the pins below are width independent.
+    text = _HYPHEN_WRAP.sub("-", capsys.readouterr().out)
+    return " ".join(text.split())
 
 
 def test_index_help_says_who_the_command_is_for(capsys):

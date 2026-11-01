@@ -546,11 +546,21 @@ def test_id_without_dry_run_still_mints_and_writes(tmp_path):
 # ------------------------------------- the global --no-write help text agrees with
 # the exit-code table in docs/cli-reference.md about which commands report.
 
+import re
+
+_HYPHEN_WRAP = re.compile(r"-\s*\n\s*")
+
 
 def _no_write_help(capsys):
     with pytest.raises(SystemExit):
         cli_mod.main(["--no-write", "--help"])
-    return capsys.readouterr().out
+    # argparse re-wraps help to the terminal width (COLUMNS) and may break
+    # inside a hyphenated word, so the pins below read the text with
+    # hyphen line breaks rejoined and all whitespace runs (including the
+    # line breaks argparse inserts) collapsed to single spaces. Width
+    # changes cannot split a phrase the pins split on.
+    text = _HYPHEN_WRAP.sub("-", capsys.readouterr().out)
+    return " ".join(text.split())
 
 
 def test_no_write_help_lists_calc_rewrite_among_the_reporting_commands(capsys):
