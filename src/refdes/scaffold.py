@@ -330,12 +330,11 @@ def _git_covers(target_dir: str, entry: _GitignoreEntry) -> bool | None:
     try:
         rel = os.path.relpath(
             os.path.join(base, *entry.pattern.strip("/").split("/")), root
-        )
+        ).replace(os.sep, "/")
     except ValueError:
         return None  # e.g. Windows: target on a different drive than the root
-    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+    if rel == os.pardir or rel.startswith(os.pardir + "/"):
         return None  # the entry is not inside the repository git answered for
-    rel = rel.replace(os.sep, "/")
     probe = rel + "/" if entry.pattern.endswith("/") else rel
     verdict = _check_ignore_verdict(root, probe)
     if verdict is None:
@@ -414,12 +413,12 @@ def vscode_local_rule_ignores(target_dir: str) -> bool:
     try:
         rel = os.path.relpath(
             os.path.join(base, *entry.pattern.strip("/").split("/")), root
-        )
+        ).replace(os.sep, "/")
     except ValueError:
         return False  # e.g. Windows: target on a different drive
-    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+    if rel == os.pardir or rel.startswith(os.pardir + "/"):
         return False  # not inside the repository git answered for
-    win = _check_ignore_source(root, rel.replace(os.sep, "/"))
+    win = _check_ignore_source(root, rel)
     if win is None or win == "none":
         return False
     negated, shared = win
@@ -467,12 +466,12 @@ def vscode_settings_state(
     try:
         rel = os.path.relpath(
             os.path.join(base, *entry.pattern.strip("/").split("/")), root
-        )
+        ).replace(os.sep, "/")
     except ValueError:
         return "unaddressed"  # e.g. Windows: target on a different drive
-    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+    if rel == os.pardir or rel.startswith(os.pardir + "/"):
         return "unaddressed"  # not inside the repository git answered for
-    probe = rel.replace(os.sep, "/")
+    probe = rel
     state = _check_ignore_ignored_state(root, probe)
     if state == "project-ignored":
         return "project-ignored"
