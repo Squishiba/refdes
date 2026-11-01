@@ -1,0 +1,41 @@
+Run-15 gate PR #408 -- review round (CHANGES REQUESTED, Qwen reviewer 5035ba2)
+
+Merged origin/main (2 new commits: #405 relpath fix, #406 browser-editor
+guide) -- branch had diverged so ff-only was impossible; used --no-ff.
+
+Re-verified each defect by running before editing:
+
+1. F15-1 mechanism. Reviewer is right. New repro `.scratch/run15/flow1`
+   has NO navi marker: `items: [{id: LOG-A-FLOW-001, ...}]` in an items
+   file. Every `refdes navis ls` run: new key (5e11tagpfpt / shgfhj63ewp
+   / 2a39b5n4h03), `could not write key ... back into the source`, exit 1.
+   Mechanism is the ITEM key mint (keys.py write-back loop ~line 775 ->
+   ids.insert_into_list returns None for a flow sequence), not the Navi
+   marker mint. Flow MAP inside a block list works: `(minted 1 key(s)
+   while loading)`, exit 0, key written once (kqtq6f20s8x). Slice-2 Navi
+   mint honors its flow refusal (marker stayed keyless, listed all runs).
+2. "The refusal warning is emitted" was wrong. Not emitted in the
+   no-marker repro, and not in evidence log section A either. Rewrote:
+   docs/markdown.md:106-108 warning is about the marker mint; the item
+   mint's refused shape emits no warning, only the hard ERROR.
+3. Build-verified rendering: added `[[fig:]]` + `{{}}` to
+   LOG-A-PWR-001's body, rebuilt pwr -> `log-a-pwr-001.html` has
+   `<span class="ref ref-missing" title="unknown figure"></span>` for
+   `[[fig:]]`; `{{converter}}` renders literally. Fixed the sentence.
+4. Measured the width band with the exact whole-file command the
+   reviewer named (COLUMNS=N pytest -q tests/test_no_write.py, absolute
+   PYTHONPATH to worktree src). Result is scattered, not a clean band:
+   fail 40-76, pass 77-81, fail 82-98, pass 90/99-102/105/110/115,
+   fail 120, pass 125/130, fail 138, pass 139-141, one pin fails
+   142-144, pass 150/158, fail 159-170, pass 180, fail 200. Report
+   states this; the earlier "passing at 77-83" claim was wrong (82/83
+   fail).
+5. PR body: reviewer saw F15-3 text spliced into the F15-2 row. Current
+   body read clean via gh, so I rewrote the whole body with the
+   corrected F15-1/F15-2/F15-4 text. Note: `gh pr edit --body-file`
+   fails on this repo (Projects-classic GraphQL deprecation); used
+   `gh api -X PATCH repos/.../pulls/408 --input payload.json`, verified
+   by reading the body back.
+
+Report-only: no src/tests changes; no suite run (per reviewer rules).
+Status: pushed a66aa65, PR body updated, CI green (see PR checks).
