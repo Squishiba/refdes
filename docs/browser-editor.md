@@ -59,7 +59,7 @@ browser.*)
 
 ## refdes buttons
 
-Seven more buttons sit in the same bar, visually separated. They insert the
+Eight more buttons sit in the same bar, visually separated. They insert the
 project's own syntax (the full syntax is in [markdown](markdown.md) and
 [math](math.md)):
 
@@ -87,6 +87,12 @@ project's own syntax (the full syntax is in [markdown](markdown.md) and
   `name` selected.
 - **`{{}}`** inserts a calc value reference with the caret inside the
   braces.
+- **`Navi`** inserts a keyless Navi marker `<!--navi: text-->` with `text`
+  selected, so typing replaces it; with a selection it wraps the selection
+  (`<!--navi: your text-->`) and leaves it selected. A selection containing
+  `--` or a newline is left untouched — a Navi is a one-line HTML comment
+  and `--` inside one is not safe. The next writable command mints the
+  marker's key ([markdown](markdown.md#navis-markers)).
 - **Image** and **Source** don't insert anything: they open and focus the
   images panel and the sources panel below the textarea — the image picker
   and uploader ([markdown](markdown.md#uploading-an-image-from-the-browser-editor))

@@ -114,6 +114,7 @@ def test_the_skeleton_strings_are_the_measured_ones():
     assert js_export("FENCE_SKELETON") == "```calc\nname = expr | V\n```"
     assert js_export("FIGURE_SKELETON") == "[[fig:]]"
     assert js_export("VALUE_SKELETON") == "{{}}"
+    assert js_export("NAVI_SKELETON") == "<!--navi: text-->"
 
 
 # ---------------------------------------------------- the build messages
@@ -140,6 +141,20 @@ def test_the_figure_and_value_skeletons_stay_below_error(tmp_path):
         tmp_path, "See " + js_export("FIGURE_SKELETON") + " value " + js_export("VALUE_SKELETON") + ".\n"
     )
     assert diags == []
+
+
+def test_the_navi_skeleton_is_a_recognised_marker(tmp_path):
+    # A Navi is one closed, single-line `<!--navi:...-->` comment (the
+    # navis.py grammar): the bar's skeleton must reach the real parser as a
+    # RECOGNISED keyless marker -- builds with no error, scanned into the
+    # item's navis with an empty key (a read-only load mints nothing). A
+    # string the grammar would not accept scans to nothing and fails here.
+    _project, item, diags = build_with_body(
+        tmp_path, js_export("NAVI_SKELETON") + "\n"
+    )
+    assert diags == [], diags
+    assert [n.text for n in item.navis] == ["text"], item.navis
+    assert [n.key for n in item.navis] == [""], item.navis
 
 
 # -------------------------------------------------------- the save gate

@@ -306,10 +306,15 @@ function hasSurrogateSafe(value) { return value.length !== [...value].length; }
   results.group = {
     count: group.length,
     labels: buttons.map((b) => b.getAttribute('aria-label') || ''),
+    classes: buttons.map((b) => b.className),
     typed: buttons.every((b) => b.tagName === 'BUTTON' && b.type === 'button'),
     refAria: (() => {
       const b = findAll(ed.bar, 'fmt-reference')[0];
       return { popup: b.getAttribute('aria-haspopup'), expanded: b.getAttribute('aria-expanded') };
+    })(),
+    navi: (() => {
+      const b = findAll(ed.bar, 'fmt-navi')[0];
+      return b ? { text: b.textContent, aria: b.getAttribute('aria-label') } : null;
     })(),
   };
   const mdown = buttons[0].dispatch('mousedown', {});
@@ -332,6 +337,58 @@ function hasSurrogateSafe(value) { return value.length !== [...value].length; }
     nameSelected: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd) === 'name',
     execs: execCalls.length - n0,
     draft: drafts.getDraft(h).body,
+  };
+  drafts.clearDraft(h);
+}
+
+// ---------- navi: keyless marker at the caret, wrap on a selection, refuse
+// `--` and newlines (the marker is a one-line HTML comment)
+{
+  const h = 'RD-NAVI';
+  const ed = openEditor(h, 'hello world');
+  const n0 = execCalls.length;
+  ed.select(0, 0);
+  ed.click('navi');
+  results.naviCaret = {
+    value: ed.area.value,
+    selText: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+    execs: execCalls.length - n0,
+    draft: drafts.getDraft(h).body,
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'RD-NAVISEL';
+  const ed = openEditor(h, 'hello world');
+  ed.select(0, 5);
+  ed.click('navi');
+  results.naviWrap = {
+    value: ed.area.value,
+    selText: ed.area.value.slice(ed.area.selectionStart, ed.area.selectionEnd),
+    draft: drafts.getDraft(h).body,
+  };
+  drafts.clearDraft(h);
+}
+for (const [name, body, from, to] of [
+  ['dash', 'use a--b pair', 4, 8],
+  ['arrow', 'x --> y', 2, 5],
+  ['newline', 'one\ntwo', 0, 7],
+]) {
+  const h = `RD-NAVI-REF-${name}`;
+  const ed = openEditor(h, body);
+  ed.select(from, to);
+  const v0 = ed.area.value;
+  const sel0 = [ed.area.selectionStart, ed.area.selectionEnd];
+  const n0 = execCalls.length;
+  const d0 = drafts.getDraft(h).body;
+  ed.click('navi');
+  results[`naviRefuse-${name}`] = {
+    value: ed.area.value,
+    unchanged: ed.area.value === v0,
+    selUnchanged: ed.area.selectionStart === sel0[0] && ed.area.selectionEnd === sel0[1],
+    execs: execCalls.length - n0,
+    draft: drafts.getDraft(h).body,
+    draftUnchanged: drafts.getDraft(h).body === d0,
   };
   drafts.clearDraft(h);
 }
@@ -436,7 +493,7 @@ function hasSurrogateSafe(value) { return value.length !== [...value].length; }
   save.click();
   await tick(5);
   const before = ed.area.value;
-  for (const name of ['span', 'calc', 'figure', 'value', 'reference']) ed.click(name);
+  for (const name of ['span', 'calc', 'figure', 'value', 'navi', 'reference']) ed.click(name);
   const popover = find(ed.bar, 'fmt-picker');
   results.savingGate = {
     unchanged: ed.area.value === before,
@@ -627,8 +684,14 @@ def test_the_refdes_row_inserts_and_picks_through_the_shared_mutator(tmp_path):
     results = _node_json(tmp_path, HARNESS)
 
     g = results["group"]
-    assert g["count"] == 1 and g["typed"] and len(g["labels"]) == 7
+    assert g["count"] == 1 and g["typed"] and len(g["labels"]) == 8
     assert all(len(label) > 0 for label in g["labels"]), g
+    assert g["classes"] == [
+        "fmt-btn fmt-reference", "fmt-btn fmt-figure", "fmt-btn fmt-calc",
+        "fmt-btn fmt-span", "fmt-btn fmt-value", "fmt-btn fmt-navi",
+        "fmt-btn fmt-image", "fmt-btn fmt-source",
+    ], "Navi sits after value; the panel openers stay last"
+    assert g["navi"] == {"text": "Navi", "aria": "Navi: insert a <!--navi: text--> marker"}, g["navi"]
     assert g["refAria"]["popup"] == "dialog" and g["refAria"]["expanded"] == "false", g
     assert g["mousedownPrevented"] is True, "mousedown must not steal focus from the textarea"
 
@@ -637,6 +700,23 @@ def test_the_refdes_row_inserts_and_picks_through_the_shared_mutator(tmp_path):
     assert sp["nameSelected"] is True, "the §H-4 skeleton selects `name` (typing replaces it)"
     assert sp["execs"] == 1, "one insertion = one execCommand"
     assert sp["draft"] == "`name := 0 | V` world", "the draft commits through the input path"
+
+    nc = results["naviCaret"]
+    assert nc["value"] == "<!--navi: text-->hello world", nc
+    assert nc["selText"] == "text", "the placeholder is selected (typing replaces it)"
+    assert nc["execs"] == 1, "one insertion = one execCommand (Ctrl/Cmd+Z restores in one step)"
+    assert nc["draft"] == "<!--navi: text-->hello world", "the draft commits through the input path"
+
+    nw = results["naviWrap"]
+    assert nw["value"] == "<!--navi: hello--> world", nw
+    assert nw["selText"] == "hello", "the wrapped text stays selected"
+
+    for name in ("dash", "arrow", "newline"):
+        nr = results[f"naviRefuse-{name}"]
+        assert nr["unchanged"] is True, (name, nr)
+        assert nr["selUnchanged"] is True, (name, nr)
+        assert nr["execs"] == 0, (name, nr)
+        assert nr["draftUnchanged"] is True and nr["draft"] is None, (name, nr)
 
     fe = results["fence"]
     assert fe["value"] == "```calc\nname = expr | V\n```", fe
