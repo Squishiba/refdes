@@ -414,6 +414,15 @@ The suite covers the invariants that must not quietly break: IDs never shift or 
 reused, the DSL cannot execute code, the content hash follows the `on_change`
 policy exactly, and checks use the worst-case bound.
 
+Two Windows-only defect classes — multi-line fixtures written in text mode
+(Windows rewrites `\n` to `\r\n`) in tests that assert on raw bytes, and
+`os.path.relpath` results reaching strings without `/` normalization — are
+policed by `tests/test_crossplatform_lint.py`. Its pre-existing hits are
+frozen in `tests/crossplatform_lint_baseline.json`, and the test fails when any
+file's count rises — or falls, since the baseline only ratchets down; lower it
+with `python tests/crossplatform_lint_baseline_update.py` and commit the
+lowered baseline in the same PR.
+
 ## Releasing
 
 The CLI ships to PyPI and the extension to the VS Code Marketplace. They version
