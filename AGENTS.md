@@ -67,6 +67,19 @@ faster and harder to get wrong than reading
 Run the actual command, or `refdes <command> --help`. If something can't be
 verified by running it, say so in the text instead of asserting it.
 
+## Running the test suite
+
+From the repo root, with the project venv (`pip install -e ".[dev]"`):
+`python -m pytest -q -n 4 --dist worksteal` — the command README.md:409
+documents. Use an absolute `PYTHONPATH=<worktree>/src`; a relative one silently
+imports the installed refdes instead of your tree. Prefer `-n 4` over `-n auto`
+when other agents share the machine — several 10-way runs at once overload the
+box and flake the timing-sensitive tests. `--dist worksteal` matters because the
+default xdist scheduler leaves workers idle on this suite's few very slow tests
+(measured by Jared on his box: ~155 s plain `-n 8`, ~105 s wall with
+`--dist worksteal`); CI runs `-n auto --dist worksteal`. Iterate on the touched
+test files; run the full suite ONCE, before pushing.
+
 ## Before writing a new docs page
 
 Check `docs/` for an existing page on the same topic first (`ls docs/*.md`,
