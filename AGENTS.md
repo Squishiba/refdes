@@ -67,6 +67,20 @@ faster and harder to get wrong than reading
 Run the actual command, or `refdes <command> --help`. If something can't be
 verified by running it, say so in the text instead of asserting it.
 
+## Running the test suite
+
+From the repo root, with the venv installed as `".[dev,xlsx]"` (CI installs the
+`xlsx` extra too; without it the xlsx tests skip):
+`python -m pytest -q -n 4 --dist worksteal`, as README.md:409 documents. Use an
+absolute `PYTHONPATH=<worktree>/src`: a relative one resolves against the cwd,
+so from anywhere but the repo root it silently imports the installed refdes.
+Prefer `-n 4` over `-n auto` on a shared box: `test_rules_scan_the_tree_fast`
+(`tests/test_crossplatform_lint.py`) recorded 11.1 s of wall for ~3.4 s of CPU
+under 10-way xdist (run 15) — heavy parallel load inflates wall-clock timing
+assertions. `--dist worksteal` is what CI runs (`-n auto --dist worksteal`) and
+what Jared's `-n 8` run favoured (~155 s default vs ~105 s with worksteal).
+Iterate on the touched test files; run the full suite ONCE, before pushing.
+
 ## Before writing a new docs page
 
 Check `docs/` for an existing page on the same topic first (`ls docs/*.md`,
