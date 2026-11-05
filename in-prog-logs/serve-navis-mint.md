@@ -140,9 +140,8 @@ navis_write 57, docs anchors + crossplatform lint 14, ruff clean on
 navis_mint.py (api.py: my lines only; pre-existing findings elsewhere
 untouched). Full suite once before pushing: 5877 passed, 2 skipped, 1
 failed (the HAND_KEY bug, fixed as above). Expected CI head-count: all
-4 checks green on ubuntu/windows/py3.13 + pr-size once the py3.11
-`_text()` fix lands; until then the two 3.11 matrix jobs stay red on
-that helper alone (1 test each: `test_the_mint_splices_only...`, the
-other fixed test passes once it reaches its comparison).
+4 checks green once the py3.11 `_text()` fix lands; until then the two
+3.11 matrix jobs stay red on that helper alone (2 tests each — its two
+users; every other mint test passes on all platforms).
 
 
