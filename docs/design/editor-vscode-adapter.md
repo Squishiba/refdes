@@ -135,7 +135,9 @@ talks to. Verified surface:
   `http://127.0.0.1:<ephemeral>/?token=<256-bit token>`
   (`src/refdes/serve/server.py:293-295`).
 - **The API.** `api.handle` dispatches `GET /api/revision`, `GET /api/items`
-  (filtered), `GET /api/item/<ref>`, `POST /api/item/<ref>/edit`,
+  (filtered), `GET /api/navis` (the Navis panel rows and the active/archived
+  counts, merged with the archive store at request time),
+  `GET /api/item/<ref>`, `POST /api/item/<ref>/edit`,
   `GET /api/create/schema`, `GET /api/create/preview`, `POST /api/items/create`,
   `GET /api/images?item=`, `POST /api/assets`, `POST /api/navis/archive`,
   `POST /api/navis/restore`, and the three
@@ -304,6 +306,7 @@ Nothing here is new server behaviour; the right column is shipped code.
 |---|---|---|
 | Is the snapshot current? | `GET /api/revision` | `revision`, `serial`, `stale`, `load_error`, advisory git (`serve/state.py:279-290`). Poll it; do not rebuild. |
 | Find an item from a cursor | `GET /api/items` with the filter query | Answered from the built project, never a file scan (`serve/api.py:34-66`, `serve/filters.py`). |
+| Everything about the project's Navis | `GET /api/navis` | `navis` rows in `refdes navis all` order, panel row shape + full `key`, and `counts`; the archive store is merged at request time, so an on-disk archive is visible on the next GET. Read-only (`serve/navis_read.py`). |
 | Everything about one item | `GET /api/item/<ref>` | id, key, type, title, board, workspace, tags, source file/line, body, fields, inheritance, external/origin, append_only, sealed, resolved links in and out, coverage, check state, per-item diagnostics, and the `edit` block (`serve/api.py:221-266`). `<ref>` accepts the handle, the display id, the key, or a retired id some item records in `former_ids:` (`serve/api.py:89-125`). |
 | May this field be edited, and why not? | same response, `edit.fields.<name>.{editable,reason}` | The server decides; the client renders. Includes sealed and imported reasons (`serve/api.py:146-215`). |
 | Save one field / body / link | `POST /api/item/<ref>/edit` with `expected_revision` | `op` ∈ `set_field`, `set_body`, `add_link`, `remove_link`; results are 200/409/422/422/400, and 403 under `--no-write` (`serve/api.py:372-460`). |
