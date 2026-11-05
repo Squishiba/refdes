@@ -661,7 +661,9 @@ between its two states. The rows are the same `navis.projection` the
 `index` payload carries under its top-level `navis` key (active first,
 ordered by file then line; the archived rows appended after, each
 labelled) — the CLI renders one projection and computes no second answer
-of its own, the `thread` precedent.
+of its own, the `thread` precedent. For the user-facing tour (selectors,
+archive/restore states, the site panel, the serve API), see the
+[Navis guide](navis.md).
 
 ```console
 $ refdes navis ls
