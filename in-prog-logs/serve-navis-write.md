@@ -70,15 +70,14 @@ pushed on feat/serve-navis-write; no PR opened).
 - The 2 failures = the test-authoring bug: the candidate assertion sorts by
   key then expects `[KEY_A, KEY_B]`, arithmetically impossible (KEY_B
   `k7f3q2zyzz…` sorts before KEY_A `k7f3q2zzzz…`). Reported, left untouched
-  per the round-0 rules; fixed in round 1 (T1).
-- Green: the 42 others pass; tests/test_navis_ops.py + test_navis_archive_-
-  cli.py + test_serve_edit_http.py + test_serve_api.py + test_serve_state.py
-  -> 142 passed. Full suite (pre-push, round 0): 2 failed, 5742 passed,
-  2 skipped.
+  per round-0 rules; fixed in round 1 (T1).
+- Green: the 42 others pass; navis_ops + navis_archive_cli + serve_edit_http
+  + serve_api + serve_state -> 142 passed. Full suite (round 0): 2 failed,
+  5742 passed, 2 skipped.
 - Smoke (real `refdes serve --port 8772`, token from the launch URL):
-  archive -> 200 ok changed:true, the store record created (absent before);
-  preview shows `[archived]`; restore -> 200 ok, store empty, page clean;
-  restore-of-active -> 409; GET on POST-only routes -> 405.
+  archive -> 200 ok changed:true + store record; preview shows `[archived]`;
+  restore -> 200 ok, store empty; restore-of-active -> 409; GET on the
+  POST-only routes -> 405.
 - Docs: route bullets in docs/design/editor-vscode-adapter.md's API
   inventory; changelog.d/serve-navis-write.added.md.
 - Merged origin/main mid-task (PR #416 GET /api/navis): api.py conflicts
@@ -92,35 +91,29 @@ pushed on feat/serve-navis-write; no PR opened).
   `candidates[:1]` -> both params FAIL; reverted.
 - T2: stale citations re-pointed by reading the files: selector ->
   `navis_ops.select` (cli `_navi_select` delegates), giant-digit guard ->
-  `navis_ops.select`'s length-bound digit branch, OSError patch seam ->
-  `navis_ops.apply`'s `navis_archive_mod.archive_record` call. No line
-  numbers cited.
+  `navis_ops.select`'s digit branch, OSError seam -> `navis_ops.apply`'s
+  `navis_archive_mod.archive_record`. No line numbers cited.
 - T3: docstring reworded -- the tests import no module under test
   (`serve.navis_write`; `navis_ops` only as the monkeypatch seam of the
   unknown-kind test); EditorApp/cli/navis_archive as fixtures, stated.
-- T4: new §9-row-4 HTTP test (archive, edit the marker text on disk,
-  restore 200 changed=true, `GET /api/navis` shows the LIVE edited text as
-  active). The §12 docstring claim narrowed to the journal refusal (no
-  draft test built, per the review).
+- T4: new §9-row-4 HTTP test (archive, edit the marker text on disk, restore
+  200 changed=true, `GET /api/navis` shows the LIVE edited text as active);
+  §12 docstring narrowed to the journal refusal (no draft test, per review).
 - S1: `_render`'s fallthrough is now 500 JSON naming an unknown kind (red
   first); journal_pending kept in the 409 branch (a first-cut guard dropped
   it to 500; its own run caught that).
 - S2: dead `VERBS` frozenset deleted.
-- S3: the two POST paths removed from the final 405 tuple (unreachable --
-  the route hook catches every method on both paths). All five listed serve
-  test files stay green without them; the round-0 log's "the 405 list
-  carries ... the two POST paths" is superseded by this.
+- S3: the two POST paths removed from the final 405 tuple (unreachable
+  behind the route hook; the listed serve files stay green; round-0's "the
+  405 list carries ... the two POST paths" is superseded).
 - Rejected on purpose: pre-lock snapshot read, the vscode-adapter citation
   range, the "1..0" wording, asserting `verb`, surfacing a failed refresh.
 - Pre-push: the five listed files -> 171 passed. Full suite (once): 5746
   passed, 2 skipped (0 failed).
 
 ## Review round 2 (one accepted finding; one commit)
-
-- `handle` now gates `read_only` FIRST (before body/selector validation),
-  returning the same 403 `refused` shape via the one `_NO_WRITE_MESSAGE`
-  constant shared with the `refused_no_write` render; the `allow_write=`
-  pass-through stays as defense in depth. Red first: the 8 read-only
-  malformed-body cases failed (400/404) and the 3 writable-parity cases
-  passed; after the hoist all green. Five listed files: 182 passed; full
-  suite (once): 5758 passed, 2 skipped.
+- `handle` gates `read_only` first (before body/selector validation) sharing
+  the one `_NO_WRITE_MESSAGE` with the `refused_no_write` render, the
+  `allow_write=` pass-through kept as defense in depth; red-first evidence:
+  the 8 read-only malformed-body cases failed 400/404 -> 403, writable parity
+  unchanged, five listed files 182 passed, full suite once 5758 passed.
