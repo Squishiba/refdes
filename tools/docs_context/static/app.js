@@ -127,6 +127,7 @@ function selectedBlock() {
 function render() {
   const leftScroll = blocksList.scrollTop;
   const rightScroll = cardsPane.scrollTop;
+  const pageScroll = window.scrollY;
   blocksList.textContent = "";
   cardsPane.textContent = "";
   const data = state.doc;
@@ -172,6 +173,7 @@ function render() {
   }
   blocksList.scrollTop = leftScroll;
   cardsPane.scrollTop = rightScroll;
+  window.scrollTo(0, pageScroll);
 }
 
 function select(startLine) {

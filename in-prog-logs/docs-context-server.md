@@ -69,21 +69,21 @@ text), header "N blocks, M refs, K flagged", j/k + arrows, aria-current,
 preserved. All untrusted text via textContent/createElement. Light/dark via
 prefers-color-scheme; columns stack <=760px, no overflow at 375.
 
-## Test bug found (NOT edited, per task rule 1)
+## Test bug: found, reported, authorized, fixed (one line)
 
-`request()` (tests/test_docs_context_server.py:148) passes `headers=None`
+`request()` (tests/test_docs_context_server.py:148) passed `headers=None`
 into `http.client.HTTPConnection.request()`; on Python 3.13 that raises
 `TypeError: 'NoneType' object is not iterable` client-side before any
-request is sent. 23 of the 31 tests die in the test process, not in the
-server. Proposed one-line change: `headers=headers or {}`. Evidence: with
-only that change (a copy of the file under .scratch/, repo test file
-untouched), 31/31 pass. Unaffected-by-the-bug tests (CLI banner/exit codes,
-static text checks, host guard -- all raw sockets) pass as written: 8/8.
+request is sent (23 of 31 tests died in the test process, not the server).
+Reported per rule 1 with the proposed one-line change; the orchestrator
+independently confirmed it and authorized exactly that edit, applied as
+`headers=headers or {}` -- nothing else in the test file was touched.
 
 ## Evidence
 
-- 31/31 (patched copy), 8/8 (raw-socket subset), refs 58 + crossplatform
-  lint pass, ruff clean on server.py.
+- After the authorized fix: 31/31 as written (+ refs 52 + lint = 89/89),
+  ruff clean on server.py and the test file. Before it: 8/8 raw-socket
+  subset, 31/31 on a .scratch copy with only the one-line change.
 - Real browsers, PASS in Chromium (headless, /usr/bin/chromium) and Firefox
   (playwright-core) for: block list (58 blocks, summary "58 blocks, 34 refs,
   2 flagged"); command card known + usage: help; link card target/anchor ok
@@ -101,6 +101,13 @@ static text checks, host guard -- all raw sockets) pass as written: 8/8.
   page-relative link (`docs/navis.md#...` from .scratch/browser/) -- correct
   behavior; the harness doc, not the product, was fixed.
 
-Status: done. All slice DC-2-impl deliverables landed; the contract file
-itself stays red on the client-side `headers=None` bug pending authorization
-of the one-line fix.
+Review round 1 (summarized): CI's 23 reds confirmed as the helper bug
+(authorized fix applied); three low findings fixed -- dark-mode
+`--flag-fg` on `.flagcount` (now 7.93:1 on the wire, measured in-browser
+in Chromium and Firefox), a compact `.cards-title` rule, and
+`window.scrollY` save/restore in `render()` so the stacked <=760px layout
+(page-scrolled) keeps position across a poll re-render -- verified in the
+375x640 live-edit case in both browsers (y 155->155, 153->153).
+
+Status: done. Slice DC-2-impl complete, test file green as written (89/89
+with refs+lint), browsers re-passed for the changed cases; PR #425 open.

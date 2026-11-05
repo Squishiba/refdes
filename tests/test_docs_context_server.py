@@ -145,7 +145,7 @@ def request(base_url, method, path, headers=None):
     host, port = addr_of(base_url)
     conn = http.client.HTTPConnection(host, port, timeout=10)
     try:
-        conn.request(method, path, headers=headers)
+        conn.request(method, path, headers=headers or {})
         resp = conn.getresponse()
         body = resp.read()
         headers_out = {k.lower(): v for k, v in resp.getheaders()}

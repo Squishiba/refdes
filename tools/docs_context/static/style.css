@@ -11,6 +11,7 @@
   --ok-bg: #e6f4ea;
   --badge: #6b7480;
   --hl: #fff3bf;
+  --flag-fg: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -26,6 +27,7 @@
     --ok-bg: #17301f;
     --badge: #9aa4b1;
     --hl: #4a4423;
+    --flag-fg: #14161a;
   }
 }
 
@@ -144,7 +146,7 @@ body {
   display: inline-block;
   min-width: 18px;
   text-align: center;
-  color: #fff;
+  color: var(--flag-fg);
   background: var(--flag);
   border-radius: 99px;
   font-size: 11px;
@@ -206,6 +208,12 @@ pre.excerpt {
 
 .card-head {
   margin-bottom: 4px;
+}
+
+.cards-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px;
 }
 
 .card-title {
