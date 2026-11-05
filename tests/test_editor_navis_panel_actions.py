@@ -21,7 +21,7 @@ next success and when the panel reopens.
 No browser here: the REAL served module runs headless under node over the
 same fake DOM as test_editor_navis_panel.py (plus insertBefore), with the
 injected apiFn replacing the network. The real-browser pass ran on Chromium
-and Firefox (in-prog-logs/navis-editor-actions.md).
+(in-prog-logs/navis-editor-actions.md).
 """
 
 from __future__ import annotations
@@ -413,6 +413,49 @@ const gets = (state) => state.calls.filter((c) => c.method === 'GET');
   };
 }
 
+// -- H: showError's fallback chain. A 500 carrying no payload.error shows
+// err.message; an error with neither payload.error nor a message shows the
+// module's own generic line. Both are textContent-only alerts.
+{
+  const { panel, apiState } = openPanel(BASE_PAYLOAD);
+  await flush();
+  apiState.post = () => {
+    const err = new Error('server exploded');
+    err.status = 500;
+    throw err;
+  };
+  findAll(panel, 'navis-archive')[0].click();
+  await flush();
+  const messageNotices = findAll(panel, 'navis-error');
+  const message = messageNotices[0] || null;
+
+  const root = new FakeNode('div');
+  const { apiFn, state } = stubApi(BASE_PAYLOAD);
+  mountNavisPanel(root, apiFn);
+  find(root, 'navis-toggle').click();
+  await flush();
+  state.post = () => {
+    const err = new Error('');
+    err.status = 500;
+    throw err;
+  };
+  findAll(find(root, 'navis-panel'), 'navis-archive')[0].click();
+  await flush();
+  const genericNotices = findAll(find(root, 'navis-panel'), 'navis-error');
+  const generic = genericNotices[0] || null;
+
+  results.fallbacks = {
+    messageCount: messageNotices.length,
+    messageText: message ? message.textContent : null,
+    messageRole: message ? message.getAttribute('role') : null,
+    messageChildren: message ? message.children.length : null,
+    genericCount: genericNotices.length,
+    genericText: generic ? generic.textContent : null,
+    genericRole: generic ? generic.getAttribute('role') : null,
+    genericChildren: generic ? generic.children.length : null,
+  };
+}
+
 // the SPA rule holds across every scenario above
 results.reloadsTotal = results.reloads;
 
@@ -520,7 +563,18 @@ def test_the_panel_actions_behaviour():
     assert i["allDisabled"] is True, "the lockout outlives the redraw"
     assert i["panelHidden"] is False, i
 
-    # H. the SPA rule: no scenario reloaded the page.
+    # H. showError's fallback chain: err.message, then the generic line.
+    h = r["fallbacks"]
+    assert h["messageCount"] == 1, h
+    assert h["messageText"] == "server exploded", h
+    assert h["messageRole"] == "alert", h
+    assert h["messageChildren"] == 0, h
+    assert h["genericCount"] == 1, h
+    assert h["genericText"] == "the request failed", h
+    assert h["genericRole"] == "alert", h
+    assert h["genericChildren"] == 0, h
+
+    # The SPA rule: no scenario reloaded the page.
     assert r["reloadsTotal"] == 0, "success re-fetches through refresh(); never a page reload"
 
 
