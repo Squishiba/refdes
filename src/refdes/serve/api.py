@@ -27,8 +27,8 @@ from ..patcher import PROTECTED_FIELDS, AddLink, RemoveLink, SetBody, SetField
 from ..seal import is_sealed
 from . import edit as edit_mod
 from . import filters as filters_mod
+from . import navis_mint, navis_write, resolution
 from . import navis_read as navis_read_mod
-from . import navis_write, resolution
 from . import sources as sources_mod
 from . import state as state_mod
 from . import upload as upload_mod
@@ -76,6 +76,10 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
     if path in ("/api/navis/archive", "/api/navis/restore"):
         if method == "POST":
             return navis_write.handle(app, path.rsplit("/", 1)[1], body)
+        return 405, {"error": "method not allowed"}
+    if path == "/api/navis/mint":
+        if method == "POST":
+            return navis_mint.handle(app, body)
         return 405, {"error": "method not allowed"}
     if path.startswith("/api/item/"):
         for suffix, handler in _SOURCE_ROUTES:

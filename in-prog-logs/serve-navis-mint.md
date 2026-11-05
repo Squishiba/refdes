@@ -58,3 +58,67 @@ continues on this branch (navis_mint.py / navis_write.py + api.py hook).
   no typos. Full suite NOT run (test-author slice). `ruff check` clean on
   the file; cross-platform lint green (newline="", read_bytes, no fixed
   ports, no POSIX-only tools).
+
+# serve navis mint — M1 implementation (slice: src only)
+
+Task: implement `POST /api/navis/mint` to the contract above. Wrote
+`src/refdes/serve/navis_mint.py` (~100 lines, renderer of
+`navis.mint_keys(project, write=True)` into HTTP, styled on
+`navis_write.handle`) and a 4-line route hook in `api.handle` (+import).
+No test edited; the test file is the spec.
+
+## Findings
+
+- LOCKS: `mint_keys` takes no lock of its own — `revise.py` contains no
+  `write_lock`/`project_write_lock` reference at all;
+  `write_rewrites_verified` → `write_rewrites` → `textio.atomic_write_text`
+  writes files directly. So the route's `write_lock_for(root)` is the only
+  lock on the mint path, taken first per the documented order;
+  `project_write_lock` is never touched here. No re-entrancy hazard;
+  `state.refresh` takes only the `ProjectState` RLock (navis_write already
+  calls refresh under the same lock, same posture).
+- `still_keyless` SOURCE: the NAVI_MINT_REFUSED warnings mint_keys records
+  on the project (delta across the call = the total; a read-only build
+  emits none). Chosen over post-mint projection rows because the response
+  promises THIS call, and the row count would also charge the caller with
+  markers mint_keys never touched (a malformed marker is the corruption
+  lint's report, not a mint refusal).
+- Snapshot staleness verified over HTTP by the stale test: `mint_keys`
+  re-reads each file at splice time and its line-exact check refuses an
+  edited file (the user's bytes win); the untouched file mints in the same
+  call. The losing concurrent request re-reads
+  `app.state.snapshot.project` INSIDE the write lock, so it plans against
+  the winner's committed state (its `still_keyless: 0` is left unpinned by
+  the spec).
+- stdout purity: verified on a live server (8817) — mint announcements
+  (`_announce_navi_mints`) all land on stderr; stdout keeps only the
+  launch-URL lines.
+
+## Live capture (docs/navis.md, serve API section)
+
+Writable `refdes serve --port 8815` + `--no-write` on 8816 against
+`.scratch/serve-navis-mint/proj`; mint 200 with two minted markers, second
+POST `changed:false`, GET 405, `--no-write` 403 with the mint-disabled
+message. Item files show the spliced keys; no `.refdes/` directory created
+by the route.
+
+## BLOCKER: one test is unpassable (reported, not edited)
+
+`test_two_simultaneous_mints_mint_each_marker_exactly_once` fails at its
+line 547 on EVERY run against a correct implementation:
+`_KEYED_RE.findall` over `note-a.md`+`note-b.md` also matches the fixture's
+own hand-declared `HAND_KEY` marker, so the file-side list has 4 keys
+against the winner's 3 minted. The extra item changes every run (= the
+module-level `keys.mint()`). Proposed change (author's file, one line):
+filter `if k != HAND_KEY` out of `keys_in_files`. Its other assertions
+(each marker keyed exactly once, line counts) pass under the
+implementation.
+
+## Status
+
+DONE except the one reported test bug. Touched-file runs: mint 27/28
+(only the bug above fails), navis_write 57, docs anchors + crossplatform
+lint 14, ruff clean on navis_mint.py (api.py: my lines only; pre-existing
+findings elsewhere untouched). Full suite: run once before pushing — see
+PR.
+
