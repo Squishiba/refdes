@@ -22,7 +22,7 @@ function el(tag, cls, text) {
   return node;
 }
 
-function verbPicker(item, handle, verb, spec, onChange) {
+function verbPicker(item, handle, verb, spec, onChange, onDraftChange) {
   const wrap = el('div', 'link-verb-edit');
   const draft = getDraft(handle);
   const serverTargets = spec.targets || [];
@@ -87,6 +87,7 @@ function verbPicker(item, handle, verb, spec, onChange) {
       const off = el('button', 'btn link-remove', 'remove');
       off.addEventListener('click', () => {
         draftLinkRemove(handle, verb, target);
+        if (onDraftChange) onDraftChange(); // a link op is a dirty write: stamp the opening revision
         refresh();
         onChange();
       });
@@ -100,6 +101,7 @@ function verbPicker(item, handle, verb, spec, onChange) {
       const undo = el('button', 'btn link-undo', 'undo');
       undo.addEventListener('click', () => {
         draftLinkCancel(handle, verb, target); // cancels the pending add
+        if (onDraftChange) onDraftChange();
         refresh();
         onChange();
       });
@@ -113,6 +115,7 @@ function verbPicker(item, handle, verb, spec, onChange) {
       const undo = el('button', 'btn link-undo', 'undo');
       undo.addEventListener('click', () => {
         draftLinkCancel(handle, verb, target); // cancels the pending remove
+        if (onDraftChange) onDraftChange();
         refresh();
         onChange();
       });
@@ -158,6 +161,7 @@ function verbPicker(item, handle, verb, spec, onChange) {
         const server = serverTargetFor(row);
         if (server) draftLinkCancel(handle, verb, server);
         else draftLinkAdd(handle, verb, row.handle || row.id);
+        if (onDraftChange) onDraftChange();
         refresh();
         onChange();
       });
@@ -193,13 +197,13 @@ function verbPicker(item, handle, verb, spec, onChange) {
   return wrap;
 }
 
-export function createLinksSection(item, handle, onChange) {
+export function createLinksSection(item, handle, onChange, onDraftChange) {
   const verbs = Object.entries((item.edit && item.edit.links) || {});
   if (!verbs.length) return null;
   const section = el('div', 'links-edit');
   section.appendChild(el('h3', null, 'Links'));
   for (const [verb, spec] of verbs) {
-    section.appendChild(verbPicker(item, handle, verb, spec, onChange));
+    section.appendChild(verbPicker(item, handle, verb, spec, onChange, onDraftChange));
   }
   return section;
 }

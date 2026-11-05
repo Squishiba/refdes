@@ -342,6 +342,58 @@ def test_a_stale_revision_is_409_with_diff_and_changes_nothing(served):
     assert snapshot_tree(root) == before_tree
 
 
+def test_a_stale_revision_on_a_body_edit_is_409_and_changes_nothing(served):
+    """The body op rides the same revision gate as a field edit: an external
+    write to the item's file lands, a form opened before it saves its body
+    against the opening revision, and the save is refused -- the external
+    bytes survive untouched (docs/design/browser-editor.md, "A content
+    mismatch returns a conflict, never a last-write-wins save")."""
+    _app, client, root = served
+    path = reqs_file(root)
+    stale = sha256(path)
+    # somebody appends a line to the same file outside the editor
+    with open(path, "ab") as fh:
+        fh.write(b"  - id: REQ-002\n    text: Added outside the editor.\n")
+    before_tree = snapshot_tree(root)
+
+    status, payload = edit(
+        client, revision=stale, op="set_body", text="Rewritten prose.\n", ref="REQ-001"
+    )
+
+    assert status == 409, payload
+    assert payload["kind"] == "conflict" and payload["ok"] is False
+    assert payload["expected_revision"] == stale
+    assert payload["current_revision"] == sha256(path)
+    assert payload["current_text"] is not None
+    assert "Added outside the editor." in payload["diff"], payload["diff"]
+    # the external bytes survive: the refused save wrote nothing
+    assert snapshot_tree(root) == before_tree
+    assert "Rewritten prose." not in read(path)
+
+
+def test_an_external_edit_to_another_items_file_does_not_conflict_this_save(served):
+    """The revision the save is checked against is the EDITED ITEM'S OWN FILE
+    (serve/edit.py `file_revision(path)`), not the project's global serial:
+    an unrelated item changing on disk (the same event that fires the
+    poller's `refdes:rebuilt` and re-renders the form) must not turn a dirty
+    form into a false conflict."""
+    _app, client, root = served
+    opening = sha256(reqs_file(root))
+    # the rebuild comes from a DIFFERENT file: REQ-001's own file has not moved
+    decs = root / "items" / "decs.yaml"
+    with open(decs, "ab") as fh:
+        fh.write(b"  - id: DEC-002\n    title: Added outside the editor.\n")
+
+    status, payload = edit(
+        client, revision=opening, op="set_body", text="Rewritten prose.\n", ref="REQ-001"
+    )
+
+    assert status == 200, payload
+    assert payload["kind"] == "applied"
+    assert "Rewritten prose." in read(reqs_file(root))
+    assert "Added outside the editor." in read(str(decs))  # both edits stand
+
+
 # ---------------------------------------------------------------- refused
 
 

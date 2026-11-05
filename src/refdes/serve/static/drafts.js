@@ -247,6 +247,25 @@ export function setDraftBody(handle, text) {
   return draft;
 }
 
+// The revision a form OPENED on, recorded when its draft first becomes
+// dirty (design "Drafts" + "Revision and conflict detection"): the draft
+// rides that revision, a re-render over the same draft keeps it, and Save
+// posts it -- so a dirty form meets an external writer's newer revision
+// with the server's 409, never with a last-write-wins overwrite. A draft
+// that has become clean again (the last pending link op cancelled) has no
+// opening to carry: reset it so the next form adopts the file's current
+// revision. Persisting is the point -- the mirror must carry the stamp
+// through a reload, not just this page.
+export function stampRevision(handle, revision) {
+  const draft = getDraft(handle);
+  const stamp = isDirty(draft) ? revision || null : null;
+  if (draft.revision !== stamp) {
+    draft.revision = stamp;
+    persist(handle, draft);
+  }
+  return draft;
+}
+
 export function addDraftPin(handle, pin) {
   const draft = getDraft(handle);
   if (!draft.pins.some((p) => p.path === pin.path && p.key === pin.key)) {

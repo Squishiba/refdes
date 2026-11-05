@@ -10,6 +10,7 @@
 import { api } from './api.js';
 import {
   getDraft, setDraftField, setDraftBody, addDraftPin, dropAppliedOp, clearDraft, isDirty,
+  stampRevision,
 } from './drafts.js';
 import { createLinksSection } from './links.js';
 import { createImagePicker } from './images.js';
@@ -39,6 +40,10 @@ function coerce(spec, raw) {
 export function createEditor(item, handle, onSaved, onDiscarded) {
   const edit = item.edit || { editable: false, fields: {}, body: {} };
   const draft = getDraft(handle);
+  // A dirty draft's stamped revision (drafts.js stampRevision) rides ahead:
+  // a rebuild re-render keeps the form on the revision it OPENED on, so an
+  // external writer meets a 409, not a last-write-wins save. A clean form
+  // has no stamp and adopts the newest file revision.
   let revision = draft.revision || edit.file_revision || item.revision;
   const specs = {};
 
@@ -117,8 +122,12 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
 
   // Link pickers live inside the edit block: their adds and removes are
   // draft ops, so the one Save button, the one revision, and the one
-  // conflict screen cover them exactly like a field edit (Slice 2).
-  const linksSection = createLinksSection(item, handle, refreshStatus);
+  // conflict screen cover them exactly like a field edit (Slice 2). The
+  // fourth argument lets a link op stamp the opening revision too (the
+  // link ops bypass this module's write closures; drafts.js stampRevision).
+  const linksSection = createLinksSection(
+    item, handle, refreshStatus, () => stampRevision(handle, revision),
+  );
   if (linksSection) block.appendChild(linksSection);
   const conflictBox = el('div', 'conflict');
   conflictBox.hidden = true;
@@ -200,6 +209,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
         page: proposal.page, row: proposal.row, token: proposal.token, sha256: proposal.sha256,
       } : {}),
     });
+    stampRevision(handle, revision); // the pin's body op rides the opening revision
     refreshStatus();
     area.focus();
   }
@@ -224,6 +234,11 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     // editable returns null above, and its old control is simply dropped.
     const writeDraft = (node) => {
       setDraftField(handle, name, node.value);
+      // The first dirty write of a form records the revision it opened on
+      // (drafts.js stampRevision): the save must ride that revision, so a
+      // rebuild re-render of the dirty form cannot adopt an external
+      // writer's newest one and turn Save into last-write-wins.
+      stampRevision(handle, revision);
       note('');
       refreshStatus();
       // A field is a calc input (design §3.2/§6.4): the panel re-reads the
@@ -251,6 +266,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     if (area.value !== shown) area.value = shown;
     const writeBody = () => {
       setDraftBody(handle, area.value);
+      stampRevision(handle, revision); // the opening revision rides the save
       note('');
       refreshStatus();
     };
