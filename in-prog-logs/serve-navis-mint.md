@@ -102,7 +102,7 @@ POST `changed:false`, GET 405, `--no-write` 403 with the mint-disabled
 message. Item files show the spliced keys; no `.refdes/` directory created
 by the route.
 
-## BLOCKER: one test is unpassable (reported, not edited)
+## BLOCKER found (later fixed with authorization): one test was unpassable
 
 `test_two_simultaneous_mints_mint_each_marker_exactly_once` fails at its
 line 547 on EVERY run against a correct implementation:
@@ -114,23 +114,35 @@ filter `if k != HAND_KEY` out of `keys_in_files`. Its other assertions
 (each marker keyed exactly once, line counts) pass under the
 implementation.
 
-## Status
+## HAND_KEY test fix (authorized)
 
-DONE except two test-file bugs (reported, not edited; PR #427). Touched-
-file runs: mint 27/28 (only the bug above fails), navis_write 57, docs
-anchors + crossplatform lint 14, ruff clean on navis_mint.py (api.py: my
-lines only; pre-existing findings elsewhere untouched). Full suite once
-before pushing: 5877 passed, 2 skipped, 1 failed (the bug above).
+The orchestrator independently confirmed the finding (27/28 on the
+unmodified file; 28/28 against this route with `if k != HAND_KEY` in the
+`keys_in_files` comprehension) and AUTHORIZED exactly that one edit;
+applied it (wrapped over three lines for the 100-char cap), nothing else
+in the test file.
 
 ## CI (PR #427)
 
 pr-size PASS. Tests jobs red ONLY on the test file, on two counts:
-(1) py3.13 job's single failure is the HAND_KEY bug (its only red test);
-(2) the 3.11 matrix (ubuntu+windows, tests.yml:46) additionally
-TypeError-s in the two tests using the file's `_text()` helper —
-`Path.read_text(newline=)` is Python 3.13+ (the local venv is 3.13.5, so
-the author's red run never hit it). Proposed author fix: read via
-`open(..., encoding="utf-8", newline="").read()`. Every mint test of the
-implementation itself is green on every platform.
+(1) py3.13 job's single failure is the HAND_KEY bug (its only red test),
+fixed as above with the authorization; (2) the 3.11 matrix (ubuntu+
+windows, tests.yml:46) additionally TypeError-s in the two tests using
+the file's `_text()` helper — `Path.read_text(newline=)` is Python 3.13+
+(the local venv is 3.13.5, so the author's red run never hit it).
+Proposed author fix: read via `open(..., encoding="utf-8",
+newline="").read()`. Not applied — only the HAND_KEY line was authorized.
+
+## Status
+
+DONE (M1-impl). Touched-file runs after all edits: mint 28/28,
+navis_write 57, docs anchors + crossplatform lint 14, ruff clean on
+navis_mint.py (api.py: my lines only; pre-existing findings elsewhere
+untouched). Full suite once before pushing: 5877 passed, 2 skipped, 1
+failed (the HAND_KEY bug, fixed as above). Expected CI head-count: all
+4 checks green on ubuntu/windows/py3.13 + pr-size once the py3.11
+`_text()` fix lands; until then the two 3.11 matrix jobs stay red on
+that helper alone (1 test each: `test_the_mint_splices_only...`, the
+other fixed test passes once it reaches its comparison).
 
 

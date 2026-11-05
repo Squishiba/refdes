@@ -543,7 +543,9 @@ def test_two_simultaneous_mints_mint_each_marker_exactly_once(serve):
     loser = next(p for p in payloads if not p["changed"])
     assert len(winner["minted"]) == 3
     assert loser["minted"] == []  # it planned against the committed state
-    keys_in_files = [k for rel in rels for k in _KEYED_RE.findall(_text(root, rel))]
+    keys_in_files = [
+        k for rel in rels for k in _KEYED_RE.findall(_text(root, rel)) if k != HAND_KEY
+    ]
     assert sorted(keys_in_files) == sorted(e["key"] for e in winner["minted"])
     for rel in rels:
         text = _text(root, rel)
