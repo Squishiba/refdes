@@ -49,6 +49,18 @@ docs-site) pass. CI docs build (`refdes build` in docs-site) clean (0 errors,
 0 warnings); generated navis.html carries id="the-served-preview-panel" /
 id="in-the-editor" and the in-page link resolves.
 
+## Evidence not produced by this worker
+
+The draft-survival claim ("an open item draft with unsaved edits outlives
+the action, observed in Chromium and Firefox on 2026-11-05") was **not run by
+this worker**. The orchestrator ran it against the merged-PR head (probe
+`.scratch/pptr422/probe.mjs` + `extra.mjs`): with the item editor open and
+text typed unsaved, Archive then Restore were clicked in the panel; the
+app's `refdes:rebuilt` event fired once per action; the textarea kept the
+typed text in both Chromium and Firefox, and a later Save still wrote it.
+The navis.md sentence stays as-is (relaying that observation, not a
+guarantee); this log records the provenance. I did not drive a browser.
+
 ## Status
 
 Complete. Added ~64 doc lines.

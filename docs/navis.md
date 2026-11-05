@@ -256,7 +256,7 @@ the current list.
   writable `refdes navis` command must mint the key first; then it is
   archivable.
 - An **orphan** (archived, marker deleted) keeps **Restore disabled**, with
-  the hint "Marker not found — hand-restore the marker, then it re-links by
+  the hint "Marker not found -- hand-restore the marker, then it re-links by
   key": the server refuses it (design §9), as the CLI does.
 
 A server started as `refdes --no-write serve` is read-only: its panel serves
