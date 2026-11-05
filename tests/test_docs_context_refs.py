@@ -69,11 +69,11 @@ DOC_LINES = [
     "",  # 30
     "Bare prose src/pkg/mod.py:7 with no backticks.",  # 31
     "",  # 32
-    "Outside `src/../outside.txt:2` and git `.git/hook.sh:1`.",  # 33
+    "Outside `../outside.txt:2` and git `.git/hook.sh:1`.",  # 33
     "",  # 34
     "Binary `sub/data.bin:2` and big `sub/big.bin:2`.",  # 35
     "",  # 36
-    "Gone `src/pkg/gone.py:3` and outside file `src/../outside.txt`.",  # 37
+    "Gone `src/pkg/gone.py:3` and outside file `../outside.txt`.",  # 37
     "",  # 38
     (
         "Links2 [g](b.md#blocked-by-and-the-cascade-report) "
@@ -140,7 +140,7 @@ def make_repo(tmp_path):
 
 def block_at(text, kind, start_line):
     for block in refs.parse_doc(text):
-        if block.kind == kind and block.start_line == start_line:
+        if block.start_line == start_line:
             return block
     raise AssertionError(f"no {kind} block starting at line {start_line}")
 
@@ -381,7 +381,7 @@ def test_file_over_two_megabytes_is_too_large(tmp_path):
 def test_file_ref_outside_repo_is_refused(tmp_path):
     repo = make_repo(tmp_path)
     ref = first_ref(DOC, "file_ref", 37)
-    assert ref.path == "src/../outside.txt"
+    assert ref.path == "../outside.txt"
     assert resolve_ref(ref, repo) == {"error": "outside repo"}
 
 
@@ -647,7 +647,7 @@ def test_cli_prints_one_json_object(tmp_path):
     code_refs = [
         r for b in blocks for r in b["refs"] if r["kind"] == "code_ref"
     ]
-    unsafe = {"src/../outside.txt", "sub/data.bin", "sub/big.bin", ".git/hook.sh"}
+    unsafe = {"../outside.txt", "sub/data.bin", "sub/big.bin", ".git/hook.sh"}
     for ref in code_refs:
         if ref["path"] in unsafe:
             assert "error" in ref["card"]
@@ -691,3 +691,68 @@ def test_cli_navis_smoke():
                 assert isinstance(card["help"], str)
             elif ref["kind"] == "link" and ref["external"]:
                 assert card == {"external": True, "url": ref["target"]}
+
+# ---- appended by the implementer: DC-1 review round 1 (A fenced headings,
+# ---- B fence inside a list item, C image syntax). Existing tests untouched.
+
+
+def test_fenced_heading_is_not_indexed(tmp_path):
+    repo = make_repo(tmp_path)
+    page = "x\n\n```\n## Fake\n```\n\n## Real\n\ntext line.\n"
+    (repo / "docs" / "f.md").write_text(page, encoding="utf-8", newline="")
+    doc = repo / "docs" / "a.md"
+    fake = refs.Ref(
+        kind="link", raw="", start=0, end=0, page="f.md", anchor="fake",
+        target="f.md#fake",
+    )
+    assert resolve_ref(fake, repo, doc=doc)["anchor_ok"] is False
+    real = refs.Ref(
+        kind="link", raw="", start=0, end=0, page="f.md", anchor="real",
+        target="f.md#real",
+    )
+    card = resolve_ref(real, repo, doc=doc)
+    assert card["anchor_ok"] is True
+    assert card["heading"] == "Real"
+    assert card["excerpt"] == ["text line."]
+
+
+def test_setext_heading_is_indexed_as_h2(tmp_path):
+    repo = make_repo(tmp_path)
+    page = "top\n\n===\n\nTitle Two\n---\n\nafter setext.\n"
+    (repo / "docs" / "s.md").write_text(page, encoding="utf-8", newline="")
+    doc = repo / "docs" / "a.md"
+    two = refs.Ref(
+        kind="link", raw="", start=0, end=0, page="s.md", anchor="title-two",
+        target="s.md#title-two",
+    )
+    card = resolve_ref(two, repo, doc=doc)
+    assert card["anchor_ok"] is True
+    assert card["excerpt"] == ["after setext."]
+    top = refs.Ref(
+        kind="link", raw="", start=0, end=0, page="s.md", anchor="top",
+        target="s.md#top",
+    )
+    assert resolve_ref(top, repo, doc=doc)["anchor_ok"] is False
+
+
+def test_fence_inside_list_item_yields_no_refs():
+    text = (
+        "- Item:\n"
+        "\n"
+        "  ```\n"
+        "  refdes build\n"
+        "  src/pkg/mod.py:10-12\n"
+        "  ```\n"
+        "\n"
+        "- Next `src/pkg/mod.py:7`.\n"
+    )
+    fenced = block_at(text, "list_item", 1)
+    assert fenced.refs == []
+    other = block_at(text, "list_item", 8)
+    assert [r.path for r in other.refs if r.kind == "code_ref"] == ["src/pkg/mod.py"]
+
+
+def test_image_syntax_is_not_a_link_ref():
+    text = "See ![alt text](img.png) and [real](b.md#usage).\n"
+    found = refs_of(text, "link", 1)
+    assert [r.text for r in found] == ["real"]

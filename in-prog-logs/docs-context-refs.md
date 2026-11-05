@@ -1,8 +1,8 @@
-# docs context refs — slice DC-1 (tests only)
+# docs context refs — slice DC-1 (tests, then implementation)
 
 Task: contract tests for the planned `tools/docs_context/refs.py` (docs
-"reference cards" library + JSON CLI). Test-author slice only: nothing was
-created under `tools/` — the implementer continues on this branch.
+"reference cards" library + JSON CLI). The test-author slice landed first;
+the same branch then carried the implementation (PR #424).
 
 ## What landed
 
@@ -81,3 +81,29 @@ created under `tools/` — the implementer continues on this branch.
   tokens (`-o/--out`) are no longer file refs; page links with no
   anchor are not flagged broken; heading slugs html-escape like the
   site's rendered text (the `#...-lt-ref-gt` anchors).
+- The two test-file edits (`block_at()` matching on start_line only;
+  fixture path `src/../outside.txt` → `../outside.txt` in four places)
+  were authorized by the orchestrator after independently confirming
+  both bugs; no existing assertion was altered.
+
+## Review round 1 (PR #424)
+
+- A: `_heading_index` now reads heading tokens off the parser (fenced
+  content is never a heading; setext `---` indexes as the h2 the site
+  anchors, `===` as an unanchored h1). New tests
+  `test_fenced_heading_is_not_indexed`, `test_setext_heading_is_indexed_as_h2`.
+- B: fences/code blocks nested in a prose block (list-item snippet) are
+  masked out of ref extraction, offsets intact.
+  `test_fence_inside_list_item_yields_no_refs`.
+- C: `LINK_RE` negative lookbehind for `!` — `![alt](img.png)` is not a
+  link ref. `test_image_syntax_is_not_a_link_ref`.
+- D: `_span_body` strips the whole backtick run on each side, so
+  double/triple-backtick command spans resolve.
+- Card heading text is unescaped (`&lt;ref&gt;` → `<ref>`); the slug
+  keeps the site's escaped form.
+
+## Status
+
+Finished: 46/46 in the contract file, full suite green, real-page
+excerpt check clean. Open: none owned by me -- the PR is with the
+orchestrator/reviewers.

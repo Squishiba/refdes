@@ -59,7 +59,7 @@ CONSOLE_LANGS = {"console", "sh", "bash", "shell", "shell-session", "zsh",
 METACHARS = set(';|&$<>()`{}*?!\'"\\\n\r')
 
 CODE_SPAN_RE = re.compile(r"`+[^`\n]*`+")
-LINK_RE = re.compile(r"\[([^\]\n]*)\]\(([^)\s]+)\)")
+LINK_RE = re.compile(r"(?<!!)\[([^\]\n]*)\]\(([^)\s]+)\)")
 _PATH_SEG = r"(?!-)[\w.+-]+"
 CODE_REF_RE = re.compile(
     rf"(?<![\w:/+\-.])({_PATH_SEG}(?:/{_PATH_SEG})+):(\d+)(?:-(\d+))?(?![\w+\-.])"
@@ -67,7 +67,6 @@ CODE_REF_RE = re.compile(
 FILE_PATH_RE = re.compile(rf"{_PATH_SEG}(?:/{_PATH_SEG})+")
 _VERB_RE = re.compile(r"[a-z][a-z0-9_-]*")
 _IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 
 _BLOCK_KINDS = {
     "heading_open": "heading",
@@ -109,6 +108,11 @@ def parse_doc(text: str) -> list[Block]:
     """Split a docs page into blocks with line ranges and their refs."""
     lines = text.split("\n")
     tokens = _build._markdown_parser().parse(text, {})
+    fenced = [
+        (token.map[0], token.map[1])
+        for token in tokens
+        if token.type in ("fence", "code_block") and token.map is not None
+    ]
     blocks: list[Block] = []
     in_list_item = 0
     for token in tokens:
@@ -136,9 +140,29 @@ def parse_doc(text: str) -> list[Block]:
             end_line=end,
             text="\n".join(lines[start:end]),
         )
-        block.refs = _refs_for(kind, block.text)
+        # A fence nested in a prose block (e.g. a snippet inside a list
+        # item) is code, not prose: masked out of the ref scan, offsets
+        # intact.
+        scan_text = (
+            block.text
+            if kind in ("code", "console")
+            else _mask_fenced(block.text, fenced, start, end)
+        )
+        block.refs = _refs_for(kind, scan_text)
         blocks.append(block)
     return blocks
+
+
+def _mask_fenced(text: str, fenced: list[tuple[int, int]], start: int, end: int) -> str:
+    """Blank fenced/code-block lines that fall inside [start, end)."""
+    if not fenced:
+        return text
+    out = text.split("\n")
+    for fence_start, fence_end in fenced:
+        if fence_start >= start and fence_end <= end:
+            for n in range(fence_start - start, fence_end - start):
+                out[n] = " " * len(out[n])
+    return "\n".join(out)
 
 
 def _refs_for(kind: str, text: str) -> list[Ref]:
@@ -150,12 +174,18 @@ def _refs_for(kind: str, text: str) -> list[Ref]:
 
 
 def _span_body(match: re.Match) -> tuple[str, int]:
-    """The backticked span's content and its offset within the block text."""
+    """The backticked span's content and its offset within the block text.
+
+    ``CODE_SPAN_RE`` consumes a run of backticks on each side (``refdes x``
+    in double backticks included); both runs are stripped, not one char.
+    """
     outer = match.group(0)
-    inner = outer[1:-1]
+    lead = len(outer) - len(outer.lstrip("`"))
+    trail = len(outer) - len(outer.rstrip("`"))
+    inner = outer[lead : len(outer) - trail]
     body = inner.strip()
-    lead = len(inner) - len(inner.lstrip())
-    return body, match.start() + (len(outer) - len(inner)) // 2 + lead
+    lead_ws = len(inner) - len(inner.lstrip())
+    return body, match.start() + lead + lead_ws
 
 
 def _verbs(tokens: list[str]) -> list[str]:
@@ -350,7 +380,8 @@ def _path_card(ref: Ref, repo_root: str) -> dict:
 
 def _plain_inline(text: str) -> str:
     text = re.sub(r"`([^`]*)`", r"\1", text)
-    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)  # tags strip; alt is an attribute
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"\*\*([^*]*)\*\*|\*([^*]*)\*", r"\1\2", text)
     text = re.sub(r"__([^_]+)__", r"\1", text)
     # The site slugifies the rendered HTML text, where < > & arrived as
@@ -359,32 +390,44 @@ def _plain_inline(text: str) -> str:
 
 
 def _heading_index(text: str) -> list[dict]:
-    """The h2/h3 headings with the ids the docs site gives them."""
+    """The h2/h3 headings with the ids the docs site gives them.
+
+    Headings come from the parser's own tokens, so fenced content is never
+    indexed as a heading (the site anchors rendered ``<h2>``/``<h3>`` only)
+    and setext headings land at the level the renderer gives them. All
+    heading levels are listed (slugless) because every heading bounds the
+    excerpt section of the anchored one.
+    """
     front = FRONTMATTER_RE.match(text)
     body = front.group(2) if front else text
     # Headings are numbered against the whole file so excerpts can read the
     # same list of lines the caller passed in.
     offset = text[: len(text) - len(body)].count("\n") if front else 0
+    tokens = _build._markdown_parser().parse(body, {})
     seen: dict[str, int] = {}
     headings: list[dict] = []
-    for number, line in enumerate(body.split("\n")):
-        match = _HEADING_RE.match(line)
-        if not match:
+    for index, token in enumerate(tokens):
+        if token.type != "heading_open" or token.map is None:
             continue
-        level = len(match.group(1))
-        title = _plain_inline(match.group(2))
-        headings.append(
-            {"line": number + offset, "level": level, "title": title, "slug": ""}
-        )
-        if level in (2, 3):
+        content = tokens[index + 1] if index + 1 < len(tokens) else None
+        title = _plain_inline(content.content if content and content.type == "inline" else "")
+        entry = {
+            "line": token.map[0] + offset,
+            "end": token.map[1] + offset,
+            "level": int(token.tag[1:]),
+            "title": title,
+            "slug": "",
+        }
+        if entry["level"] in (2, 3):
             base = _slugify(title)
             seen[base] = seen.get(base, 0) + 1
-            headings[-1]["slug"] = base if seen[base] == 1 else f"{base}-{seen[base]}"
+            entry["slug"] = base if seen[base] == 1 else f"{base}-{seen[base]}"
+        headings.append(entry)
     return headings
 
 
 def _section_excerpt(lines: list[str], headings: list[dict], index: int) -> list[str]:
-    start = headings[index]["line"] + 1
+    start = headings[index]["end"]  # setext headings span two source lines
     level = headings[index]["level"]
     end = len(lines)
     for later in headings[index + 1 :]:
@@ -434,7 +477,7 @@ def _link_card(ref: Ref, repo_root: str, doc_path: str | None) -> dict:
     for index, heading in enumerate(headings):
         if heading["slug"] == ref.anchor:
             card["anchor_ok"] = True
-            card["heading"] = heading["title"]
+            card["heading"] = html.unescape(heading["title"])
             card["excerpt"] = _section_excerpt(lines, headings, index)
             return card
     return card
