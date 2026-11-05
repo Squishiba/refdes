@@ -142,7 +142,7 @@ you press **Save**.
 
 ## Navis panel
 
-The editor has a read-only Navis panel: a fixed **Navis (N)** button at
+The editor has a Navis panel: a fixed **Navis (N)** button at
 the top-right of the window (N = the number of active markers) opens a
 list of the active Navis — short key, the source item's id as a link to
 that item in the editor, and the marker text — plus a **Show all (N)**
@@ -150,16 +150,30 @@ disclosure that also lists the archived ones. An archived row is tagged
 `[archived]` and shows the text as snapshotted when it was archived; a
 row whose marker was deleted is labelled `marker not found (file)`, and
 a row whose marker text has moved since is noted *marker text has
-changed since archived*. The panel refetches when the editor learns the
-project changed and each time you open it; Escape closes it. It has no
-archive or restore actions — those are the `refdes navis` CLI commands
-([markdown](markdown.md#navis-markers)). On 2026-11-04 this behaviour was
-verified in Chromium and Firefox against a live `refdes serve`: opening
-and closing, the row set (active, archived snapshot, orphan, changed),
-the item link navigating in the editor, Escape, literal rendering of
-marker text containing `<script>`/`&`/quotes, a CLI archive moving the
-row into Show-all on the next open, and the panel clearing the save bar
-at 1200×700 and fitting 375×640.
+changed since archived*. A keyed active row has an **Archive** pill; an
+archived keyed row in Show-all has **Restore**. An orphaned archived row
+keeps Restore disabled and points at the hand-restore path. A keyless
+row has no button. The actions use the same serve routes as the CLI,
+with the marker's full key in the request; the row's 6-character key is
+only the display.
+
+A successful action refreshes the panel in place and leaves it open —
+the page does not reload, so an unsaved item draft survives it. A failed
+request re-enables the clicked button and shows the server's message at
+the top of the panel. A `--no-write` server disables every remaining
+action for the rest of the editing session and keeps its refusal shown.
+The message clears on the next successful action and when the panel is
+reopened. The panel refetches when the editor learns the project changed
+and each time you open it; Escape closes it. The `refdes navis` CLI
+commands ([markdown](markdown.md#navis-markers)) remain available.
+
+On 2026-11-05 the new actions were verified in Chromium against a live
+`refdes serve`: the Archive button posted the full key, the refreshed
+panel showed the server's response, a hostile server error remained
+literal, and a read-only server showed its refusal with every action
+disabled. The Chromium run also checked the row set (active, archived,
+orphan, keyless) and the panel at 375×640. Node tests cover the full
+action rule set, including a refresh that lands after the 403.
 
 ## Font setting
 
