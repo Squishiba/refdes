@@ -150,6 +150,9 @@ brings it back, showing its current text). Archive and restore never
 touch your file: the marker stays exactly where you wrote it, and no
 body, hash, seal, or history content changes.
 
+The marker grammar above is the authoring side; for reading, archiving,
+restoring, and the site panel, see the [Navis guide](navis.md).
+
 ### Cross-references
 
 ```markdown

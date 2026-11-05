@@ -1,0 +1,290 @@
+# Navis — flying notes
+
+A **Navi** is one flying note: a short reminder you pin inside an item's
+body, collected across the whole project into one list you can read,
+archive, and restore. This guide is the user-facing tour — the marker
+grammar in full lives in
+[markdown — Navis markers](markdown.md#navis-markers), the flags in
+[CLI reference](cli-reference.md#refdes-navis-ls-all-show-archive-restore),
+and the panel in [output formats](output.md#the-navis-panel). Every
+command and response below was run on a throwaway project and is quoted as
+it printed.
+
+## What a Navi is
+
+One line in an item body:
+
+```markdown
+intro
+<!--navi: Model worst-case copper temperature.-->
+```
+
+It is an HTML comment, so the published page **consumes** it: the marker's
+bytes never appear in the rendered item text, its list-page summary, its
+tree entry, or a hover preview. Write it by hand, or press the **Navi**
+button in [the browser editor](browser-editor.md#refdes-buttons), which
+inserts one with `text` selected (and wraps a selection with it).
+
+You write it **keyless**. The next writable command mints an 11-character
+key into the marker, at its exact position in your file, and announces it
+on stderr:
+
+```console
+$ refdes navis ls
+navis: minted key 4jp6qy (4jp6qysbahb) into NOTE-001 (items/note-a.md)
+navis: minted key 3fm1dg (3fm1dgvv6p3) into NOTE-002 (items/note-b.md)
+(minted 2 key(s) and minted 2 navi key(s) while loading)
+2 Navis:
+  1. 4jp6qy Model worst-case copper temperature.  NOTE-001 (items/note-a.md:9)
+  2. 3fm1dg Recheck decoupling near U14.  NOTE-002 (items/note-b.md:9)
+```
+
+The file now reads `<!--navi:4jp6qysbahb Model worst-case copper
+temperature.-->`. The key is the Navi's stable name: it is how you select
+one, how the archive record is named, and how a hand-restored marker
+re-links. `--no-write` mints nothing and keeps markers keyless.
+
+A marker is inert — a plain comment, not a Navi — exactly where the page's
+Markdown renderer says it is literal text: inside a fenced code block, an
+indented code block, an inline code span, or an open HTML comment. The full
+rules (the strict grammar, the malformed-marker warnings, the line-spanning
+case, removal being structural) are in
+[markdown — Navis markers](markdown.md#navis-markers); this guide does not
+repeat them.
+
+## The CLI
+
+`refdes navis <verb>` reads the one project-wide list. The verbs:
+
+| Verb | Shows / does |
+|---|---|
+| `ls` | The **active** Navis — markers with no archive record — numbered, in file-then-line order |
+| `all` | The **Show-all**: the active rows, then the archived rows labelled `[archived]` |
+| `show <selector>` | One Navi in full: text, key, source, and (if archived) the record's snapshot |
+| `archive <selector>` | Write the Navi's gzip record; it leaves the active list |
+| `restore <selector>` | Delete the record; the marker (if present) is active again |
+
+Every verb resolves a **selector** the same way, in this order:
+
+1. the **full 11-character key** (matched first, so an all-digit key is a
+   selector, not an ordinal);
+2. a unique **6-to-10-character key prefix**;
+3. the **number** in the `all` listing (active first) — `ls` prints the
+   same numbers on its active rows.
+
+```console
+$ refdes navis show 4jp6qysbahb      # full key
+Navi: Model worst-case copper temperature.
+  key: 4jp6qysbahb
+  source: NOTE-001 (items/note-a.md:9)
+
+$ refdes navis show 4jp6qy           # unique 6-char prefix — same Navi
+Navi: Model worst-case copper temperature.
+  key: 4jp6qysbahb
+  source: NOTE-001 (items/note-a.md:9)
+
+$ refdes navis show 2                # the `all` number
+Navi: Recheck decoupling near U14.
+  key: 3fm1dgvv6p3
+  source: NOTE-002 (items/note-b.md:9)
+```
+
+An ordinal addresses the list *as it is now*, so archiving row 1 renumbers
+the rest; the key is the stable name.
+
+**`ls` vs `all`.** `ls` is the working list (active only); `all` is
+`ls` plus the archived rows, and with nothing archived it says so:
+
+```console
+$ refdes navis all
+2 Navis (active), 0 archived:
+  1. 4jp6qy Model worst-case copper temperature.  NOTE-001 (items/note-a.md:9)
+  2. 3fm1dg Recheck decoupling near U14.  NOTE-002 (items/note-b.md:9)
+  archived: none
+```
+
+**Exit codes** (observed on the runs shown here and in
+[Archiving](#archiving-and-restoring)):
+
+| Code | When |
+|---|---|
+| `0` | Success — including a project with no Navis (`ls`/`all` print `no Navis: …`) |
+| `1` | An items file failed to load (the listing still prints), or an archived Navi whose marker is gone (orphan) and you asked to `restore` it |
+| `2` | A refusal: the selector names nothing, an ambiguous prefix, `restore` of something not archived, a keyless marker, an editor transaction in flight, or `--no-write` on `archive`/`restore` |
+
+The refusals, each run:
+
+```console
+$ refdes navis show 99                     # names nothing
+no Navi '99': `refdes navis all` numbers them 1..2; a selector is a number, a full key, or a key prefix   # exit 2
+
+$ refdes navis show 4jp6qy                 # prefix matches two keys
+navi key prefix '4jp6qy' is ambiguous:
+  4jp6qysbahb  Model worst-case copper temperature.  (items/note-a.md:9)
+  4jp6qy00000  A colliding prefix reminder.  (items/note-c.md:9)                                            # exit 2
+
+$ refdes navis restore 3fm1dg              # this Navi is active
+navis restore: Navi 3fm1dg (3fm1dgvv6p3) is not archived -- nothing to restore                              # exit 2
+
+$ refdes navis archive 1                   # a keyless marker (mint refused on this body)
+navis archive: this Navi has no key -- keys are minted by the next writable command, and this
+marker's body is one refdes will not mint into (see the mint warnings above), so it cannot be archived     # exit 2
+
+$ refdes --no-write navis archive 4jp6qysbahb
+--no-write: archive writes the .refdes/navis/ archive store; refusing to run it under --no-write. Drop --no-write to run it for real.   # exit 2
+```
+
+A keyless marker cannot be archived because the record is named by its key;
+`show` flags it on its key line (`key: (keyless -- the next writable
+command mints a key)`). Mint refuses a body whose bytes it cannot locate
+losslessly (a folded `>` scalar, a plain scalar, a shared body), leaving
+that marker keyless. A marker in the editor-transaction window is refused
+by the whole command, as it is for every writable command.
+
+## Archiving and restoring
+
+Archiving a Navi writes **one gzip record** under `.refdes/navis/`, named
+by the Navi's key, and nothing else. The marker stays in your file — the
+item is **byte-identical**:
+
+```console
+$ sha256sum items/note-a.md
+3170ed419f3dd1dc7492ab8d004a8bf1a4fdbd8a4633dea29d2fe0d7380ca358  items/note-a.md
+$ refdes navis archive 4jp6qysbahb
+navis archive: archived Navi 4jp6qy (4jp6qysbahb): 'Model worst-case copper temperature.'  NOTE-001 (items/note-a.md:9)
+$ sha256sum items/note-a.md
+3170ed419f3dd1dc7492ab8d004a8bf1a4fdbd8a4633dea29d2fe0d7380ca358  items/note-a.md
+```
+
+The record is the **snapshot** — the text at the moment you archived, its
+source, keys, and a stamp (`archived_at`). `archive` writes only under
+`.refdes/navis/`; no body, content hash, seal, or history content changes.
+`show` on an archived Navi prints that snapshot:
+
+```console
+$ refdes navis show 4jp6qysbahb
+Navi: Model worst-case copper temperature.
+  key: 4jp6qysbahb
+  source: NOTE-001 (items/note-a.md:9)
+  archived: yes -- restore with `refdes navis restore`
+  archived: snapshot: Model worst-case copper temperature.  (at 2026-11-05T02:48:18Z)
+```
+
+**You edited the marker text afterwards.** The snapshot is the archive, not
+a live view — it is never re-stamped. The list shows the live text; `show`
+shows both and notes the drift, and a restore will show the *current* text:
+
+```console
+$ refdes navis show 4jp6qysbahb
+Navi: Model worst-case copper temp (rev 2).
+  …
+  archived: snapshot: Model worst-case copper temperature.  (at 2026-11-05T02:48:18Z)
+  archived: marker text has changed since archived -- the live text above is what a restore shows
+```
+
+**You deleted the marker.** The record now has no marker — an **orphan**.
+`all` labels it `marker not found`, and `restore` refuses (exit 1): writing
+a marker back would edit a body.
+
+```console
+$ refdes navis all
+1 Navis (active), 1 archived:
+  1. 4jp6qy Model worst-case copper temperature.  NOTE-001 (items/note-a.md:9)
+  2. 3fm1dg Recheck decoupling near U14.  marker not found (items/note-b.md:9) [archived]
+
+$ refdes navis restore 3fm1dgvv6p3
+navis.archived_orphan: Navi 3fm1dg (3fm1dgvv6p3) is archived at items/note-b.md:9 with marker
+not found -- restore refuses (there is no marker to reactivate; writing one would edit a body,
+design §9). Hand-restore the marker and the pair re-links by key.                                           # exit 1
+```
+
+Hand-restore the marker (`<!--navi:3fm1dgvv6p3 …-->`) and the two re-pair
+by key. A `restore` of a live archived Navi removes the record and the
+marker is active again showing its current text; `--no-write` refuses both
+verbs.
+
+## The published-site panel
+
+A project that has Navis gets a small, read-only **`Navis (n)`** pill fixed
+to the **top-right** of every page. It opens over the active list (each
+row: the 6-character key, a link to the source item, the text), with a
+**Show all** disclosure adding the archived rows. The restore control is
+rendered **disabled** and names the command that acts — the site is
+read-only:
+
+```html
+<button type="button" class="refdes-navis-restore" disabled
+        title="the published site is read-only — run: refdes navis restore 4jp6qy">Restore</button>
+```
+
+A project with **no** Navis publishes no panel, no `navis.css` asset, and
+no `<link>` — byte-identical to a project predating Navis. The panel's
+placement, its data riding the page with no fetch, its no-JavaScript
+`<details>`, and its print-hidden behaviour are documented in
+[output formats — The Navis panel](output.md#the-navis-panel).
+
+## The serve API
+
+`refdes serve` exposes the same list to tool builders over its loopback,
+token-gated API (see [CLI reference — `refdes serve`](cli-reference.md#refdes-serve)
+for the token). Every request carries the launch token in the
+**`X-Refdes-Token`** header; a `POST` additionally needs a matching
+`Origin`. All responses below were captured from a `refdes serve --port
+8780` on a project with two Navis.
+
+**Read the list.**
+
+```console
+$ curl -H "X-Refdes-Token: <token>" http://127.0.0.1:8780/api/navis
+{
+  "navis": [
+    {"key": "4jp6qysbahb", "key6": "4jp6qy",
+     "text": "Model worst-case copper temperature.",
+     "item": "NOTE-001", "href": "note-001.html",
+     "file": "items/note-a.md", "line": 9,
+     "archived": false, "changed": false, "orphan": false},
+    { "key": "3fm1dgvv6p3", "key6": "3fm1dg", "…": "…" }
+  ],
+  "counts": {"active": 2, "archived": 0}
+}
+```
+
+Each row carries the full `key` and `key6`, the `text` (a live row's text;
+an archived row's snapshot), the `item` id and its `href` (both `null` for
+an orphan), the `file`/`line`, and the `archived` / `changed` / `orphan`
+flags. `counts` splits active from archived. A request without the token
+is `403`.
+
+**Write one.** `POST /api/navis/archive` and `/api/navis/restore` take a
+JSON body `{"navi": <selector>}` — the selector is the full key, a unique
+prefix, its `all` ordinal (a JSON string or number), and resolves exactly
+as the CLI's does. A successful write rebuilds the preview before the
+response lands.
+
+| Status | `kind` | Meaning (each run) |
+|---|---|---|
+| `200` | `ok` | Performed (`changed: true`) or already in that state (`changed: false`); body adds `verb` and `key` |
+| `400` | `bad_request` | The body is not a JSON object, `navi` is missing, `null`, blank, or not a string/number |
+| `403` | `refused` | The server runs `--no-write` — checked first, so even a bad body gets the refusal |
+| `404` | `not_found` | The selector names no Navi |
+| `409` | `ambiguous` | A prefix matches several; body adds `candidates` (`key`, `text`, `file`, `line`) |
+| `409` | `conflict` | A state refusal; body adds `reason` — `not_archived`, `keyless`, `orphan`, `journal_pending` |
+| `500` | `error` | A store write failed; body adds `error` |
+
+```console
+$ curl -X POST -H "X-Refdes-Token: <token>" -H "Origin: http://127.0.0.1:8780" \
+       -H "Content-Type: application/json" -d '{"navi": "4jp6qysbahb"}' \
+       http://127.0.0.1:8780/api/navis/archive
+{"kind":"ok","verb":"archive","key":"4jp6qysbahb","changed":true}          # 200
+
+$ curl -X POST -H "X-Refdes-Token: <token>" -H "Origin: http://127.0.0.1:8780" \
+       -H "Content-Type: application/json" -d '{"navi": "4jp6qy"}' \
+       http://127.0.0.1:8780/api/navis/archive
+{"kind":"ambiguous","error":"navi key prefix '4jp6qy' is ambiguous: name one of its candidates",
+ "candidates":[{"key":"4jp6qysbahb","…":"…"},{"key":"4jp6qy00000","…":"…"}]}   # 409
+
+$ curl -X POST -H "X-Refdes-Token: <token>" -H "Origin: http://127.0.0.1:8780" \
+       -H "Content-Type: application/json" -d '{"navi": "3fm1dgvv6p3"}' \
+       http://127.0.0.1:8780/api/navis/restore
+{"kind":"conflict","reason":"not_archived","error":"this Navi is not archived -- nothing to restore"}  # 409
+```
