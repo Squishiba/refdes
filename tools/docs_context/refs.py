@@ -484,6 +484,27 @@ def _link_card(ref: Ref, repo_root: str, doc_path: str | None) -> dict:
 
 
 _KNOWN_CACHE: dict[tuple[str, ...], bool] = {}
+_HELP_CACHE: dict[tuple[str, tuple[str, ...], tuple[int, int] | None], str] = {}
+
+
+def clear_caches() -> None:
+    """Empty the module-level caches (tests; a server process keeps them warm)."""
+    _KNOWN_CACHE.clear()
+    _HELP_CACHE.clear()
+
+
+def _cli_source_signature(repo_root: str) -> tuple[int, int] | None:
+    """(mtime_ns, size) of the CLI source, or None when it is not there.
+
+    The help cache keys on this so editing ``src/refdes/cli.py`` invalidates
+    the cached ``--help`` cards on its own. A repo without that file (a test
+    fixture) gets None, which means: run the help every time, cache nothing.
+    """
+    try:
+        st = os.stat(os.path.join(repo_root, "src", "refdes", "cli.py"))
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
 
 
 def _verb_path_is_leaf(verbs: tuple[str, ...]) -> bool:
@@ -499,7 +520,9 @@ def _verb_path_is_leaf(verbs: tuple[str, ...]) -> bool:
     return "{" not in usage  # a group "{a,b,...}" in usage means subcommands
 
 
-def _help_subprocess(verbs: list[str], repo_root: str) -> str:
+def _help_subprocess(verbs: list[str], repo_root: str) -> tuple[str, bool]:
+    """(help text, ok). ok is False on spawn failure, timeout, or exit != 0;
+    only an ok run is cacheable, and a failing card is never memoized."""
     env = dict(os.environ)
     env["PYTHONPATH"] = os.path.join(repo_root, "src")
     env["COLUMNS"] = "100"
@@ -525,10 +548,10 @@ def _help_subprocess(verbs: list[str], repo_root: str) -> str:
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        return ""
+        return "", False
     if result.returncode != 0:
-        return ""
-    return (result.stdout or "")[:HELP_CHARS]
+        return "", False
+    return (result.stdout or "")[:HELP_CHARS], True
 
 
 def _command_card(ref: Ref, repo_root: str) -> dict:
@@ -543,7 +566,21 @@ def _command_card(ref: Ref, repo_root: str) -> dict:
     if not _KNOWN_CACHE[verbs]:
         return card
     card["known"] = True
-    card["help"] = _help_subprocess(list(verbs), repo_root)
+    # --help spawns a subprocess per command ref (~20 on a page like
+    # navis.md, ~12 s per resolve). An edited page re-resolves every ref,
+    # so memoize the help per (repo, verb path, CLI source signature):
+    # an edit that touches no command costs zero spawns, and editing the
+    # CLI source invalidates every entry. Signature None (no cli.py) = no
+    # caching at all.
+    signature = _cli_source_signature(repo_root)
+    key = (os.path.realpath(repo_root), verbs, signature)
+    if signature is not None and key in _HELP_CACHE:
+        card["help"] = _HELP_CACHE[key]
+        return card
+    help_text, ok = _help_subprocess(list(verbs), repo_root)
+    if ok and signature is not None:
+        _HELP_CACHE[key] = help_text
+    card["help"] = help_text
     return card
 
 

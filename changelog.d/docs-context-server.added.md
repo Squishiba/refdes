@@ -8,4 +8,8 @@
   broken (missing file, cited line past the file end, missing symbols, broken
   anchor, unknown command). Polls the file's mtime and re-renders in place on
   edits; stdlib only, loopback only, GET/HEAD (every other method is a 405
-  JSON), writes nothing.
+  JSON), writes nothing. A page edit that touches no command now re-resolves
+  in milliseconds: the per-command `--help` cards are memoized per repository
+  and verb path, keyed on the CLI source's (mtime, size), so editing
+  `src/refdes/cli.py` — the help those cards quote — invalidates them and the
+  next resolve re-runs the (list-argv, shell-free) spawns.

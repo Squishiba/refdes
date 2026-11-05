@@ -29,6 +29,14 @@ from docs_context import refs
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "docs_context" / "refs.py"
 
+
+@pytest.fixture(autouse=True)
+def _fresh_ref_caches():
+    """refs' caches are process-wide; start every test from empty ones."""
+    refs.clear_caches()
+    yield
+
+
 DOC_LINES = [
     "# Title",  # 1
     "",  # 2
@@ -756,3 +764,107 @@ def test_image_syntax_is_not_a_link_ref():
     text = "See ![alt text](img.png) and [real](b.md#usage).\n"
     found = refs_of(text, "link", 1)
     assert [r.text for r in found] == ["real"]
+
+
+# ---- appended by the implementer: DC-2b --help card memoization.
+# ---- Existing tests untouched.
+
+
+def cache_repo(tmp_path):
+    """make_repo plus the help cache's signature file, src/refdes/cli.py."""
+    repo = make_repo(tmp_path)
+    (repo / "src" / "refdes").mkdir(parents=True)
+    (repo / "src" / "refdes" / "cli.py").write_text(
+        "def main(argv):\n    raise SystemExit(0)\n", encoding="utf-8", newline=""
+    )
+    return repo
+
+
+def test_help_card_cached_across_resolves(tmp_path, monkeypatch):
+    calls = _fake_help(monkeypatch, "usage: refdes navis archive [-h]\n")
+    repo = cache_repo(tmp_path)
+    doc = "Run `refdes navis archive 4jp6qy` now.\n"
+    ref = first_ref(doc, "command", 1)
+    card1 = resolve_ref(ref, repo)
+    card2 = resolve_ref(ref, repo)
+    assert card1["known"] is True and card1["help"].startswith("usage:")
+    assert card2 == card1
+    assert len(calls) == 1
+
+
+def test_help_cache_is_per_verb_path(tmp_path, monkeypatch):
+    calls = _fake_help(monkeypatch, "usage: refdes\n")
+    repo = cache_repo(tmp_path)
+    doc = "Run `refdes navis archive 4jp6qy` now.\n\nList with `refdes navis ls`.\n"
+    archive = first_ref(doc, "command", 1)
+    ls = first_ref(doc, "command", 3)
+    resolve_ref(archive, repo)
+    resolve_ref(archive, repo)  # cache hit: no second spawn for the same verbs
+    resolve_ref(ls, repo)  # a different verb path gets its own spawn
+    assert len(calls) == 2
+    verb_paths = [tuple(argv[3:-1]) for (argv, _kw) in calls]
+    assert verb_paths == [("navis", "archive"), ("navis", "ls")]
+
+
+def test_help_cache_invalidated_by_cli_source_change(tmp_path, monkeypatch):
+    calls = _fake_help(monkeypatch, "usage: refdes navis archive [-h]\n")
+    repo = cache_repo(tmp_path)
+    doc = "Run `refdes navis archive 4jp6qy` now.\n"
+    ref = first_ref(doc, "command", 1)
+    resolve_ref(ref, repo)
+    resolve_ref(ref, repo)
+    assert len(calls) == 1
+    cli = repo / "src" / "refdes" / "cli.py"
+    cli.write_text(
+        "def main(argv):\n    raise SystemExit(0)\n# touched\n",
+        encoding="utf-8",
+        newline="",
+    )
+    os.utime(cli, ns=(1234567890000000000, 1234567890000000000))
+    card = resolve_ref(ref, repo)
+    assert card["known"] is True
+    assert len(calls) == 2
+
+
+def test_help_cache_skips_failed_and_timeout_runs(tmp_path, monkeypatch):
+    calls = []
+    mode = {"state": "fail"}
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if mode["state"] == "timeout":
+            raise subprocess.TimeoutExpired(argv, 10)
+        if mode["state"] == "fail":
+            return subprocess.CompletedProcess(argv, 2, stdout="", stderr="boom")
+        return subprocess.CompletedProcess(argv, 0, stdout="usage: ok\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("Popen used"))
+    repo = cache_repo(tmp_path)
+    doc = "Run `refdes navis archive 4jp6qy` now.\n"
+    ref = first_ref(doc, "command", 1)
+    mode["state"] = "timeout"
+    assert resolve_ref(ref, repo)["help"] == ""
+    mode["state"] = "fail"
+    assert resolve_ref(ref, repo)["help"] == ""
+    assert len(calls) == 2  # each failure spawns; neither is cached
+    mode["state"] = "ok"
+    assert resolve_ref(ref, repo)["help"] == "usage: ok\n"
+    assert resolve_ref(ref, repo)["help"] == "usage: ok\n"
+    assert len(calls) == 3  # only the success is cached
+
+
+def test_clear_caches_empties_both_caches(tmp_path, monkeypatch):
+    calls = _fake_help(monkeypatch, "usage: refdes navis archive [-h]\n")
+    repo = cache_repo(tmp_path)
+    doc = "Run `refdes navis archive 4jp6qy` now.\n\nDrop with `refdes rm`.\n"
+    archive = first_ref(doc, "command", 1)
+    resolve_ref(archive, repo)
+    resolve_ref(first_ref(doc, "command", 3), repo)  # fills _KNOWN_CACHE (unknown)
+    assert refs._KNOWN_CACHE
+    assert refs._HELP_CACHE
+    refs.clear_caches()
+    assert refs._KNOWN_CACHE == {}
+    assert refs._HELP_CACHE == {}
+    resolve_ref(archive, repo)
+    assert len(calls) == 2  # cleared: the help spawns again
