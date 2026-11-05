@@ -24,8 +24,6 @@ from .. import navis as navis_mod
 from .. import navis_ops
 from .edit import write_lock_for
 
-VERBS = frozenset({"archive", "restore"})
-
 _CONFLICT_MESSAGES = {
     "keyless": (
         "this Navi has no key -- keys are minted by the next writable "
@@ -137,8 +135,18 @@ def _render(verb: str, selector: str, total: int, result) -> tuple[int, dict]:
     if kind == "error":
         return 500, {"kind": "error", "error": result.detail}
     # The 409 conflicts: keyless, not_archived, orphan, journal_pending.
-    return 409, {
-        "kind": "conflict",
-        "reason": kind,
-        "error": result.detail if kind == "journal_pending" else _CONFLICT_MESSAGES[kind],
+    # journal_pending carries the store's own refusal text in `detail`.
+    if kind in _CONFLICT_MESSAGES or kind == "journal_pending":
+        return 409, {
+            "kind": "conflict",
+            "reason": kind,
+            "error": result.detail if kind == "journal_pending" else _CONFLICT_MESSAGES[kind],
+        }
+    # A kind this renderer has never seen (a future `navis_ops` addition):
+    # a JSON 500 naming it, never a KeyError that dies in the handler thread
+    # and drops the connection.
+    return 500, {
+        "kind": "error",
+        "error": f"navis {verb}: navis_ops reported an outcome kind this "
+        f"server does not know how to render ({kind!r})",
     }

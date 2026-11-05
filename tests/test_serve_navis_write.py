@@ -1,18 +1,20 @@
 """Contract tests for `POST /api/navis/archive` and `POST /api/navis/restore`
-(design in-prog-logs/navis-design-20261025.md §6, §7.3, §9, §11, §12; parity
-with the CLI verbs -- cli.py `_navis_write_verb` / `_navi_select`).
+(design in-prog-logs/navis-design-20261025.md §6, §7.3, §9, §11, and §12's
+journal refusal; parity with the CLI verbs -- cli.py `_navis_write_verb`,
+which renders the same `navis_ops.apply` Outcome).
 
-Black-box over HTTP: the tests import no implementation module (the planned
-`navis_ops` extraction included). They seed state with the shipped CLI and
-the public store reader (`navis_archive.load_records`), and assert the JSON
-contract the routes must answer with. `navis_archive.archive_record` /
-`restore_record` are patched only on the OSError test, where the module
-attribute IS the specified patch target.
+Black-box over HTTP: the tests import no module under test -- nothing from
+`serve.navis_write`, and `navis_ops` only as the monkeypatch seam of the
+unknown-outcome-kind test. They import the fixture machinery (`EditorApp`,
+the shipped `cli`, and the public store reader `navis_archive.load_records`)
+to seed state and assert the JSON contract the routes must answer with.
+`navis_archive.archive_record` / `restore_record` are patched only on the
+OSError tests, where the module attribute IS the specified patch target.
 
-Selector rules mirrored from `_navi_select` (cli.py:2931): the full 11-char
-key, a unique 6..10-char key prefix (ambiguous names its candidates), then
-the Show-all ordinal -- the list `navis.projection` numbers (active first,
-then archived, orphans last).
+Selector rules mirrored from `navis_ops.select` (which cli.py's
+`_navi_select` delegates to): the full 11-char key, a unique 6..10-char key
+prefix (ambiguous names its candidates), then the Show-all ordinal -- the
+list `navis.projection` numbers (active first, then archived, orphans last).
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from conftest import write_project_config
 from serve_support import Client, snapshot_tree
 
 from refdes import cli as cli_mod
-from refdes import keys, navis_archive
+from refdes import keys, navis_archive, navis_ops
 from refdes.serve.server import EditorApp
 
 ARCHIVE = "/api/navis/archive"
@@ -214,6 +216,31 @@ def test_archiving_an_already_archived_navi_changes_no_bytes(served):
     assert snapshot_tree(root) == before_tree
 
 
+def test_restore_of_an_edited_archived_navi_returns_the_live_text(served):
+    """§9 row 4: the live marker text changed under the archive record.
+    Restore is the record's removal -- it succeeds (200, changed true) and
+    the panel shows the LIVE edited text as an active row (the §9 note says
+    the snapshot is never re-stamped; the live marker wins)."""
+    _app, client, root = served
+    key = _navi_keys(root)[0]
+    status, payload = _post(client, "archive", key)
+    assert status == 200, payload
+    source = root / "items" / "note-a.md"
+    text = source.read_text(encoding="utf-8")
+    assert ALPHA_TEXT in text
+    edited = ALPHA_TEXT + " (edited)"
+    source.write_text(text.replace(ALPHA_TEXT, edited), encoding="utf-8", newline="")
+    status, payload = _post(client, "restore", key)
+    assert status == 200, payload
+    _ok(payload, "restore", key, True)
+    status, panel = client.api_get("/api/navis")
+    assert status == 200, panel
+    rows = [r for r in panel["navis"] if r["key"] == key]
+    assert len(rows) == 1
+    assert rows[0]["archived"] is False
+    assert rows[0]["text"] == edited
+
+
 def test_restore_round_trip_returns_the_store_to_its_original_state(served):
     """archive -> restore leaves the whole project tree byte-identical to
     before (the §7.3 invariant, round-tripped)."""
@@ -397,10 +424,14 @@ def test_an_ambiguous_prefix_names_its_candidates(serve, verb):
     status, payload = _post(client, verb, AMBIGUOUS_PREFIX)
     assert status == 409, payload
     assert payload["kind"] == "ambiguous"
-    candidates = sorted(payload["candidates"], key=lambda c: c["key"])
-    assert [c["key"] for c in candidates] == [KEY_A, KEY_B]
-    assert [c["text"] for c in candidates] == [ALPHA_TEXT, BETA_TEXT]
-    for cand, name in zip(candidates, ("amb-a", "amb-b")):
+    # The contract is the candidate SET, keyed by key -- the spec promises
+    # no payload order, so nothing here may assume one.
+    by_key = {c["key"]: c for c in payload["candidates"]}
+    assert set(by_key) == {KEY_A, KEY_B}
+    expected = {KEY_A: (ALPHA_TEXT, "amb-a"), KEY_B: (BETA_TEXT, "amb-b")}
+    for key, (text, name) in expected.items():
+        cand = by_key[key]
+        assert cand["text"] == text
         assert name in cand["file"].replace("\\", "/")
         assert isinstance(cand["line"], int) and cand["line"] > 0
     assert snapshot_tree(root) == before
@@ -424,8 +455,9 @@ def test_a_selector_that_names_nothing_is_not_found(served, selector):
 
 def test_a_giant_digit_selector_never_500s(served):
     """A 4300-digit string is out of range by length alone; int() of it
-    raises in CPython, and the CLI's guard mirrors that -- the route must
-    answer 404/400, never a traceback (cli.py:2957-2961)."""
+    raises in CPython, and the guard in `navis_ops.select` (the length-bound
+    digit branch) mirrors that -- the route must answer 404/400, never a
+    traceback."""
     _app, client, _root = served
     status, payload = _post(client, "archive", "1" * 4300)
     assert status in (400, 404), status
@@ -545,10 +577,10 @@ def _boom(*_args, **_kwargs):
 
 
 def test_a_store_write_failure_is_a_500_json_error(served, monkeypatch):
-    """Patch target: `refdes.navis_archive.archive_record` -- the CLI calls
-    it as a module attribute (cli.py:3028) and the serve handlers will too.
-    If the implementation calls through `navis_ops`, the implementer moves
-    the patch target there (noted in the handoff report)."""
+    """Patch target: `refdes.navis_archive.archive_record` -- `navis_ops.apply`
+    calls it as a module attribute (`navis_archive_mod.archive_record`) and
+    the serve handlers reach it through the same call, so patching the module
+    attribute is the specified seam."""
     _app, client, root = served
     monkeypatch.setattr(navis_archive, "archive_record", _boom)
     before = snapshot_tree(root)
@@ -577,6 +609,24 @@ def test_a_store_remove_failure_is_a_500_json_error(tmp_path, monkeypatch):
         assert (tmp_path / ".refdes" / "navis" / f"{key}.yaml.gz").exists()
     finally:
         app.stop()
+
+
+def test_an_unknown_outcome_kind_is_a_500_json_error(served, monkeypatch):
+    """The handler is a renderer: a kind it has never seen (a future
+    `navis_ops` addition) must answer 500 JSON naming the kind, never
+    raise in the handler thread and drop the connection."""
+    _app, client, root = served
+
+    def _fake_apply(*_args, **_kwargs):
+        return navis_ops.Outcome("brand_new_kind")
+
+    monkeypatch.setattr(navis_ops, "apply", _fake_apply)
+    before = snapshot_tree(root)
+    status, payload = _post(client, "archive", "1")
+    assert status == 500, payload
+    assert payload["kind"] == "error"
+    assert "brand_new_kind" in payload["error"]
+    assert snapshot_tree(root) == before
 
 
 # ---------------------------------------------------------------------------

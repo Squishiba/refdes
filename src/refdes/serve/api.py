@@ -94,8 +94,6 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
         "/api/images",
         "/api/items/create",
         "/api/assets",
-        "/api/navis/archive",
-        "/api/navis/restore",
     ) or path.startswith("/api/item/"):
         return 405, {"error": "method not allowed"}
     return 404, {"error": "not found"}
