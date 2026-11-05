@@ -146,5 +146,3 @@ untouched). Full suite once before pushing: 5877 passed, 2 skipped, 1
 failed (the HAND_KEY bug, fixed as above). CI expectation after the two
 authorized test fixes: all 4 checks green (pr-size, ubuntu/windows on
 3.11, py3.13).
-
-
