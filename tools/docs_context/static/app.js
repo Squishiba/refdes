@@ -152,7 +152,10 @@ function render() {
     if (flagged > 0) li.appendChild(el("span", "flagcount", String(flagged)));
     li.appendChild(blockLabel(block));
     if (block.start_line === state.selected) li.setAttribute("aria-current", "true");
-    li.addEventListener("click", () => select(block.start_line));
+    li.addEventListener("click", () => {
+      restoreFocus = true;
+      select(block.start_line);
+    });
     blocksList.appendChild(li);
   }
   countsLine.textContent =
@@ -174,6 +177,11 @@ function render() {
   blocksList.scrollTop = leftScroll;
   cardsPane.scrollTop = rightScroll;
   window.scrollTo(0, pageScroll);
+  if (restoreFocus) {
+    restoreFocus = false;
+    const focused = blocksList.querySelector('.block[aria-current="true"]');
+    if (focused) focused.focus();
+  }
 }
 
 function select(startLine) {
@@ -235,7 +243,11 @@ async function tick() {
   try {
     const response = await fetch("/api/mtime");
     const data = await response.json();
-    if (state.mtime !== null && data.mtime !== state.mtime) await refreshDoc();
+    if (state.doc === null) {
+      await refreshDoc(); // startup fetch failed; a live mtime poll proves recovery
+    } else if (data.mtime !== state.mtime) {
+      await refreshDoc();
+    }
   } catch (err) {
     /* the page is polling its own server; a blip is fine, the next tick retries */
   } finally {
@@ -243,14 +255,19 @@ async function tick() {
   }
 }
 
+let restoreFocus = false;
+
 document.addEventListener("keydown", (event) => {
   const tag = event.target ? event.target.tagName : "";
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key === "j" || event.key === "ArrowDown") {
     event.preventDefault();
+    restoreFocus = true;
     moveSelection(1);
   } else if (event.key === "k" || event.key === "ArrowUp") {
     event.preventDefault();
+    restoreFocus = true;
     moveSelection(-1);
   }
 });

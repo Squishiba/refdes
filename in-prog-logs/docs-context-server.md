@@ -109,34 +109,32 @@ independently confirmed it and authorized exactly that edit, applied as
   page-relative link (`docs/navis.md#...` from .scratch/browser/) -- correct
   behavior; the harness doc, not the product, was fixed.
 
-Review round 1 (summarized): CI's 23 reds confirmed as the helper bug
-(authorized fix applied); three low findings fixed -- dark-mode
-`--flag-fg` on `.flagcount` (now 7.93:1 on the wire, measured in-browser
-in Chromium and Firefox), a compact `.cards-title` rule, and
-`window.scrollY` save/restore in `render()` so the stacked <=760px layout
-(page-scrolled) keeps position across a poll re-render -- verified in the
-375x640 live-edit case in both browsers (y 155->155, 153->153).
+Review rounds 1-2 (summarized): round 1 -- dark-mode `--flag-fg` on
+`.flagcount` (7.93:1 measured in-browser), `.cards-title` rule,
+`window.scrollY` kept across a poll re-render (verified at 375x640 in
+both browsers); windows CI caught the served-static CRLF byte-identity
+break (core.autocrlf) -- `_static` normalizes to LF. The second windows
+red (serve_cli token-file "Access is denied") was a temp-dir flake, not
+this diff (previous head passed; main green). Round 2 -- every method
+word answers the 405 JSON path (`__getattr__` on `do_*`), Host
+allowlist case-folds the name, 405/403 drain a Content-Length body
+(keep-alive desync proven by appended tests, red first); app.js
+startup failure shows a header line and keeps polling, `tick()` has a
+reentrancy guard; doc cache capped at 32, oldest evicted.
 
-Round-1 CI follow-up: windows ran red on the byte-identity of served
-static files -- its checkout (core.autocrlf) has CRLF copies where the
-tests read with universal newlines; `_static` now normalizes CRLF to LF
-on the wire. The second windows failure (test_serve_cli token-file
-"Access is denied") is a temp-dir flake in the serve CLI's own test,
-unrelated to this diff (it passed on the previous head of this PR;
-main is green).
+Review round 3 (summarized, final): tick() refetches the doc when
+state.doc is null and the mtime poll succeeds (startup failure now
+recovers -- proven in Chromium and Firefox: one 500 on /api/doc, visible
+error line, auto-reload to 58 blocks, no manual reload); chunked /
+over-cap bodies get `Connection: close`; keyboard handler ignores
+ctrl/meta/alt; repo discovery accepts `.git` as a FILE (git worktrees)
+-- appended test, red first; render() re-focuses the selected li only
+after keyboard/click navigation, not after a poll; dead `raw_name`
+param removed. 35/35 server tests, 93/93 with refs+lint, ruff clean.
 
-Review round 2 (summarized): every method word now answers through the 405
-JSON path (`__getattr__` on `do_*`; appended TRACE/CONNECT/FOO test shown
-red then green); Host allowlist is case-insensitive on the name (appended
-test); 405/403 drain a `Content-Length` body, capped at 1 MiB with the
-connection closed past it (appended keep-alive test -- pre-fix the drained
-bytes desynced into a 501); app.js startup failure shows a visible header
-line via textContent and keeps polling, and `tick()` has a reentrancy
-guard; the doc cache is capped at 32 entries, oldest evicted. Server file
-34/34, 92/92 with refs+lint, ruff clean; both browsers pass every case
-including the startup-failure case (page served with `/api/doc` intercepted
-to a 500: header reads "cannot reach the doc server: ... (still
-retrying)"; normal load after works).
+Known limitations (by review decision): the doc cache is capped at 32
+pages but not by bytes; a deleted doc keeps serving from the cache
+(/api/mtime errors while it is gone; the page keeps the last render).
 
-Status: done. Slice DC-2-impl complete, test file green as written (92/92
-with refs+lint), browsers re-passed for the changed cases; PR #425 open.
+Status: done. Slice DC-2-impl complete; test file green as written (93/93
+with refs+lint); all browser cases pass in Chromium and Firefox. PR #425.

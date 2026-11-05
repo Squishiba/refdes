@@ -880,3 +880,21 @@ def test_405_on_a_request_with_a_body_keeps_the_connection_in_sync(tmp_path):
             assert isinstance(body["mtime"], float), body
         finally:
             conn.close()
+
+
+def test_repo_discovery_accepts_a_dotgit_file_like_a_worktree(tmp_path):
+    repo = tmp_path / "linked-checkout"
+    (repo / "docs").mkdir(parents=True)
+    doc = repo / "docs" / "a.md"
+    doc.write_text("# A\n\nBody text.\n", encoding="utf-8", newline="\n")
+    (repo / ".git").write_text(
+        "gitdir: /nowhere/.git/worktrees/linked-checkout\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    with serve_cli(doc, repo=tmp_path) as (_proc, port):
+        # docs/a.md exists only under linked-checkout, the directory found
+        # by walking up from the doc: the .git FILE accepted the discovery.
+        status, body = get_at(port, "/api/mtime")
+        assert status == 200, body
+        assert json.loads(body)["mtime"] == os.stat(doc).st_mtime

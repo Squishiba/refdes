@@ -151,6 +151,8 @@ class DocsContextHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Cache-Control", "no-store")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -158,7 +160,7 @@ class DocsContextHandler(BaseHTTPRequestHandler):
     def _json(self, status: int, payload: dict) -> None:
         self._respond(status, "application/json", json.dumps(payload).encode("utf-8"))
 
-    def _static(self, name: str, raw_name: str) -> None:
+    def _static(self, name: str) -> None:
         path = STATIC_DIR / name
         try:
             # LF on the wire: the repo's static files are LF, and a Windows
@@ -177,13 +179,13 @@ class DocsContextHandler(BaseHTTPRequestHandler):
         path, _, query = self.path.partition("?")
         qs = parse_qs(query, keep_blank_values=True)
         if path == "/":
-            self._static("index.html", "index.html")
+            self._static("index.html")
         elif path.startswith("/static/"):
             name = path[len("/static/"):]
             if STATIC_NAME_RE.fullmatch(name) is None:
                 self._json(404, {"error": "not found"})
             else:
-                self._static(name, name)
+                self._static(name)
         elif path == "/api/doc":
             raw = qs.get("path", [None])[0]
             if raw is None:
@@ -220,8 +222,11 @@ class DocsContextHandler(BaseHTTPRequestHandler):
     def _drain_body(self) -> None:
         """Consume a request body so a keep-alive connection cannot desync:
         the 405/403 response must not leave the body to be parsed as the
-        next request. An oversized body gets the response plus a close
-        instead of being buffered."""
+        next request. A chunked body (framed, not drainable by length) and
+        a Content-Length past the cap get the response plus a close."""
+        if self.headers.get("Transfer-Encoding") is not None:
+            self.close_connection = True
+            return
         raw = self.headers.get("Content-Length")
         if raw is None:
             return
@@ -284,7 +289,10 @@ def make_server(doc_path: str, repo_root: str, port: int = 0):
 def find_repo_upward(doc_path: Path) -> Path:
     start = doc_path.parent
     for directory in (start, *start.parents):
-        if (directory / ".git").is_dir() or (directory / "refdes-project.yaml").is_file():
+        if (
+            (directory / ".git").exists()  # a worktree checkout has .git as a FILE
+            or (directory / "refdes-project.yaml").is_file()
+        ):
             return directory
     return start
 
