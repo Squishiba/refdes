@@ -139,8 +139,21 @@ talks to. Verified surface:
   counts, merged with the archive store at request time),
   `GET /api/item/<ref>`, `POST /api/item/<ref>/edit`,
   `GET /api/create/schema`, `GET /api/create/preview`, `POST /api/items/create`,
-  `GET /api/images?item=`, `POST /api/assets`, and the three
+  `GET /api/images?item=`, `POST /api/assets`, `POST /api/navis/archive`,
+  `POST /api/navis/restore`, and the three
   `/api/item/<ref>/sources…` reads (`src/refdes/serve/api.py:34-66`).
+- **The navis write routes.** `POST /api/navis/archive` and
+  `POST /api/navis/restore` take `{"navi": <selector>}` — full key, unique
+  key prefix, or the `refdes navis all` ordinal — and render the
+  `navis_ops.Outcome` the CLI's `_navis_write_verb` renders: 200
+  `{kind: ok, verb, key, changed}` (a re-archive is `changed: false`), 403
+  on `--no-write`, 404 `not_found`, 409 `ambiguous` (with `candidates`) or
+  `conflict` (`reason`: `keyless`, `not_archived`, `orphan`,
+  `journal_pending`), 500 `error`, 400 `bad_request`; other methods 405.
+  The rules live in `navis_ops`; the route is a renderer
+  (`src/refdes/serve/navis_write.py`), shares the editor's write lock, and
+  forces the same save-then-rebuild refresh so the panel is current on the
+  next preview GET.
 - **The write service.** `serve.edit.apply_edit(project_root, EditRequest)` is
   the single mutation entry point, with four result types — `Applied`,
   `Conflict`, `Refused`, `Invalid` — and its own per-project write lock

@@ -262,20 +262,27 @@ class ProjectState:
             sig = signature(paths)
             return None if sig == self._handled_signature else sig
 
-    def refresh(self) -> bool:
+    def refresh(self, force: bool = False) -> bool:
         """Confirm a change by content hash and rebuild on it. Returns True
-        when the model was replaced. Idempotent and safe to call at any time."""
+        when the model was replaced. Idempotent and safe to call at any time.
+
+        ``force`` rebuilds through the same ``_build`` path even when the
+        watched-input signature is unchanged. A write under ``.refdes/navis/``
+        is not a hashed input (the archive store is merged at load, not
+        watched), so the navis write handlers pass ``force=True`` to make the
+        model and the preview current before they answer -- the editor save's
+        save-then-rebuild, same mechanism, one rebuild path (design §11)."""
         with self._lock:
             snap = self.snapshot
             paths = project_inputs(snap.project, self.config_path)
             sig = signature(paths)
-            if sig == self._handled_signature:
+            if sig == self._handled_signature and not force:
                 return False
             self._handled_signature = sig
             hashes = content_hashes(paths, snap.project.root)
             disk_revision = revision_of(hashes)
             self._disk_revision = disk_revision
-            if disk_revision == snap.revision:
+            if disk_revision == snap.revision and not force:
                 # Touched, not changed: remember the new stat so we stop re-hashing.
                 self.load_error = None
                 return False

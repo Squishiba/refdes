@@ -28,7 +28,7 @@ from ..seal import is_sealed
 from . import edit as edit_mod
 from . import filters as filters_mod
 from . import navis_read as navis_read_mod
-from . import resolution
+from . import navis_write, resolution
 from . import sources as sources_mod
 from . import state as state_mod
 from . import upload as upload_mod
@@ -73,6 +73,10 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
         return 405, {"error": "method not allowed"}
     if path == "/api/items/create" and method == "POST":
         return _write_outcome(app, _create_item(app, body))
+    if path in ("/api/navis/archive", "/api/navis/restore"):
+        if method == "POST":
+            return navis_write.handle(app, path.rsplit("/", 1)[1], body)
+        return 405, {"error": "method not allowed"}
     if path.startswith("/api/item/"):
         for suffix, handler in _SOURCE_ROUTES:
             if not path.endswith(suffix):
@@ -84,7 +88,13 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
     if path.startswith("/api/item/") and method in ("GET", "HEAD"):
         ref = urllib.parse.unquote(path[len("/api/item/"):])
         return _item_view(app, ref)
-    if path in ("/api/items", "/api/navis", "/api/images", "/api/items/create", "/api/assets") or path.startswith("/api/item/"):
+    if path in (
+        "/api/items",
+        "/api/navis",
+        "/api/images",
+        "/api/items/create",
+        "/api/assets",
+    ) or path.startswith("/api/item/"):
         return 405, {"error": "method not allowed"}
     return 404, {"error": "not found"}
 
