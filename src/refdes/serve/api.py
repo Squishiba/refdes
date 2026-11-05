@@ -27,6 +27,7 @@ from ..patcher import PROTECTED_FIELDS, AddLink, RemoveLink, SetBody, SetField
 from ..seal import is_sealed
 from . import edit as edit_mod
 from . import filters as filters_mod
+from . import navis_read as navis_read_mod
 from . import resolution
 from . import sources as sources_mod
 from . import state as state_mod
@@ -48,6 +49,8 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
         return 200, app.state.revision_info()
     if path == "/api/items" and method in ("GET", "HEAD"):
         return _items(app, query)
+    if path == "/api/navis" and method in ("GET", "HEAD"):
+        return navis_read_mod.navis_payload(app)
     if path.startswith("/api/item/") and path.endswith("/edit"):
         ref = urllib.parse.unquote(path[len("/api/item/"):-len("/edit")])
         if method == "POST":
@@ -81,7 +84,7 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
     if path.startswith("/api/item/") and method in ("GET", "HEAD"):
         ref = urllib.parse.unquote(path[len("/api/item/"):])
         return _item_view(app, ref)
-    if path in ("/api/items", "/api/images", "/api/items/create", "/api/assets") or path.startswith("/api/item/"):
+    if path in ("/api/items", "/api/navis", "/api/images", "/api/items/create", "/api/assets") or path.startswith("/api/item/"):
         return 405, {"error": "method not allowed"}
     return 404, {"error": "not found"}
 
