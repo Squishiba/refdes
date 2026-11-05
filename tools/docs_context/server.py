@@ -3,15 +3,20 @@
 Serves one docs page (given on the command line) so it can sit open beside
 the editor: the left column is the page's blocks, the right column the card
 refs.py resolved for every reference in the selected block, with broken refs
-flagged. Stdlib only; binds 127.0.0.1; GET/HEAD only; writes nothing; makes
-no outbound connection. Path safety lives in ``refs.py`` -- this module
-imports it and never copies its checks.
+flagged. Each card carries three ask buttons (explain / misread / match)
+answered by a local model as a READING AID: ``POST /api/ask`` takes only a
+block line, a ref index and a question name, builds the prompt from the
+server's own current analysis via ``llm.build_messages``, and the browser
+can never supply prompt text. Stdlib only; binds 127.0.0.1; writes nothing;
+the only outbound connection is the LLM request, whose url is refused at
+startup unless it is loopback. Path safety lives in ``refs.py`` -- this
+module imports it and never copies its checks.
 
 Run: ``python tools/docs_context/server.py <doc.md> [--repo ROOT] [--port N]
-[--no-open]``. The default ``--repo`` is found upward from the doc (a ``.git``
-directory or ``refdes-project.yaml``), else the doc's parent. Port 0 (the
-default) picks an ephemeral one; the listening URL is printed once, on
-stdout, as the only stdout line.
+[--no-open] [--llm-url URL] [--llm-model ID]``. The default ``--repo`` is
+found upward from the doc (a ``.git`` directory or ``refdes-project.yaml``),
+else the doc's parent. Port 0 (the default) picks an ephemeral one; the
+listening URL is printed once, on stdout, as the only stdout line.
 """
 
 from __future__ import annotations
@@ -22,16 +27,19 @@ import json
 import os
 import re
 import sys
+import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
 
 try:
-    from docs_context import refs
+    from docs_context import llm, refs
+    from docs_context.llm import DEFAULT_LLM_URL, require_loopback
 except ModuleNotFoundError:  # run as a script from a checkout, tools/ not on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from docs_context import refs
+    from docs_context import llm, refs
+    from docs_context.llm import DEFAULT_LLM_URL, require_loopback
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -45,12 +53,23 @@ ALLOWED_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 DRIVE_RE = re.compile(r"[A-Za-z]:[\\/]")
 CACHE_MAX = 32
 DRAIN_MAX = 1024 * 1024
+ASK_MAX_BODY = 4096
+ASK_ORIGINS = ("http://127.0.0.1", "http://localhost", "http://[::1]")
 
 
 class DocState:
-    """The served doc, the repo it resolves in, and the analyze cache."""
+    """The served doc, the repo it resolves in, the analyze cache, the LLM
+    endpoint the ask buttons post to (loopback, validated at startup), and
+    the one-at-a-time lock around the model."""
 
-    def __init__(self, doc_path: str, repo_root: str) -> None:
+    def __init__(
+        self,
+        doc_path: str,
+        repo_root: str,
+        llm_url: str = DEFAULT_LLM_URL,
+        llm_model: str | None = None,
+    ) -> None:
+        require_loopback(llm_url)  # before anything can use it
         self.repo_root = os.path.abspath(repo_root)
         self.repo_real = os.path.realpath(self.repo_root)
         self.doc_abs = os.path.abspath(doc_path)
@@ -58,6 +77,9 @@ class DocState:
         if not inside:
             raise ValueError(f"doc is outside the repo: {doc_path}")
         self.rel_doc = Path(rel).as_posix()
+        self.llm_url = llm_url
+        self.llm_model = llm_model
+        self.ask_lock = threading.Lock()
         self._cache: dict[str, tuple[tuple[int, int], dict]] = {}
 
     def target_for(self, rel: str) -> str:
@@ -177,6 +199,17 @@ class DocsContextHandler(BaseHTTPRequestHandler):
     def _route(self) -> None:
         state: DocState = self.server.state
         path, _, query = self.path.partition("?")
+        if self.command == "POST":
+            # POST is only ever the ask route; every other POST is a 405.
+            if path == "/api/ask":
+                self._ask(state)
+            else:
+                self._method_not_allowed()
+            return
+        if path == "/api/ask":
+            # the ask route is POST-only, on every method word
+            self._json(405, {"error": "method not allowed"})
+            return
         qs = parse_qs(query, keep_blank_values=True)
         if path == "/":
             self._static("index.html")
@@ -212,6 +245,116 @@ class DocsContextHandler(BaseHTTPRequestHandler):
             self._json(200, state.file_payload(raw, line))
         else:
             self._json(404, {"error": "not found"})
+
+    def _read_ask_body(self) -> bytes | None:
+        """The POST body, fully drained from the wire (a keep-alive
+        connection must not desync), or None when this responded already:
+        a chunked body cannot be drained by length, and a body past
+        DRAIN_MAX gets the response plus a close."""
+        if self.headers.get("Transfer-Encoding") is not None:
+            self.close_connection = True
+            self._json(400, {"error": "chunked bodies are not accepted"})
+            return None
+        raw = self.headers.get("Content-Length")
+        try:
+            length = int(raw) if raw is not None else 0
+        except ValueError:
+            length = 0
+        if length > DRAIN_MAX:
+            self.close_connection = True
+            self._json(400, {"error": "body too large"})
+            return None
+        chunks: list[bytes] = []
+        remaining = length
+        while remaining > 0:
+            chunk = self.rfile.read(min(remaining, 65536))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+
+    def _ask(self, state: DocState) -> None:
+        """POST /api/ask: {"block": start_line, "ref": index, "question": name}.
+        Only the three fixed questions exist and only the server's own
+        current analysis feeds the prompt; body keys other than these three
+        are ignored, so no client-supplied prompt, text, or messages can
+        reach the model. One request at a time (409 busy); LLM failures are
+        502/504 with the LlmError kind."""
+        if self.headers.get("X-Docs-Context") != "1":
+            self._drain_body()
+            self._json(403, {"error": "forbidden"})
+            return
+        origin = self.headers.get("Origin")
+        port = str(self.server.server_address[1])
+        if origin is not None and origin not in {f"{scheme}:{port}" for scheme in ASK_ORIGINS}:
+            self._drain_body()
+            self._json(403, {"error": "forbidden"})
+            return
+        ctype = self.headers.get("Content-Type", "")
+        if ctype.split(";", 1)[0].strip().lower() != "application/json":
+            self._drain_body()
+            self._json(415, {"error": "application/json body required"})
+            return
+        body = self._read_ask_body()
+        if body is None:
+            return
+        if len(body) > ASK_MAX_BODY:
+            self._json(400, {"error": "body too large"})
+            return
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._json(400, {"error": "body must be json"})
+            return
+        if not isinstance(payload, dict):
+            self._json(400, {"error": "body must be a json object"})
+            return
+        block_line = payload.get("block")
+        ref_index = payload.get("ref")
+        question = payload.get("question")
+        if isinstance(block_line, bool) or not isinstance(block_line, int):
+            self._json(400, {"error": "block must be an integer"})
+            return
+        if isinstance(ref_index, bool) or not isinstance(ref_index, int):
+            self._json(400, {"error": "ref must be an integer"})
+            return
+        if not isinstance(question, str):
+            self._json(400, {"error": "question must be a string"})
+            return
+        doc = state.doc_payload(state.rel_doc)
+        block = None
+        for candidate in doc["blocks"]:
+            if candidate["start_line"] == block_line:
+                block = candidate
+                break
+        if block is None:
+            self._json(400, {"error": "no such block"})
+            return
+        block_refs = block.get("refs") or []
+        if ref_index < 0 or ref_index >= len(block_refs):
+            self._json(400, {"error": "no such ref in the block"})
+            return
+        ref = block_refs[ref_index]
+        try:
+            messages = llm.build_messages(question, block, ref, ref.get("card") or {})
+        except ValueError:
+            self._json(400, {"error": "unknown question"})
+            return
+        if not state.ask_lock.acquire(blocking=False):
+            self._json(409, {"error": "busy"})
+            return
+        try:
+            model = state.llm_model
+            if model is None:
+                model = llm.discover_model(state.llm_url)
+            answer = llm.ask_model(messages, base_url=state.llm_url, model=model)
+            self._json(200, {"answer": answer, "model": model, "question": question})
+        except llm.LlmError as exc:
+            status = 504 if exc.kind == "timeout" else 502
+            self._json(status, {"error": str(exc), "kind": exc.kind})
+        finally:
+            state.ask_lock.release()
 
     def do_GET(self) -> None:
         self._guarded()
@@ -259,7 +402,9 @@ class DocsContextHandler(BaseHTTPRequestHandler):
         self._drain_body()
         self._json(405, {"error": "method not allowed"})
 
-    do_POST = _method_not_allowed
+    def do_POST(self) -> None:
+        self._guarded()  # only /api/ask routes; every other POST is a 405
+
     do_PUT = _method_not_allowed
     do_DELETE = _method_not_allowed
     do_PATCH = _method_not_allowed
@@ -277,9 +422,24 @@ class DocsContextServer(ThreadingHTTPServer):
     daemon_threads = True
 
 
-def make_server(doc_path: str, repo_root: str, port: int = 0):
-    """(httpd, base_url) bound to 127.0.0.1; caller runs serve_forever()."""
-    state = DocState(doc_path, repo_root)
+def make_server(
+    doc_path: str,
+    repo_root: str,
+    port: int = 0,
+    llm_url: str | None = None,
+    llm_model: str | None = None,
+):
+    """(httpd, base_url) bound to 127.0.0.1; caller runs serve_forever().
+
+    A non-loopback ``llm_url`` raises ``ValueError`` here, before the
+    server is created -- no socket is bound and no request can use it.
+    """
+    state = DocState(
+        doc_path,
+        repo_root,
+        llm_url=DEFAULT_LLM_URL if llm_url is None else llm_url,
+        llm_model=llm_model,
+    )
     httpd = DocsContextServer(("127.0.0.1", port), DocsContextHandler)
     httpd.state = state
     base_url = f"http://127.0.0.1:{httpd.server_address[1]}/"
@@ -314,6 +474,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-open", action="store_true", help="do not open a browser on startup"
     )
+    parser.add_argument(
+        "--llm-url",
+        default=DEFAULT_LLM_URL,
+        help="OpenAI-compatible base url for the ask buttons (default: "
+        "http://127.0.0.1:8080/v1; loopback only -- 127.0.0.1, localhost, "
+        "or ::1)",
+    )
+    parser.add_argument(
+        "--llm-model",
+        default=None,
+        help="model id to ask (default: discovered from the llm's /models)",
+    )
     args = parser.parse_args(argv)
 
     doc = Path(args.doc)
@@ -328,8 +500,15 @@ def main(argv: list[str] | None = None) -> int:
     if not inside:
         print(f"server: the doc must live inside the repo root: {args.doc}", file=sys.stderr)
         return 2
+    try:
+        require_loopback(args.llm_url)
+    except ValueError as exc:
+        print(f"server: {exc}", file=sys.stderr)
+        return 2
 
-    httpd, base_url = make_server(str(doc), str(repo), port=args.port)
+    httpd, base_url = make_server(
+        str(doc), str(repo), port=args.port, llm_url=args.llm_url, llm_model=args.llm_model
+    )
     print(f"docs-context: http://127.0.0.1:{httpd.server_address[1]}/", flush=True)
     if not args.no_open:
         with contextlib.suppress(Exception):
