@@ -18,6 +18,7 @@ Stdlib only. Not a shipped package: imported by ``server.py``.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import urllib.error
 import urllib.parse
@@ -57,7 +58,7 @@ _QUESTION_INSTRUCTIONS = {
     ),
 }
 
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_LOOPBACK_NAME = "localhost"
 
 
 class LlmError(Exception):
@@ -69,22 +70,63 @@ class LlmError(Exception):
 
 
 def require_loopback(base_url: str) -> str:
-    """Return base_url if its host is loopback; raise ValueError before any
-    socket is opened otherwise (a host-only rule; scheme is not judged)."""
-    host = urllib.parse.urlsplit(base_url).hostname
+    """Return base_url if it is a plain http url to the loopback interface;
+    raise ValueError before any socket is opened otherwise.
+
+    Only the literal name ``localhost`` and IP literals that
+    ``ipaddress.ip_address`` reports as loopback are accepted -- a name
+    like ``127.evil.com`` resolves wherever its owner points it, so
+    prefix-matching a ``127.`` string is not a loopback rule. The host
+    is taken from the url's authority, so a userinfo trick
+    (``http://127.0.0.1@evil.com/``) reads as ``evil.com`` and is
+    refused. Scheme must be ``http``: this is a plaintext local
+    endpoint, not a general url fetcher."""
+    parts = urllib.parse.urlsplit(base_url)
+    if parts.scheme != "http":
+        raise ValueError(f"llm url must be a plain http url: {base_url!r}")
+    host = parts.hostname
     if host is None:
         raise ValueError(f"llm url has no host: {base_url!r}")
-    host = host.lower().strip("[]")
-    if host in _LOOPBACK_HOSTS or host.startswith("127."):
+    host = host.lower()
+    if host == _LOOPBACK_NAME:
+        return base_url
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        raise ValueError(
+            f"llm url host must be the literal localhost or a loopback ip "
+            f"literal (127.0.0.0/8, ::1), not a name: {base_url!r}"
+        ) from None
+    if address.is_loopback:
         return base_url
     raise ValueError(
-        f"llm url must be loopback (127.0.0.1, localhost, ::1): {base_url!r}"
+        f"llm url must be loopback (127.0.0.0/8, ::1, localhost): {base_url!r}"
     )
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """A redirect is a second url. The prompt carries the page's code and
+    help text; it must never be resent somewhere the guard did not vet,
+    so redirects are refused rather than followed."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise LlmError(
+            "bad_response",
+            f"the llm sent a redirect ({code}) to {newurl!r}: prompts are never resent to a second url",
+        )
+
+
+_DEFAULT_URLOPEN = urllib.request.urlopen
+_OPENER = urllib.request.build_opener(_NoRedirectHandler())
+
+
 def _urlopen(request, timeout: float):
+    # Tests stub the request by patching this module's `urlopen`; the real
+    # path (the unpatched default) goes through an opener that refuses
+    # redirects. A stubbed transport is used as given.
+    send = _OPENER.open if urlopen is _DEFAULT_URLOPEN else urlopen
     try:
-        return urlopen(request, timeout=timeout)
+        return send(request, timeout=timeout)
     except urllib.error.HTTPError as exc:
         raise LlmError("bad_response", f"llm answered http {exc.code}") from exc
     except TimeoutError as exc:
@@ -95,9 +137,18 @@ def _urlopen(request, timeout: float):
         raise LlmError("unreachable", f"cannot reach the llm: {exc.reason}") from exc
 
 
-def _get_json(url: str, timeout: float) -> dict:
-    with _urlopen(Request(url, method="GET"), timeout=timeout) as response:
-        raw = response.read()
+def _get_json(request, timeout: float) -> dict:
+    """Fetch and parse a json object; every failure of the response -- a
+    stalled body, a truncated body, a non-json body -- lands in the same
+    taxonomy as a failed request, never as a bare exception on the
+    handler thread."""
+    with _urlopen(request, timeout) as response:
+        try:
+            raw = response.read()
+        except TimeoutError as exc:
+            raise LlmError("timeout", "the llm did not answer in time") from exc
+        except OSError as exc:
+            raise LlmError("bad_response", f"the llm answer body failed to arrive: {exc}") from exc
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -111,7 +162,7 @@ def discover_model(base_url: str, timeout: float = 120) -> str:
     """The first model id on the endpoint's /models list (server-side only,
     so the answer the page sees can name the model that answered)."""
     require_loopback(base_url)
-    payload = _get_json(base_url.rstrip("/") + "/models", timeout)
+    payload = _get_json(Request(base_url.rstrip("/") + "/models", method="GET"), timeout)
     data = payload.get("data")
     if isinstance(data, list):
         for entry in data:
@@ -147,7 +198,7 @@ def ask_model(
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    body = _get_json_body(request, timeout)
+    body = _get_json(request, timeout)
     content = None
     choices = body.get("choices")
     if isinstance(choices, list) and choices and isinstance(choices[0], dict):

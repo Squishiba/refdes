@@ -23,3 +23,7 @@
   `--llm-model` control the endpoint, which must be loopback — a non-loopback
   url is refused at startup, before any socket opens, so the prompt never
   leaves the machine.
+  The loopback rule is literal: only the name localhost and loopback ip
+  literals (127.0.0.0/8, ::1) are accepted -- a lookalike name like
+  127.evil.com is not -- and redirects from the endpoint are refused, so
+  the prompt is never resent to a url the guard did not vet.

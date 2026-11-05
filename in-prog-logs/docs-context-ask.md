@@ -104,3 +104,34 @@ answer display in `static/app.js`/`style.css`. Test file untouched.
 
 Status: DONE. Slice implemented, all listed test files green, real-run
 browser matrix above; changelog fragment extended (it is unreleased).
+
+# DC-3 review round 1 (head 53ab21e: 2 approve, chunk 3 CR, Windows CI red)
+
+- SECURITY (HIGH, reproduced): `require_loopback` prefix-matched
+  `127.` so `http://127.evil.com/v1` was accepted. Fixed: only the
+  literal name localhost and `ipaddress.ip_address(...).is_loopback`
+  literals; scheme must be http; userinfo tricks read as their real
+  host. Redirects are now refused via a pinned opener (urllib follows
+  GET 302s by default -- that leak is what the new test shows red).
+- MEDIUM: `response.read()` sat outside the taxonomy; a headers-then-
+  stall server raised a bare TimeoutError. Read/decode/parse now map to
+  timeout/bad_response.
+- LOW: app.js answers keyed by (blockStart, refIndex, question),
+  restored in renderCard (clearing on doc change was already wired);
+  ALL ask buttons disabled during flight (the 409 path is no longer a
+  silent no-op); `_get_json`/`_get_json_body` collapsed.
+- Both authorizations used: appended the host-matrix/redirect/stall
+  tests (red first: 127.evil.com accepted, GET 302 leaked to the
+  redirect target, bare TimeoutError) and raised the ONE Windows-
+  flaky closed-port test's `timeout` 2 -> 5 (Windows retries SYNs on
+  closed loopback ports ~2 s, so the old budget expired before the
+  refusal arrived; Linux is unaffected).
+- Windows red also killed my first fix attempt (a `socket` connect
+  probe) -- the BoomSocket contract bans sockets in llm.py; the
+  transport is urlopen-only. The authorized timeout bump is the fix.
+- Caught in the re-run: the app.js refactor left renderCard calling
+  the old 6-arg `askModel` -> every ask was a 400. Fixed; Chromium
+  persistence case passes (1 request, all 9 buttons disabled in
+  flight, answer survives re-render and restores after).
+- Verified: ask/server/refs/crossplatform 150 passed; ruff clean on
+  both .py files; full suite 5935 passed, 2 skipped.

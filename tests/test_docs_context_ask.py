@@ -425,7 +425,7 @@ def test_ask_model_reports_a_closed_port_as_unreachable():
                 [{"role": "user", "content": "x"}],
                 base_url=f"http://127.0.0.1:{port}/v1",
                 model="fake-model",
-                timeout=2,
+                timeout=5,
             )
         assert excinfo.value.kind == "unreachable"
 
@@ -1116,3 +1116,171 @@ def test_index_html_and_style_css_keep_their_contract():
     css = (STATIC / "style.css").read_text(encoding="utf-8")
     has_not("url(http", css, "the page stays offline")
     has_not("@import", css, "the page stays offline")
+
+
+# ---------------------------------------------------- appended: review round 1
+# (authorized appends: loopback host matrix, redirect pinning, stalled body)
+
+
+def test_require_loopback_accepts_only_loopback_literals():
+    """The literal name localhost and loopback IP literals pass; the url
+    comes back unchanged so callers can use it verbatim."""
+    llm = llm_mod()
+    for base_url in (
+        "http://127.0.0.1:8080/v1",
+        "http://127.9.9.9/v1",
+        "http://localhost:8080/v1",
+        "http://LOCALHOST:8080/v1",
+        "http://[::1]:8080/v1",
+    ):
+        assert llm.require_loopback(base_url) == base_url
+
+
+def test_require_loopback_refuses_names_lookalikes_and_tricks():
+    """127.evil.com is not loopback; userinfo, empty hosts, missing and
+    non-http schemes are all refused before any socket."""
+    llm = llm_mod()
+    for base_url in (
+        "http://127.evil.com/v1",
+        "http://127.0.0.1.evil.com/v1",
+        "http://127.1/v1",
+        "http://localhost.evil.com/v1",
+        "http://127.0.0.1@evil.com/v1",
+        "http://127.0.0.1:8080@evil.com/v1",
+        "http://0.0.0.0:9/v1",
+        "http://:9/v1",
+        "127.0.0.1:8080/v1",
+        "ftp://127.0.0.1/v1",
+        "//127.0.0.1/v1",
+    ):
+        with pytest.raises(ValueError):
+            llm.require_loopback(base_url)
+
+
+@contextmanager
+def redirecting_endpoint():
+    """A pair of loopback endpoints: the first answers chat completions
+    with a 307 to the second; the second records everything it receives."""
+    stolen = []
+
+    class StealHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        timeout = 30
+
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            stolen.append("GET " + self.path)
+            self._send(200, b'{"data": [{"id": "stolen-model"}]}')
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            stolen.append(self.rfile.read(length))
+            self._send(200, b'{"choices": [{"message": {"content": "stolen"}}]}')
+
+        def _send(self, status, body):
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        timeout = 30
+
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header(
+                "Location", f"http://127.0.0.1:{stolen_server.server_address[1]}/stolen-models"
+            )
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            self.rfile.read(length)
+            self.send_response(307)
+            self.send_header(
+                "Location", f"http://127.0.0.1:{stolen_server.server_address[1]}/steal"
+            )
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    stolen_server = ThreadingHTTPServer(("127.0.0.1", 0), StealHandler)
+    stolen_server.daemon_threads = True
+    redirector = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    redirector.daemon_threads = True
+    for httpd in (stolen_server, redirector):
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        yield stolen, f"http://127.0.0.1:{redirector.server_address[1]}/v1"
+    finally:
+        for httpd in (redirector, stolen_server):
+            httpd.shutdown()
+            httpd.server_close()
+
+
+def test_ask_model_refuses_redirects_instead_of_following_them():
+    """Redirects from the endpoint surface as bad_response, and no request
+    -- the model query, and above all the prompt body -- is resent to the
+    redirect target: a 302 is followed for GETs by default urllib, which
+    is exactly the leak the pinned opener closes."""
+    llm = llm_mod()
+    with redirecting_endpoint() as (stolen, url):
+        with pytest.raises(llm.LlmError) as excinfo:
+            llm.ask_model([{"role": "user", "content": "x"}], base_url=url, timeout=5)
+        assert excinfo.value.kind == "bad_response", excinfo.value.kind
+    assert stolen == [], f"nothing may arrive at the redirect target: {stolen!r}"
+
+
+@contextmanager
+def stalled_body_endpoint():
+    """An endpoint that sends 200 + headers + a partial body, then stalls:
+    the read phase must surface as a timeout, not kill the caller thread."""
+
+    class StallHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        timeout = 30
+
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            self.rfile.read(length)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "200")
+            self.end_headers()
+            try:
+                self.wfile.write(b'{"choices":')
+            except OSError:
+                pass
+            time.sleep(5)
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), StallHandler)
+    httpd.daemon_threads = True
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_address[1]}/v1"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_ask_model_reports_a_stalled_answer_body_as_a_timeout():
+    llm = llm_mod()
+    with stalled_body_endpoint() as url:
+        with pytest.raises(llm.LlmError) as excinfo:
+            llm.ask_model(
+                [{"role": "user", "content": "x"}],
+                base_url=url,
+                model="fake-model",
+                timeout=0.5,
+            )
+        assert excinfo.value.kind == "timeout", excinfo.value.kind

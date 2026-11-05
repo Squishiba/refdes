@@ -75,10 +75,32 @@ function codeWindow(lines, cited) {
 
 let askInFlight = false;
 
-async function askModel(buttons, result, blockStart, refIndex, question) {
+function askKey(blockStart, refIndex, question) {
+  return blockStart + ":" + refIndex + ":" + question;
+}
+
+function askAnswerNode(saved) {
+  const box = el("div", "ask-answer-box");
+  box.appendChild(
+    el(
+      "div",
+      "ask-label",
+      "advisory answer from " + saved.model + " (" + saved.question +
+      ") -- a reading aid, not project facts; it never drafts prose"
+    )
+  );
+  box.appendChild(el("pre", "ask-answer", saved.answer));
+  return box;
+}
+
+function setAskButtonsDisabled(disabled) {
+  for (const button of document.querySelectorAll(".ask-btn")) button.disabled = disabled;
+}
+
+async function askModel(result, blockStart, refIndex, question) {
   if (askInFlight) return;
   askInFlight = true;
-  for (const button of buttons) button.disabled = true;
+  setAskButtonsDisabled(true);
   result.textContent = "asking the model: " + question + " ...";
   try {
     const response = await fetch("/api/ask", {
@@ -98,21 +120,19 @@ async function askModel(buttons, result, blockStart, refIndex, question) {
       result.appendChild(el("div", "ask-error", "the model did not answer -- " + why));
       return;
     }
-    result.appendChild(
-      el(
-        "div",
-        "ask-label",
-        "advisory answer from " + data.model + " (" + data.question +
-        ") -- a reading aid, not project facts; it never drafts prose"
-      )
-    );
-    result.appendChild(el("pre", "ask-answer", String(data.answer)));
+    const saved = {
+      model: String(data.model),
+      question: String(data.question),
+      answer: String(data.answer),
+    };
+    state.answers[askKey(blockStart, refIndex, question)] = saved;
+    result.appendChild(askAnswerNode(saved));
   } catch (err) {
     result.textContent = "";
     result.appendChild(el("div", "ask-error", "the ask request failed: " + String(err)));
   } finally {
     askInFlight = false;
-    for (const button of buttons) button.disabled = false;
+    setAskButtonsDisabled(false);
   }
 }
 
@@ -158,19 +178,21 @@ function renderCard(ref, blockStart, refIndex) {
       }
     }
   }
-  const askButtons = [];
   const askRow = el("div", "ask-row");
   const askResult = el("div", "ask-result");
   for (const question of QUESTIONS) {
     const button = el("button", "ask-btn", "ask: " + question);
     button.addEventListener("click", () =>
-      askModel(askButtons, askResult, blockStart, refIndex, question)
+      askModel(askResult, blockStart, refIndex, question)
     );
-    askButtons.push(button);
     askRow.appendChild(button);
   }
   box.appendChild(askRow);
   box.appendChild(askResult);
+  for (const question of QUESTIONS) {
+    const saved = state.answers[askKey(blockStart, refIndex, question)];
+    if (saved) askResult.appendChild(askAnswerNode(saved));
+  }
   return box;
 }
 
