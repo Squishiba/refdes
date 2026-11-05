@@ -18,8 +18,13 @@ poller, createElement/textContent only.
   there on the next poll), the panel re-renders/re-fetches on it and
   re-fetches on each open. A failed fetch keeps the last good rows;
   with none, the open panel says `Navis unavailable`.
-- `app.js`: imports the module, mounts it once (`mountNavisPanel(
-  document.body, api)`), before the boot poll. No second poller.
+- `app.js`: imports the module, mounts it once (`if (document.body)
+  mountNavisPanel(document.body, api)`), before the boot poll. No second
+  poller. The body test is not browser code (a module script always
+  runs after the body exists) — the first full-suite run caught
+  test_editor_live_calc.py's node harness, which imports the real
+  app.js with a minimal `document` stub and no `body`; unguarded, the
+  mount threw in every harness that imports app.js.
 - `style.css`: editor's own tokens; toggle fixed top 52/right 12 (clear
   of the topbar's git badge, which shares the topbar row), panel under
   it with max-height min(60vh, 32rem) + overflow, z-index 10/11 (the
