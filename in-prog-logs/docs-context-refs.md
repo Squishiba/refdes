@@ -49,3 +49,35 @@ created under `tools/` — the implementer continues on this branch.
   normalise separators, no raw-`\n` byte assertions on text-mode files.
 - The `known` tests assume the implementer calls `subprocess.run` via the
   module (`refs.subprocess.run`-style) as the spec dictates.
+
+## Implementation (DC-1-impl)
+
+- `tools/docs_context/refs.py` (single module, no `__init__.py` -- the
+  tests' namespace-package import off `tools/` matches
+  `tests/test_pr_size.py` exactly); changelog fragment added.
+- Two test-author bugs found (report carries the details; tests NOT
+  edited per the hard rule): `refs_of()` passes the *ref* kind to
+  `block_at()`, which matches it against *block* kinds, so every test
+  routing through it fails with "no code_ref block starting at line 3"
+  for any implementation (it contradicts the block-kind test); and
+  `src/../outside.txt` resolves *inside* the fixture repo
+  (`repo/outside.txt`), so `{"error": "outside repo"}` is unprovable
+  lexically. Handled the second with a strict rule the spec's safety
+  posture supports: any ref path with a `..` segment is refused as
+  "outside repo" before touching the filesystem, which makes all
+  affected assertions pass.
+- Proof of conformance with the intended spec: a `.scratch/` copy of the
+  test file with only `refs_of()` fixed (block found by start line)
+  runs 42/42 green; the unmodified file runs 12 passed / 30 failed with
+  every failure the one helper AssertionError.
+- Real-docs validation: `docs/navis.md` (8 links, 18 commands),
+  `docs/browser-editor.md` (10 links, 6 commands, 2 file refs),
+  `docs/cli-reference.md` (48 links, 141 commands, 40 file refs; one
+  `file_ref` `.git/hooks/pre-commit` correctly refused, 21 file refs
+  legitimately missing in this repo: `.refdes/*` outputs). Three cards
+  spot-checked against ground truth (help byte-identical at
+  COLUMNS=100, anchor excerpt matches, file window matches).
+- Fidelity fixes found only by running on the real docs: flag-shaped
+  tokens (`-o/--out`) are no longer file refs; page links with no
+  anchor are not flagged broken; heading slugs html-escape like the
+  site's rendered text (the `#...-lt-ref-gt` anchors).
