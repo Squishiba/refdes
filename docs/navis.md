@@ -355,3 +355,28 @@ $ curl -X POST -H "X-Refdes-Token: <token>" -H "Origin: http://127.0.0.1:8780" \
        http://127.0.0.1:8780/api/navis/restore
 {"kind":"conflict","reason":"not_archived","error":"this Navi is not archived -- nothing to restore"}  # 409
 ```
+
+**Mint keys.** `POST /api/navis/mint` takes a JSON object body — the mint is
+project-wide, so `{}` is the whole request and extra keys are ignored. It
+writes a minted key into every keyless live marker (the CLI's
+`navis.mint_keys` decides every mint: exact provenance or refuse, so a
+marker whose bytes cannot be located exactly — a list file's `body:` scalar,
+a file edited after the served snapshot — stays keyless, counted in
+`still_keyless` beside the markers the call minted). A successful mint
+rebuilds the preview before the response lands. Captured from a writable
+`refdes serve --port 8815` on a two-Navi project:
+
+```console
+$ curl -X POST -H "X-Refdes-Token: <token>" -H "Origin: http://127.0.0.1:8815" \
+       -H "Content-Type: application/json" -d '{}' \
+       http://127.0.0.1:8815/api/navis/mint
+{"kind":"ok","changed":true,
+ "minted":[{"key":"xw5kbykt82k","key6":"xw5kby","item":"NOTE-001","file":"items/note-a.md"},
+           {"key":"ne1tnta9n8t","key6":"ne1tnt","item":"NOTE-002","file":"items/note-b.md"}],
+ "still_keyless":0}
+```
+
+The same POST again answers `{"kind":"ok","changed":false,"minted":[],
+"still_keyless":0}` (the mint is idempotent), and on a `--no-write` server it
+answers `403 {"kind":"refused","error":"this server was started with
+--no-write: navis mint is disabled"}` (observed on port 8816).
