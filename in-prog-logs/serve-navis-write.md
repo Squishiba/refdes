@@ -59,47 +59,34 @@ pushed on feat/serve-navis-write; no PR opened).
   in `handle` + the two paths added to the final 405 list.
 - Forced rebuild: `ProjectState.refresh(force=True)` -- one keyword added to
   the save path's own mechanism (refresh -> `_build` -> preview.render);
-  force skips the signature gate, which cannot see `.refdes/navis/` (the
-  store is merged at load, not hashed). No second rebuild path.
+  force skips the signature gate, which cannot see `.refdes/navis/`.
 - Write-lock check: `project_write_lock` is an RLock with per-thread depth
-  tracking (write_lock.py), re-entrant -- `navis_archive.archive_record`
-  takes it internally, and the handler takes `write_lock_for` (a plain
-  Lock, taken once) outside it, the order edit.py documents. No double-take,
-  no deadlock.
+  (write_lock.py), re-entrant; `navis_archive` takes it internally and the
+  handler takes `write_lock_for` (plain Lock, once) outside it -- edit.py's
+  documented order. No double-take, no deadlock.
 - Red evidence (this branch, before src changes): `tests/test_serve_navis_-
   write.py` -> 37 failed, 7 passed, same as the test author recorded. After:
   42 passed, 2 failed.
-- The 2 failures are a test-authoring bug in
-  `test_an_ambiguous_prefix_names_its_candidates` (both verbs), not the
-  routes: it sorts candidates by key, then asserts `[KEY_A, KEY_B]`, but
-  `keys.check_char` makes KEY_B `k7f3q2zyzzj` and KEY_A `k7f3q2zzzzt`, and
-  `sorted()` puts zyzz before zzzz ('y' < 'z'), so the assertion can never
-  hold for ANY payload ordering. Verified independently:
-  `sorted([KEY_A, KEY_B]) == [KEY_B, KEY_A]`. The endpoint returns exactly
-  the two candidate keys with text/file/line. Left the test untouched per
-  the task rules; it needs `[KEY_B, KEY_A]` (the author's zz/zy slip).
+- The 2 failures = the test-authoring bug: the candidate assertion sorts by
+  key then expects `[KEY_A, KEY_B]`, arithmetically impossible (KEY_B
+  `k7f3q2zyzz…` sorts before KEY_A `k7f3q2zzzz…`). Reported, left untouched
+  per the round-0 rules; fixed in round 1 (T1).
 - Green: the 42 others pass; tests/test_navis_ops.py + test_navis_archive_-
   cli.py + test_serve_edit_http.py + test_serve_api.py + test_serve_state.py
   -> 142 passed. Full suite (pre-push, round 0): 2 failed, 5742 passed,
   2 skipped.
-- Smoke (real `refdes serve --port 8772`, venv, PYTHONPATH=src of this
-  worktree, token from the launch URL): archive `{"navi":"znxbqdvcym2"}` ->
-  200 `{"kind":"ok","verb":"archive","key":"znxbqdvcym2","changed":true}`,
-  `.refdes/navis/znxbqdvcym2.yaml.gz` created (before: store dir absent);
-  preview note-001.html then shows `[archived]` + Show all; restore -> 200
-  ok changed:true, store empty, page clean; restore of the active Navi ->
-  409 conflict not_archived; GET on the POST-only route -> 405. Server
-  stopped by PID.
+- Smoke (real `refdes serve --port 8772`, token from the launch URL):
+  archive -> 200 ok changed:true, `.refdes/navis/<key>.yaml.gz` created
+  (store absent before); preview shows `[archived]`/Show all; restore ->
+  200 ok, store empty, page clean; restore-of-active -> 409 not_archived;
+  GET on POST-only routes -> 405. Server stopped by PID.
 - Docs: route bullets in docs/design/editor-vscode-adapter.md's API
   inventory; changelog.d/serve-navis-write.added.md.
-- Merged origin/main again mid-task (PR #416 GET /api/navis landed): the
-  api.py conflicts (imports, the 405 list) resolved keeping BOTH sides --
-  the GET hook beside the POST hook, the 405 list carries /api/navis.
-  test_serve_navis_write.py + test_serve_navis_read.py re-run after the
-  merge: 59 passed, 2 failed (the same authored-bug pair).
+- Merged origin/main mid-task (PR #416 GET /api/navis): api.py conflicts
+  resolved keeping BOTH hooks; the post-merge run was 59 passed / 2 failed
+  (the same authored-bug pair).
 
 ## Review round 1 (both reviewers CHANGES REQUESTED; one commit)
-
 - T1: the ambiguous-candidates test made order-independent (`by_key` dict,
   `set(...) == {KEY_A, KEY_B}`, per-key text/file/line; no zip over an
   assumed order). Mutation proof: patched the handler to emit
