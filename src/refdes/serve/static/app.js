@@ -8,6 +8,7 @@ import { parseFilters, filterQuery, renderSidebar } from './filters.js';
 import { renderList } from './list.js';
 import { renderItem, destroyLiveCalc } from './item.js';
 import { createForm } from './create.js';
+import { mountNavisPanel } from './navis-panel.js';
 
 const banner = document.getElementById('banner');
 const sidebar = document.getElementById('sidebar');
@@ -138,6 +139,14 @@ window.addEventListener('refdes:stale-calc', () => {
   lastServed = null;
   renderRoute();
 });
+
+// The read-only Navis panel (design §11, N5d-1): the shell mounts it once
+// on the body and owns nothing of its content — the module fetches
+// /api/navis itself and rides the same poller's `refdes:rebuilt` signal
+// (a save lands in it on the next poll), so there is no second poller here.
+// The body test is for node harnesses that stub `document` minimally; a
+// module script in the real page always runs after the body exists.
+if (document.body) mountNavisPanel(document.body, api);
 
 // The baseline serial must be captured before the first view is fetched.
 // The serve answers the two boot fetches on parallel handler threads, so a
