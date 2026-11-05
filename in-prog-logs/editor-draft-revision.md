@@ -51,3 +51,47 @@ the Save POST carried `set_body@rev-1` -> 200, `saved:true`,
   harness's conflict scenario exercises it end-to-end from the client side.
 - No changelog fragment: tests only, no user-visible change.
 - Status: done. Full suite run once before push (see final reply).
+
+# ED-1-impl (implementer)
+
+Merged `origin/main` into the branch; `git merge --ff-only` was impossible
+(the branch carries the test-author's commit on top of base `ff078148`,
+which is recent — not the old-base failure mode), so a normal merge was
+made.
+
+## The fix (44 inserted lines, all under src/refdes/serve/static/)
+
+- `drafts.js`: new exported `stampRevision(handle, revision)` — a dirty
+  draft records the form's opening revision (idempotent, persists to the
+  session mirror); a clean draft resets the stamp to null.
+- `editor.js`: import + call `stampRevision(handle, revision)` from
+  `writeDraft`, `writeBody`, `insertSourceLine`; pass a stamp callback to
+  `createLinksSection`. The stamp is the closure revision at the moment of
+  the first edit, so post-save edits stamp the NEW revision.
+- `links.js`: `verbPicker`/`createLinksSection` take an `onDraftChange`
+  callback, fired on add/undo-add/remove/undo-remove.
+- Live-calc's `revisionFromDraft: () => !!draft.revision` guard (kept in
+  tests/test_editor_live_calc.py) keeps a dirty form riding its draft
+  revision through rebuilds (no stale-model drop) — the stamp makes that
+  posture real, not theoretical.
+
+## Verification
+
+- Red/green: `tests/test_editor_draft_revision.py` red (`stamp.revision`
+  None != 'rev-0') -> green after the fix. Editor/calc/serve-edit family
+  (880 tests incl. live-calc, drafts_corruption, static, e2e) green.
+- Full suite: 5938 passed, 2 skipped (`-n 4 --dist worksteal`).
+- Real browsers (puppeteer-core Chromium + playwright-core Firefox, own
+  throwaway project on port 8850, `.scratch/pptr/`), all four required
+  cases PASS in BOTH browsers: (a) dirty draft + external append -> Save
+  shows the conflict screen, the POST carried the draft's opening revision
+  (409), disk keeps the external line; Keep mine then writes the draft;
+  (b) external change to a different item's file -> normal save, no
+  conflict; (c) clean form adopts the rebuilt file (textarea shows the
+  external line), typed edit saves, disk has both; (d) `POST /api/navis/
+  mint` mints NOTE-005's marker while the draft is open -> Save -> conflict
+  screen, minted key stays on disk, draft survives. The one Chromium false
+  negative was a harness selector bug (the image picker mounts its own
+  `.conflict` box; scope to `.edit-block .conflict`), not a fix bug.
+- Status: done.
+

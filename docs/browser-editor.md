@@ -190,7 +190,11 @@ The status beside Save reads `saved` or `unsaved`. Everything you type,
 click, or insert accumulates as a draft; **Save** writes it through the
 server (one save per item, per edit you made) and the status returns to
 `saved`. A draft survives a page reload — it is kept in the browser tab's
-session — and **Discard** restores the saved text.
+session — and **Discard** restores the saved text. The moment the form
+becomes dirty it records the file revision it opened on, so a rebuild
+started by someone else meets a conflict screen on your next Save instead
+of overwriting their change; a form you have not touched follows the file
+and adopts each new revision.
 
 Saves are refused, with the reason shown in the editor, when the project is
 [sealed or imported](design-log.md), when the file changed on disk
