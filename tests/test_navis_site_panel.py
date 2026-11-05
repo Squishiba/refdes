@@ -28,11 +28,10 @@ import json
 import os
 import subprocess
 import sys
-import tarfile
 
 import pytest
 from conftest import write_project_config
-from test_navis_archive import SRC, REPO
+from test_navis_archive import SRC, _git_tree
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
@@ -290,28 +289,7 @@ def test_render_site_projects_the_navis_exactly_once(site, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _git_tree(ref: str, dest: str) -> str | None:
-    os.makedirs(dest, exist_ok=True)
-    proc = subprocess.run(
-        ["git", "-C", REPO, "archive", ref],
-        stdout=subprocess.PIPE,
-        check=False,
-    )
-    if proc.returncode != 0:
-        return None
-    import io
-
-    with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tar:
-        members = [
-            m for m in tar.getmembers()
-            if m.name == "src" or m.name.startswith("src/")
-        ]
-        tar.extractall(dest, members=members, filter="data")
-    return os.path.join(dest, "src")
-
-
-DIFFERENTIAL_FILES = {
-    "note-a.md": (
+DIFFERENTIAL_FILES = {    "note-a.md": (
         "---\nid: NOTE-001\ntype: note\ntitle: Power\n---\n"
         "plain body, no marker\n"
     ),
