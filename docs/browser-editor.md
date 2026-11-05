@@ -25,13 +25,14 @@ The create form has no formatting bar: the body there is a plain textarea.
 
 ## Formatting buttons
 
-The bar sits directly above the body textarea. Eleven buttons cover the
+The bar sits directly above the body textarea. Twelve buttons cover the
 markdown every body uses (all syntax is in the [markdown
 reference](markdown.md)):
 
 | Button | With a selection | With the caret only |
 |---|---|---|
 | **B** / **I** / **S** / **code** | wraps the selection in `**` / `*` / `~~` / `` ` `` | inserts the markers around a placeholder (`bold text`, `italic text`, `text`, `code`) with the placeholder selected, so you can type over it |
+| **` ``` `** | wraps the selection in a fenced code block as its own paragraph, the text staying selected (a longer fence when the selection itself contains a ` ``` ` line); a selection *inside* an existing fenced block is left untouched | inserts an empty fenced block as its own paragraph, with the caret on the inside line so typing goes inside; with the caret inside an existing fence, the new block lands after that fence |
 | **H** | cycles the line's heading level: none → `#` → `##` → … → six → none | same, on the caret's line |
 | **•** / **1.** / **❝** | prefixes every line the selection touches with `- ` / `1. ` / `> `; pressing again removes it | same, on the caret's line |
 | **Link** | wraps: `[selection](url)` with `url` selected; if the selection is itself an `http(s)://` URL, it becomes the target and `link text` is selected | inserts `[link text](url)` with `url` selected |
@@ -42,17 +43,17 @@ Wrapping is layer-aware: a selection (or caret pair) that already carries
 the marker removes one layer instead of adding a second, so **B** on
 `**word**` unwraps to `word`.
 
-Inline buttons wrap the exact selection. Block inserts (Table, HR, the calc
-fence skeleton) go in as their own paragraph, padded with blank lines — and
-when the caret sits *inside* a fenced code block, a block insert lands
-after the block's closing fence, so fences stay balanced.
+Inline buttons wrap the exact selection. Block inserts (the code fence,
+Table, HR, the calc fence skeleton) go in as their own paragraph, padded
+with blank lines — and when the caret sits *inside* a fenced code block, a
+block insert lands after the block's closing fence, so fences stay balanced.
 
 Keyboard shortcuts, handled while the body textarea is focused:
 **Ctrl/Cmd+B** (bold), **Ctrl/Cmd+I** (italic), **Ctrl/Cmd+K** (link),
-**Alt+Shift+5** (strikethrough). There are no shortcuts for the heading,
-list, quote, table, or rule buttons. Every insertion — button, shortcut, or
-picker — goes into the textarea the way typing does, so the browser's own
-**Ctrl+Z** undoes it as a single step. (In a browser where the insertion
+**Alt+Shift+5** (strikethrough). There are no shortcuts for the code-fence,
+heading, list, quote, table, or rule buttons. Every insertion — button,
+shortcut, or picker — goes into the textarea the way typing does, so the
+browser's own **Ctrl+Z** undoes it as a single step. (In a browser where the insertion
 can't go through the native text path, the bar edits the textarea value
 directly and shows the note: *Undo may need more than one step in this
 browser.*)

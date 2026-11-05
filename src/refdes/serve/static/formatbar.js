@@ -29,6 +29,10 @@ const URL = new RegExp('^https?:\\/\\/', 'i');
 // error (warnings only, design §C).
 export const SPAN_SKELETON = '`name := 0 | V`';
 export const FENCE_SKELETON = '```calc\nname = expr | V\n```';
+// The plain code-fence button's caret skeleton: an empty fenced block whose
+// middle line receives the caret (typing goes inside). tests/ pins it through
+// the real build -- an unbalanced fence fails there.
+export const FENCE_EMPTY_SKELETON = '```\n\n```';
 export const FIGURE_SKELETON = '[[fig:]]';
 export const VALUE_SKELETON = '{{}}';
 // The Navi skeleton is KEYLESS on purpose: the next writable command mints
@@ -187,6 +191,31 @@ function fenceInsertAfter(text, caret) {
     if (caret >= block.start && caret < block.end) return block.endLine;
   }
   return null;
+}
+
+// A selection lies inside a fenced block when one block spans the whole of it
+// (the fenceBlocks span: opener line start through closing fence end). Used to
+// refuse the fence button inside a fence, matching the blockAfterFence rule
+// (caret case) -- fences cannot nest.
+function selectionInFence(text, start, end) {
+  for (const block of fenceBlocks(text)) {
+    if (start >= block.start && end <= block.end) return true;
+  }
+  return false;
+}
+
+// The fence a wrapped selection needs: longer than the longest backtick run
+// that opens any of its lines (CommonMark: a fence closes only on a run of its
+// own length or longer, so a 3-tick fence with an inner ``` line closes early).
+function fenceMarkerFor(text) {
+  let maxRun = 0;
+  for (const line of text.split('\n')) {
+    const stripped = line.replace(/^[ ]{0,3}/, '');
+    let run = 0;
+    while (stripped[run] === '`') run += 1;
+    if (run > maxRun) maxRun = run;
+  }
+  return '`'.repeat(Math.max(3, maxRun + 1));
 }
 
 export function blockInsertPlan(area, text, start, end) {
@@ -515,6 +544,27 @@ function applyRule(area, opts) {
   applyEdit(area, plan.start, plan.end, plan.chunk, plan.caret, plan.caret, opts);
 }
 
+// Plain code fence. Caret inserts an empty fenced block (caret on the empty
+// line, so typing goes inside); a selection is wrapped in a fence that keeps it
+// selected; a selection inside a fence is refused silently (no-op).
+function applyFence(area, opts) {
+  const text = area.value;
+  const { start, end } = selectionIn(area);
+  if (start === end) {
+    const plan = blockInsertPlan(area, FENCE_EMPTY_SKELETON);
+    const caret = plan.start + plan.open.length + 4; // after '```', on the empty line
+    applyEdit(area, plan.start, plan.end, plan.chunk, caret, caret, opts);
+    return;
+  }
+  if (selectionInFence(text, start, end)) return;
+  const chosen = text.slice(start, end);
+  const marker = fenceMarkerFor(chosen);
+  const block = `${marker}\n${chosen}\n${marker}`;
+  const plan = blockInsertPlan(area, block, start, end);
+  const innerStart = plan.start + plan.open.length + marker.length + 1;
+  applyEdit(area, plan.start, plan.end, plan.chunk, innerStart, innerStart + chosen.length, opts);
+}
+
 // refdes row (slice 2, design §C). Every op runs through the same applyEdit
 // pipeline as the core row; the skeletons place their `name` placeholder
 // SELECTED (typing replaces it) and the figure/value skeletons leave the
@@ -717,6 +767,7 @@ export const OPS = {
   italic: (area, opts) => applyInline(area, 'italic', '*', 'italic text', opts),
   strike: (area, opts) => applyInline(area, 'strike', '~~', 'text', opts),
   code: (area, opts) => applyInline(area, 'code', '`', 'code', opts),
+  fence: applyFence,
   heading: applyHeading,
   list: (area, opts) => applyLineMarker(area, '- ', /^\s*[-*+]\s+/, opts),
   numbered: (area, opts) => applyLineMarker(area, '1. ', /^\s*\d+\.\s+/, opts, true),
@@ -758,6 +809,7 @@ const BUTTONS = [
   ['italic', 'I', 'Italic'],
   ['strike', 'S', 'Strikethrough'],
   ['code', 'code', 'Code'],
+  ['fence', '```', 'Code block'],
   ['heading', 'H', 'Heading'],
   ['list', '•', 'Bulleted list'],
   ['numbered', '1.', 'Numbered list'],

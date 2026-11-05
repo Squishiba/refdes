@@ -890,6 +890,7 @@ const results = {};
   const sel0 = [ed.area.selectionStart, ed.area.selectionEnd];
   const draft0 = drafts.getDraft(h).body;
   ed.click('bold');
+  ed.click('fence');
   ed.area.dispatch('keydown', { key: 'b', code: 'KeyB', ctrlKey: true });
   results.savingGate = {
     value: ed.area.value,
@@ -979,7 +980,7 @@ const results = {};
   const b = buttons[0];
   const sentMdown = b.dispatch('mousedown', mdown);
   results.a11y.mousedownPrevented = sentMdown.defaultPrevented === true;
-  results.a11y.ops = ['bold', 'italic', 'strike', 'code', 'heading', 'list', 'numbered',
+  results.a11y.ops = ['bold', 'italic', 'strike', 'code', 'fence', 'heading', 'list', 'numbered',
     'quote', 'link', 'table', 'hr']
     .map((op) => Boolean(findAll(ed.bar, `fmt-${op}`).length));
   results.a11y.refdesOps = ['reference', 'figure', 'calc', 'span', 'value', 'navi', 'image', 'source']
@@ -1104,6 +1105,118 @@ const results = {};
     sel: [area.selectionStart, area.selectionEnd],
     focused: globalThis.document.activeElement === area,
   };
+}
+
+// ---------- the fence button: wiring, caret insert, wrap, refuse
+{
+  const h = 'FB-FENCEBAR';
+  const ed = openEditor(h, 'body');
+  const core = findAll(ed.bar, 'fmt-core')[0];
+  const coreOps = core.children.map((b) => b.className.replace('fmt-btn fmt-', ''));
+  const fenceBtn = findAll(ed.bar, 'fmt-fence')[0];
+  results.fenceWiring = {
+    coreOps,
+    fenceLabel: fenceBtn.textContent,
+    fenceAria: fenceBtn.getAttribute('aria-label'),
+    total: findAll(ed.bar, 'fmt-btn').length,
+    afterCode: coreOps.indexOf('fence') === coreOps.indexOf('code') + 1,
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-FENCE-CARET';
+  const ed = openEditor(h, 'Intro text');
+  ed.select(10, 10);
+  const n0 = execCalls.length;
+  ed.click('fence');
+  const a = ed.area.value;
+  results.fenceCaret = {
+    value: a,
+    padded: a === 'Intro text\n\n```\n\n```',
+    caretEmptyLine: ed.area.selectionStart === ed.area.selectionEnd
+      && a.slice(0, ed.area.selectionStart) === 'Intro text\n\n```\n',
+    fences: (a.match(/^```/gm) || []).length,
+    execs: execCalls.length - n0,
+    draft: drafts.getDraft(h).body,
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-FENCE-CARET-IN';
+  const ed = openEditor(h, '```calc\nV = 2 V\n```\n');
+  ed.select(8, 8); // caret INSIDE the fence body
+  ed.click('fence');
+  const a = ed.area.value;
+  results.fenceCaretInsideFence = {
+    value: a,
+    afterFence: a.startsWith('```calc\nV = 2 V\n```\n\n```\n\n```'),
+    fences: (a.match(/^```/gm) || []).length,
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-FENCE-WRAP';
+  const ed = openEditor(h, 'Intro alpha tail');
+  ed.select(6, 11); // "alpha"
+  const n0 = execCalls.length;
+  ed.click('fence');
+  const a = ed.area.value;
+  results.fenceWrap = {
+    value: a,
+    padded: a === 'Intro \n\n```\nalpha\n```\n\n tail',
+    selected: a.slice(ed.area.selectionStart, ed.area.selectionEnd),
+    fences: (a.match(/^```/gm) || []).length,
+    execs: execCalls.length - n0,
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-FENCE-WRAP2';
+  const ed = openEditor(h, 'one\ntwo\nthree');
+  ed.select(0, 7); // "one\ntwo"
+  ed.click('fence');
+  const a = ed.area.value;
+  results.fenceWrapMulti = {
+    value: a,
+    selected: a.slice(ed.area.selectionStart, ed.area.selectionEnd),
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-FENCE-BACKTICK';
+  const body = 'lead\n```\ninner\ntrail';
+  const ed = openEditor(h, body);
+  ed.select(0, body.length); // the whole body: a line opening with a backtick run
+  ed.click('fence');
+  const a = ed.area.value;
+  results.fenceWrapBacktick = {
+    value: a,
+    usesFour: a.startsWith('````\n') && a.endsWith('\n````'),
+    chosenSelected: a.slice(ed.area.selectionStart, ed.area.selectionEnd) === body,
+    fences: (a.match(/^`{3,}/gm) || []).length,
+  };
+  drafts.clearDraft(h);
+}
+{
+  const h = 'FB-FENCE-REFUSE';
+  const body = 'intro\n```\ncode line\n```\noutro';
+  const ed = openEditor(h, body);
+  const s = body.indexOf('code');
+  ed.select(s, s + 9); // "code line" -- entirely inside the fence
+  const v0 = ed.area.value;
+  const sel0 = [ed.area.selectionStart, ed.area.selectionEnd];
+  const n0 = execCalls.length;
+  const d0 = drafts.getDraft(h).body;
+  ed.click('fence');
+  results.fenceRefuse = {
+    value: ed.area.value,
+    unchanged: ed.area.value === v0,
+    selUnchanged: ed.area.selectionStart === sel0[0] && ed.area.selectionEnd === sel0[1],
+    execs: execCalls.length - n0,
+    draft: drafts.getDraft(h).body,
+    draftUnchanged: drafts.getDraft(h).body === d0,
+  };
+  drafts.clearDraft(h);
 }
 
 console.log(JSON.stringify(results));
@@ -1346,8 +1459,47 @@ def test_the_format_bar_mutates_the_body_through_the_shared_case_a_b_contract(tm
         "the keydown handler stacked across a re-render: shortcuts would fire twice"
     )
 
+    # -- the fence button: wiring, caret insert, wrap, refuse
+    fw = results["fenceWiring"]
+    assert fw["coreOps"] == ["bold", "italic", "strike", "code", "fence", "heading",
+      "list", "numbered", "quote", "link", "table", "hr"], fw
+    assert fw["fenceLabel"] == "```", fw
+    assert fw["fenceAria"] == "Code block", fw
+    assert fw["total"] == 20, "12 core + 8 refdes-row buttons"
+    assert fw["afterCode"] is True, fw
+
+    fc = results["fenceCaret"]
+    assert fc["padded"] is True, fc
+    assert fc["caretEmptyLine"] is True, "caret on the empty line between the fences"
+    assert fc["fences"] == 2, "the inserted block is balanced"
+    assert fc["execs"] == 1, "one insertion = one execCommand = one undo step"
+    assert fc["draft"] == "Intro text\n\n```\n\n```", fc
+
+    fci = results["fenceCaretInsideFence"]
+    assert fci["afterFence"] is True, "caret inside a fence: the block lands AFTER it"
+    assert fci["fences"] == 4, fci
+
+    fwr = results["fenceWrap"]
+    assert fwr["padded"] is True, fwr
+    assert fwr["selected"] == "alpha", "the wrapped text stays selected"
+    assert fwr["fences"] == 2, fwr
+    assert fwr["execs"] == 1, fwr
+
+    fwm = results["fenceWrapMulti"]
+    assert fwm["selected"] == "one\ntwo", fwm
+
+    fwb = results["fenceWrapBacktick"]
+    assert fwb["usesFour"] is True, "a selection with a ``` line gets a 4-backtick fence"
+    assert fwb["chosenSelected"] is True, fwb
+
+    fr = results["fenceRefuse"]
+    assert fr["unchanged"] is True, fr
+    assert fr["selUnchanged"] is True, fr
+    assert fr["execs"] == 0, fr
+    assert fr["draftUnchanged"] is True, fr
+
     a = results["a11y"]
-    assert a["count"] == 19, a  # 11 core + 8 refdes-row buttons
+    assert a["count"] == 20, a  # 12 core + 8 refdes-row buttons
     assert all(a["ops"]) and all(a["refdesOps"]), a
     assert a["refdesGroup"] == 1, "the refdes row is its own group in the bar"
     assert a["allButtons"] is True and a["allTyped"] is True, "real <button type=button>"
