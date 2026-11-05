@@ -116,9 +116,21 @@ implementation.
 
 ## Status
 
-DONE except the one reported test bug. Touched-file runs: mint 27/28
-(only the bug above fails), navis_write 57, docs anchors + crossplatform
-lint 14, ruff clean on navis_mint.py (api.py: my lines only; pre-existing
-findings elsewhere untouched). Full suite: run once before pushing — see
-PR.
+DONE except two test-file bugs (reported, not edited; PR #427). Touched-
+file runs: mint 27/28 (only the bug above fails), navis_write 57, docs
+anchors + crossplatform lint 14, ruff clean on navis_mint.py (api.py: my
+lines only; pre-existing findings elsewhere untouched). Full suite once
+before pushing: 5877 passed, 2 skipped, 1 failed (the bug above).
+
+## CI (PR #427)
+
+pr-size PASS. Tests jobs red ONLY on the test file, on two counts:
+(1) py3.13 job's single failure is the HAND_KEY bug (its only red test);
+(2) the 3.11 matrix (ubuntu+windows, tests.yml:46) additionally
+TypeError-s in the two tests using the file's `_text()` helper —
+`Path.read_text(newline=)` is Python 3.13+ (the local venv is 3.13.5, so
+the author's red run never hit it). Proposed author fix: read via
+`open(..., encoding="utf-8", newline="").read()`. Every mint test of the
+implementation itself is green on every platform.
+
 
