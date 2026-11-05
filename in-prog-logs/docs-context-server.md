@@ -109,5 +109,13 @@ in Chromium and Firefox), a compact `.cards-title` rule, and
 (page-scrolled) keeps position across a poll re-render -- verified in the
 375x640 live-edit case in both browsers (y 155->155, 153->153).
 
+Round-1 CI follow-up: windows ran red on the byte-identity of served
+static files -- its checkout (core.autocrlf) has CRLF copies where the
+tests read with universal newlines; `_static` now normalizes CRLF to LF
+on the wire. The second windows failure (test_serve_cli token-file
+"Access is denied") is a temp-dir flake in the serve CLI's own test,
+unrelated to this diff (it passed on the previous head of this PR;
+main is green).
+
 Status: done. Slice DC-2-impl complete, test file green as written (89/89
 with refs+lint), browsers re-passed for the changed cases; PR #425 open.
