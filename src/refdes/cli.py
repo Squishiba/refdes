@@ -28,6 +28,7 @@ from . import lifecycle as lifecycle_mod
 from . import loader as loader_mod
 from . import navis as navis_mod
 from . import navis_archive as navis_archive_mod
+from . import navis_ops
 from . import render as render_mod
 from . import revise as revise_mod
 from . import scaffold as scaffold_mod
@@ -2929,45 +2930,11 @@ def cmd_history_migrate_seals(args) -> int:
 
 
 def _navi_select(rows: list[dict], selector: str) -> tuple[dict | None, list[dict]]:
-    """The selector every Navis verb shares (slice 2's `show` selector,
-    design §5): the full 11-character key first -- every digit is in the
-    key alphabet, so an 11-character all-digit string is legal key
-    grammar and a full-key selector must not be read as an out-of-range
-    ordinal number -- then a 6-to-10-character key *prefix* (the short
-    key the CLI and panel display; a unique match selects, an ambiguous
-    one names its candidates, §5's short-key resolution), then the
-    ls/Show-all ordinal. Returns ``(row, ambiguous)``; at most one side
-    is populated.
-
-    Slice 3: `archive` and `restore` share this selector verbatim --
-    one way to name a Navi, for every verb that needs to name one."""
-    row = next((r for r in rows if r["key"] == selector), None)
-    if (
-        row is None
-        and 6 <= len(selector) < keys_mod.KEY_LEN
-        and all(ch in keys_mod.ALPHABET for ch in selector)
-    ):
-        candidates = [
-            r for r in rows if r["key"] and r["key"].startswith(selector)
-        ]
-        if len(candidates) == 1:
-            row = candidates[0]
-        elif candidates:
-            return None, candidates
-    # ASCII digits only, and no more of them than the largest ordinal
-    # has: a longer digit string is out of range by length alone, and
-    # int() of a 4300-digit string raises (CPython's integer-string
-    # limit) -- a selector that names nothing is a naming error, exit 2,
-    # never a traceback.
-    if (
-        row is None
-        and len(selector) <= len(str(len(rows)))
-        and re.fullmatch(r"[0-9]+", selector)
-    ):
-        index = int(selector) - 1
-        if 0 <= index < len(rows):
-            row = rows[index]
-    return row, []
+    """The selector every Navis verb shares (navis_ops.select, design §5):
+    the full 11-character key first, then a unique 6-to-10-character key
+    prefix (an ambiguous one names its candidates), then the ls/Show-all
+    ordinal. `show` names a Navi exactly the way `archive`/`restore` do."""
+    return navis_ops.select(rows, selector)
 
 
 def _print_ambiguous_navi(selector: str, candidates: list[dict]) -> None:
@@ -2982,22 +2949,31 @@ def _print_ambiguous_navi(selector: str, candidates: list[dict]) -> None:
 
 
 def _navis_write_verb(args, project, rows: list[dict], load_errors) -> int:
-    """`archive`/`restore` (slice 3, design §6, §9, §12, §13). The only
-    writes are the Navi's gzip record under `.refdes/navis/` and its
-    removal -- that is the §7.3 invariant, and it is why there is no
-    other write here: the item's body keeps the marker (the pointer),
+    """`archive`/`restore` (slice 3, design §6, §9, §12, §13), rendered:
+    the decisions live in `navis_ops.apply` (the CLI and the coming serve
+    API are clients of one implementation, §11); this function owns only
+    the text and the exit code. The store write it triggers is the
+    Navi's gzip record under `.refdes/navis/` and its removal -- that is
+    the §7.3 invariant: the item's body keeps the marker (the pointer),
     the record is the snapshot, and a Navi's text is edited by editing
     the marker, never by the archive. `main()` took the project write
     lock and ran the journal gate before dispatch; the store writer
     re-checks the journal for callers that are not this CLI (§12)."""
     verb = args.navis_command
-    if not _writes_allowed(args):
+    result = navis_ops.apply(
+        str(project.root),
+        verb,
+        rows,
+        args.navi,
+        allow_write=_writes_allowed(args),
+    )
+    kind = result.kind
+    if kind == "refused_no_write":
         return _refuse_no_write(verb, "the .refdes/navis/ archive store")
-    row, ambiguous = _navi_select(rows, args.navi)
-    if ambiguous:
-        _print_ambiguous_navi(args.navi, ambiguous)
+    if kind == "ambiguous":
+        _print_ambiguous_navi(args.navi, result.candidates)
         return 2
-    if row is None:
+    if kind == "not_found":
         print(
             f"no Navi {args.navi!r}: `refdes navis all` numbers them "
             f"1..{len(rows)}; a selector is a number, a full key, "
@@ -3005,8 +2981,9 @@ def _navis_write_verb(args, project, rows: list[dict], load_errors) -> int:
             file=sys.stderr,
         )
         return 2
+    row = result.row
     key = row["key"]
-    if not key:
+    if kind == "keyless":
         print(
             f"navis {verb}: this Navi has no key -- keys are minted by "
             "the next writable command, and this marker's body is one "
@@ -3017,71 +2994,54 @@ def _navis_write_verb(args, project, rows: list[dict], load_errors) -> int:
         return 2
     short = key[:6]
     src = row["source"]
-    try:
-        if verb == "archive":
-            if row["archived"]:
-                print(
-                    f"Navi {short} ({key}) is already archived -- "
-                    f"`refdes navis restore {short}` reactivates it"
-                )
-                return 1 if load_errors else 0
-            navis_archive_mod.archive_record(
-                str(project.root),
-                navi_key=key,
-                item_key=src.get("key") or "",
-                source={"file": src["file"], "line": src["line"]},
-                text=row["text"],
-            )
-            print(
-                f"navis archive: archived Navi {short} ({key}): "
-                f"{row['text']!r}  {src['item']} ({src['file']}:{src['line']})"
-            )
-            return 1 if load_errors else 0
-        # restore
-        if not row["archived"]:
-            print(
-                f"navis restore: Navi {short} ({key}) is not archived "
-                "-- nothing to restore",
-                file=sys.stderr,
-            )
-            return 2
-        if src.get("marker_found") is False:
-            # §9 row 3: restore reactivates a *marker*; writing a marker
-            # back would edit a body, which §2.3 forbids. The record
-            # stays, Show-all keeps revealing it, and hand-restoring the
-            # marker re-pairs the two by key.
-            print(
-                f"navis.archived_orphan: Navi {short} ({key}) is archived "
-                f"at {src['file']}:{src['line']} with marker not found -- "
-                "restore refuses (there is no marker to reactivate; "
-                "writing one would edit a body, design §9). Hand-restore "
-                "the marker and the pair re-links by key.",
-                file=sys.stderr,
-            )
-            return 1
-        navis_archive_mod.restore_record(str(project.root), key)
+    if kind == "noop":
+        print(
+            f"Navi {short} ({key}) is already archived -- "
+            f"`refdes navis restore {short}` reactivates it"
+        )
+        return 1 if load_errors else 0
+    if kind == "not_archived":
+        print(
+            f"navis restore: Navi {short} ({key}) is not archived "
+            "-- nothing to restore",
+            file=sys.stderr,
+        )
+        return 2
+    if kind == "orphan":
+        # §9 row 3: restore reactivates a *marker*; writing a marker back
+        # would edit a body, which §2.3 forbids. The record stays,
+        # Show-all keeps revealing it, and hand-restoring the marker
+        # re-pairs the two by key.
+        print(
+            f"navis.archived_orphan: Navi {short} ({key}) is archived "
+            f"at {src['file']}:{src['line']} with marker not found -- "
+            "restore refuses (there is no marker to reactivate; "
+            "writing one would edit a body, design §9). Hand-restore "
+            "the marker and the pair re-links by key.",
+            file=sys.stderr,
+        )
+        return 1
+    if kind in ("journal_pending", "error"):
+        # The store's own refusal (§12 journal, malformed key) or a failed
+        # write: a failed write says so and writes nothing half -- the
+        # temp is unlinked by the store writer, the marker is untouched,
+        # and the run exits like every other failed write. Never a
+        # traceback.
+        print(f"error: {result.detail}", file=sys.stderr)
+        return 2
+    # kind == "ok": the record was written (archive) or removed (restore).
+    if verb == "archive":
+        print(
+            f"navis archive: archived Navi {short} ({key}): "
+            f"{row['text']!r}  {src['item']} ({src['file']}:{src['line']})"
+        )
+    else:
         print(
             f"navis restore: restored Navi {short} ({key}) -- the marker "
             f"at {src['file']}:{src['line']} is active again, showing its "
             "current text"
         )
-        return 1 if load_errors else 0
-    except navis_archive_mod.JournalPending as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    except navis_archive_mod.NavisArchiveError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    except OSError as exc:
-        # The record is the archive: a failed write says so and writes
-        # nothing half -- the temp is unlinked by the store writer, the
-        # marker is untouched, and the run exits like every other failed
-        # write. Never a traceback.
-        print(
-            f"error: navis {verb} could not write the archive store: {exc}",
-            file=sys.stderr,
-        )
-        return 2
+    return 1 if load_errors else 0
 
 
 def cmd_navis(args) -> int:
