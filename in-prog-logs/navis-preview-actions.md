@@ -2,7 +2,8 @@
 
 Goal: make the served preview page's Navis panel interactive through
 `GET /api/navis` + `POST /api/navis/archive|restore`, without touching
-published output. Slice N5c of docs/design/editor-vscode-adapter.md §11.
+published output. Slice N5c of the panel design
+(in-prog-logs/navis-design-20261025.md §11).
 
 ## What landed
 
@@ -63,3 +64,16 @@ published output. Slice N5c of docs/design/editor-vscode-adapter.md §11.
 
 Code, tests, docs complete; browser evidence complete. NOT yet done:
 full suite (paused for profiler run), push, PR.
+
+## Review round 1 (PR #420)
+
+Chunk 2 approved; chunk 1 asked for three fixes, all in one follow-up:
+F1 restored the `wireValueToggles();` call my diff had replaced in
+preview.js (regression: the W3 toggle was dead on served pages) with a
+new red-first entry-point test that runs the real preview.js top level,
+plus a real-browser check (Chromium + Firefox, proj7 page with a calc
+table AND the Navis panel: toggle hides/shows the badge, panel wiring
+alive); F2 corrected the false `editor-vscode-adapter.md §11` citation
+to `in-prog-logs/navis-design-20261025.md` §11 in all four places
+(changelog, module header, bar.css, this log); F3 removed the dead
+`@media print` rule (navis.css already prints-hides the whole panel).

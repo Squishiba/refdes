@@ -530,3 +530,70 @@ def test_the_preview_page_ships_the_wiring_chain(tmp_path):
         assert "wireNavisPanel" in module.decode("utf-8")
     finally:
         app.stop()
+
+
+# --------------------------------------------- entry-point wiring (review round 1, F1)
+
+ENTRY_HARNESS = r"""
+// The REAL preview.js entry point (not a function in isolation) runs against
+// a minimal document: its top level must wire BOTH the W3 show-values toggle
+// and the N5c Navis panel. Review round 1 of PR #420 caught a head whose top
+// level called wireNavisPanel() in place of wireValueToggles() -- string
+// tests on the function bodies could not see that; this harness runs the
+// entry point, so it can.
+const STATIC = __STATIC__;
+const queries = [];
+const toggle = {
+  listeners: {},
+  addEventListener(t, fn) { (this.listeners[t] ||= []).push(fn); },
+  setAttribute() {},
+  click() { for (const fn of this.listeners.click || []) fn({ type: 'click' }); },
+};
+let off = false;
+globalThis.document = {
+  querySelector(sel) {
+    queries.push(sel);
+    if (sel === 'meta[name="refdes-token"]') return { content: 'tok' };
+    return null;
+  },
+  querySelectorAll(sel) {
+    queries.push(sel);
+    return sel === '.refdes-values-toggle' ? [toggle] : [];
+  },
+  documentElement: {
+    classList: {
+      toggle(cls) {
+        if (cls === 'refdes-values-off') off = !off;
+        return off;
+      },
+    },
+  },
+  createElement() {
+    return { setAttribute() {}, getAttribute() { return null; } };
+  },
+};
+globalThis.location = { reload() {} };
+globalThis.fetch = async () => { throw new Error('no network in the harness'); };
+
+await import(`file://${STATIC}/preview.js`);
+const navisQueried = queries.includes('details.refdes-navis');
+toggle.click();
+const offAfterFirst = off;
+toggle.click();
+const offAfterSecond = off;
+console.log(JSON.stringify({ navisQueried, offAfterFirst, offAfterSecond }));
+process.exit(0);
+"""
+
+
+@pytest.mark.skipif(
+    NODE is None, reason="no node on PATH to run the served preview entry point"
+)
+def test_the_preview_entry_point_wires_both_toggle_and_panel(tmp_path):
+    """preview.js's top level wires the W3 show-values toggle AND the N5c
+    panel. A head where wireNavisPanel() replaces wireValueToggles() leaves
+    every served page's toggle dead (the button is injected, the function
+    exists, no listener attaches); this test runs the entry point, so that
+    replacement fails it."""
+    r = _node_json(tmp_path, ENTRY_HARNESS)
+    assert r == {"navisQueried": True, "offAfterFirst": True, "offAfterSecond": False}, r

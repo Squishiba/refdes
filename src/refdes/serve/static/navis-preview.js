@@ -1,6 +1,8 @@
 // N5c: the Navis panel on a SERVED preview page gains Archive/Restore
-// actions (docs/design/editor-vscode-adapter.md §11: the editor is a client
-// of the panel's projection, never a second implementation). The published
+// actions (in-prog-logs/navis-design-20261025.md §11: the panel is a
+// projection of the Navi store, with the serve surface as its client, never
+// a second implementation; endpoints listed in
+// docs/design/editor-vscode-adapter.md §3.3). The published
 // page stays exactly as published -- the read-only panel with its disabled
 // restore is the floor; this module, loaded only by preview.js, upgrades
 // that floor over the serve API (GET /api/navis, POST /api/navis/archive and

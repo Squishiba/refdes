@@ -41,9 +41,15 @@ export function wireValueToggles(doc = document) {
   }
 }
 
+wireValueToggles();
+
 // N5c: the Navis panel's Archive/Restore actions (navis-preview.js). Same
 // progressive-enhancement posture as the toggle: the page reads and acts
-// through the serve API, and the published generation is untouched.
+// through the serve API, and the published generation is untouched. BOTH
+// top-level calls stay -- the round-1 review of PR #420 caught a head that
+// replaced wireValueToggles() with this one, killing the toggle on every
+// served page; test_the_preview_entry_point_wires_both_toggle_and_panel
+// runs the entry point so that cannot go unnoticed again.
 wireNavisPanel();
 
 poll();

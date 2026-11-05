@@ -40,7 +40,7 @@
     at `toggle bottom < panel bottom`. */
 .refdes-taskpane-toggle { bottom: 50px; }
 .refdes-taskpane { bottom: 87px; }
-/* N5c (docs/design/editor-vscode-adapter.md §11): the Navis panel's row
+/* N5c (in-prog-logs/navis-design-20261025.md §11): the Navis panel's row
    actions on a served preview page, wired by navis-preview.js. The panel
    box is fixed top-right (navis.css), so a row button can never reach the
    bar's corner -- the buttons copy the published restore pill's metrics
@@ -62,4 +62,3 @@
   margin: 0 0 var(--space-6);
   color: var(--warn); font-size: var(--text-xs); font-weight: var(--weight-semibold);
 }
-@media print { .refdes-navis-archive, .refdes-navis-error { display: none; } }
