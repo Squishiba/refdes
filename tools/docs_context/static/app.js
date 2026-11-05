@@ -2,6 +2,8 @@
 
 const TEXT_LIMIT = 200;
 
+const QUESTIONS = ["explain", "misread", "match"];
+
 function el(tag, cls, text) {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
@@ -13,7 +15,7 @@ const blocksList = document.getElementById("blocks");
 const cardsPane = document.getElementById("cards");
 const countsLine = document.getElementById("summary-counts");
 
-const state = { doc: null, selected: null, mtime: null };
+const state = { doc: null, selected: null, mtime: null, answers: {} };
 
 function refFlags(ref) {
   const card = ref.card || {};
@@ -71,7 +73,70 @@ function codeWindow(lines, cited) {
   return pre;
 }
 
-function renderCard(ref) {
+let askInFlight = false;
+
+function askKey(blockStart, refIndex, question) {
+  return blockStart + ":" + refIndex + ":" + question;
+}
+
+function askAnswerNode(saved) {
+  const box = el("div", "ask-answer-box");
+  box.appendChild(
+    el(
+      "div",
+      "ask-label",
+      "advisory answer from " + saved.model + " (" + saved.question +
+      ") -- a reading aid, not project facts; it never drafts prose"
+    )
+  );
+  box.appendChild(el("pre", "ask-answer", saved.answer));
+  return box;
+}
+
+function setAskButtonsDisabled(disabled) {
+  for (const button of document.querySelectorAll(".ask-btn")) button.disabled = disabled;
+}
+
+async function askModel(result, blockStart, refIndex, question) {
+  if (askInFlight) return;
+  askInFlight = true;
+  setAskButtonsDisabled(true);
+  result.textContent = "asking the model: " + question + " ...";
+  try {
+    const response = await fetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Docs-Context": "1" },
+      body: JSON.stringify({ block: blockStart, ref: refIndex, question: question }),
+    });
+    let data = {};
+    try {
+      data = await response.json();
+    } catch (err) {
+      /* a non-json error page: fall through to the status line */
+    }
+    result.textContent = "";
+    if (!response.ok) {
+      const why = data.kind ? data.kind + ": " + (data.error || "") : "http " + response.status;
+      result.appendChild(el("div", "ask-error", "the model did not answer -- " + why));
+      return;
+    }
+    const saved = {
+      model: String(data.model),
+      question: String(data.question),
+      answer: String(data.answer),
+    };
+    state.answers[askKey(blockStart, refIndex, question)] = saved;
+    result.appendChild(askAnswerNode(saved));
+  } catch (err) {
+    result.textContent = "";
+    result.appendChild(el("div", "ask-error", "the ask request failed: " + String(err)));
+  } finally {
+    askInFlight = false;
+    setAskButtonsDisabled(false);
+  }
+}
+
+function renderCard(ref, blockStart, refIndex) {
   const card = ref.card || {};
   const box = el("article", "card");
   const head = el("div", "card-head");
@@ -112,6 +177,21 @@ function renderCard(ref) {
         box.appendChild(el("pre", "excerpt", card.excerpt.join("\n")));
       }
     }
+  }
+  const askRow = el("div", "ask-row");
+  const askResult = el("div", "ask-result");
+  for (const question of QUESTIONS) {
+    const button = el("button", "ask-btn", "ask: " + question);
+    button.addEventListener("click", () =>
+      askModel(askResult, blockStart, refIndex, question)
+    );
+    askRow.appendChild(button);
+  }
+  box.appendChild(askRow);
+  box.appendChild(askResult);
+  for (const question of QUESTIONS) {
+    const saved = state.answers[askKey(blockStart, refIndex, question)];
+    if (saved) askResult.appendChild(askAnswerNode(saved));
   }
   return box;
 }
@@ -172,7 +252,9 @@ function render() {
     if (block.refs.length === 0) {
       cardsPane.appendChild(el("p", "hint", "this block makes no references"));
     }
-    for (const ref of block.refs) cardsPane.appendChild(renderCard(ref));
+    for (const [index, ref] of block.refs.entries()) {
+      cardsPane.appendChild(renderCard(ref, block.start_line, index));
+    }
   }
   blocksList.scrollTop = leftScroll;
   cardsPane.scrollTop = rightScroll;
@@ -227,6 +309,7 @@ async function refreshDoc() {
   if (!response.ok) throw new Error("doc fetch failed: " + response.status);
   state.doc = await response.json();
   state.mtime = state.doc.mtime;
+  state.answers = {}; // block/ref coordinates moved: answers are stale
   keepSelectionAlive();
   render();
 }
