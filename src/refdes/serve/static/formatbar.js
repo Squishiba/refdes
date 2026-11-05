@@ -186,22 +186,30 @@ function fenceBlocks(text) {
   return blocks;
 }
 
-function fenceInsertAfter(text, caret) {
+// The fenced block whose span (opener line start through closing fence end)
+// contains `caret` -- fence marker lines included. ONE geometry, shared by the
+// caret-after-fence rule and the selection refuse rule so they can never
+// disagree about what "inside a fence" means.
+function fenceAt(text, caret) {
   for (const block of fenceBlocks(text)) {
-    if (caret >= block.start && caret < block.end) return block.endLine;
+    if (caret >= block.start && caret < block.end) return block;
   }
   return null;
 }
 
-// A selection lies inside a fenced block when one block spans the whole of it
-// (the fenceBlocks span: opener line start through closing fence end). Used to
-// refuse the fence button inside a fence, matching the blockAfterFence rule
-// (caret case) -- fences cannot nest.
+function fenceInsertAfter(text, caret) {
+  const block = fenceAt(text, caret);
+  return block ? block.endLine : null;
+}
+
+// A NON-EMPTY selection is refused when EITHER endpoint falls inside a fenced
+// block: one endpoint inside and one outside would drop the blockInsertPlan
+// range (duplicated text) or wrap half a fence (an orphan closer), and both
+// inside nests fences. A selection whose endpoints are both OUTSIDE is allowed
+// even when it encloses a whole fence -- fenceMarkerFor makes the wrapper
+// longer than any fence it swallows, so the enclosed text survives once.
 function selectionInFence(text, start, end) {
-  for (const block of fenceBlocks(text)) {
-    if (start >= block.start && end <= block.end) return true;
-  }
-  return false;
+  return start < end && (fenceAt(text, start) !== null || fenceAt(text, end) !== null);
 }
 
 // The fence a wrapped selection needs: longer than the longest backtick run

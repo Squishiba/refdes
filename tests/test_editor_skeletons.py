@@ -126,6 +126,14 @@ def test_the_span_skeleton_is_the_measured_build_error(tmp_path):
     assert diags[0].file == "items/decs.yaml"
 
 
+def test_the_fence_skeleton_is_the_measured_build_error(tmp_path):
+    _project, item, diags = build_with_body(
+        tmp_path, js_export("FENCE_SKELETON") + "\n"
+    )
+    assert [d.message for d in diags] == [FENCE_MESSAGE], diags
+    assert diags[0].line == item.source_line
+
+
 def test_the_plain_fence_the_bar_inserts_builds_clean(tmp_path):
     # The fence button's caret skeleton (exported by the real formatbar.js):
     # an empty fenced block with the caret on the middle line. A typed line
@@ -138,11 +146,6 @@ def test_the_plain_fence_the_bar_inserts_builds_clean(tmp_path):
     _project, item, diags = build_with_body(tmp_path, "Intro.\n\n" + typed + "\n")
     assert diags == [], diags
     assert "```\nR1 = 100\n```" in item.body, item.body
-    _project, item, diags = build_with_body(
-        tmp_path, js_export("FENCE_SKELETON") + "\n"
-    )
-    assert [d.message for d in diags] == [FENCE_MESSAGE], diags
-    assert diags[0].line == item.source_line
 
 
 def test_the_figure_and_value_skeletons_stay_below_error(tmp_path):

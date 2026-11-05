@@ -81,3 +81,24 @@ fixed, both browsers green.
 
 No Python under src changed. Node suites: `ruff check` on the two touched
 test files is clean.
+
+## Review round 1 (44c437b9, changes requested)
+
+F1 (real bug, spec gap): the old refuse rule required BOTH endpoints inside
+ONE fence; a selection starting inside a fence and ending past its closer
+survived, and `blockInsertPlan`'s after-fence rule then dropped the range and
+inserted a zero-length block -- duplicated text, save succeeds silently. New
+rule: refuse when EITHER endpoint of a non-empty selection falls inside any
+fence, defined off one shared `fenceAt` helper (the caret-after-fence rule's
+own `caret >= block.start && caret < block.end` geometry, so the two rules
+can never disagree). Caret-only behaviour unchanged. Node harness: red shown
+pre-fix for start-inside/end-after (reviewer's exact input), start-before/
+end-inside, endpoints in two fences; enclosing-whole-fence stays accepted
+(4-tick wrapper, original text asserted to occur exactly once); every
+accepted edit now asserts the fence-line-count parity invariant
+(`keepsBalance`). Browser case (g) added and run in both browsers; all
+(a)-(g) re-run PASS. F2: the round-1 rename of
+`test_the_fence_skeleton_is_the_measured_build_error` is reverted -- the
+calc-fence build-error pin is that test again, the plain-fence clean build
+gets its own test. F3: design-record re-indent reverted (diff is the one
+sentence). Docs row restated to the implemented rule.

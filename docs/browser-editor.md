@@ -32,7 +32,7 @@ reference](markdown.md)):
 | Button | With a selection | With the caret only |
 |---|---|---|
 | **B** / **I** / **S** / **code** | wraps the selection in `**` / `*` / `~~` / `` ` `` | inserts the markers around a placeholder (`bold text`, `italic text`, `text`, `code`) with the placeholder selected, so you can type over it |
-| **` ``` `** | wraps the selection in a fenced code block as its own paragraph, the text staying selected (a longer fence when the selection itself contains a ` ``` ` line); a selection *inside* an existing fenced block is left untouched | inserts an empty fenced block as its own paragraph, with the caret on the inside line so typing goes inside; with the caret inside an existing fence, the new block lands after that fence |
+| **` ``` `** | wraps the selection in a fenced code block as its own paragraph, the text staying selected (a longer fence when the selection contains — or encloses whole — a ` ``` ` line); nothing happens when *either end* of the selection falls inside an existing fenced block | inserts an empty fenced block as its own paragraph, with the caret on the inside line so typing goes inside; with the caret inside an existing fence, the new block lands after that fence |
 | **H** | cycles the line's heading level: none → `#` → `##` → … → six → none | same, on the caret's line |
 | **•** / **1.** / **❝** | prefixes every line the selection touches with `- ` / `1. ` / `> `; pressing again removes it | same, on the caret's line |
 | **Link** | wraps: `[selection](url)` with `url` selected; if the selection is itself an `http(s)://` URL, it becomes the target and `link text` is selected | inserts `[link text](url)` with `url` selected |
