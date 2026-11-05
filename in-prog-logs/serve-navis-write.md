@@ -91,3 +91,8 @@ pushed on feat/serve-navis-write; no PR opened).
   stopped by PID.
 - Docs: route bullets in docs/design/editor-vscode-adapter.md's API
   inventory; changelog.d/serve-navis-write.added.md.
+- Merged origin/main again mid-task (PR #416 GET /api/navis landed): the
+  api.py conflicts (imports, the 405 list) resolved keeping BOTH sides --
+  the GET hook beside the POST hook, the 405 list carries /api/navis plus
+  the two POST paths. test_serve_navis_write.py + test_serve_navis_read.py
+  re-run after the merge: 59 passed, 2 failed (the same authored-bug pair).
