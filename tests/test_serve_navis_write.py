@@ -524,6 +524,52 @@ def test_a_read_only_server_refuses_both_verbs_and_writes_nothing(tmp_path):
         app.stop()
 
 
+@pytest.mark.parametrize("path", [ARCHIVE, RESTORE])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},                # no navi
+        {"navi": 1.5},     # not a string, not an int
+        [1],               # a JSON array, not an object
+        "zzzzzz",          # a non-object body (names nothing on a writable server)
+        {"navi": "zzzzzz"},  # a selector that 404s on a writable server
+    ],
+)
+def test_a_read_only_server_refuses_malformed_bodies_before_validating(
+    tmp_path, path, payload
+):
+    """Design §13 slice 5: "403 under --no-write", unqualified -- a client
+    probing writability with an incomplete payload gets the refusal, the
+    same gate-first posture as every sibling write route (`_apply_edit`,
+    `_create_item`, `_upload_asset`), not a 400 that leaks the body rules
+    of a server that cannot write."""
+    _project(tmp_path, NOTES)
+    app = start(tmp_path, read_only=True)
+    try:
+        client = Client(app)
+        before = snapshot_tree(tmp_path)
+        status, body = client.api_post(path, payload)
+        assert status == 403, body
+        assert body["kind"] == "refused"
+        assert "--no-write" in body["error"]
+        assert snapshot_tree(tmp_path) == before
+    finally:
+        app.stop()
+
+
+def test_a_writable_server_still_answers_the_same_malformed_bodies(served):
+    """The hoist moved nothing on a writable server: the malformed bodies
+    keep their 400s and the 404-selector keeps its 404."""
+    _app, client, _root = served
+    for payload in ({}, {"navi": 1.5}, [1], "zzzzzz"):
+        status, body = client.api_post(ARCHIVE, payload)
+        assert status == 400, (payload, body)
+        assert body["kind"] == "bad_request"
+    status, body = client.api_post(ARCHIVE, {"navi": "zzzzzz"})
+    assert status == 404, body
+    assert body["kind"] == "not_found"
+
+
 def test_the_write_routes_share_the_items_create_token_gate(served):
     """The gate is route-agnostic (server.py `_api`); these routes must
     answer without the token exactly as /api/items/create does -- compare,

@@ -76,10 +76,9 @@ pushed on feat/serve-navis-write; no PR opened).
   -> 142 passed. Full suite (pre-push, round 0): 2 failed, 5742 passed,
   2 skipped.
 - Smoke (real `refdes serve --port 8772`, token from the launch URL):
-  archive -> 200 ok changed:true, `.refdes/navis/<key>.yaml.gz` created
-  (store absent before); preview shows `[archived]`/Show all; restore ->
-  200 ok, store empty, page clean; restore-of-active -> 409 not_archived;
-  GET on POST-only routes -> 405. Server stopped by PID.
+  archive -> 200 ok changed:true, the store record created (absent before);
+  preview shows `[archived]`; restore -> 200 ok, store empty, page clean;
+  restore-of-active -> 409; GET on POST-only routes -> 405.
 - Docs: route bullets in docs/design/editor-vscode-adapter.md's API
   inventory; changelog.d/serve-navis-write.added.md.
 - Merged origin/main mid-task (PR #416 GET /api/navis): api.py conflicts
@@ -103,17 +102,25 @@ pushed on feat/serve-navis-write; no PR opened).
   restore 200 changed=true, `GET /api/navis` shows the LIVE edited text as
   active). The §12 docstring claim narrowed to the journal refusal (no
   draft test built, per the review).
-- S1: `_render`'s fallthrough is now 500 JSON naming an unknown kind
-  (red first: the new test failed with a KeyError in the handler thread);
-  journal_pending kept in the 409 branch via the `or kind ==` test (caught
-  in its own run: a first cut of the guard dropped journal_pending to 500).
+- S1: `_render`'s fallthrough is now 500 JSON naming an unknown kind (red
+  first); journal_pending kept in the 409 branch (a first-cut guard dropped
+  it to 500; its own run caught that).
 - S2: dead `VERBS` frozenset deleted.
 - S3: the two POST paths removed from the final 405 tuple (unreachable --
   the route hook catches every method on both paths). All five listed serve
   test files stay green without them; the round-0 log's "the 405 list
   carries ... the two POST paths" is superseded by this.
-- Rejected on purpose (reviewers' nits): pre-lock snapshot read, the
-  vscode-adapter citation range, the "1..0" empty-project wording.
+- Rejected on purpose: pre-lock snapshot read, the vscode-adapter citation
+  range, the "1..0" wording, asserting `verb`, surfacing a failed refresh.
 - Pre-push: the five listed files -> 171 passed. Full suite (once): 5746
-  passed, 2 skipped (0 failed). ruff clean on the test file and
-  navis_write.py; api.py keeps only its 7 pre-existing E501s.
+  passed, 2 skipped (0 failed).
+
+## Review round 2 (one accepted finding; one commit)
+
+- `handle` now gates `read_only` FIRST (before body/selector validation),
+  returning the same 403 `refused` shape via the one `_NO_WRITE_MESSAGE`
+  constant shared with the `refused_no_write` render; the `allow_write=`
+  pass-through stays as defense in depth. Red first: the 8 read-only
+  malformed-body cases failed (400/404) and the 3 writable-parity cases
+  passed; after the hoist all green. Five listed files: 182 passed; full
+  suite (once): 5758 passed, 2 skipped.

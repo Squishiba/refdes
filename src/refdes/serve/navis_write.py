@@ -24,6 +24,10 @@ from .. import navis as navis_mod
 from .. import navis_ops
 from .edit import write_lock_for
 
+_NO_WRITE_MESSAGE = (
+    "this server was started with --no-write: navis archive and restore are disabled"
+)
+
 _CONFLICT_MESSAGES = {
     "keyless": (
         "this Navi has no key -- keys are minted by the next writable "
@@ -44,8 +48,14 @@ def handle(app, verb: str, body) -> tuple[int, dict]:
     """`verb` is "archive" or "restore"; `body` is the parsed JSON body.
 
     The route's own `read_only` flag is the `allow_write` answer `navis_ops`
-    refuses on (the same gate the CLI's `--no-write` reaches), so the whole
-    refusal is decided in one place, not transcribed here."""
+    refuses on (the same gate the CLI's `--no-write` reaches), consulted
+    FIRST -- before any body validation, the sibling write routes' gate-first
+    posture (design §13 slice 5: "403 under --no-write", unqualified), so a
+    client probing writability with an incomplete payload gets the refusal;
+    the `allow_write=` pass-through stays as defense in depth (one message
+    source: `_NO_WRITE_MESSAGE`)."""
+    if getattr(app, "read_only", False):
+        return 403, {"kind": "refused", "error": _NO_WRITE_MESSAGE}
     if not isinstance(body, dict):
         return 400, {"kind": "bad_request", "error": "expected a JSON object"}
     selector, error = _selector(body.get("navi"))
@@ -104,11 +114,7 @@ def _render(verb: str, selector: str, total: int, result) -> tuple[int, dict]:
             "changed": result.changed,
         }
     if kind == "refused_no_write":
-        return 403, {
-            "kind": "refused",
-            "error": "this server was started with --no-write: navis archive "
-            "and restore are disabled",
-        }
+        return 403, {"kind": "refused", "error": _NO_WRITE_MESSAGE}
     if kind == "not_found":
         return 404, {
             "kind": "not_found",
