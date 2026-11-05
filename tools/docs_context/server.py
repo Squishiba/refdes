@@ -43,6 +43,8 @@ STATIC_TYPES = {
 FILE_WINDOW = 15
 ALLOWED_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 DRIVE_RE = re.compile(r"[A-Za-z]:[\\/]")
+CACHE_MAX = 32
+DRAIN_MAX = 1024 * 1024
 
 
 class DocState:
@@ -99,6 +101,9 @@ class DocState:
             "mtime": st.st_mtime,
             "blocks": analyzed["blocks"],
         }
+        # dict order is insertion order: the oldest page is the first key.
+        if len(self._cache) >= CACHE_MAX:
+            self._cache.pop(next(iter(self._cache)))
         self._cache[rel] = (key, payload)
         return payload
 
@@ -212,14 +217,41 @@ class DocsContextHandler(BaseHTTPRequestHandler):
     def do_HEAD(self) -> None:
         self._guarded()
 
+    def _drain_body(self) -> None:
+        """Consume a request body so a keep-alive connection cannot desync:
+        the 405/403 response must not leave the body to be parsed as the
+        next request. An oversized body gets the response plus a close
+        instead of being buffered."""
+        raw = self.headers.get("Content-Length")
+        if raw is None:
+            return
+        try:
+            length = int(raw)
+        except ValueError:
+            length = 0
+        if length > DRAIN_MAX:
+            self.close_connection = True
+            return
+        remaining = length
+        while remaining > 0:
+            chunk = self.rfile.read(min(remaining, 65536))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+
     def _guarded(self) -> None:
         name, port = _split_host(self.headers.get("Host", ""))
-        if name not in ALLOWED_HOSTS or port not in ("", str(self.server.server_address[1])):
+        if name.lower() not in ALLOWED_HOSTS or port not in (
+            "",
+            str(self.server.server_address[1]),
+        ):
+            self._drain_body()
             self._json(403, {"error": "bad host"})
             return
         self._route()
 
     def _method_not_allowed(self) -> None:
+        self._drain_body()
         self._json(405, {"error": "method not allowed"})
 
     do_POST = _method_not_allowed
@@ -227,6 +259,13 @@ class DocsContextHandler(BaseHTTPRequestHandler):
     do_DELETE = _method_not_allowed
     do_PATCH = _method_not_allowed
     do_OPTIONS = _method_not_allowed
+
+    def __getattr__(self, name: str):
+        # Any method word the class does not name (TRACE, CONNECT, FOO, ...)
+        # answers through the same 405 JSON path, never the stdlib 501.
+        if name.startswith("do_"):
+            return self._method_not_allowed
+        raise AttributeError(name)
 
 
 class DocsContextServer(ThreadingHTTPServer):

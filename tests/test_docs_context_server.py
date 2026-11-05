@@ -810,3 +810,73 @@ def test_cli_doc_outside_repo_exits_two(tmp_path):
     proc = run_cli([str(tmp_path / "outside.md"), "--repo", str(repo)])
     assert proc.returncode == 2
     assert proc.stderr.strip()
+
+
+# --- review round 2 (authorized append): 405 for EVERY method word, Host
+# case-insensitivity, and 405/403 body draining --------------------------------
+
+
+def raw_request(port, method, path="/", body=None, host_header=None):
+    """One request with any method word; (status, ctype, headers, body)."""
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        headers = {"Host": host_header} if host_header is not None else {}
+        conn.request(method, path, body=body, headers=headers)
+        resp = conn.getresponse()
+        return (
+            resp.status,
+            resp.getheader("Content-Type", "").lower(),
+            {k.lower(): v for k, v in resp.getheaders()},
+            resp.read(),
+        )
+    finally:
+        conn.close()
+
+
+def test_every_other_method_gets_the_405_json_with_security_headers(tmp_path):
+    repo = make_repo(tmp_path)
+    with running(repo) as base:
+        _host, port = addr_of(base)
+        for method in ("TRACE", "CONNECT", "FOO"):
+            status, ctype, headers, body = raw_request(port, method, "/api/mtime")
+            assert status == 405, method
+            assert "application/json" in ctype, method
+            assert json.loads(body) == {"error": "method not allowed"}, method
+            assert headers.get("x-content-type-options") == "nosniff", method
+            assert headers.get("cache-control") == "no-store", method
+        assert get(base, "/api/mtime")[0] == 200
+
+
+def test_host_allowlist_is_case_insensitive(tmp_path):
+    repo = make_repo(tmp_path)
+    with running(repo) as base:
+        _host, port = addr_of(base)
+        for host_header in (f"LOCALHOST:{port}", f"LocalHost:{port}", f"127.0.0.1:{port}"):
+            status, _body = raw_get(port, host_header)
+            assert status == 200, host_header
+        for host_header in (
+            f"LOCALHOST:{port + 1}",
+            f"Evil.Example.COM:{port}",
+            "LOCALHOST.local:1",
+        ):
+            status, _body = raw_get(port, host_header)
+            assert status == 403, host_header
+
+
+def test_405_on_a_request_with_a_body_keeps_the_connection_in_sync(tmp_path):
+    repo = make_repo(tmp_path)
+    with running(repo) as base:
+        _host, port = addr_of(base)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            conn.request("POST", "/api/mtime", body=b"x" * 100)
+            resp = conn.getresponse()
+            assert resp.status == 405
+            assert json.loads(resp.read()) == {"error": "method not allowed"}
+            conn.request("GET", "/api/mtime")
+            resp = conn.getresponse()
+            body = json.loads(resp.read())
+            assert resp.status == 200, resp.status
+            assert isinstance(body["mtime"], float), body
+        finally:
+            conn.close()

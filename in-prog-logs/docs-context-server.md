@@ -50,7 +50,10 @@ Status: done. 31 tests, all red on the missing `server.py`.
 # DC-2-impl: the server and the page (this slice)
 
 Implemented `tools/docs_context/server.py` + `static/{index.html,app.js,style.css}`
-against the contract file. No test edits; no src/ changes; docs/ untouched.
+against the contract file. No test edits at delivery (the two authorized
+edits came in review rounds: the one-line helper fix, and the round-2
+append of three tests at the end -- both recorded below); no src/ changes;
+docs/ untouched.
 Path safety is refs.py's, imported: `/api/file` runs `refs._read_text_file`
 (error cards, never an open outside the repo), `/api/doc?path=` validates
 against the same realpath/`.git` posture for its 400-vs-404 split. Stdlib
@@ -72,16 +75,18 @@ prefers-color-scheme; columns stack <=760px, no overflow at 375.
 ## Test bug: found, reported, authorized, fixed (one line)
 
 `request()` (tests/test_docs_context_server.py:148) passed `headers=None`
-into `http.client.HTTPConnection.request()`; on Python 3.13 that raises
+into `http.client.HTTPConnection.request()`; that raises
 `TypeError: 'NoneType' object is not iterable` client-side before any
-request is sent (23 of 31 tests died in the test process, not the server).
+request is sent (CI showed it on 3.11 as well as 3.13; 23 of 31 tests died
+in the test process, not the server).
 Reported per rule 1 with the proposed one-line change; the orchestrator
 independently confirmed it and authorized exactly that edit, applied as
 `headers=headers or {}` -- nothing else in the test file was touched.
 
 ## Evidence
 
-- After the authorized fix: 31/31 as written (+ refs 52 + lint = 89/89),
+- After the authorized fix: 31/31 as written (server 31 + refs 46 + lint 12
+  = 89/89),
   ruff clean on server.py and the test file. Before it: 8/8 raw-socket
   subset, 31/31 on a .scratch copy with only the one-line change.
 - Real browsers, PASS in Chromium (headless, /usr/bin/chromium) and Firefox
@@ -92,7 +97,10 @@ independently confirmed it and authorized exactly that edit, applied as
   paragraph -> re-render <4 s keeping selection (line 31) and scrollTop
   (400->400); hostile doc (<script>/<img onerror> in paragraph AND heading)
   renders literally, window.__pwn undefined, 1 script (app.js), 0 img;
-  375x640 stacked, scrollWidth==innerWidth. Screenshots: .scratch/browser/.
+  375x640 stacked, scrollWidth==innerWidth. Screenshots exist under
+  .scratch/browser/ but that directory is gitignored -- reviewers cannot
+  see them; the browser claims above rest on the DOM assertions, not on
+  shared images.
 - Known cost: first analyze of a command-heavy page (navis.md, 21 known
   commands) takes ~8.4 s -- DC-1's `_help_subprocess` spawns one subprocess
   per card, uncached. Later requests hit the (mtime, size) cache. A card-
@@ -117,5 +125,18 @@ on the wire. The second windows failure (test_serve_cli token-file
 unrelated to this diff (it passed on the previous head of this PR;
 main is green).
 
-Status: done. Slice DC-2-impl complete, test file green as written (89/89
+Review round 2 (summarized): every method word now answers through the 405
+JSON path (`__getattr__` on `do_*`; appended TRACE/CONNECT/FOO test shown
+red then green); Host allowlist is case-insensitive on the name (appended
+test); 405/403 drain a `Content-Length` body, capped at 1 MiB with the
+connection closed past it (appended keep-alive test -- pre-fix the drained
+bytes desynced into a 501); app.js startup failure shows a visible header
+line via textContent and keeps polling, and `tick()` has a reentrancy
+guard; the doc cache is capped at 32 entries, oldest evicted. Server file
+34/34, 92/92 with refs+lint, ruff clean; both browsers pass every case
+including the startup-failure case (page served with `/api/doc` intercepted
+to a 500: header reads "cannot reach the doc server: ... (still
+retrying)"; normal load after works).
+
+Status: done. Slice DC-2-impl complete, test file green as written (92/92
 with refs+lint), browsers re-passed for the changed cases; PR #425 open.

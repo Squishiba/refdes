@@ -216,19 +216,30 @@ function keepSelectionAlive() {
 
 async function refreshDoc() {
   const response = await fetch("/api/doc");
+  if (!response.ok) throw new Error("doc fetch failed: " + response.status);
   state.doc = await response.json();
   state.mtime = state.doc.mtime;
   keepSelectionAlive();
   render();
 }
 
+function showStartupFailure(err) {
+  countsLine.textContent = "cannot reach the doc server: " + String(err) + " (still retrying)";
+}
+
+let inFlight = false;
+
 async function tick() {
+  if (inFlight) return;
+  inFlight = true;
   try {
     const response = await fetch("/api/mtime");
     const data = await response.json();
     if (state.mtime !== null && data.mtime !== state.mtime) await refreshDoc();
   } catch (err) {
     /* the page is polling its own server; a blip is fine, the next tick retries */
+  } finally {
+    inFlight = false;
   }
 }
 
@@ -244,5 +255,5 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-refreshDoc();
+refreshDoc().catch(showStartupFailure);
 setInterval(tick, 1500);
