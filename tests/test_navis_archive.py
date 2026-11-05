@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import io
 import os
 import signal
 import subprocess
@@ -775,19 +776,46 @@ def test_huge_navi_megabyte_line_is_handled(tmp_path):
 
 
 def _git_tree(ref: str, dest: str) -> str | None:
-    os.makedirs(dest, exist_ok=True)
-    proc = subprocess.run(
-        ["git", "-C", REPO, "archive", ref],
-        stdout=subprocess.PIPE,
-        check=False,
-    )
-    if proc.returncode != 0:
-        return None
-    import io
+    """Extract ``ref``'s ``src/`` subtree into ``dest`` and return the src
+    root, or None so the differential can skip.
 
-    with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tar:
-        members = [m for m in tar.getmembers() if m.name == "src" or m.name.startswith("src/")]
-        tar.extractall(dest, members=members, filter="data")
+    None -- never an exception -- when the environment cannot support the
+    diff: git is absent; ``REPO`` is not its own git checkout, so
+    ``git -C REPO archive`` would climb to a parent repo and archive a
+    subpath absent from that tree, exiting 0 with a zero-filled tar that
+    ``tarfile.open`` rejects (the ReadError this guard turns into a skip);
+    ``git archive`` exits non-zero; the output is empty or not a readable
+    tar. On a real checkout the toplevel matches ``REPO`` and the behavior
+    is unchanged.
+    """
+    try:
+        top = subprocess.run(
+            ["git", "-C", REPO, "rev-parse", "--show-toplevel"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if top.returncode != 0:
+            return None
+        if os.path.realpath(top.stdout.decode(errors="replace").strip()) != os.path.realpath(REPO):
+            return None
+        proc = subprocess.run(
+            ["git", "-C", REPO, "archive", ref],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if proc.returncode != 0 or not proc.stdout:
+            return None
+        os.makedirs(dest, exist_ok=True)
+        with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tar:
+            members = [
+                m for m in tar.getmembers()
+                if m.name == "src" or m.name.startswith("src/")
+            ]
+            tar.extractall(dest, members=members, filter="data")
+    except (OSError, tarfile.TarError):
+        return None
     return os.path.join(dest, "src")
 
 
