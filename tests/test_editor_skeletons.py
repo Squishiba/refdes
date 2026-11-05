@@ -134,6 +134,20 @@ def test_the_fence_skeleton_is_the_measured_build_error(tmp_path):
     assert diags[0].line == item.source_line
 
 
+def test_the_plain_fence_the_bar_inserts_builds_clean(tmp_path):
+    # The fence button's caret skeleton (exported by the real formatbar.js):
+    # an empty fenced block with the caret on the middle line. A typed line
+    # lands inside it. A plain fence (no calc info string) is inert to the
+    # calc layer: the real build reports NO error and the inner text reaches
+    # the item body intact -- an unbalanced result fails here.
+    skeleton = js_export("FENCE_EMPTY_SKELETON")
+    assert skeleton == "```\n\n```", skeleton
+    typed = skeleton.replace("\n\n", "\nR1 = 100\n")
+    _project, item, diags = build_with_body(tmp_path, "Intro.\n\n" + typed + "\n")
+    assert diags == [], diags
+    assert "```\nR1 = 100\n```" in item.body, item.body
+
+
 def test_the_figure_and_value_skeletons_stay_below_error(tmp_path):
     # Design §C: unresolved figure refs and values are warnings, not errors
     # -- the safe skeletons. (Pinned as no-error: the gate blocks errors.)

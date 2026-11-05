@@ -779,7 +779,8 @@ node):
    only; `calc` is the only fence-inserting button). Ctrl/Cmd+Shift+F
    was considered and not adopted: the F mnemonic does not suggest
    code and the macOS full-screen collision is unverified. Folded
-   into §B.
+   into §B. Update: a plain code-fence BUTTON (no shortcut) landed
+   afterwards -- see changelog.d/editor-fence-button.added.md.
 
 ---
 

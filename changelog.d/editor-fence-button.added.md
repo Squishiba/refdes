@@ -1,0 +1,1 @@
+- The browser editor's formatting bar has a code-fence button (`` ``` ``): with the caret it inserts an empty fenced code block as its own paragraph with the caret inside, and with a selection it wraps the selection in a fence (a longer fence when the selection itself contains a ``` line). There is no keyboard shortcut.
