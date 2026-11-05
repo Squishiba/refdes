@@ -7,6 +7,7 @@
 // here computes a project fact, and the page stays read-only.
 
 import { api } from './api.js';
+import { wireNavisPanel } from './navis-preview.js';
 
 const serialMeta = document.querySelector('meta[name="refdes-serial"]');
 const renderedSerial = serialMeta ? Number(serialMeta.content) : null;
@@ -40,7 +41,10 @@ export function wireValueToggles(doc = document) {
   }
 }
 
-wireValueToggles();
+// N5c: the Navis panel's Archive/Restore actions (navis-preview.js). Same
+// progressive-enhancement posture as the toggle: the page reads and acts
+// through the serve API, and the published generation is untouched.
+wireNavisPanel();
 
 poll();
 setInterval(poll, 2000);

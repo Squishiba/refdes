@@ -315,6 +315,16 @@ and its `<link>` are written only for projects that have Navis, the
 panel data is embedded in the page (it fetches nothing), the open/close
 is a plain `<details>` (no JavaScript), and it prints hidden.
 
+On pages served by `refdes serve` the panel is interactive: each active
+row gains an **Archive** button and each archived row's **Restore** button
+is enabled, both acting through the serve API (`GET /api/navis`,
+`POST /api/navis/archive` / `restore`) and reloading the page on success.
+This enhancement exists only in the served response — the published page
+stays the read-only panel described above. A `--no-write` server refuses
+both actions and shows its refusal inside the panel, and a row whose
+marker was hand-deleted keeps its restore disabled, with a note that
+hand-restoring the marker re-links it by key.
+
 ## An item page
 
 - Type badge, ID, check state, and — where relevant — `imported` or `append-only`
