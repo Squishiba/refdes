@@ -2,6 +2,8 @@
 
 const TEXT_LIMIT = 200;
 
+const QUESTIONS = ["explain", "misread", "match"];
+
 function el(tag, cls, text) {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
@@ -13,7 +15,7 @@ const blocksList = document.getElementById("blocks");
 const cardsPane = document.getElementById("cards");
 const countsLine = document.getElementById("summary-counts");
 
-const state = { doc: null, selected: null, mtime: null };
+const state = { doc: null, selected: null, mtime: null, answers: {} };
 
 function refFlags(ref) {
   const card = ref.card || {};
@@ -71,7 +73,50 @@ function codeWindow(lines, cited) {
   return pre;
 }
 
-function renderCard(ref) {
+let askInFlight = false;
+
+async function askModel(buttons, result, blockStart, refIndex, question) {
+  if (askInFlight) return;
+  askInFlight = true;
+  for (const button of buttons) button.disabled = true;
+  result.textContent = "asking the model: " + question + " ...";
+  try {
+    const response = await fetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Docs-Context": "1" },
+      body: JSON.stringify({ block: blockStart, ref: refIndex, question: question }),
+    });
+    let data = {};
+    try {
+      data = await response.json();
+    } catch (err) {
+      /* a non-json error page: fall through to the status line */
+    }
+    result.textContent = "";
+    if (!response.ok) {
+      const why = data.kind ? data.kind + ": " + (data.error || "") : "http " + response.status;
+      result.appendChild(el("div", "ask-error", "the model did not answer -- " + why));
+      return;
+    }
+    result.appendChild(
+      el(
+        "div",
+        "ask-label",
+        "advisory answer from " + data.model + " (" + data.question +
+        ") -- a reading aid, not project facts; it never drafts prose"
+      )
+    );
+    result.appendChild(el("pre", "ask-answer", String(data.answer)));
+  } catch (err) {
+    result.textContent = "";
+    result.appendChild(el("div", "ask-error", "the ask request failed: " + String(err)));
+  } finally {
+    askInFlight = false;
+    for (const button of buttons) button.disabled = false;
+  }
+}
+
+function renderCard(ref, blockStart, refIndex) {
   const card = ref.card || {};
   const box = el("article", "card");
   const head = el("div", "card-head");
@@ -113,6 +158,19 @@ function renderCard(ref) {
       }
     }
   }
+  const askButtons = [];
+  const askRow = el("div", "ask-row");
+  const askResult = el("div", "ask-result");
+  for (const question of QUESTIONS) {
+    const button = el("button", "ask-btn", "ask: " + question);
+    button.addEventListener("click", () =>
+      askModel(askButtons, askResult, blockStart, refIndex, question)
+    );
+    askButtons.push(button);
+    askRow.appendChild(button);
+  }
+  box.appendChild(askRow);
+  box.appendChild(askResult);
   return box;
 }
 
@@ -172,7 +230,9 @@ function render() {
     if (block.refs.length === 0) {
       cardsPane.appendChild(el("p", "hint", "this block makes no references"));
     }
-    for (const ref of block.refs) cardsPane.appendChild(renderCard(ref));
+    for (const [index, ref] of block.refs.entries()) {
+      cardsPane.appendChild(renderCard(ref, block.start_line, index));
+    }
   }
   blocksList.scrollTop = leftScroll;
   cardsPane.scrollTop = rightScroll;
@@ -227,6 +287,7 @@ async function refreshDoc() {
   if (!response.ok) throw new Error("doc fetch failed: " + response.status);
   state.doc = await response.json();
   state.mtime = state.doc.mtime;
+  state.answers = {}; // block/ref coordinates moved: answers are stale
   keepSelectionAlive();
   render();
 }
