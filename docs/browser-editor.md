@@ -140,6 +140,27 @@ row grows a **Fill** button, which applies the same rewrite to that span
 alone. Rows are display and drafts only — nothing reaches the file until
 you press **Save**.
 
+## Navis panel
+
+The editor has a read-only Navis panel: a fixed **Navis (N)** button at
+the top-right of the window (N = the number of active markers) opens a
+list of the active Navis — short key, the source item's id as a link to
+that item in the editor, and the marker text — plus a **Show all (N)**
+disclosure that also lists the archived ones. An archived row is tagged
+`[archived]` and shows the text as snapshotted when it was archived; a
+row whose marker was deleted is labelled `marker not found (file)`, and
+a row whose marker text has moved since is noted *marker text has
+changed since archived*. The panel refetches when the editor learns the
+project changed and each time you open it; Escape closes it. It has no
+archive or restore actions — those are the `refdes navis` CLI commands
+([markdown](markdown.md#navis-markers)). On 2026-11-04 this behaviour was
+verified in Chromium and Firefox against a live `refdes serve`: opening
+and closing, the row set (active, archived snapshot, orphan, changed),
+the item link navigating in the editor, Escape, literal rendering of
+marker text containing `<script>`/`&`/quotes, a CLI archive moving the
+row into Show-all on the next open, and the panel clearing the save bar
+at 1200×700 and fitting 375×640.
+
 ## Font setting
 
 The **Font** button beside the bar opens the `Editor font setting` popover:
