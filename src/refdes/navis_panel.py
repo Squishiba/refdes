@@ -37,8 +37,10 @@ def panel_model(project: Project, rows: list[dict]) -> dict | None:
     publishes exactly the bytes it published before the panel existed (the
     `taskpane_assets` gate posture, `render.py:1035-1059`).
 
-    Each row carries: `key6` (the §7 short key), `text` (an archived row's
-    snapshot text, §9), `item` + `href` (the §10 link to the source item's
+    Each row carries: `key` (the full key, "" for a keyless marker -- the
+    editor API addresses rows by it, N5a; the site template renders only
+    `key6`, so publishing is unchanged), `key6` (the §7 short key), `text`
+    (an archived row's snapshot text, §9), `item` + `href` (the §10 link to the source item's
     page -- None when unresolvable, §9 row 3: an orphan whose stored item
     key names no live item has a dead link by design),
     `archived`, `changed` (§9 row 4) and `orphan` (§9 row 3, labelled
@@ -66,6 +68,7 @@ def panel_model(project: Project, rows: list[dict]) -> dict | None:
         text = row["snapshot"]["text"] if archived and row["snapshot"] else row["text"]
         model.append(
             {
+                "key": row["key"] or "",
                 "key6": (row["key"] or "")[:KEY_PREFIX],
                 "text": text,
                 "item": item.id if item else None,

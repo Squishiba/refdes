@@ -46,4 +46,49 @@ Checks: `ruff check tests/test_serve_navis_read.py` clean;
 `newline=""`; no raw-byte asserts; paths come from the projection, never
 from a hand-built separator). Full suite NOT run (red by design, task override).
 
-Status: done. Branch `feat/serve-navis-read`, test file committed.
+Status: tests done (test-author phase). Branch `feat/serve-navis-read`,
+test file committed.
+
+## Implementation (implementer phase)
+
+Task: make the 12 red tests green; src only, tests untouched.
+
+Red re-confirmed on the branch after merging origin/main (post-#414):
+12 failed / 5 passed, every failure `404 == 200` (or `404 == 405`) on
+`{"error": "not found"}` — the missing route, as the test author recorded.
+
+Changes (all verified by running, per AGENTS.md):
+- `navis_panel.panel_model`: each row gains `key` (full key, "" for a
+  keyless marker). The site template renders only `key6`, so the published
+  site is unchanged — `tests/test_navis_site_panel.py` (byte-differential
+  vs origin/main) passes.
+- `serve/navis_read.py` (new): `navis_payload(app)` =
+  `panel_model(snapshot.project, navis.projection(snapshot.project))`,
+  rows = model rows (they carry `key`), counts tallied off the rows;
+  None model (Navi-free) → empty rows, zero counts. One projection per
+  request, read-only; the archive store is merged inside `projection` at
+  request time, which is what makes the freshness test pass.
+- `serve/api.py`: 2-line GET/HEAD hook next to `/api/items` + `"/api/navis"`
+  added to the final 405-path list. Tiny/self-contained for the sibling's
+  POST archive/restore rebase. PUT/DELETE never reach `handle` (the
+  transport refuses first), so the gate/method tests pass by construction.
+
+Green: `tests/test_serve_navis_read.py` 17 passed. Guard/neighbour:
+`tests/test_navis_site_panel.py tests/test_serve_api.py
+tests/test_crossplatform_lint.py` 87 passed. Full suite once:
+5700 passed, 2 skipped.
+
+Smoke (real server, port 8771, `--token-file`, venv python, absolute
+PYTHONPATH): GET `/api/navis` → 200
+`{"navis":[{"key":"","key6":"","text":"A reminder with no key yet","item":
+"NOTE-001","href":"note-001.html","file":"items/note-a.md","line":7,
+"archived":false,"changed":false,"orphan":false}],"counts":{"active":1,
+"archived":0}}` (keyless: serve's load never mints, matching the
+read-only contract); POST → 405 `{"error":"method not allowed"}`; no
+token → 403. Server stopped by its own PID; token file removed on clean
+stop.
+
+Docs: route bullet + table row in
+`docs/design/editor-vscode-adapter.md` §3 (the page listing the served
+`/api/*` routes); `changelog.d/serve-navis-read.added.md`.
+`ruff check` clean on the touched src files.
