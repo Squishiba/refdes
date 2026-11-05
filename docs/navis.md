@@ -253,8 +253,9 @@ the current list.
 
 - A **keyless** row shows **no button**: the served load is side-effect-free
   and mints no key, and a keyless marker has no identity to address — so a
-  writable `refdes navis` command must mint the key first; then it is
-  archivable.
+  writable `refdes navis` command must mint the key first. Markers in bodies
+  refdes will not mint into (a flow-style YAML list `body:`, say) stay
+  keyless and can never be archived; see [The CLI](#the-cli).
 - An **orphan** (archived, marker deleted) keeps **Restore disabled**, with
   the hint "Marker not found -- hand-restore the marker, then it re-links by
   key": the server refuses it (design §9), as the CLI does.

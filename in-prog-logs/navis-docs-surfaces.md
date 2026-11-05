@@ -61,6 +61,18 @@ typed text in both Chromium and Firefox, and a later Save still wrote it.
 The navis.md sentence stays as-is (relaying that observation, not a
 guarantee); this log records the provenance. I did not drive a browser.
 
+## Review round 2
+
+Keyless bullet over-generalised ("a writable command must mint, then it is
+archivable"). Qualified it: markers in bodies refdes will not mint into stay
+keyless and can never be archived, pointing at [The CLI](#the-cli). Verified
+against a real run in `.scratch/n5f/flow` (a keyless marker in a flow-style
+YAML list `body:`): writable `refdes navis ls` prints
+`ERROR items/items.yaml:1 — ... key cannot be added to this flow-style
+list ...`, items.yaml stays byte-identical (keyless), `show 1` prints
+`key: (keyless ...)`, `archive 1` refuses exit 2 (matches navis.py:1233-1235
+and navis_write.py:32-36). The Firefox/draft-survival note left as accepted.
+
 ## Status
 
 Complete. Added ~64 doc lines.
