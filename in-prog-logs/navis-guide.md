@@ -60,3 +60,19 @@ required by the task anyway).
   on a fresh project mints different keys; the shapes/messages are exact.
 - The serve API section quotes a real port-8780 run; the 500 `error` row is
   documented from the `navis_write._render` status map, not a live run.
+
+## Review round 1
+
+Jared's re-run found two accuracy nits against the page's "quoted as it
+printed" promise; fixed in one commit, all re-run on the throwaway projects:
+N1 — the two orphan blocks now quote the complete output including the
+`WARNING .refdes/navis/<key>.yaml.gz:9 — navis.archived_orphan: …` line that
+every command prints once an orphan exists. N2 — the ambiguous CLI and serve
+examples used a hand-typed key (`4jp6qy00000`) that trips the malformed-key
+lint; replaced with a hand-built VALID key sharing the `4jp6qy` prefix
+(`4jp6qym9s3j`, correct Damm check char), so those runs print no key warning,
+plus one sentence noting the collision is constructed and rare. N3 —
+re-ran every block: the keyless block now quotes the real `ERROR … flow-style
+list …` line that precedes its refusal (the guide's own "see the mint warnings
+above" refers to it), and the serve count/keys were updated to the three-Navi
+project the ambiguity needs.

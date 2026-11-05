@@ -8,7 +8,8 @@ grammar in full lives in
 [CLI reference](cli-reference.md#refdes-navis-ls-all-show-archive-restore),
 and the panel in [output formats](output.md#the-navis-panel). Every
 command and response below was run on a throwaway project and is quoted as
-it printed.
+it printed (the narrative runs on one project, keys `4jp6qysbahb` /
+`3fm1dgvv6p3`; the keyless- and no-Navis checks ran on their own).
 
 ## What a Navi is
 
@@ -112,7 +113,11 @@ $ refdes navis all
 | `1` | An items file failed to load (the listing still prints), or an archived Navi whose marker is gone (orphan) and you asked to `restore` it |
 | `2` | A refusal: the selector names nothing, an ambiguous prefix, `restore` of something not archived, a keyless marker, an editor transaction in flight, or `--no-write` on `archive`/`restore` |
 
-The refusals, each run:
+The refusals, each run (the ambiguous one uses a third Navi,
+`4jp6qym9s3j`, hand-built to share note-a's first six characters so the
+prefix `4jp6qy` matches two keys — real prefix collisions are rare, six
+of eleven characters, and this one carries a valid check character, so the
+run below prints no key warning):
 
 ```console
 $ refdes navis show 99                     # names nothing
@@ -121,12 +126,13 @@ no Navi '99': `refdes navis all` numbers them 1..2; a selector is a number, a fu
 $ refdes navis show 4jp6qy                 # prefix matches two keys
 navi key prefix '4jp6qy' is ambiguous:
   4jp6qysbahb  Model worst-case copper temperature.  (items/note-a.md:9)
-  4jp6qy00000  A colliding prefix reminder.  (items/note-c.md:9)                                            # exit 2
+  4jp6qym9s3j  A colliding prefix reminder.  (items/note-c.md:9)                                            # exit 2
 
 $ refdes navis restore 3fm1dg              # this Navi is active
 navis restore: Navi 3fm1dg (3fm1dgvv6p3) is not archived -- nothing to restore                              # exit 2
 
-$ refdes navis archive 1                   # a keyless marker (mint refused on this body)
+$ refdes navis archive 1                   # a keyless marker, in a flow-style YAML list file
+ERROR   items/items.yaml:1 — could not write key t1kjvxk7ayd back into the source: key cannot be added to this flow-style list; rewrite it in block style (one `- id:` entry per line)
 navis archive: this Navi has no key -- keys are minted by the next writable command, and this
 marker's body is one refdes will not mint into (see the mint warnings above), so it cannot be archived     # exit 2
 
@@ -137,9 +143,11 @@ $ refdes --no-write navis archive 4jp6qysbahb
 A keyless marker cannot be archived because the record is named by its key;
 `show` flags it on its key line (`key: (keyless -- the next writable
 command mints a key)`). Mint refuses a body whose bytes it cannot locate
-losslessly (a folded `>` scalar, a plain scalar, a shared body), leaving
-that marker keyless. A marker in the editor-transaction window is refused
-by the whole command, as it is for every writable command.
+losslessly — the flow-style list file above, a plain scalar, a folded `>`
+scalar, a shared body — and prints a per-file line naming the fix (the
+`ERROR` line above) *before* the refusal. A marker in the
+editor-transaction window is refused by the whole command, as it is for
+every writable command.
 
 ## Archiving and restoring
 
@@ -184,15 +192,19 @@ Navi: Model worst-case copper temp (rev 2).
 
 **You deleted the marker.** The record now has no marker — an **orphan**.
 `all` labels it `marker not found`, and `restore` refuses (exit 1): writing
-a marker back would edit a body.
+a marker back would edit a body. Once a project has an orphan, **every**
+command prints this line on stderr first; the two blocks below quote the
+complete output, warning included:
 
 ```console
 $ refdes navis all
+WARNING .refdes/navis/3fm1dgvv6p3.yaml.gz:9 — navis.archived_orphan: Navi 3fm1dgvv6p3 is archived with no marker found at its stored source (items/note-b.md:9) -- the marker was hand-deleted or moved out of scope. Show-all reveals it by snapshot; restore refuses (§9) -- hand-restore the marker to re-pair them by key
 1 Navis (active), 1 archived:
   1. 4jp6qy Model worst-case copper temperature.  NOTE-001 (items/note-a.md:9)
   2. 3fm1dg Recheck decoupling near U14.  marker not found (items/note-b.md:9) [archived]
 
 $ refdes navis restore 3fm1dgvv6p3
+WARNING .refdes/navis/3fm1dgvv6p3.yaml.gz:9 — navis.archived_orphan: Navi 3fm1dgvv6p3 is archived with no marker found at its stored source (items/note-b.md:9) -- the marker was hand-deleted or moved out of scope. Show-all reveals it by snapshot; restore refuses (§9) -- hand-restore the marker to re-pair them by key
 navis.archived_orphan: Navi 3fm1dg (3fm1dgvv6p3) is archived at items/note-b.md:9 with marker
 not found -- restore refuses (there is no marker to reactivate; writing one would edit a body,
 design §9). Hand-restore the marker and the pair re-links by key.                                           # exit 1
@@ -230,7 +242,8 @@ token-gated API (see [CLI reference — `refdes serve`](cli-reference.md#refdes-
 for the token). Every request carries the launch token in the
 **`X-Refdes-Token`** header; a `POST` additionally needs a matching
 `Origin`. All responses below were captured from a `refdes serve --port
-8780` on a project with two Navis.
+8780` on the same three-Navi project as the CLI examples above (so the
+`4jp6qy` prefix is the same ambiguity).
 
 **Read the list.**
 
@@ -243,9 +256,10 @@ $ curl -H "X-Refdes-Token: <token>" http://127.0.0.1:8780/api/navis
      "item": "NOTE-001", "href": "note-001.html",
      "file": "items/note-a.md", "line": 9,
      "archived": false, "changed": false, "orphan": false},
-    { "key": "3fm1dgvv6p3", "key6": "3fm1dg", "…": "…" }
+    { "key": "3fm1dgvv6p3", "key6": "3fm1dg", "…": "…" },
+    { "key": "4jp6qym9s3j", "key6": "4jp6qy", "…": "…" }
   ],
-  "counts": {"active": 2, "archived": 0}
+  "counts": {"active": 3, "archived": 0}
 }
 ```
 
@@ -281,7 +295,7 @@ $ curl -X POST -H "X-Refdes-Token: <token>" -H "Origin: http://127.0.0.1:8780" \
        -H "Content-Type: application/json" -d '{"navi": "4jp6qy"}' \
        http://127.0.0.1:8780/api/navis/archive
 {"kind":"ambiguous","error":"navi key prefix '4jp6qy' is ambiguous: name one of its candidates",
- "candidates":[{"key":"4jp6qysbahb","…":"…"},{"key":"4jp6qy00000","…":"…"}]}   # 409
+ "candidates":[{"key":"4jp6qym9s3j","…":"…"},{"key":"4jp6qysbahb","…":"…"}]}   # 409
 
 $ curl -X POST -H "X-Refdes-Token: <token>" -H "Origin: http://127.0.0.1:8780" \
        -H "Content-Type: application/json" -d '{"navi": "3fm1dgvv6p3"}' \
