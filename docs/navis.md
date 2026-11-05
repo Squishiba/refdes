@@ -235,6 +235,59 @@ placement, its data riding the page with no fetch, its no-JavaScript
 `<details>`, and its print-hidden behaviour are documented in
 [output formats — The Navis panel](output.md#the-navis-panel).
 
+Under `refdes serve` the same panel grows actions over the API below —
+see [the served preview panel](#the-served-preview-panel). The **published**
+page (the build's `_site/`) keeps the read-only panel above; the actions
+live only in the served preview.
+
+## The served preview panel
+
+`refdes serve` renders the page at `/preview/`. On a **writable** server
+(any `refdes serve` not started with `--no-write`) the panel gains actions
+over the serve API below. A **keyed active** row grows an **Archive**
+button; a **keyed archived** row under **Show all** has its **Restore**
+enabled (it ships disabled on the published page). A click posts the row's
+full key to `/api/navis/archive` (or `/api/navis/restore`), the server
+rebuilds the preview before the response lands, and the page reloads onto
+the current list.
+
+- A **keyless** row shows **no button**: the served load is side-effect-free
+  and mints no key, and a keyless marker has no identity to address — so a
+  writable `refdes navis` command must mint the key first. Markers in bodies
+  refdes will not mint into (a flow-style YAML list `body:`, say) stay
+  keyless and can never be archived; see [The CLI](#the-cli).
+- An **orphan** (archived, marker deleted) keeps **Restore disabled**, with
+  the hint "Marker not found -- hand-restore the marker, then it re-links by
+  key": the server refuses it (design §9), as the CLI does.
+
+A server started as `refdes --no-write serve` is read-only: its panel serves
+and lists (`GET /api/navis` → `200`), and a click returns the server's
+refusal (`POST /api/navis/archive` → `403`) —
+
+```json
+{"kind": "refused", "error": "this server was started with --no-write: navis archive and restore are disabled"}
+```
+
+— and every action button disables for the rest of that page. On a writable
+server the same `archive` returns `200` `{"kind": "ok", "verb": "archive",
+"key": …, "changed": true}` and the list's `counts.active` drops.
+
+## In the editor
+
+The browser editor has its own Navis panel: a fixed **Navis (n)** toggle at
+the **top-right** opens the active list; **Show all** adds the archived
+rows; a keyed active row carries **Archive**, a keyed archived row
+**Restore**; an orphan keeps Restore disabled with the hand-restore hint; a
+keyless row has no button; a failed action shows the server's message
+inline; and a `403` from a `--no-write` server locks the panel's actions for
+the rest of the editing session. The full row model, the refresh behaviour,
+and the browser-verification notes live in
+[browser editor — Navis panel](browser-editor.md#navis-panel); this guide
+does not repeat them. The one difference from the preview panel above: an
+action there reloads the page, an action here keeps the panel open and
+refreshes in place — so an open item draft with unsaved edits outlives the
+action (observed in Chromium and Firefox on 2026-11-05, not a guarantee).
+
 ## The serve API
 
 `refdes serve` exposes the same list to tool builders over its loopback,

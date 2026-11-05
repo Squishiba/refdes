@@ -19,7 +19,7 @@ build time.
 | [Authoring items](authoring.md) | The two file formats, fields, bodies, when to use which |
 | [Pages](pages.md) | Narrative markdown alongside your items — and pages-only sites |
 | [Markdown reference](markdown.md) | Every formatting feature that works in an item body |
-| [Navis — flying notes](navis.md) | The one-line `<!--navi: …-->` notes: reading, archiving, restoring them, the site panel, the serve API |
+| [Navis — flying notes](navis.md) | The one-line `<!--navi: …-->` notes: reading, archiving, restoring them, the site panel, the served preview and editor panels, the serve API |
 | [The browser editor](browser-editor.md) | `refdes serve`'s editor: formatting bar, refdes buttons, live calc, font setting, what it refuses to save |
 | [Generated blocks](blocks.md) | `{{index}}`, `{{cascade}}`, `{{compare}}`, `{{tree}}` and `{{calcblock}}` on narrative pages, and the parameters-not-expressions non-goal |
 | [IDs](ids.md) | Allocation, prefixes, why numbers are never reused |
