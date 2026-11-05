@@ -156,7 +156,11 @@ class DocsContextHandler(BaseHTTPRequestHandler):
     def _static(self, name: str, raw_name: str) -> None:
         path = STATIC_DIR / name
         try:
-            body = path.read_bytes()
+            # LF on the wire: the repo's static files are LF, and a Windows
+            # checkout with core.autocrlf turns them into CRLF -- normalizing
+            # keeps what browsers fetch byte-identical to what `read_text`
+            # (universal newlines) reads in the contract tests.
+            body = path.read_bytes().replace(b"\r\n", b"\n")
         except OSError:
             self._json(404, {"error": "not found"})
             return
