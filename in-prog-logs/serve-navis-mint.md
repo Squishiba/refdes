@@ -116,11 +116,10 @@ implementation.
 
 ## HAND_KEY test fix (authorized)
 
-The orchestrator independently confirmed the finding (27/28 on the
-unmodified file; 28/28 against this route with `if k != HAND_KEY` in the
-`keys_in_files` comprehension) and AUTHORIZED exactly that one edit;
-applied it (wrapped over three lines for the 100-char cap), nothing else
-in the test file.
+The orchestrator independently confirmed the finding (27/28 unmodified;
+28/28 with `if k != HAND_KEY` in the `keys_in_files` comprehension) and
+AUTHORIZED exactly that one edit; applied (three-line wrap for the
+100-char cap), nothing else in the test file.
 
 ## CI (PR #427)
 
@@ -130,8 +129,13 @@ fixed as above with the authorization; (2) the 3.11 matrix (ubuntu+
 windows, tests.yml:46) additionally TypeError-s in the two tests using
 the file's `_text()` helper — `Path.read_text(newline=)` is Python 3.13+
 (the local venv is 3.13.5, so the author's red run never hit it).
-Proposed author fix: read via `open(..., encoding="utf-8",
-newline="").read()`. Not applied — only the HAND_KEY line was authorized.
+SECOND AUTHORIZATION (orchestrator, head 7faeebef): replace that one
+helper body with `(root / rel).open(encoding="utf-8", newline="").read()`
+(`Path.open` takes `newline` since 3.5; `write_text(newline=)` is 3.10+,
+fine). Applied, nothing else; mint 28/28 + ruff green on 3.13.5 after.
+Grepped the file, my new src module, and the doc code for other
+3.12+/3.13-only APIs: none (test imports are stdlib + project modules;
+`navis_mint.py` touches no version-gated API).
 
 ## Status
 
@@ -139,9 +143,8 @@ DONE (M1-impl). Touched-file runs after all edits: mint 28/28,
 navis_write 57, docs anchors + crossplatform lint 14, ruff clean on
 navis_mint.py (api.py: my lines only; pre-existing findings elsewhere
 untouched). Full suite once before pushing: 5877 passed, 2 skipped, 1
-failed (the HAND_KEY bug, fixed as above). Expected CI head-count: all
-4 checks green once the py3.11 `_text()` fix lands; until then the two
-3.11 matrix jobs stay red on that helper alone (2 tests each — its two
-users; every other mint test passes on all platforms).
+failed (the HAND_KEY bug, fixed as above). CI expectation after the two
+authorized test fixes: all 4 checks green (pr-size, ubuntu/windows on
+3.11, py3.13).
 
 

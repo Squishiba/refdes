@@ -122,7 +122,7 @@ def _run_cli(config: str, *args: str) -> int:
 
 
 def _text(root, rel: str) -> str:
-    return (root / rel).read_text(encoding="utf-8", newline="")
+    return (root / rel).open(encoding="utf-8", newline="").read()
 
 
 def _unsplice(text: str, minted_keys: list[str]) -> str:
