@@ -494,13 +494,13 @@ class EditorApp:
     def start(self) -> None:
         self.poller.start()
         self._thread = threading.Thread(
-            target=self.httpd.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True
+            target=self.httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
         )
         self._thread.start()
 
     def serve_forever(self) -> None:
         self.poller.start()
-        self.httpd.serve_forever(poll_interval=0.2)
+        self.httpd.serve_forever(poll_interval=0.01)
 
     def stop(self) -> None:
         self.poller.stop()
