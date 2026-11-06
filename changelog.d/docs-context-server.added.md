@@ -27,3 +27,17 @@
   literals (127.0.0.0/8, ::1) are accepted -- a lookalike name like
   127.evil.com is not -- and redirects from the endpoint are refused, so
   the prompt is never resent to a url the guard did not vet.
+
+  The viewer can now follow the editor's cursor: `POST /api/focus` takes
+  `{path, line}` (the same guards as `/api/ask`: the `X-Docs-Context: 1`
+  header, own-Origin, 415 on a non-JSON body, a 1024-byte body cap), and
+  when the path names the served doc the server resolves the line to its
+  block from its own cached analysis and remembers it IN MEMORY ONLY (a
+  lock-protected, monotonically increasing seq; nothing is ever written to
+  disk); any other path is answered by string comparison alone
+  (`{"followed": false, "reason": "other-doc"}`), never opened.
+  `GET /api/focus` reports the remembered focus cheaply (never parses), and
+  the page polls it on the existing mtime interval: with the default-on
+  follow checkbox, the focused block is selected and scrolled into view; a
+  manual click wins until the next posted focus; a page opened for another
+  doc is never moved.
