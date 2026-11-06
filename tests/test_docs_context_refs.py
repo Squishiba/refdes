@@ -990,11 +990,9 @@ def test_analyze_prefetch_never_caches_failures(tmp_path, monkeypatch):
     doc = perf_doc(repo)
     distinct = len(set(PERF_VERBS))
     per_cold_analyze = distinct + len(PERF_VERBS)  # prefetch + uncached serial cards
-    runs = 0
-    for state in ("timeout", "fail"):
+    for runs, state in enumerate(("timeout", "fail"), start=1):
         mode["state"] = state
         data = refs.analyze(str(doc), str(repo))
-        runs += 1
         assert len(calls) == runs * per_cold_analyze
         assert refs._HELP_CACHE == {}  # a failing run is never memoized
         cards = command_cards(data)
