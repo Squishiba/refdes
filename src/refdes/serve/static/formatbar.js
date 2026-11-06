@@ -10,6 +10,7 @@
 // broken for the panel stands the bar down too.
 
 import { candidatesFor, displayId, matchesFilter, rowLabel } from './pickers.js';
+import { el } from './dom.js';
 
 const FALLBACK_KEY = 'refdes.live-calc.fallback';
 const FALLBACK_NOTE = 'Undo may need more than one step in this browser.';
@@ -40,13 +41,6 @@ export const VALUE_SKELETON = '{{}}';
 // this string through the real parser, which recognises it as one closed
 // single-line marker with an empty key.
 export const NAVI_SKELETON = '<!--navi: text-->';
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 function readFallbackFlag() {
   try {

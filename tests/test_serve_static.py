@@ -1051,3 +1051,47 @@ def test_the_font_setting_is_wired_into_the_editor():
     assert "var(--refdes-editor-font, monospace)" in css
     assert "var(--refdes-editor-size, 12px)" in css
     assert "var(--refdes-editor-line-height, 1.5)" in css
+
+
+# ------------------------------------------------------------ shared el() helper
+
+
+EL_USERS = (
+    "create.js",
+    "editor.js",
+    "filters.js",
+    "fontsetting.js",
+    "formatbar.js",
+    "images.js",
+    "item.js",
+    "links.js",
+    "list.js",
+    "live-calc.js",
+    "navis-panel.js",
+    "sourcepicker.js",
+)
+
+
+def test_the_el_builder_is_shared_not_duplicated():
+    """The same rule controls.js enforces for field controls: dom.js exports
+    the one `el(tag, cls, text)` builder, every served module that builds
+    elements imports it, and none carries a local copy (a second copy is
+    exactly the drift sharing prevents -- twelve identical copies were the
+    status quo this replaced)."""
+    assert os.path.isfile(os.path.join(STATIC, "dom.js"))
+    with open(os.path.join(STATIC, "dom.js"), encoding="utf-8") as fh:
+        dom = fh.read()
+    assert "export function el(tag, cls, text)" in dom
+    for name in EL_USERS:
+        with open(os.path.join(STATIC, name), encoding="utf-8") as fh:
+            text = fh.read()
+        assert "from './dom.js'" in text, f"{name} must use the shared el()"
+        assert "function el(" not in text, f"{name} keeps a local el() copy"
+
+
+def test_the_shared_el_never_touches_innerHTML():
+    """The panels render untrusted text (marker text written in files) through
+    el(); textContent is the only safe assignment, so it is the only one."""
+    dom = js_code("dom.js")
+    assert "node.textContent = text" in dom
+    assert "innerHTML" not in dom

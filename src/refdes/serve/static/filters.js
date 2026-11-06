@@ -3,6 +3,8 @@
 // takes, so a view is deep-linkable, survives reload, and the server's
 // `filters` echo is the authority on what is active.
 
+import { el } from './dom.js';
+
 export const FILTER_PARAMS = [
   'q', 'type', 'board', 'workspace', 'tag', 'file',
   'stage', 'check', 'blocked', 'links_to', 'linked_from', 'missing_verb',
@@ -49,13 +51,6 @@ export function withFacet(filters, name, value) {
   if (next[name] === value) delete next[name];
   else next[name] = value;
   return next;
-}
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
 }
 
 function facetBlock(name, label, filters, counts, onChange) {
