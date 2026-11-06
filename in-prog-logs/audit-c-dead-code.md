@@ -85,5 +85,8 @@ Full suite, run once: `5938 passed, 2 skipped in 190.46s`
 
 - No changelog fragment: nothing here is user-visible (no CLI, build, or
   serve output changed — the four hashes above are the proof).
-- `docs/api` has no page naming the removed names, so no docs page needed a
-  claim updated; the only prose edits are src docstrings, per the table above.
+- No user-facing docs page names the removed symbols (`grep -rnw` over
+  `docs/*.md`), so no doc claim needed updating; the only prose edits are the
+  src docstrings above. `docs/design/living-notes-plan.md` and
+  `docs/design/extends.md` name `fold_at_tip`/`resolve_schema` in design
+  prose, which is a record of what was decided at the time and stays.
