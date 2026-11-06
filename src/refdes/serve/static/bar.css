@@ -54,6 +54,23 @@
   cursor: pointer;
 }
 .refdes-navis-archive[disabled] { opacity: 0.55; cursor: not-allowed; }
+/* M2 (Jared 2026-11-05): the Mint keys pill, above the list in the same
+   panel, wired by navis-preview.js. Same pill metrics as the row actions
+   above; block so it sits on its own line over the list, and its status
+   line reuses .refdes-navis-note from the published sheet (navis.css). */
+.refdes-navis-mint {
+  display: block; margin: 0 0 var(--space-6);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--bg); color: var(--muted);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-10);
+  cursor: pointer;
+}
+.refdes-navis-mint[disabled] { opacity: 0.55; cursor: not-allowed; }
+.refdes-navis-mint:hover:not([disabled]) {
+  border-color: var(--muted); color: var(--fg);
+}
 .refdes-navis-restore:not([disabled]) { cursor: pointer; }
 .refdes-navis-restore:not([disabled]):hover {
   border-color: var(--muted); color: var(--fg);

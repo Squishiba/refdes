@@ -252,23 +252,39 @@ rebuilds the preview before the response lands, and the page reloads onto
 the current list.
 
 - A **keyless** row shows **no button**: the served load is side-effect-free
-  and mints no key, and a keyless marker has no identity to address — so a
-  writable `refdes navis` command must mint the key first. Markers in bodies
-  refdes will not mint into (a flow-style YAML list `body:`, say) stay
-  keyless and can never be archived; see [The CLI](#the-cli).
+  and mints no key, and a keyless marker has no identity to address; its key
+  span carries the title "No key yet -- use Mint keys" so the reason is
+  discoverable. Markers in bodies refdes will not mint into (a flow-style
+  YAML list `body:`, say) stay keyless and can never be archived; see
+  [The CLI](#the-cli).
+- With **N keyless rows** the panel grows one **`Mint keys (N)`** pill above
+  the list: a click posts `{}` to `/api/navis/mint` (the mint is
+  project-wide, see [the serve API](#the-serve-api)), the server rebuilds
+  before the response lands, and the page reloads onto the keyed list the
+  way any successful action reloads it. The reloaded page opens with a
+  status line — `Minted K key(s).`, extended with "N marker(s) could not be
+  keyed -- refdes will not mint into those bodies (for example a YAML list
+  body)." for markers the mint refused (the pill's N drops to that count),
+  or `Nothing to mint.` when there was nothing to mint — and the status
+  line clears on the next action. (The mint flow, both status lines, and
+  the refused marker's row were observed in Chromium and Firefox on
+  2026-11-05, item files differing from before the click only by the key
+  splices.)
 - An **orphan** (archived, marker deleted) keeps **Restore disabled**, with
   the hint "Marker not found -- hand-restore the marker, then it re-links by
   key": the server refuses it (design §9), as the CLI does.
 
 A server started as `refdes --no-write serve` is read-only: its panel serves
 and lists (`GET /api/navis` → `200`), and a click returns the server's
-refusal (`POST /api/navis/archive` → `403`) —
+refusal (`POST /api/navis/archive` → `403`, and `POST /api/navis/mint` →
+`403` with the same message naming mint) —
 
 ```json
 {"kind": "refused", "error": "this server was started with --no-write: navis archive and restore are disabled"}
 ```
 
-— and every action button disables for the rest of that page. On a writable
+— and every action button — Mint included — disables for the rest of that
+page (observed in Chromium and Firefox on 2026-11-05). On a writable
 server the same `archive` returns `200` `{"kind": "ok", "verb": "archive",
 "key": …, "changed": true}` and the list's `counts.active` drops.
 
