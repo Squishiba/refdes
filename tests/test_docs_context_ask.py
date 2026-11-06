@@ -1284,3 +1284,113 @@ def test_ask_model_reports_a_stalled_answer_body_as_a_timeout():
                 timeout=0.5,
             )
         assert excinfo.value.kind == "timeout", excinfo.value.kind
+
+
+# ------------------------------------------------- FIX-ASK-RACE: lock release ordering
+#
+# The flaky 409 (tests/test_docs_context_ask.py::test_ask_uses_its_own_analysis_for_the_given_block_and_ref
+# -> "assert 409 == 200", py3.11 job 127667550657): the ask handler wrote the
+# 200/502/504 response INSIDE the try and released ask_lock in the finally,
+# i.e. AFTER the response bytes hit the socket. A client that fires its next
+# request the instant it has the response (the sequential test loop above; a
+# double-click) can reach the handler before the release and get 409 busy.
+# The fix: compute status+payload under the lock, RELEASE, then write.
+
+
+def test_ask_lock_is_free_at_the_moment_the_response_is_written(repo, monkeypatch):
+    """RED: the ask_lock is still held when the 200 response is written.
+
+    Deterministic, not timing luck: the lock state is observed from inside
+    the response write (``DocsContextHandler._json`` wrapped), the exact
+    point the race is about. Pre-fix the handler writes inside the ``try``
+    and releases in the ``finally`` AFTER the bytes, so the observed state
+    is ``locked() is True`` -> the assert fails. A second ask sent from
+    inside the same hook (the "next request the instant the response
+    arrives" a real client fires) proves the consequence: 409 busy.
+    """
+    with fake_llm() as (_script, url), running_ask(repo, url) as base:
+        observed = {}
+        real_json = server.DocsContextHandler._json
+
+        def spy_json(self, status, payload):
+            # the first write the 200 path makes is the response itself:
+            # probe the lock at that exact moment.
+            if status == 200 and "locked" not in observed:
+                observed["locked"] = self.server.state.ask_lock.locked()
+                probe = {}
+
+                def second():
+                    try:
+                        probe["status"] = ask(base, 3, 1)[0]
+                    except (OSError, http.client.HTTPException) as exc:  # pragma: no cover
+                        probe["error"] = repr(exc)
+
+                # the client's double-click / the test loop's next request,
+                # fired the instant it has (is about to have) this response.
+                t = threading.Thread(target=second, daemon=True)
+                t.start()
+                t.join(timeout=15)
+                observed["second"] = probe.get("status", probe.get("error"))
+            return real_json(self, status, payload)
+
+        monkeypatch.setattr(server.DocsContextHandler, "_json", spy_json)
+        status, data, _headers = ask_json(base, 3, 0, "explain")
+        assert status == 200, data
+        assert "locked" in observed, "the spy never saw the 200 response write"
+        # the lock MUST be released before the response is written, so a
+        # client that pipelines cannot observe 409 busy.
+        assert observed["locked"] is False, (
+            f"ask_lock.locked() is True at the response write: a client's next "
+            f"request can hit 409 (the flaky 409); second ask got {observed['second']}"
+        )
+        assert observed["second"] != 409, "the racing second ask got 409 busy"
+
+
+def test_ask_lock_is_free_at_the_moment_a_502_response_is_written(repo, monkeypatch):
+    """RED for the LlmError path: same lock-release-before-response rule for
+    the 502/504 branch -- a client that fires its next request the instant
+    the failure response arrives must not get 409 busy."""
+    with closed_port() as port, running_ask(repo, f"http://127.0.0.1:{port}/v1") as base:
+        observed = {}
+        real_json = server.DocsContextHandler._json
+
+        def spy_json(self, status, payload):
+            if status == 502 and "locked" not in observed:
+                observed["locked"] = self.server.state.ask_lock.locked()
+                probe = {}
+
+                def second():
+                    try:
+                        probe["status"] = ask(base, 3, 0)[0]
+                    except (OSError, http.client.HTTPException) as exc:  # pragma: no cover
+                        probe["error"] = repr(exc)
+
+                t = threading.Thread(target=second, daemon=True)
+                t.start()
+                t.join(timeout=15)
+                observed["second"] = probe.get("status", probe.get("error"))
+            return real_json(self, status, payload)
+
+        monkeypatch.setattr(server.DocsContextHandler, "_json", spy_json)
+        status, data, _headers = ask_json(base, 3, 0, "explain")
+        assert status == 502, data
+        assert observed.get("locked") is False, (
+            f"ask_lock.locked() is True at the 502 write; racing ask: {observed.get('second')}"
+        )
+        assert observed.get("second") != 409
+
+
+def test_ask_back_to_back_asks_never_see_busy(repo):
+    """The client loop that CI hit: 300 SEQUENTIAL asks, each on its own
+    connection (the shape of the flaky test's `ask_json` loop, which opens a
+    new connection per call -- the release-after-write race can only bite
+    when the next request is handled on a different thread than the release).
+    Pre-fix a client in this shape can land in the release window and get
+    409 busy; post-fix all 300 are 200, which also proves the lock is
+    released exactly once (a double release raises in the handler and shows
+    up as a non-200; a leaked lock shows up as 409)."""
+    with fake_llm() as (_script, url), running_ask(repo, url) as base:
+        statuses = [ask(base, 3, 0)[0] for _ in range(300)]
+        busy = [s for s in statuses if s == 409]
+        assert not busy, f"{len(busy)}/300 asks got 409 busy: {statuses[:10]}..."
+        assert set(statuses) == {200}, statuses[:10]
