@@ -1,6 +1,6 @@
 # LINT-311: catch Python 3.12/3.13-only APIs before CI does
 
-Status: finished. Branch chore/lint-311-floor, one commit, tests/test_crossplatform_lint.py
+Status: finished. Branch chore/lint-311-floor, tests/test_crossplatform_lint.py
 only (no product changes — there were no pre-existing violations to fix).
 
 Started from main at b9eba32d (after `git fetch origin main && git merge --ff-only
