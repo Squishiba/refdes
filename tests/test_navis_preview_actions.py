@@ -18,6 +18,16 @@ count mismatch aborts silently), the hostile-text rule (marker text is
 never parsed as markup), and the fetch-failure rule (panel stays exactly
 as published). The Python test at the bottom pins the delivery chain on a
 real EditorApp: preview page -> preview.js -> navis-preview.js.
+
+M2 (the mint offer): with keyless rows the panel grows ONE `Mint keys (N)`
+button above the list; a click POSTs `{}` to /api/navis/mint, and its 200
+rides the same reload a successful archive rides on this surface -- so the
+status line is stored for the reloaded page (one-shot, consumed once) and
+says `Minted K key(s).`, the refusal sentence when still_keyless > 0, or
+`Nothing to mint.`; a non-200 re-enables the button and shows the server
+text; a 403 locks every action button INCLUDING Mint; keyless rows carry
+the discoverability title on their key span; the status clears on the next
+action.
 """
 
 from __future__ import annotations
@@ -72,6 +82,12 @@ class FNode {
       : this._text;
   }
   appendChild(c) { c._parent = this; this.children.push(c); return c; }
+  removeChild(c) {
+    const i = this.children.indexOf(c);
+    if (i >= 0) this.children.splice(i, 1);
+    c._parent = null;
+    return c;
+  }
   insertBefore(n, ref) {
     const i = this.children.indexOf(ref);
     if (i < 0) this.children.push(n);
@@ -132,6 +148,16 @@ globalThis.document = {
 };
 const results = { reload: 0 };
 globalThis.location = { reload: () => { results.reload += 1; } };
+// the preview surface reloads the page on a successful action, so the mint
+// status rides the reload through sessionStorage: the fake is the browser's
+// (string values, null for a missing key, per-page lifetime = per scenario)
+const mintStorage = new Map();
+globalThis.sessionStorage = {
+  getItem: (k) => (mintStorage.has(k) ? mintStorage.get(k) : null),
+  setItem: (k, v) => { mintStorage.set(k, String(v)); },
+  removeItem: (k) => { mintStorage.delete(k); },
+  clear: () => { mintStorage.clear(); },
+};
 
 const { wireNavisPanel } = await import(url('navis-preview.js'));
 
@@ -167,13 +193,15 @@ function makePanel(opts = {}) {
 
   const topUl = new FNode('ul');
   topUl.className = 'refdes-navis-list';
-  const addTop = (text) => {
+  const addTop = (row) => {
     const li = new FNode('li');
-    li.appendChild(textNode(text));
+    li.appendChild(monoNode(row.key6));
+    li.appendChild(textNode(row.text));
     topUl.appendChild(li);
   };
-  const topTexts = opts.topTexts || ['Alpha active.', 'Keyless marker.'];
-  for (const t of topTexts) addTop(t);
+  const showRows = opts.showRows || rowsFixture();
+  const topRows = opts.topRows || showRows.filter((r) => !r.archived);
+  for (const row of topRows) addTop(row);
   body.appendChild(topUl);
 
   const showAll = new FNode('details');
@@ -183,6 +211,7 @@ function makePanel(opts = {}) {
   showUl.className = 'refdes-navis-list';
   const addShow = (row) => {
     const li = new FNode('li');
+    li.appendChild(monoNode(row.key6));
     li.appendChild(textNode(row.text));
     if (row.archived) {
       const restore = new FNode('button');
@@ -207,6 +236,24 @@ function textNode(text) {
   const span = new FNode('span');
   span.textContent = text;
   return span;
+}
+
+// the published row markup carries the key6 in a .mono span (empty for a
+// keyless row) -- base.html.j2's row template, the node the keyless title
+// lands on
+function monoNode(key6) {
+  const span = new FNode('span');
+  span.className = 'mono';
+  span.textContent = key6 || '';
+  return span;
+}
+
+async function scenario(key, fn) {
+  try {
+    results[key] = await fn();
+  } catch (err) {
+    results[key] = { harnessError: String((err && err.stack) || err) };
+  }
 }
 
 function fakeApi(payload, post = null) {
@@ -339,10 +386,12 @@ function apiPayload(rows) {
   await tick();
   await tick();
   const actions = panel
-    .querySelectorAll('.refdes-navis-archive, .refdes-navis-restore')
+    .querySelectorAll('.refdes-navis-archive, .refdes-navis-restore, .refdes-navis-mint')
     .filter((b) => b.className.includes('refdes-navis-'));
+  const mint = panel.querySelector('.refdes-navis-mint');
   results.refused = {
     allDisabled: actions.every((b) => b.disabled === true),
+    mintDisabled: mint ? mint.disabled : null,
     message: panel.querySelector('.refdes-navis-error').textContent,
     reload: results.reload - reload0,
   };
@@ -351,10 +400,11 @@ function apiPayload(rows) {
 // ---------- scenario 6: a stale page (DOM/API counts disagree) aborts
 {
   const rows = rowsFixture();
-  const { doc, panel } = makePanel({ topTexts: ['Alpha active.'] });
+  const { doc, panel } = makePanel({ topRows: [rowsFixture()[0]] });
   await wireNavisPanel(doc, fakeApi(apiPayload(rows)));
   results.stale = {
     archives: panel.querySelectorAll('.refdes-navis-archive').length,
+    mints: panel.querySelectorAll('.refdes-navis-mint').length,
     restores: panel
       .querySelectorAll('.refdes-navis-restore')
       .map((b) => ({ disabled: b.disabled, title: b.getAttribute('title') })),
@@ -366,7 +416,7 @@ function apiPayload(rows) {
   const rows = rowsFixture();
   rows[0].text = '<img src=x onerror="steal()"><b>bold</b>';
   const { doc, panel } = makePanel({
-    topTexts: ['<img src=x onerror="steal()"><b>bold</b>', 'Keyless marker.'],
+    topRows: [rows[0], rows[1]],
     showRows: rows,
   });
   await wireNavisPanel(doc, fakeApi(apiPayload(rows)));
@@ -377,6 +427,10 @@ function apiPayload(rows) {
     imgs: img.length,
     bolds: b.length,
     labels,
+    mints: panel.querySelectorAll('.refdes-navis-mint').map((x) => x.textContent),
+    mintLabels: panel
+      .querySelectorAll('.refdes-navis-mint')
+      .map((x) => x.getAttribute('aria-label')),
   };
 }
 
@@ -412,6 +466,209 @@ function apiPayload(rows) {
   }, api);
   results.noPanel = { calls: api.calls.length };
 }
+
+// ---------- scenario 10 (M2): the Mint button by keyless count
+await scenario('mintWired', async () => {
+  sessionStorage.clear();
+  const rows = rowsFixture();
+  const { doc, panel } = makePanel();
+  await wireNavisPanel(doc, fakeApi(apiPayload(rows)));
+  const mints = panel.querySelectorAll('.refdes-navis-mint');
+  const lists = panel.querySelectorAll('.refdes-navis-list');
+  const tops = lists[0] ? lists[0].querySelectorAll('li') : [];
+  const keyed = rowsFixture();
+  keyed[1].key = 'dddd4444dddd';
+  keyed[1].key6 = 'dddd44';
+  const allKeyed = makePanel({ showRows: keyed });
+  await wireNavisPanel(allKeyed.doc, fakeApi(apiPayload(keyed)));
+  const twoKeyless = rowsFixture();
+  twoKeyless[2].key = '';
+  twoKeyless[2].key6 = '';
+  const two = makePanel({ showRows: twoKeyless });
+  await wireNavisPanel(two.doc, fakeApi(apiPayload(twoKeyless)));
+  return {
+    count: mints.length,
+    texts: mints.map((b) => b.textContent),
+    labels: mints.map((b) => b.getAttribute('aria-label')),
+    titles: mints.map((b) => b.getAttribute('title')),
+    classes: mints.map((b) => b.className),
+    topKeyTitles: tops.map((li) => {
+      const mono = li.querySelector('.mono');
+      return mono ? mono.getAttribute('title') : null;
+    }),
+    allKeyedMints: allKeyed.panel.querySelectorAll('.refdes-navis-mint').length,
+    twoKeylessTexts: two.panel
+      .querySelectorAll('.refdes-navis-mint')
+      .map((b) => b.textContent),
+  };
+});
+
+// ---------- scenario 11 (M2): a Mint click posts {} to /api/navis/mint,
+// the 200 rides the archive's reload, the status is stored for that reload
+await scenario('mintClick', async () => {
+  sessionStorage.clear();
+  const rows = rowsFixture();
+  const { doc, panel } = makePanel();
+  const api = fakeApi(apiPayload(rows), (path) => {
+    if (path === '/api/navis/mint') {
+      return {
+        kind: 'ok',
+        changed: true,
+        minted: [{ key: 'k1' }, { key: 'k2' }, { key: 'k3' }],
+        still_keyless: 1,
+      };
+    }
+    return { kind: 'ok' };
+  });
+  await wireNavisPanel(doc, api);
+  const mint = panel.querySelectorAll('.refdes-navis-mint')[0];
+  const reload0 = results.reload;
+  mint.click();
+  const disabledDuring = mint.disabled;
+  await tick();
+  await tick();
+  return {
+    disabledDuring,
+    calls: api.calls
+      .filter((c) => (c.init.method || 'GET') === 'POST')
+      .map((c) => ({ path: c.path, body: c.init.body })),
+    reload: results.reload - reload0,
+    stored: sessionStorage.getItem('refdes-navis-mint-status'),
+    statusInDom: panel
+      .querySelectorAll('.refdes-navis-note')
+      .filter((p) => p.getAttribute('role') === 'status').length,
+  };
+});
+
+// ---------- scenario 12 (M2): the three status-line texts, each consumed
+// exactly once by the reloaded page
+await scenario('mintStatus', async () => {
+  const REFUSED =
+    '1 marker(s) could not be keyed -- refdes will not mint into those ' +
+    'bodies (for example a YAML list body).';
+  const cases = [
+    { minted: 3, stillKeyless: 1, text: `Minted 3 key(s). ${REFUSED}` },
+    { minted: 0, stillKeyless: 0, text: 'Nothing to mint.' },
+    { minted: 0, stillKeyless: 1, text: `Minted 0 key(s). ${REFUSED}` },
+  ];
+  const out = [];
+  for (const c of cases) {
+    sessionStorage.clear();
+    const rows = rowsFixture();
+    const { doc, panel } = makePanel();
+    const api = fakeApi(apiPayload(rows), () => ({
+      kind: 'ok',
+      changed: true,
+      minted: new Array(c.minted).fill({ key: 'k' }),
+      still_keyless: c.stillKeyless,
+    }));
+    await wireNavisPanel(doc, api);
+    panel.querySelectorAll('.refdes-navis-mint')[0].click();
+    await tick();
+    await tick();
+    const stored = sessionStorage.getItem('refdes-navis-mint-status');
+    const second = makePanel();
+    await wireNavisPanel(second.doc, fakeApi(apiPayload(rowsFixture())));
+    out.push({
+      stored,
+      consumed: sessionStorage.getItem('refdes-navis-mint-status') === null,
+      rendered: second.panel
+        .querySelectorAll('.refdes-navis-note')
+        .filter((p) => p.getAttribute('role') === 'status')
+        .map((p) => p.textContent),
+    });
+  }
+  return out;
+});
+
+// ---------- scenario 13 (M2): a failed Mint re-enables, alerts, no reload
+await scenario('mintFailed', async () => {
+  sessionStorage.clear();
+  const rows = rowsFixture();
+  const { doc, panel } = makePanel();
+  const api = fakeApi(apiPayload(rows), () => {
+    const err = new Error('mint exploded');
+    err.status = 500;
+    err.payload = { kind: 'error', error: 'mint exploded' };
+    throw err;
+  });
+  await wireNavisPanel(doc, api);
+  const mint = panel.querySelectorAll('.refdes-navis-mint')[0];
+  const reload0 = results.reload;
+  mint.click();
+  await tick();
+  await tick();
+  const alert = panel.querySelector('.refdes-navis-error');
+  return {
+    disabledAfter: mint.disabled,
+    alert: alert
+      ? { role: alert.getAttribute('role'), text: alert.textContent }
+      : null,
+    reload: results.reload - reload0,
+    stored: sessionStorage.getItem('refdes-navis-mint-status'),
+  };
+});
+
+// ---------- scenario 14 (M2): a Mint 403 (--no-write) locks every action
+// button, the Mint button included
+await scenario('mintRefused', async () => {
+  sessionStorage.clear();
+  const rows = rowsFixture();
+  const { doc, panel } = makePanel();
+  const api = fakeApi(apiPayload(rows), () => {
+    const err = new Error('refused');
+    err.status = 403;
+    err.payload = {
+      kind: 'refused',
+      error: 'this server was started with --no-write: navis mint is disabled',
+    };
+    throw err;
+  });
+  await wireNavisPanel(doc, api);
+  const mint = panel.querySelectorAll('.refdes-navis-mint')[0];
+  const reload0 = results.reload;
+  mint.click();
+  await tick();
+  await tick();
+  const actions = panel
+    .querySelectorAll('.refdes-navis-archive, .refdes-navis-restore, .refdes-navis-mint')
+    .filter((b) => b.className.includes('refdes-navis-'));
+  return {
+    allDisabled: actions.every((b) => b.disabled === true),
+    mintDisabled: mint.disabled,
+    message: panel.querySelector('.refdes-navis-error').textContent,
+    reload: results.reload - reload0,
+  };
+});
+
+// ---------- scenario 15 (M2): the stored status clears on the next action
+// (both a Mint and an Archive click)
+await scenario('statusClears', async () => {
+  const out = [];
+  for (const which of ['mint', 'archive']) {
+    sessionStorage.clear();
+    sessionStorage.setItem('refdes-navis-mint-status', 'Minted 1 key(s).');
+    const rows = rowsFixture();
+    const { doc, panel } = makePanel();
+    await wireNavisPanel(doc, fakeApi(apiPayload(rows)));
+    const statuses = () =>
+      panel
+        .querySelectorAll('.refdes-navis-note')
+        .filter((p) => p.getAttribute('role') === 'status').length;
+    const before = statuses();
+    const target =
+      which === 'mint'
+        ? panel.querySelectorAll('.refdes-navis-mint')[0]
+        : panel.querySelectorAll('.refdes-navis-archive')[0];
+    target.click();
+    const after = statuses();
+    out.push({ which, before, after });
+    await tick();
+    await tick();
+  }
+  sessionStorage.clear();
+  return out;
+});
 
 console.log(JSON.stringify(results));
 """
@@ -471,15 +728,17 @@ def test_the_preview_panel_wiring(tmp_path):
     assert f["reload"] == 0, f
     assert f["second"] == 1, "the alert is reused in place, never stacked"
 
-    # 5. 403: every action disabled, the message kept
+    # 5. 403: every action disabled (the Mint button included), message kept
     x = r["refused"]
     assert x["allDisabled"] is True, x
+    assert x["mintDisabled"] is True, x
     assert x["message"].startswith("this server was started with --no-write"), x
     assert x["reload"] == 0, x
 
     # 6. stale page (counts disagree): the published panel survives untouched
     s = r["stale"]
     assert s["archives"] == 0, s
+    assert s["mints"] == 0, s
     assert [d["disabled"] for d in s["restores"]] == [True, True], s
     assert all(d["title"] == "the published site is read-only" for d in s["restores"]), s
 
@@ -487,6 +746,8 @@ def test_the_preview_panel_wiring(tmp_path):
     assert r["hostile"]["imgs"] == 0, r["hostile"]
     assert r["hostile"]["bolds"] == 0, r["hostile"]
     assert r["hostile"]["labels"] == ["Archive Navi aaaa11"], r["hostile"]
+    assert r["hostile"]["mints"] == ["Mint keys (1)"], r["hostile"]
+    assert r["hostile"]["mintLabels"] == ["Mint keys for 1 unkeyed Navis"], r["hostile"]
 
     # 8. the GET fails: no error UI, restore stays disabled, no reload
     ff = r["fetchFail"]
@@ -498,6 +759,64 @@ def test_the_preview_panel_wiring(tmp_path):
 
     # 9. no panel on the page: the API is never asked
     assert r["noPanel"]["calls"] == 0, r["noPanel"]
+
+    # 10. M2: one Mint button when rows are keyless, gone when none are
+    m = r["mintWired"]
+    assert m["count"] == 1, m
+    assert m["texts"] == ["Mint keys (1)"], m
+    assert m["labels"] == ["Mint keys for 1 unkeyed Navis"], m
+    assert m["titles"] == [
+        "Writes a key into each unkeyed Navi marker in your item files"
+    ], m
+    assert m["classes"] == ["refdes-navis-mint"], m
+    assert m["twoKeylessTexts"] == ["Mint keys (2)"], m
+    assert m["allKeyedMints"] == 0, m
+    assert m["topKeyTitles"] == [None, "No key yet -- use Mint keys"], m
+
+    # 11. M2: Mint posts {} to /api/navis/mint; the 200 rides the reload
+    mc = r["mintClick"]
+    assert mc["disabledDuring"] is True, mc
+    assert mc["calls"] == [{"path": "/api/navis/mint", "body": {}}], mc
+    assert mc["reload"] == 1, mc
+    assert mc["stored"] == (
+        "Minted 3 key(s). 1 marker(s) could not be keyed -- refdes will not "
+        "mint into those bodies (for example a YAML list body)."
+    ), mc
+    assert mc["statusInDom"] == 0, mc  # the status belongs to the reloaded page
+
+    # 12. M2: the three status texts, each rendered once on the reloaded page
+    REFUSED = (
+        "1 marker(s) could not be keyed -- refdes will not mint into those "
+        "bodies (for example a YAML list body)."
+    )
+    ms = r["mintStatus"]
+    assert [c["stored"] for c in ms] == [
+        f"Minted 3 key(s). {REFUSED}",
+        "Nothing to mint.",
+        f"Minted 0 key(s). {REFUSED}",
+    ], ms
+    assert [c["consumed"] for c in ms] == [True, True, True], ms
+    assert [c["rendered"] for c in ms] == [[c["stored"]] for c in ms], ms
+
+    # 13. M2: a failed Mint re-enables, alerts once, no reload, no status
+    mf = r["mintFailed"]
+    assert mf["disabledAfter"] is False, mf
+    assert mf["alert"] == {"role": "alert", "text": "mint exploded"}, mf
+    assert mf["reload"] == 0, mf
+    assert mf["stored"] is None, mf
+
+    # 14. M2: a Mint 403 locks every action button, Mint included
+    mr = r["mintRefused"]
+    assert mr["allDisabled"] is True, mr
+    assert mr["mintDisabled"] is True, mr
+    assert mr["message"].startswith("this server was started with --no-write"), mr
+    assert mr["reload"] == 0, mr
+
+    # 15. M2: the stored status clears on the next action (Mint and Archive)
+    sc = r["statusClears"]
+    assert [c["which"] for c in sc] == ["mint", "archive"], sc
+    assert [c["before"] for c in sc] == [1, 1], sc
+    assert [c["after"] for c in sc] == [0, 0], sc
 
 
 # ------------------------------------------------- delivery chain on a real server
