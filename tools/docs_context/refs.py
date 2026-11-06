@@ -21,6 +21,7 @@ Stdlib + ``refdes`` only. Not a shipped package: run it as
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import contextlib
 import dataclasses
 import html
@@ -584,6 +585,68 @@ def _command_card(ref: Ref, repo_root: str) -> dict:
     return card
 
 
+HELP_WORKERS = 4
+
+
+def _prefetch_help(blocks: list[Block], repo_root: str) -> None:
+    """Warm ``_HELP_CACHE`` with one bounded pool of concurrent ``--help``
+    runs before ``analyze`` resolves a page's refs serially.
+
+    A cold page pays one ``refdes <verbs> --help`` subprocess per command
+    ref in series (docs/navis.md: ~22 cards over 6 distinct verb paths,
+    ~4.8 s). Prefetching the distinct verb paths through
+    ``ThreadPoolExecutor(max_workers=HELP_WORKERS)`` makes that wall time
+    about one subprocess deep per four paths, bounded by the same
+    per-call 10 s timeout each run already has.
+
+    Every safety rule of ``_command_card`` is kept, in the same order:
+    the metachar gate and the known-verb check (in-process argparse
+    redirects stdout, so it is not thread-safe) run here serially, and
+    only a verb path that passes both reaches ``_help_subprocess`` --
+    same list argv, no shell, same timeout. Only ok runs are cached,
+    under the same ``(repo, verbs, cli.py signature)`` key; a repo
+    without ``cli.py`` (signature None) caches nothing, so prefetching
+    there would only add spawns the serial path then ignores: skip it.
+    Cards keep their exact contents and order -- this fills a cache the
+    serial path reads; a cache hit and a fresh run return the same text.
+    """
+    signature = _cli_source_signature(repo_root)
+    if signature is None:
+        return
+    root = os.path.realpath(repo_root)
+    pending: dict[tuple, tuple[str, ...]] = {}
+    for block in blocks:
+        for ref in block.refs:
+            if ref.kind != "command" or not ref.verbs:
+                continue
+            if any(char in METACHARS for char in ref.command):
+                continue
+            verbs = tuple(ref.verbs)
+            if verbs in _KNOWN_CACHE:
+                known = _KNOWN_CACHE[verbs]
+            else:
+                known = _verb_path_is_leaf(verbs)
+                _KNOWN_CACHE[verbs] = known
+            if not known:
+                continue
+            key = (root, verbs, signature)
+            if key not in _HELP_CACHE and key not in pending:
+                pending[key] = verbs
+    if not pending:
+        return
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(HELP_WORKERS, len(pending))
+    ) as pool:
+        futures = {
+            pool.submit(_help_subprocess, list(verbs), repo_root): key
+            for key, verbs in pending.items()
+        }
+        for future in concurrent.futures.as_completed(futures):
+            help_text, ok = future.result()
+            if ok:
+                _HELP_CACHE[futures[future]] = help_text
+
+
 def resolve(ref: Ref, repo_root: str, doc_path: str | None = None) -> dict:
     """One JSON-serialisable card of facts for one ref. Read-only, offline."""
     if ref.kind in ("code_ref", "file_ref"):
@@ -603,8 +666,10 @@ def _ref_dict(ref: Ref) -> dict:
 
 def analyze(doc: str, repo_root: str) -> dict:
     text = Path(doc).read_text(encoding="utf-8", errors="replace")
+    parsed = parse_doc(text)
+    _prefetch_help(parsed, repo_root)
     blocks = []
-    for block in parse_doc(text):
+    for block in parsed:
         entry = dataclasses.asdict(block)
         entry.pop("refs")
         entry["refs"] = []
