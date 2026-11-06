@@ -58,7 +58,8 @@ control: rebuild at base → same digest. Builds run with
 - `tests/test_crossplatform_lint.py`: 12 passed (fixtures use
   `newline=""`; no path-sep asserts added).
 - Touched-file ruff (I,F,E9): clean (repo not ruff-clean overall).
-- Full suite once: see final line below.
+- Full suite once: 5953 passed, 2 skipped, 88.52 s (the 2 skips are
+  the venv's xlsx extras, CI installs them).
 - Size gate: src additions for this branch = 18 (budget 350).
 - pr-size gate runs `tools/pr_size.py` itself: it is exercised by this
   PR's CI, and now self-tests its shipped path.
