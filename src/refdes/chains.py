@@ -636,9 +636,8 @@ class TipFold:
     about (the walk itself only ever reports its conclusion).
 
     * `value`/`source` — exactly the pair a thin wrapper over this returns: the
-      folded value and the
-      entry it came from; `(None, None)` when the fold is ambiguous or nothing
-      declared.
+      folded value and the entry it came from; `(None, None)` when the fold is
+      ambiguous or nothing declared.
     * `declared` — whether the walk's nearest declaring level declared the
       field with a non-null value: a `field: null` declaration does not
       count (it is the walk's own no-hit, and it does not stop the walk),
