@@ -42,7 +42,6 @@ from . import model
 from .model import SEALING_BUILD, SEALING_HISTORY, Item, Project, SchemaError
 from .parse import read_store_text, yaml_safe_load
 
-SEAL_FILE = ".refdes/log-seal.yaml"
 RESEAL_ALL = "*"  # sentinel: --reseal with no board name means "every board"
 
 _HEADER = (

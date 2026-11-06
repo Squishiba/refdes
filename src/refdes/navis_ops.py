@@ -21,28 +21,15 @@ from dataclasses import dataclass
 from . import keys as keys_mod
 from . import navis_archive as navis_archive_mod
 
-KINDS = frozenset(
-    {
-        "ok",
-        "noop",
-        "refused_no_write",
-        "ambiguous",
-        "not_found",
-        "keyless",
-        "not_archived",
-        "orphan",
-        "journal_pending",
-        "error",
-    }
-)
-
 
 @dataclass(frozen=True)
 class Outcome:
     """The result of one archive/restore attempt, as data.
 
-    ``kind`` names the outcome (one of ``KINDS``). ``row`` is the
-    selected Show-all row, None while nothing was selected.
+    ``kind`` names the outcome: one of ``ok``, ``noop``,
+    ``refused_no_write``, ``ambiguous``, ``not_found``, ``keyless``,
+    ``not_archived``, ``orphan``, ``journal_pending``, ``error``.
+    ``row`` is the selected Show-all row, None while nothing was selected.
     ``candidates`` is populated only for ``ambiguous``. ``changed``
     says a record was written or removed (only ever true for ``ok``).
     ``detail`` carries the failure text for ``journal_pending`` and

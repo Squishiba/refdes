@@ -31,7 +31,6 @@ from .preview import PreviewManager
 
 PROJECT_CONFIG_NAME = "refdes-project.yaml"
 SCHEMA_CONFIG_NAME = "refdes-schema.yaml"
-CONFIG_NAMES = (PROJECT_CONFIG_NAME, SCHEMA_CONFIG_NAME)
 # `.refdes/` files that feed a build. schema.json is regenerated on every
 # writable load (disposable), so it is not an input; copies/ holds fetched PDFs.
 _STATE_SUFFIXES = (".yaml", ".yml", ".json")
