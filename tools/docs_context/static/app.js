@@ -14,8 +14,9 @@ function el(tag, cls, text) {
 const blocksList = document.getElementById("blocks");
 const cardsPane = document.getElementById("cards");
 const countsLine = document.getElementById("summary-counts");
+const followBox = document.getElementById("follow");
 
-const state = { doc: null, selected: null, mtime: null, answers: {} };
+const state = { doc: null, selected: null, mtime: null, answers: {}, focusSeq: 0 };
 
 function refFlags(ref) {
   const card = ref.card || {};
@@ -320,6 +321,25 @@ function showStartupFailure(err) {
 
 let inFlight = false;
 
+// Follow-the-editor focus (DC-4a): a small editor extension POSTs the
+// cursor line to /api/focus and GET /api/focus is polled here, on the SAME
+// tick interval -- there is no second setInterval. The rule is: manual selection wins until the next focus
+// seq -- clicking a block moves the selection and it stays put until a POST
+// bumps the seq. The server counts every accepted POST (the same line twice
+// included), so the poll de-dupes by block.
+async function pollFocus() {
+  const response = await fetch("/api/focus");
+  if (!response.ok) return;
+  const data = await response.json();
+  if (data.seq === state.focusSeq) return;
+  state.focusSeq = data.seq;
+  if (!followBox.checked || data.block === null) return;
+  if (data.block === state.selected) return;
+  select(data.block);
+  const current = blocksList.querySelector('.block[aria-current="true"]');
+  if (current) current.scrollIntoView({ block: "nearest" });
+}
+
 async function tick() {
   if (inFlight) return;
   inFlight = true;
@@ -331,6 +351,7 @@ async function tick() {
     } else if (data.mtime !== state.mtime) {
       await refreshDoc();
     }
+    await pollFocus();
   } catch (err) {
     /* the page is polling its own server; a blip is fine, the next tick retries */
   } finally {
