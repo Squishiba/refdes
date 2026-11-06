@@ -493,6 +493,13 @@ class EditorApp:
 
     def start(self) -> None:
         self.poller.start()
+        # 0.01, not the foreground serve_forever's 0.2: this is the
+        # background-thread entry tests and embedders use, and shutdown()
+        # blocks until the accept loop's next poll -- 200 ms of teardown tax
+        # per fixture for every test that serves a project (~1500 of them).
+        # The foreground path keeps 0.2: a real serve is long-lived and
+        # Ctrl+C'd, and 100 selector wakeups per second forever is a real
+        # cost the user pays.
         self._thread = threading.Thread(
             target=self.httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
         )
@@ -500,7 +507,7 @@ class EditorApp:
 
     def serve_forever(self) -> None:
         self.poller.start()
-        self.httpd.serve_forever(poll_interval=0.01)
+        self.httpd.serve_forever(poll_interval=0.2)
 
     def stop(self) -> None:
         self.poller.stop()

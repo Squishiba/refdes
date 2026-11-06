@@ -34,11 +34,15 @@ timed work): `test_editor_format_bar.py` 77 s (4 tests — one test is 73 s),
    workers). Total CPU is unchanged (~77 s) — this is a critical-path fix,
    not a work-elimination one. Shard count 4 mirrors `-n 4`.
 
-2. **`EditorApp.stop()`'s 200 ms accept-loop tax** — `serve_forever` ran
-   with `poll_interval=0.2`, so `shutdown()` blocked up to 200 ms per
-   fixture teardown; ~1500 serve tests pay it. Lowered to 0.01 in
-   `src/refdes/serve/server.py` (real editor gets a snappier shutdown too).
-   Direct cycle: 387 ms → 205 ms. In-suite the gain is ~6 ms/test because
+2. **`EditorApp.stop()`'s 200 ms accept-loop tax** — `start()` (the
+   background-thread entry tests and embedders use) ran
+   `serve_forever(poll_interval=0.2)`, so `shutdown()` blocked up to 200 ms
+   per fixture teardown; ~1500 serve tests pay it. Lowered to 0.01 **in
+   `start()` only**; the foreground `serve_forever()` — the path
+   `cli.py:699` runs for every real `refdes serve` — stays at 0.2 (100
+   selector wakeups/second forever is a real user cost; review round 1
+   caught my initial change of both). Direct cycle with only `start()`
+   changed: 387 ms -> 215 ms. In-suite the gain is ~6 ms/test because
    HTTP traffic wakes the loop before the teardown does — measured, not
    assumed (serial before/after on `test_serve_pdf_sources.py` with the
    original source shadowed to `.scratch/perf1/src_orig`: 18.9/18.8 s vs

@@ -1712,13 +1712,17 @@ def _node_json_shards(tmp_path, harness_source, shards, timeout):
     for i, proc in enumerate(procs):
         try:
             out, err = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired as exc:
+        except subprocess.TimeoutExpired:
             for other in procs:
                 other.kill()
+            # Reap so the message reports the real status (TimeoutExpired's
+            # returncode is None for a Popen pipe, and after kill() the
+            # process is a SIGTERM death, not the hung state worth naming).
+            killed_out, killed_err = proc.communicate()
             pytest.fail(
-                f"format bar node sweep shard {i} hung: "
-                f"exit={exc.returncode}\nstdout:\n{_decoded(exc.stdout)}\n"
-                f"stderr:\n{_decoded(exc.stderr)}"
+                f"format bar node sweep shard {i} hung and was killed: "
+                f"exit={proc.returncode}\nstdout:\n{_decoded(killed_out)}\n"
+                f"stderr:\n{_decoded(killed_err)}"
             )
         assert proc.returncode == 0, (
             f"format bar node sweep shard {i} failed:\n{out}\n{err}"
@@ -1740,9 +1744,12 @@ FENCE_TIMEOUT_S = 20
 SWEEP_TIMEOUT_S = 300
 # The sweep is the suite's slowest single test (73 s serial on a loaded box).
 # It is a pure JS computation over a generated string list, so it splits into
-# disjoint shards checked by concurrent node processes; 4 mirrors the suite's
-# -n 4 and keeps CI runners with 2 cores from oversubscribing badly.
-SWEEP_SHARDS = 4
+# disjoint shards checked by concurrent node processes. The default leaves
+# half the cpus to the rest of the suite (a 4-vCPU runner under -n 4 gets 2
+# shards, not 4 -- saturating the box makes other tests' lock races likelier);
+# REFDES_TEST_SWEEP_SHARDS overrides it for debugging.
+SWEEP_SHARDS = min(4, max(1, int(os.environ.get("REFDES_TEST_SWEEP_SHARDS")
+                                  or (os.cpu_count() or 2) // 2)))
 
 MARKER_HARNESS = r'''
 globalThis.sessionStorage = {
