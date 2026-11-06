@@ -20,7 +20,6 @@ from markdown_it.common.utils import escapeHtml
 
 from . import blocked as blocked_mod
 from . import blocks as blocks_mod
-from .blocks import _esc
 from . import boards as boards_mod
 from . import calc, dates, imports, inline_calc, seal
 from . import chains as chains_mod
@@ -34,6 +33,7 @@ from . import navis as navis_mod
 from . import pages as pages_mod
 from . import status_links as status_links_mod
 from . import workspaces as workspaces_mod
+from .blocks import _esc
 from .model import (
     CHECK_VIOLATION,
     ERROR,
