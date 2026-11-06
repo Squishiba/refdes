@@ -56,6 +56,10 @@ def _anchorize(html: str, known_slugs: set[str]) -> str:
 
 _ID_ATTR_RE = re.compile(r'(?<![-\w])id="([^"]*)"')
 _CALC_TABLE_ID_RE = re.compile(r'(<table class="calc" id=")(calc-[^"]*)(")')
+# `_CALC_TABLE_ID_RE` can only match text containing this literal, so a page
+# without it needs neither scan below. Keep the two adjacent and change them
+# together: if `_calc_table_html` ever emits different markup, both move.
+_CALC_TABLE_MARKER = 'class="calc"'
 
 
 def _unique_calc_anchors(html: str) -> str:
@@ -81,6 +85,8 @@ def _unique_calc_anchors(html: str) -> str:
     for the same reason: `data-id="calc-losses-2"` must not push a rename
     one suffix further.
     """
+    if _CALC_TABLE_MARKER not in html:
+        return html
     taken = set(_ID_ATTR_RE.findall(html))
     emitted: set[str] = set()
 
