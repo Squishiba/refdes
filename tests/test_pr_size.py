@@ -98,3 +98,32 @@ def test_label_waiver():
 def test_no_pr_number_fails_closed_over_budget():
     assert pr_size.over_budget(pr_size.BUDGET + 1, None, False) is True
     assert pr_size.over_budget(pr_size.BUDGET, None, False) is False
+
+
+def test_main_computes_total_through_count_src_additions(monkeypatch, capsys):
+    """The gate's shipped path must be the tested helper.
+
+    main() used to recompute the src sum inline, so count_src_additions'
+    13 unit tests guarded a copy the gate never ran (audit 2.8). Replacing
+    the helper with a sentinel must change what main() reports; if it
+    doesn't, main() is computing the total on its own again.
+    """
+    numstat = "10\t0\tsrc/refdes/cli.py\n4\t2\tdocs/cli-reference.md\n"
+
+    class Completed:
+        stdout = numstat
+
+    monkeypatch.setattr(pr_size.subprocess, "run", lambda *a, **k: Completed())
+    seen = []
+
+    def sentinel_count(text):
+        seen.append(text)
+        return pr_size.BUDGET
+
+    monkeypatch.setattr(pr_size, "count_src_additions", sentinel_count)
+    rc = pr_size.main(["--base-sha", "b", "--head-sha", "h", "--pr-number", "500"])
+
+    assert seen == [numstat]
+    out = capsys.readouterr().out
+    assert f"pr-size: {pr_size.BUDGET} added src lines" in out
+    assert rc == 0

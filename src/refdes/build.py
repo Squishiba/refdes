@@ -33,6 +33,7 @@ from . import navis as navis_mod
 from . import pages as pages_mod
 from . import status_links as status_links_mod
 from . import workspaces as workspaces_mod
+from .blocks import _esc
 from .model import (
     CHECK_VIOLATION,
     ERROR,
@@ -3476,17 +3477,6 @@ def _calc_table_html(lines: list[CalcLine], block: str = "") -> str:
             f"{comment}</tr>"
         )
     return f'<table class="calc"{anchor}>' + caption + "".join(rows) + "</table>"
-
-
-def _esc(text: str) -> str:
-    return (
-        str(text)
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&#39;")
-    )
 
 
 def _placeholder(index: int) -> str:

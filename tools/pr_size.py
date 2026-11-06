@@ -110,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         check=True,
     )
     rows = parse_numstat(result.stdout)
-    total = sum(added for added, _, path in rows if path.startswith(SRC_PREFIX))
+    total = count_src_additions(result.stdout)
     src_rows = sorted(
         ((added, path) for added, _, path in rows if path.startswith(SRC_PREFIX)),
         reverse=True,

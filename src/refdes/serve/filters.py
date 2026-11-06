@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..model import Item, Project
+from ..render import _check_state as check_state
 
 FILTER_PARAMS = (
     "type",
@@ -89,17 +90,6 @@ def item_tags(item: Item) -> list[str]:
     if not tags:
         return []
     return [str(t) for t in tags] if isinstance(tags, list) else [str(tags)]
-
-
-def check_state(item: Item) -> str:
-    """The same rollup `render._check_state`/`items.json` report."""
-    if not item.checks:
-        return "none"
-    if any(c.ok is False for c in item.checks):
-        return "fail"
-    if any(c.ok is None for c in item.checks):
-        return "unknown"
-    return "pass"
 
 
 @dataclass
