@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 import yaml
+from helpers import revert_plan
 
 from refdes.patcher import (
     AddLink,
@@ -20,7 +21,6 @@ from refdes.patcher import (
     RemoveLink,
     apply_patch,
     plan_patch,
-    revert_plan,
 )
 
 

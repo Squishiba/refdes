@@ -14,9 +14,10 @@ from pathlib import Path
 
 import pytest
 import yaml
+from helpers import revert_plan
 
 from refdes import patcher
-from refdes.patcher import PatchPlan, Refusal, SetBody, SetField, apply_patch, plan_patch, revert_plan
+from refdes.patcher import PatchPlan, Refusal, SetBody, SetField, apply_patch, plan_patch
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ITEMS = os.path.join(REPO, "items")
@@ -41,6 +42,18 @@ def edited(text, ref, op, **kw):
     assert new[: got.start] == text[: got.start]
     assert new[len(new) - len(text) + got.end :] == text[got.end :]
     return new, got
+
+
+def patch_item(text, ref, op, **kw):
+    """Convenience: plan and, if it holds, apply. Returns (text, plan).
+
+    Test support only -- the serve editor path plans and applies through
+    `plan_patch`/`apply_patch` directly, so this wrapper lives here.
+    """
+    got = plan_patch(text, ref, op, **kw)
+    if isinstance(got, Refusal):
+        return text, got
+    return apply_patch(text, got), got
 
 
 # --------------------------------------------------------------- the three shapes
@@ -865,9 +878,9 @@ def test_plan_carries_the_path_for_messages():
 
 
 def test_patch_item_returns_text_and_plan():
-    new, got = patcher.patch_item(LIST_FILE, "REQ-001", SetField("priority", "low"))
+    new, got = patch_item(LIST_FILE, "REQ-001", SetField("priority", "low"))
     assert got.ok and "priority: low" in new
-    same, bad = patcher.patch_item(LIST_FILE, "NOPE", SetField("priority", "low"))
+    same, bad = patch_item(LIST_FILE, "NOPE", SetField("priority", "low"))
     assert same is LIST_FILE and isinstance(bad, Refusal)
 
 

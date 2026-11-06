@@ -61,6 +61,20 @@ def _project(tmp_path, items_yaml):
     return _load(tmp_path)
 
 
+def fold_at_tip(project, tip, field, *, graph=None):
+    """The (value, source) pair `chains.fold_field_at_tip` reports at ONE tip.
+
+    The thin wrapper the src fold carried, kept here (audit §1.3) so the
+    equivalence test below still compares the same two implementations:
+    `fold_field_at_tip`'s per-tip walk and `resolve_current_with_source`'s
+    thread fold, which on a one-tip thread must agree.
+    """
+    folded = chains.fold_field_at_tip(project, tip, field, graph=graph)
+    if folded is None:
+        return None, None
+    return folded.value, folded.source
+
+
 def _thread(views, ref):
     (view,) = [v for v in views if v["ref"] == ref]
     return view
@@ -125,13 +139,14 @@ def test_one_tip_thread_carries_tasks_with_age_and_verdict_together(tmp_path):
 
 
 def test_verdict_fold_is_resolve_current_on_a_one_tip_thread(tmp_path):
-    """`chains.fold_at_tip` is `resolve_current_with_source`'s own fold
+    """`fold_at_tip` above -- the thin wrapper over `chains.fold_field_at_tip`
+    kept in this module -- is `resolve_current_with_source`'s own fold
     anchored at the tip, so on a one-tip thread the two agree on both the
     value and the declaring entry -- the equivalence decision 2 rests on."""
     project = _project(tmp_path, ONE_TIP)
     start = project.item_by_id("LOG-001")
     tip = project.item_by_id("LOG-002")
-    folded = chains.fold_at_tip(project, tip, "status", graph=None)
+    folded = fold_at_tip(project, tip, "status", graph=None)
     current = chains.resolve_current_with_source(project, start, "status")
     assert folded[0] == current[0]
     assert folded[1] is current[1]

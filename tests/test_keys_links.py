@@ -9,6 +9,7 @@ import builtins
 
 import yaml
 from conftest import write_project_config
+from helpers import legacy_hash_for
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
@@ -580,11 +581,11 @@ def test_refresh_does_not_rewrite_old_id_in_markdown_prose(tmp_path):
 
 def _legacy_baseline_entry(project, item_id: str) -> dict:
     """The hash a hash_format-1 (pre-keys) stamp would have recorded for
-    this item, right now -- built via build.legacy_hash_for so these tests
+    this item, right now -- built via the suite's helpers.legacy_hash_for so these tests
     don't hand-roll their own second implementation of the old format."""
     item = project.item_by_id(item_id)
     return {
-        "hash": build_mod.legacy_hash_for(item, project),
+        "hash": legacy_hash_for(item, project),
         "type": item.type,
         "title": item.title,
     }
@@ -862,7 +863,7 @@ def test_seal_migration_silently_upgrades_an_unedited_entry_and_still_catches_a_
     project = load_project(config_path=config)
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False)
-    legacy_hash = build_mod.legacy_hash_for(project.item_by_id("LOG-001"), project)
+    legacy_hash = legacy_hash_for(project.item_by_id("LOG-001"), project)
 
     seal_path = tmp_path / ".refdes" / "log-seal.yaml"
     seal_path.parent.mkdir(parents=True, exist_ok=True)

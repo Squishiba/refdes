@@ -43,8 +43,8 @@ The shape carries §5's decisions, not a rendering of them:
 * a fork is never collapsed: there is no thread-level status anywhere, and
   each open tip gets its own branch (its own ``fold_tasks`` list, its own
   branch-local verdict via ``chains.fold_field_at_tip`` — the reported fold
-  ``_verdict`` needs for the ``conflicting`` posture, not ``chains.fold_at_tip``'s
-  bare ``(value, source)`` pair);
+  ``_verdict`` needs for the ``conflicting`` posture, not a bare
+  ``(value, source)`` pair);
 * the store's capture fact travels with the thread it captures: ``captured``
   names each member with a live capture event in the history store, with the
   event's kind and its ``occurred_at`` when the store holds one (a

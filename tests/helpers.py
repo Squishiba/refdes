@@ -10,7 +10,8 @@ from __future__ import annotations
 import os
 
 from refdes import build as build_mod
-from refdes import parse, render
+from refdes import navis, parse, render, standards
+from refdes.patcher import PatchPlan, PatchRefused, Refusal
 from refdes.schema import load_project
 
 REPO = os.path.join(os.path.dirname(__file__), "..")
@@ -566,3 +567,70 @@ def _build_at_repo_schema():
     """A real project resolving the bundled hardware@2 standard, for
     refdes new / JSON schema tests that need its actual field shapes."""
     return load_project(config_path=os.path.join(REPO, "refdes-project.yaml"))
+# ------------------------------------------------- test-only support moved out of src
+
+# These four wrappers live here, not in `src/refdes`, because no production
+# code calls them (audit §1.3, 2026-11-06). Each keeps the exact behaviour it
+# had in src, and the tests that use them are unchanged.
+
+
+def revert_plan(plan: PatchPlan) -> PatchPlan:
+    """The exact inverse of a plan: put the span back the way it was.
+
+    This is byte-identical restore, not "set the field back to the value it
+    had". The distinction matters for a folded scalar, whose original wrapping
+    is not recoverable from its value: re-setting the old value can re-wrap the
+    text, while replaying the recorded span cannot. Apply the original plan
+    first, then this one against the patched text.
+    """
+    if isinstance(plan, Refusal):
+        raise PatchRefused("a refusal has nothing to revert")
+    return PatchPlan(
+        ref=plan.ref,
+        op="revert",
+        shape=plan.shape,
+        start=plan.start,
+        end=plan.start + len(plan.replacement),
+        replacement=plan.original,
+        original=plan.replacement,
+        start_line=plan.start_line,
+        end_line=plan.end_line,
+        old_value=plan.new_value,
+        new_value=plan.old_value,
+        field=plan.field,
+        notes=("replay of the recorded span, byte-identical to the original",),
+        path=plan.path,
+    )
+
+
+def scan_body(body: str) -> tuple[list[navis.Navi], list[tuple[int, str]]]:
+    """``([Navi...], [(line_offset, message)...])`` for one item body.
+
+    `line_offset` is 0-indexed within the body (add `Item.body_line` for
+    the absolute source line, the `inline_calc` pattern). Malformed
+    markers -- empty text, a key-shaped head outside the key alphabet --
+    and a marker that spans two lines are returned as (offset, message)
+    and never become Navis; an unclosed `<!--navi:` is not a malformed
+    marker (the existing unclosed-comment warning owns it, §4) and is
+    silently inert here because it is already reported there.
+    """
+    analysis = navis.analyze_navis(body)
+    return list(analysis.navis), list(analysis.diagnostics)
+
+
+def resolve_schema(
+    raw: dict[str, object], require_rejection_rationale: bool
+) -> tuple[dict[str, object], dict[str, object]]:
+    """The two-value form of `standards.resolve_namespaces`, for callers that
+    have no use for the set namespace."""
+    _sets, link_types, types, _warnings, _optins = standards.resolve_namespaces(
+        raw, require_rejection_rationale
+    )
+    return link_types, types
+
+
+def legacy_hash_for(item, project) -> str:
+    """build_mod.hash_for_format(item, project, 1) -- the pre-keys hash. The
+    test-suite's own name for it, so legacy-hash fixtures do not hand-roll a
+    second implementation of the old format."""
+    return build_mod.hash_for_format(item, project, 1)
