@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import threading
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -31,6 +32,50 @@ from .model import Item, Project
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 ASSET_DIR = os.path.join(TEMPLATE_DIR, "assets")
+
+
+# Jinja compiles every template the first time a given Environment loads it
+# -- 12 compiles, ~150 ms, per render_site call (audit §3.3). Reusing one
+# Environment per (template dir, compile options) keeps those compiles for
+# the life of the process; the key means a caller that renders against a
+# different template tree, or with different options, gets its own. The
+# `render_site` globals are project state, so they are written in full on
+# every call below -- nothing a previous render set is ever read as this
+# render's default. `auto_reload` (set explicitly below) keeps a template
+# edited on disk recompiling on the next render, exactly what a fresh
+# Environment per call used to buy.
+_ENVIRONMENTS: dict[tuple, Environment] = {}
+_ENVIRONMENTS_LOCK = threading.Lock()
+
+
+def _environment() -> Environment:
+    # (template dir, autoescape, trim_blocks, lstrip_blocks)
+    key = (TEMPLATE_DIR, True, True, True)
+    env = _ENVIRONMENTS.get(key)
+    if env is None:
+        with _ENVIRONMENTS_LOCK:
+            env = _ENVIRONMENTS.get(key)
+            if env is None:
+                env = Environment(
+                    loader=FileSystemLoader(TEMPLATE_DIR),
+                    # autoescape=True, not select_autoescape(["html"]): select_autoescape
+                    # matches on the template name's SUFFIX, and every template here is
+                    # named *.html.j2 -- ending in ".j2", not ".html" -- so it returned
+                    # False for every template and nothing was ever escaped. Every template
+                    # in this project is HTML, so escaping can simply always be on; the
+                    # intentional raw-markup sites are already marked | safe in render_site.
+                    autoescape=True,
+                    trim_blocks=True,
+                    lstrip_blocks=True,
+                    # The Environment default (None) serves the cached
+                    # template without a disk check; with one Environment
+                    # for the process, an edited template would stay
+                    # invisible to `serve`. The per-call Environment got
+                    # freshness by being brand new -- this keeps it.
+                    auto_reload=True,
+                )
+                _ENVIRONMENTS[key] = env
+    return env
 
 
 PAGE_HREF_RE = re.compile(r'href="([a-z0-9][a-z0-9\-_.]*)\.html"')
@@ -1291,18 +1336,7 @@ def render_site(project: Project, draft: bool = False) -> str:
     os.makedirs(out_dir, exist_ok=True)
     written: set[str] = set()
 
-    env = Environment(
-        loader=FileSystemLoader(TEMPLATE_DIR),
-        # autoescape=True, not select_autoescape(["html"]): select_autoescape
-        # matches on the template name's SUFFIX, and every template here is
-        # named *.html.j2 -- ending in ".j2", not ".html" -- so it returned
-        # False for every template and nothing was ever escaped. Every template
-        # in this project is HTML, so escaping can simply always be on; the
-        # intentional raw-markup sites are already marked | safe below.
-        autoescape=True,
-        trim_blocks=True,
-        lstrip_blocks=True,
-    )
+    env = _environment()
     # The theme's generated stylesheet, or "" when there is none. A global
     # rather than a per-call argument because base.html.j2 is the only consumer
     # and every page inherits it; the empty string is what keeps the `<link>`
