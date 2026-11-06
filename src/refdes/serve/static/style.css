@@ -223,7 +223,8 @@ ul.diagnostics, ul.checks { list-style: none; margin: 0; padding: 0; }
 /* N5d-2 row actions (navis-panel.js): pills on the toggle's metrics so a
    wired row never changes the panel's shape; inline in the row, so the
    list layout is what it was. */
-.navis-archive, .navis-restore { margin-left: 8px; padding: 1px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
-.navis-archive:hover:not(:disabled), .navis-restore:hover:not(:disabled) { border-color: var(--muted); color: var(--fg); }
-.navis-archive:disabled, .navis-restore:disabled { opacity: .55; cursor: not-allowed; }
+.navis-archive, .navis-restore, .navis-mint { margin-left: 8px; padding: 1px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+.navis-archive:hover:not(:disabled), .navis-restore:hover:not(:disabled), .navis-mint:hover:not(:disabled) { border-color: var(--muted); color: var(--fg); }
+.navis-archive:disabled, .navis-restore:disabled, .navis-mint:disabled { opacity: .55; cursor: not-allowed; }
+.navis-mint { margin-left: 0; margin-top: 8px; }
 .navis-error { margin: 6px 0 0; color: var(--warn); font-size: 11px; font-weight: 600; }

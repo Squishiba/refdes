@@ -24,6 +24,10 @@ import { api as sharedApi } from './api.js';
 
 const CHANGED_NOTE = 'marker text has changed since archived';
 const ORPHAN_TITLE = 'Marker not found -- hand-restore the marker, then it re-links by key';
+const MINT_TITLE = 'Writes a key into each unkeyed Navi marker in your item files';
+const KEYLESS_TITLE = 'No key yet -- use Mint keys';
+const DRAFT_SENTENCE =
+  'Item files were edited: an open unsaved draft will ask you to resolve a conflict when you Save.';
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -39,7 +43,9 @@ function rowNode(row, wire, withArchive) {
   // button). A locked session (--no-write, set after the first 403) builds
   // every action button disabled, so the lockout survives redraws.
   const li = el('li', 'navis-row');
-  li.appendChild(el('span', 'navis-key mono', row.key6));
+  const key = el('span', 'navis-key mono', row.key6);
+  if (!row.key) key.setAttribute('title', KEYLESS_TITLE); // discoverable reason
+  li.appendChild(key);
   if (row.item) {
     // the item's editor route, spelled the way the shell's router reads it
     const link = el('a', 'navis-item', row.item);
@@ -85,13 +91,27 @@ function rowNode(row, wire, withArchive) {
 
 function render(panel, payload, wire) {
   panel.textContent = '';
+  const keyless = payload.navis.filter((row) => !row.key).length;
+  const nodes = [];
+  if (keyless > 0 && wire) {
+    // the mint is project-wide, so it is ONE button for the whole panel,
+    // counted from the rows already in hand (a keyless row is `key: ''`).
+    const mint = el('button', 'navis-mint', `Mint keys (${keyless})`);
+    mint.type = 'button';
+    mint.setAttribute('aria-label', `Mint keys for ${keyless} unkeyed Navis`);
+    mint.setAttribute('title', MINT_TITLE);
+    mint.disabled = wire.locked();
+    wire.registry.push(mint);
+    mint.addEventListener('click', () => wire.mint(mint));
+    nodes.push(mint);
+  }
   const active = payload.navis.filter((row) => !row.archived);
   if (active.length) {
     const list = el('ul', 'navis-list');
     for (const row of active) list.appendChild(rowNode(row, wire, true));
-    panel.appendChild(list);
+    nodes.push(list);
   } else {
-    panel.appendChild(el('p', 'navis-empty', 'No active Navis.'));
+    nodes.push(el('p', 'navis-empty', 'No active Navis.'));
   }
   const archived = payload.navis.filter((row) => row.archived);
   if (archived.length) {
@@ -103,8 +123,9 @@ function render(panel, payload, wire) {
     const list = el('ul', 'navis-list');
     for (const row of payload.navis) list.appendChild(rowNode(row, wire, false));
     details.appendChild(list);
-    panel.appendChild(details);
+    nodes.push(details);
   }
+  for (const node of nodes) panel.appendChild(node);
 }
 
 export function mountNavisPanel(root, apiFn = sharedApi) {
@@ -118,9 +139,11 @@ export function mountNavisPanel(root, apiFn = sharedApi) {
   let open = false;
   let notice = null; // the one inline alert; render() detaches it, draw() re-adds it
   let noticeShown = false;
+  let status = null; // the one status line a mint leaves; rides draw() like the alert
+  let statusShown = false;
   let locked = false; // a 403 (--no-write) ends this session's writes for good
   const registry = []; // this render's action buttons, for the 403 lockout
-  const wire = { act, registry, locked: () => locked };
+  const wire = { act, mint, registry, locked: () => locked };
 
   function label() {
     toggle.textContent = `Navis (${data ? data.counts.active : 0})`;
@@ -134,6 +157,7 @@ export function mountNavisPanel(root, apiFn = sharedApi) {
     registry.length = 0;
     if (data) render(panel, data, wire);
     else if (failed) panel.textContent = 'Navis unavailable';
+    if (statusShown && status) panel.insertBefore(status, panel.firstChild);
     if (noticeShown && notice) panel.insertBefore(notice, panel.firstChild);
   }
 
@@ -168,7 +192,64 @@ export function mountNavisPanel(root, apiFn = sharedApi) {
     noticeShown = false;
   }
 
+  function showStatus(text) {
+    if (!status) {
+      status = el('p', 'navis-note');
+      status.setAttribute('role', 'status');
+    }
+    status.textContent = text;
+    if (!statusShown) {
+      if (panel.firstChild) panel.insertBefore(status, panel.firstChild);
+      else panel.appendChild(status);
+      statusShown = true;
+    }
+  }
+
+  function clearStatus() {
+    if (status && status.parentNode) status.parentNode.removeChild(status);
+    status = null;
+    statusShown = false;
+  }
+
+  function mint(button) {
+    button.disabled = true;
+    apiFn('/api/navis/mint', { method: 'POST', body: {} })
+      .then((res) => {
+        // the mint is an in-place edit of item files with a forced rebuild
+        // before the answer, so the panel's own re-fetch lands keyed; the
+        // page never reloads and an open editor draft outlives it (ED-1).
+        clearError();
+        const minted = (res && res.minted && res.minted.length) || 0;
+        const refused = (res && res.still_keyless) || 0;
+        const parts = [];
+        if (minted > 0) parts.push(`Minted ${minted} key(s).`);
+        if (refused > 0) {
+          parts.push(
+            `${refused} marker(s) could not be keyed -- refdes will not mint into those ` +
+              'bodies (for example a YAML list body).'
+          );
+        }
+        if (minted === 0 && refused === 0) parts.push('Nothing to mint.');
+        if (minted > 0) parts.push(DRAFT_SENTENCE);
+        showStatus(parts.join(' '));
+        refresh();
+      })
+      .catch((err) => {
+        button.disabled = false;
+        showError(
+          (err && err.payload && err.payload.error)
+            || (err && err.message)
+            || 'the request failed'
+        );
+        if (err && err.status === 403) {
+          locked = true;
+          for (const b of registry) b.disabled = true;
+        }
+      });
+  }
+
   function act(button, path, key) {
+    clearStatus(); // a fresh action supersedes the mint's status line
     button.disabled = true;
     apiFn(path, { method: 'POST', body: { navi: key } })
       .then(() => {
@@ -206,6 +287,7 @@ export function mountNavisPanel(root, apiFn = sharedApi) {
       refresh();
     } else {
       clearError(); // a reopened panel starts clean
+      clearStatus();
     }
   }
 
