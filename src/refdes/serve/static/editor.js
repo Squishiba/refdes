@@ -19,13 +19,7 @@ import { createLiveCalc } from './live-calc.js';
 import { createFormatBar, applyEdit, blockInsertPlan } from './formatbar.js';
 import { createFontSetting } from './fontsetting.js';
 import { fieldControlNode, applyControl } from './controls.js';
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
+import { el } from './dom.js';
 
 function coerce(spec, raw) {
   if (!spec) return raw;

@@ -9,15 +9,9 @@
 import { api } from './api.js';
 import { createEditor } from './editor.js';
 import { captureFocus, collectControls, restoreFocus } from './update.js';
+import { el } from './dom.js';
 
 const STAGES = ['open', 'addressed', 'claimed', 'satisfied', 'verified'];
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 function section(title) {
   const s = el('section', 'detail-block');

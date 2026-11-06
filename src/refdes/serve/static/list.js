@@ -3,13 +3,7 @@
 // while keeping the current filter query in the URL.
 
 import { filterQuery } from './filters.js';
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
+import { el } from './dom.js';
 
 function badge(text, kind) {
   return el('span', `badge ${kind || ''}`.trim(), text);

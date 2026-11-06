@@ -10,13 +10,7 @@
 
 import { api } from './api.js';
 import { fieldControlNode } from './controls.js';
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
+import { el } from './dom.js';
 
 function row(label, node) {
   const wrap = el('div', 'create-row');

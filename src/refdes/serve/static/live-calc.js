@@ -15,6 +15,7 @@
 // discarded silently and the next trigger re-requests.
 
 import { api } from './api.js';
+import { el } from './dom.js';
 
 const DEBOUNCE_MS = 400;
 const AUTOFILL_KEY = 'refdes.live-calc.autofill';
@@ -28,13 +29,6 @@ const FALLBACK_KEY = 'refdes.live-calc.fallback';
 // Mirrors build.PREVIEW_SPAN_LIMIT (src/refdes/build.py); the static test
 // pins the two numbers against each other.
 const PREVIEW_SPAN_LIMIT = 200;
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 function readAutofillPref() {
   try {

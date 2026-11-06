@@ -26,13 +26,7 @@
 // needs more than a shorter list.
 
 import { api, postRaw } from './api.js';
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
+import { el } from './dom.js';
 
 function humanSize(bytes) {
   if (!Number.isFinite(bytes)) return '';

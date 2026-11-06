@@ -14,13 +14,7 @@
 
 import { getDraft, draftLinkAdd, draftLinkRemove, draftLinkCancel } from './drafts.js';
 import { displayHalf, candidatesFor, rowLabel, matchesFilter } from './pickers.js';
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
+import { el } from './dom.js';
 
 function verbPicker(item, handle, verb, spec, onChange, onDraftChange) {
   const wrap = el('div', 'link-verb-edit');
