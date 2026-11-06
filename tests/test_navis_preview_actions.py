@@ -549,7 +549,7 @@ await scenario('mintStatus', async () => {
   const cases = [
     { minted: 3, stillKeyless: 1, text: `Minted 3 key(s). ${REFUSED}` },
     { minted: 0, stillKeyless: 0, text: 'Nothing to mint.' },
-    { minted: 0, stillKeyless: 1, text: `Minted 0 key(s). ${REFUSED}` },
+    { minted: 0, stillKeyless: 1, text: REFUSED },
   ];
   const out = [];
   for (const c of cases) {
@@ -793,7 +793,7 @@ def test_the_preview_panel_wiring(tmp_path):
     assert [c["stored"] for c in ms] == [
         f"Minted 3 key(s). {REFUSED}",
         "Nothing to mint.",
-        f"Minted 0 key(s). {REFUSED}",
+        REFUSED,
     ], ms
     assert [c["consumed"] for c in ms] == [True, True, True], ms
     assert [c["rendered"] for c in ms] == [[c["stored"]] for c in ms], ms
