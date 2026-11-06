@@ -15,12 +15,51 @@ from __future__ import annotations
 
 import ast
 import re
+import threading
 from dataclasses import dataclass
 
-import pint
+# The unit registry is built on first use, not at import (audit 2026-11-06
+# §3.2): `refdes.calc` sits in the import chain of *every* command (`cli ->
+# adopt -> boards -> keys -> ids -> model -> calc`), and minting a
+# `pint.UnitRegistry()` costs the majority of the runtime of commands that
+# never touch units (`ls`, `schema`, `keys`, ...). `_registry()` is the
+# single-flight accessor; it binds the module-level `pint` name, which is
+# what the `except pint.*` handlers below read -- safe because no quantity
+# exists before the registry that built it does, and every handler guards
+# arithmetic on quantities.
+pint = None
+_registry_lock = threading.Lock()
+_UREG = None
 
-UREG = pint.UnitRegistry()
-Q = UREG.Quantity
+
+def _registry():
+    """The process-wide `pint.UnitRegistry`, imported and built on first use.
+
+    Single-flight under `_registry_lock`: serve rebuilds previews on worker
+    threads, and two racing first uses must not mint two registries -- pint
+    quantities only interoperate inside the registry that created them.
+    """
+    global pint, _UREG
+    if _UREG is None:
+        with _registry_lock:
+            if _UREG is None:
+                import pint
+                _UREG = pint.UnitRegistry()
+    return _UREG
+
+
+def __getattr__(name: str):
+    """`UREG`/`Q` stay importable names, now resolving through `_registry()`."""
+    if name == "UREG":
+        return _registry()
+    if name == "Q":
+        return _registry().Quantity
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _Q(magnitude, units) -> object:
+    """`_registry().Quantity(...)`, the one form this module's sites use."""
+    return _registry().Quantity(magnitude, units)
 
 
 class CalcError(Exception):
@@ -279,7 +318,7 @@ def _dimensionless(fn, name: str, fix: str):
     """
 
     def wrap(q):
-        return Q(fn(float(q.to("dimensionless").magnitude)), "dimensionless")
+        return _Q(fn(float(q.to("dimensionless").magnitude)), "dimensionless")
 
     def apply(v: Value) -> Value:
         if not v.nom.dimensionless:
@@ -545,7 +584,7 @@ def _lex(expression: str) -> str:
 
 def is_known_unit(token: str) -> bool:
     try:
-        UREG.parse_expression(_to_pint_units(token))
+        _registry().parse_expression(_to_pint_units(token))
         return True
     except Exception:
         return False
@@ -580,7 +619,7 @@ def check_ambiguity(expression: str, names: set[str]) -> str | None:
 
 def quantity(number: str, unit: str) -> Value:
     try:
-        q = Q(float(number), unit) if unit else Q(float(number), "dimensionless")
+        q = _Q(float(number), unit) if unit else _Q(float(number), "dimensionless")
     except Exception as exc:  # pint raises several types for bad unit strings
         raise CalcError(f"unknown unit {unit!r}") from exc
     return Value.exact(q)
@@ -608,7 +647,7 @@ def _eval_node(node: ast.AST, env: dict[str, Value]) -> Value:
     if isinstance(node, ast.Constant):
         if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
             raise CalcError(f"unsupported literal {node.value!r}")
-        return Value.exact(Q(float(node.value), "dimensionless"))
+        return Value.exact(_Q(float(node.value), "dimensionless"))
 
     if isinstance(node, ast.Name):
         if node.id not in env:
@@ -850,7 +889,7 @@ def parse_limit(text: str) -> Limit:
         # "9 .. 36 V" -- borrow the unit from the upper bound when the lower omits it.
         low = parse_quantity(low_text)
         if low.nom.dimensionless and not high.nom.dimensionless:
-            low = Value.exact(Q(low.nom.magnitude, high.nom.units))
+            low = Value.exact(_Q(low.nom.magnitude, high.nom.units))
         return Limit("range", low, high, raw)
 
     raise CalcError(
@@ -861,7 +900,12 @@ def parse_limit(text: str) -> Limit:
 
 # ------------------------------------------------------------------------ formatting
 
-_preferred_cache: list = []
+# The preferred-unit list is stored as names, not parsed units: parsing them
+# needs the registry, and the registry must not be built at import (§3.2).
+# The names arrive from project config exactly as their spelling; `_preferred()`
+# resolves them, once, on the first formatting call.
+_preferred_names: list[str] = []
+_preferred_cache: list | None = None
 
 # Named derived units worth collapsing to by default, so formatting is sensible
 # even when no project config has been loaded.
@@ -869,12 +913,25 @@ DEFAULT_PREFERRED = ["W", "V", "A", "ohm", "F", "H", "Hz", "J", "N", "Pa", "s", 
 
 
 def set_preferred_units(units: list[str]) -> None:
-    _preferred_cache.clear()
-    for name in units or DEFAULT_PREFERRED:
-        try:
-            _preferred_cache.append((UREG.parse_expression(name).units, name))
-        except Exception:
-            continue
+    global _preferred_cache
+    _preferred_names.clear()
+    _preferred_names.extend(units or DEFAULT_PREFERRED)
+    _preferred_cache = None
+
+
+def _preferred() -> list:
+    global _preferred_cache
+    if _preferred_cache is None:
+        with _registry_lock:
+            if _preferred_cache is None:
+                cache = []
+                for name in _preferred_names:
+                    try:
+                        cache.append((_registry().parse_expression(name).units, name))
+                    except Exception:
+                        continue
+                _preferred_cache = cache
+    return _preferred_cache
 
 
 set_preferred_units(DEFAULT_PREFERRED)
@@ -916,19 +973,19 @@ def _simplify(q):
         for subset in combinations(names, size):
             part = UnitsContainer({n: units[n] for n in subset})
             try:
-                part_q = Q(1, part)
+                part_q = _Q(1, part)
             except Exception:
                 continue
-            for target, _name in _preferred_cache:
+            for target, _name in _preferred():
                 if _unit_count_units(target) != 1:
                     continue
-                if part_q.dimensionality != Q(1, target).dimensionality:
+                if part_q.dimensionality != _Q(1, target).dimensionality:
                     continue
                 try:
                     rest = UnitsContainer(
                         {n: e for n, e in units.items() if n not in subset}
                     )
-                    combined = (Q(1, target) * Q(1, rest)).units
+                    combined = (_Q(1, target) * _Q(1, rest)).units
                     if combined == q.units:
                         return q
                     return q.to(combined).to_compact()
