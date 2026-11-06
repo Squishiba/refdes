@@ -98,6 +98,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+import yaml
+
 from .. import build as build_mod
 from .. import citations as citations_mod
 from .. import dates, editor_journal, ids, keys, links, loader, patcher, scaffold, seal, textio
@@ -105,6 +107,7 @@ from ..model import (
     CHECK_VIOLATION,
     ERROR,
     NON_SCALAR_FIELD_TYPES,
+    TASK_STATES,
     Diagnostic,
     Item,
     Project,
@@ -2345,3 +2348,346 @@ def preview_creation(
     )
     exists = os.path.exists(os.path.join(project.root, dest.replace("/", os.sep)))
     return {"id": new_id, "reason": reason, "destination": dest, "destination_exists": exists}
+
+
+# W5b.1: append the tick draft as one new entry using create_item's machinery.
+# Client sends ticks + revision; server re-folds, refuses no-list postures,
+# copies tip fields/list, appends a new follows entry (plan §4, §5 R1/R2/R5).
+
+
+@dataclass(frozen=True)
+class ContinueRequest:
+    who: str
+    ref: str
+    ticks: tuple
+    expected_revision: str
+
+
+@dataclass(frozen=True)
+class _ContinuationPlan:
+    new_id: str
+    rel: str
+    ticks: tuple
+
+    def describe(self) -> str:
+        verb = "tick" if len(self.ticks) == 1 else "ticks"
+        return f"continuation {self.new_id} appended to {self.rel} ({len(self.ticks)} {verb})"
+
+
+def continue_thread(
+    project_root: str,
+    request: ContinueRequest,
+    config_path: str | None = None,
+    *,
+    read_only: bool = False,
+):
+    """Append the tip's copied-and-updated task list as one new thread entry."""
+    root = os.path.abspath(project_root)
+    config = os.path.abspath(config_path) if config_path else os.path.join(root, CONFIG_NAME)
+    if read_only:
+        return Refused(
+            request.who,
+            request.ref,
+            "this server was started with --no-write: continuations are disabled",
+        )
+    with write_lock_for(root):
+        try:
+            with _disk_write_lock(root):
+                return _continue_locked(config, request)
+        except OSError as exc:
+            return Refused(
+                request.who, request.ref, f"could not lock {root} for writing: {exc}"
+            )
+
+
+def _continue_locked(config: str, request: ContinueRequest):
+    from .. import chains
+
+    who, ref = request.who, request.ref
+    try:
+        before = loader.load_readonly(config)
+    except Exception as exc:  # noqa: BLE001 - a project that will not load is a result
+        return Refused(who, ref, f"the project did not load: {type(exc).__name__}: {exc}")
+    resolved = resolution.resolve_ref(before, ref)
+    if resolved.claimed_by:
+        owners = ", ".join(f"'{owner}'" for owner in resolved.claimed_by)
+        return Refused(
+            who,
+            ref,
+            f"former id {ref!r} is recorded in the former_ids of {owners}: a retired id "
+            "must resolve to exactly one item, and this write refuses to pick one",
+        )
+    item = resolved.item
+    if item is None:
+        return Refused(who, ref, f"no item {ref!r} in this project")
+    if item.external:
+        return Refused(who, ref, f"{ref} is an imported item; imports are read-only here")
+    folds = chains.fold_tasks(before, item)
+    if not folds:
+        return Refused(who, ref, f"{ref} does not name an entry of a task thread")
+    if len(folds) > 1:
+        tips = ", ".join(fold.tip.id or fold.tip.key for fold in folds)
+        return Refused(
+            who,
+            ref,
+            f"{ref}'s thread is forked across tips {tips}: a continuation names one tip, "
+            "and this request cannot pick one",
+        )
+    fold = folds[0]
+    tip = fold.tip
+    if fold.ambiguous:
+        return Refused(
+            who,
+            ref,
+            f"the task list at {tip.id} is ambiguous: equal-distance declarations differ "
+            "(task reconciliation required) -- there is no list to copy",
+        )
+    if fold.rows is None:
+        return Refused(
+            who,
+            ref,
+            f"nothing in {tip.id}'s thread declares tasks: (undeclared) -- there is no "
+            "list, not an empty one, for a tick to change",
+        )
+    if not fold.rows:
+        return Refused(
+            who,
+            ref,
+            f"the task list at {tip.id} is cleared (an explicit tasks: []): ticking a "
+            "row of a cleared list would invent rows the fold says do not exist",
+        )
+    if tip.external:
+        return Refused(who, ref, f"{tip.id} is an imported entry; imports are read-only here")
+    path = _item_path(before, tip)
+    if path is None:
+        return Refused(who, ref, f"{ref} resolves outside the project; nothing was written")
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+        text = raw.decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return Refused(who, ref, f"could not read {path}: {exc}", path=path)
+    if seal.is_sealed(before, tip):
+        return Refused(
+            who,
+            ref,
+            f"{tip.id} is a sealed append-only entry: a continuation appends a new "
+            "entry, it never rewrites a sealed one",
+            path=path,
+        )
+    rows, reason = _planned_rows(fold.rows, request.ticks)
+    if reason is not None:
+        return Refused(who, ref, reason, path=path)
+    rel, dest, reason = _resolve_destination(
+        before,
+        CreateRequest(who=who, type=tip.type, fields={}, destination=tip.source_file),
+    )
+    if reason is not None:
+        return Refused(who, ref, reason, path=path)
+    if dest["kind"] == "new-md":
+        return Refused(
+            who,
+            ref,
+            f"{rel} is not an existing list file: a continuation appends to the "
+            "thread's own file",
+            path=path,
+        )
+    new_id, reason = ids.plan_new_id(
+        before,
+        tip.type,
+        prefix_hint=str((dest.get("defaults") or {}).get("prefix") or ""),
+    )
+    if reason is not None:
+        return Refused(who, new_id, reason, path=path)
+    key = _fresh_key(before)
+    composite = links.composite_for(tip)
+    if composite is None:
+        return Refused(
+            who,
+            ref,
+            f"{tip.id} carries no artifact key, so no DISPLAY-ID@key composite can be "
+            "written for it; naming the tip with a bare id would drop the identity "
+            "the link is for",
+            path=path,
+        )
+    body, reason = _continuation_lines(before, tip, rows)
+    if reason is not None:
+        return Refused(who, ref, reason, path=path)
+    body.append(f"follows: [{composite}]")
+    eol = textio.append_ending(text)
+    if dest["kind"] == "append-md":
+        block = ["---", f"id: {new_id}", f"key: {key}", f"type: {tip.type}", *body, "---", ""]
+    else:
+        ind = dest["indent"]
+        block = [f"{ind}- id: {new_id}", f"{ind}  key: {key}"]
+        if dest.get("type") != tip.type:
+            block.append(f"{ind}  type: {tip.type}")
+        block.extend(f"{ind}  {ln}" for ln in body)
+    head = "" if text.endswith("\n") else eol
+    new_text = text + head + eol.join(block) + eol
+    current_revision = hashlib.sha256(raw).hexdigest()
+    if current_revision != request.expected_revision:
+        diff = "\n".join(
+            difflib.unified_diff(
+                text.splitlines(),
+                new_text.splitlines(),
+                fromfile=f"{rel} (on disk)",
+                tofile=f"{rel} (your continuation)",
+                lineterm="",
+            )
+        )
+        return Conflict(who, ref, path, request.expected_revision, current_revision, text, diff)
+    try:
+        after = loader.load_readonly(config, overlay={path: new_text})
+    except Exception as exc:  # noqa: BLE001 - a candidate that will not load is a result
+        return Refused(
+            who,
+            ref,
+            f"the project did not load with the new entry: {type(exc).__name__}: {exc}",
+            path=path,
+        )
+    blocking = _creation_blocking(before, after, new_id, key)
+    if blocking:
+        return Invalid(who, ref, tuple(blocking), path=path)
+    journal_rel = _journal_relpath(before.root, path)
+    payload = new_text.encode("utf-8")
+    if journal_rel is not None:
+        reason = _journal_arm(before.root, journal_rel, raw, payload)
+        if reason is not None:
+            return Refused(who, ref, reason, path=path)
+    try:
+        failure = _atomic_replace(path, payload, current_revision)
+    except _Moved as moved:
+        warning = _journal_clear(before.root)
+        try:
+            with open(path, "rb") as fh:
+                moved_text = fh.read().decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            moved_text = None
+        return Conflict(
+            who,
+            ref,
+            path,
+            request.expected_revision,
+            moved.current,
+            moved_text,
+            "",
+            journal_warning=warning or "",
+        )
+    if failure is not None:
+        warning = (
+            _journal_clear_after_failure(before.root, journal_rel, raw)
+            if journal_rel is not None
+            else _journal_clear(before.root)
+        )
+        return Refused(
+            who, new_id, failure if warning is None else f"{failure}; {warning}", path=path
+        )
+    try:
+        ids.reserve_id(before, new_id)
+    except OSError as exc:
+        if _rollback(path, raw):
+            warning = _journal_clear(before.root)
+            reason = (
+                f"the id ledger could not be written ({exc}); {rel} was rolled back "
+                f"and {new_id} was not reserved"
+            )
+            return Refused(
+                who, new_id, reason if warning is None else f"{reason}; {warning}", path=path
+            )
+        return Refused(
+            who,
+            new_id,
+            f"the id ledger could not be written ({exc}); {new_id} was not reserved, "
+            f"and {rel} could not be restored: run 'refdes recover' to restore the file",
+            path=path,
+        )
+    journal_warning = _journal_clear(before.root)
+    return Applied(
+        who=who,
+        ref=ref,
+        path=path,
+        revision=file_revision(path),
+        plan=_ContinuationPlan(new_id, rel, tuple(request.ticks)),
+        diagnostics=tuple(after.diagnostics),
+        item_id=new_id,
+        handle=key,
+        journal_warning=journal_warning,
+    )
+
+
+def _planned_rows(rows: list, ticks: tuple):
+    """Validate ticks against the fold's list and return the copied rows."""
+    by_id = {
+        r["id"]: r for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str)
+    }
+    seen, wanted = set(), {}
+    for tick in ticks:
+        if not isinstance(tick, (tuple, list)) or len(tick) != 2:
+            return None, "every tick is a (task id, wanted state) pair"
+        task_id, state = tick
+        if not isinstance(task_id, str) or task_id not in by_id:
+            return None, (
+                f"task {task_id!r} is not in the task list at the tip: the fold owns "
+                "the list, and a continuation invents no rows"
+            )
+        if not isinstance(state, str) or state not in TASK_STATES:
+            return None, (
+                f"task state {state!r} is outside the task vocabulary "
+                f"({', '.join(TASK_STATES)})"
+            )
+        if task_id in seen:
+            return None, (
+                f"task {task_id!r} is ticked twice: one continuation sets each row once"
+            )
+        seen.add(task_id)
+        current = by_id[task_id].get("state")
+        if state != current and current != "open" and state != "open":
+            return None, (
+                f"task {task_id!r} is {current!r}: a continuation moves a row from "
+                f"open to done/dropped, or back to open, not {current} to {state}"
+            )
+        wanted[task_id] = state
+    updated = []
+    for row in rows:
+        copy = dict(row) if isinstance(row, dict) else row
+        if isinstance(row, dict) and row.get("id") in wanted:
+            copy["state"] = wanted[row["id"]]
+        updated.append(copy)
+    return updated, None
+
+
+def _continuation_lines(project: Project, tip: Item, rows: list):
+    """Tip fields verbatim plus copied-and-updated tasks; body empty."""
+    spec = project.types.get(tip.type)
+    lines: list[str] = []
+
+    def emit(name: str, value: object) -> str | None:
+        text, _note = patcher._emit_scalar(
+            value, style=None, indent=0, eol="\n", allow_block=False, original=""
+        )
+        if text is None:
+            return f"the value for {name!r} cannot be emitted as YAML"
+        lines.append(f"{name}: {text}")
+        return None
+
+    for name, value in (("board", tip.board_hint), ("workspace", tip.workspace_hint)):
+        if value:
+            reason = emit(name, value)
+            if reason:
+                return None, reason
+    fspec = spec.fields.get("date") if spec is not None else None
+    if fspec is not None and fspec.type == "date" and "date" not in tip.fields:
+        lines.append(f"date: {dates.format_date(date.today(), project.date_format)}")
+    for name, value in tip.fields.items():
+        if name == "tasks" or value is None or isinstance(value, (list, dict)):
+            continue
+        declared = spec.fields.get(name) if spec is not None else None
+        if declared is not None and declared.type in NON_SCALAR_FIELD_TYPES:
+            continue
+        reason = emit(name, value)
+        if reason:
+            return None, reason
+    flow = yaml.safe_dump(rows, default_flow_style=True, sort_keys=False, width=10**9)
+    lines.append(f"tasks: {flow.strip()}")
+    return lines, None
