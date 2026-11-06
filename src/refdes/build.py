@@ -20,6 +20,7 @@ from markdown_it.common.utils import escapeHtml
 
 from . import blocked as blocked_mod
 from . import blocks as blocks_mod
+from .blocks import _esc
 from . import boards as boards_mod
 from . import calc, dates, imports, inline_calc, seal
 from . import chains as chains_mod
@@ -3476,17 +3477,6 @@ def _calc_table_html(lines: list[CalcLine], block: str = "") -> str:
             f"{comment}</tr>"
         )
     return f'<table class="calc"{anchor}>' + caption + "".join(rows) + "</table>"
-
-
-def _esc(text: str) -> str:
-    return (
-        str(text)
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&#39;")
-    )
 
 
 def _placeholder(index: int) -> str:
