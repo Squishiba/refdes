@@ -18,7 +18,7 @@ Extended the existing rule/ratchet mechanism — no new mechanism:
   copy.replace, os.path.isjunction, Path.is_junction, Path.full_match,
   Path.walk (only when the receiver is plausibly a Path: name assigned
   from a Path expr, `/` join, Path() call, path-method chain, subscript —
-  so the 55 `os.walk`/`ast.walk` call sites in the tree stay clean), and
+  so every `os.walk`/`ast.walk` call site in the tree stays clean), and
   `shutil.rmtree(onexc=)` (3.11 spells it `onerror=`; bare `rmtree` call
   flagged only when imported from shutil). tomllib stays clean.
 - R5 `R5-syntax-newer-than-311`: `ast.parse(source, feature_version=(3,11))`
@@ -51,7 +51,8 @@ Extended the existing rule/ratchet mechanism — no new mechanism:
   scanned files parse under feature_version=(3,11) (command run on 3.13.5).
 - Timing: test_rules_scan_the_tree_fast passes. Measured scan_repo CPU:
   5.03s/292 scans before (2 rules), 6.04s/296 files after (5 rules) —
-  10% of the 60s ceiling. Docstring updated.
+  10% of the 60s ceiling. Docstring updated. These CPU figures are
+  machine dependent: ~6s on this box, ~9s on a loaded one.
 - Full suite: 5952 passed, 2 skipped, -n 4 --dist worksteal (3:36).
 - ruff (E9,F and I) clean on the touched file.
 
