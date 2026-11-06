@@ -1249,6 +1249,18 @@ TASKPANE_DIR = os.path.join(TEMPLATE_DIR, "taskpane")
 TASKPANE_ASSET_NAMES = ("taskpane.css", "taskpane.js")
 
 
+def _write_assets(
+    out_dir: str, written: set[str], enabled: bool, names: tuple[str, ...], src_dir: str
+) -> None:
+    if not enabled:
+        return
+    asset_out = os.path.join(out_dir, "assets")
+    os.makedirs(asset_out, exist_ok=True)
+    for name in names:
+        shutil.copyfile(os.path.join(src_dir, name), os.path.join(asset_out, name))
+        written.add(f"assets/{name}")
+
+
 def _write_taskpane_assets(out_dir: str, written: set[str], enabled: bool) -> None:
     """Emit the pane's assets only when this render shows a pane anywhere
     (`enabled` = the projection had at least one thread). Same posture as
@@ -1256,15 +1268,7 @@ def _write_taskpane_assets(out_dir: str, written: set[str], enabled: bool) -> No
     site stays "no build step, works with JavaScript disabled" for every
     project, and here additionally byte-identical for the ones with no
     threads."""
-    if not enabled:
-        return
-    asset_out = os.path.join(out_dir, "assets")
-    os.makedirs(asset_out, exist_ok=True)
-    for name in TASKPANE_ASSET_NAMES:
-        shutil.copyfile(
-            os.path.join(TASKPANE_DIR, name), os.path.join(asset_out, name)
-        )
-        written.add(f"assets/{name}")
+    _write_assets(out_dir, written, enabled, TASKPANE_ASSET_NAMES, TASKPANE_DIR)
 
 
 #: The Navis panel's stylesheet (design §11, slice 4a). Outside `ASSET_DIR`
@@ -1280,13 +1284,7 @@ def _write_navis_assets(out_dir: str, written: set[str], enabled: bool) -> None:
     anywhere (`enabled` = the projection had at least one Navi). Same
     posture as `_write_taskpane_assets`: a Navi-free project publishes
     neither the file nor the `<link>`, byte-identical output."""
-    if not enabled:
-        return
-    asset_out = os.path.join(out_dir, "assets")
-    os.makedirs(asset_out, exist_ok=True)
-    for name in NAVIS_ASSET_NAMES:
-        shutil.copyfile(os.path.join(NAVIS_DIR, name), os.path.join(asset_out, name))
-        written.add(f"assets/{name}")
+    _write_assets(out_dir, written, enabled, NAVIS_ASSET_NAMES, NAVIS_DIR)
 
 
 def _prune_stale_output(out_dir: str, written: set[str]) -> None:
