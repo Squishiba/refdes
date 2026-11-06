@@ -344,17 +344,27 @@ class DocsContextHandler(BaseHTTPRequestHandler):
         if not state.ask_lock.acquire(blocking=False):
             self._json(409, {"error": "busy"})
             return
+        # Compute the outcome (status + payload) while the model is held
+        # one-at-a-time, then RELEASE the lock and write the response after:
+        # a client that fires its next request the instant the response
+        # arrives (the fetch in the page; a double-click) must reach the
+        # handler with the lock already free, not catch it in the release
+        # window and get 409 busy. A genuine in-flight ask (the model call
+        # below) still holds the lock, so a concurrent ask is still 409.
+        # Every path releases exactly once; an unexpected exception surfaces
+        # through the existing handler error path with the lock released.
         try:
             model = state.llm_model
             if model is None:
                 model = llm.discover_model(state.llm_url)
             answer = llm.ask_model(messages, base_url=state.llm_url, model=model)
-            self._json(200, {"answer": answer, "model": model, "question": question})
+            status, payload = 200, {"answer": answer, "model": model, "question": question}
         except llm.LlmError as exc:
             status = 504 if exc.kind == "timeout" else 502
-            self._json(status, {"error": str(exc), "kind": exc.kind})
+            payload = {"error": str(exc), "kind": exc.kind}
         finally:
             state.ask_lock.release()
+        self._json(status, payload)
 
     def do_GET(self) -> None:
         self._guarded()
