@@ -54,7 +54,28 @@ def _anchorize(html: str, known_slugs: set[str]) -> str:
     return PAGE_HREF_RE.sub(swap, html)
 
 
-_ID_ATTR_RE = re.compile(r'(?<![-\w])id="([^"]*)"')
+_ID_ATTR_RE = re.compile(r'id="([^"]*)"')
+
+
+def _id_attr_values(html: str) -> list[str]:
+    """The ids a DOM would see on `html`: every `id="..."` whose `id` is not
+    the tail of a longer attribute name (`data-id=`, `hiddenid=`, the
+    generated `data-where-id=`).
+
+    This is the lookbehind rule `(?<![-\\w])id="` written as a plain scan
+    plus a check of the preceding character: same rule, same output, ~20x
+    cheaper per page (audit §3.1). `str.isalnum() or == "_"` is exactly
+    `\\w` for `str` patterns in Python.
+    """
+    values = []
+    for match in _ID_ATTR_RE.finditer(html):
+        start = match.start()
+        prev = html[start - 1] if start else ""
+        if prev != "-" and not (prev.isalnum() or prev == "_"):
+            values.append(match.group(1))
+    return values
+
+
 _CALC_TABLE_ID_RE = re.compile(r'(<table class="calc" id=")(calc-[^"]*)(")')
 # `_CALC_TABLE_ID_RE` can only match text containing this literal, so a page
 # without it needs neither scan below. Keep the two adjacent and change them
@@ -81,13 +102,13 @@ def _unique_calc_anchors(html: str) -> str:
     `hiddenid=`, the generated `data-where-id=`) or plain escaped text, and
     a value inside such an attribute is not a DOM id -- matching only the
     generated tag keeps this pass from reading or moving anything it does
-    not own. The collision inventory (`_ID_ATTR_RE`) is attribute-bounded
+    not own. The collision inventory (`_id_attr_values`) is attribute-bounded
     for the same reason: `data-id="calc-losses-2"` must not push a rename
     one suffix further.
     """
     if _CALC_TABLE_MARKER not in html:
         return html
-    taken = set(_ID_ATTR_RE.findall(html))
+    taken = set(_id_attr_values(html))
     emitted: set[str] = set()
 
     def swap(match: re.Match) -> str:

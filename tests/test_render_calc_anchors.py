@@ -250,6 +250,30 @@ def test_helper_still_renames_later_table_duplicates_with_inventory():
     assert renamed.count('id="calc-losses-2"') == 1  # the span keeps its id
 
 
+def test_inventory_is_attribute_bounded_like_the_rename():
+    """The collision inventory is attribute-bounded the same way the rename
+    is (the docstring's `data-id="calc-losses-2"` rule): a `-2` value that
+    lives in `data-id=`/`hiddenid=` is not an id on the page, so it must
+    not push the rename one suffix further.
+
+    Sabotage: an inventory scanning bare `id="` with no boundary check
+    counts those two values, takes `-2` as claimed, and renames to `-3`.
+    """
+    page = (
+        '<span data-id="calc-losses-2"></span>'
+        '<span hiddenid="calc-losses-2"></span>'
+        '<table class="calc" id="calc-losses"></table>'
+        '<table class="calc" id="calc-losses"></table>'
+    )
+    renamed = _unique_calc_anchors(page)
+    assert renamed.count('<table class="calc" id="calc-losses">') == 1
+    assert '<table class="calc" id="calc-losses-2">' in renamed
+    assert 'id="calc-losses-3"' not in renamed
+    # the attribute values themselves are never rewritten
+    assert 'data-id="calc-losses-2"' in renamed
+    assert 'hiddenid="calc-losses-2"' in renamed
+
+
 def _page(tmp_path, items, pages):
     project = _project(tmp_path, items, pages)
     return project, next(p for p in project.pages if p.slug == "empty")
