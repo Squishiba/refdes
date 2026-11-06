@@ -192,6 +192,7 @@ function mintStatusText(payload) {
   const refused = payload && typeof payload.still_keyless === 'number'
     ? payload.still_keyless : 0;
   if (minted === 0 && refused === 0) return 'Nothing to mint.';
+  if (minted === 0) return `${refused} marker(s) could not be keyed${REFUSAL_SUFFIX}`;
   if (refused === 0) return `Minted ${minted} key(s).`;
   return `Minted ${minted} key(s). ${refused} marker(s) could not be keyed${REFUSAL_SUFFIX}`;
 }
