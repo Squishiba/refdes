@@ -868,3 +868,168 @@ def test_clear_caches_empties_both_caches(tmp_path, monkeypatch):
     assert refs._HELP_CACHE == {}
     resolve_ref(archive, repo)
     assert len(calls) == 2  # cleared: the help spawns again
+
+
+# ---- appended by the implementer: PERF-2 --help prefetch for analyze().
+# ---- Existing tests untouched.
+
+
+PERF_DOC_LINES = [
+    "# Perf",  # 1
+    "",  # 2
+    "A `refdes navis archive 4jp6qy` and `refdes check`.",  # 3
+    "",  # 4
+    "B `refdes navis ls` then `refdes navis archive X` again.",  # 5
+    "",  # 6
+    "C `refdes build` and `refdes schema`.",  # 7
+    "",  # 8
+    "D `refdes revise` at the end.",  # 9
+]
+PERF_DOC = "\n".join(PERF_DOC_LINES) + "\n"
+PERF_VERBS = [
+    ("navis", "archive"),
+    ("check",),
+    ("navis", "ls"),
+    ("navis", "archive"),
+    ("build",),
+    ("schema",),
+    ("revise",),
+]
+
+
+def perf_doc(repo):
+    doc = repo / "docs" / "perf.md"
+    doc.write_text(PERF_DOC, encoding="utf-8", newline="")
+    return doc
+
+
+def command_cards(data):
+    return [
+        r["card"]
+        for b in data["blocks"]
+        for r in b["refs"]
+        if r["kind"] == "command"
+    ]
+
+
+def test_analyze_prefetches_help_concurrently(tmp_path, monkeypatch):
+    import threading
+    import time as _time
+
+    lock = threading.Lock()
+    state = {"active": 0, "max_active": 0, "calls": []}
+
+    def run(argv, **kwargs):
+        verbs = list(argv[3:-1])
+        with lock:
+            state["active"] += 1
+            state["max_active"] = max(state["max_active"], state["active"])
+            state["calls"].append(tuple(verbs))
+        try:
+            _time.sleep(0.3)
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=f"usage: refdes {' '.join(verbs)}\n", stderr=""
+            )
+        finally:
+            with lock:
+                state["active"] -= 1
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("Popen used"))
+    repo = cache_repo(tmp_path)
+    doc = perf_doc(repo)
+    t0 = _time.perf_counter()
+    data = refs.analyze(str(doc), str(repo))
+    wall = _time.perf_counter() - t0
+    assert sorted(state["calls"]) == sorted(set(PERF_VERBS))
+    assert state["max_active"] >= 2, f"spawns peaked at {state['max_active']}: serial"
+    assert wall < 1.2, f"7 refs over 6 verb paths took {wall:.2f}s: not concurrent"
+    cards = command_cards(data)
+    assert len(cards) == len(PERF_VERBS)
+    assert all(c["known"] is True and c["help"].startswith("usage: refdes ") for c in cards)
+
+
+def test_analyze_card_order_and_contents_match_serial_resolve(tmp_path, monkeypatch):
+    import dataclasses
+
+    _fake_help(monkeypatch, "usage: refdes\n")
+    repo = cache_repo(tmp_path)
+    doc = perf_doc(repo)
+    data = refs.analyze(str(doc), str(repo))
+    expected_blocks = []
+    for block in refs.parse_doc(PERF_DOC):
+        entry = dataclasses.asdict(block)
+        entry.pop("refs")
+        entry["refs"] = []
+        for ref in block.refs:
+            item = refs._ref_dict(ref)
+            item["card"] = refs.resolve(ref, str(repo), doc_path=str(doc))
+            entry["refs"].append(item)
+        expected_blocks.append(entry)
+    assert data["blocks"] == expected_blocks
+    first = json.dumps(data, sort_keys=True)
+    second = json.dumps(refs.analyze(str(doc), str(repo)), sort_keys=True)
+    assert first == second
+
+
+def test_analyze_prefetch_never_caches_failures(tmp_path, monkeypatch):
+    calls = []
+    mode = {"state": "timeout"}
+
+    def run(argv, **kwargs):
+        calls.append(tuple(argv[3:-1]))
+        if mode["state"] == "timeout":
+            raise subprocess.TimeoutExpired(argv, 10)
+        if mode["state"] == "fail":
+            return subprocess.CompletedProcess(argv, 2, stdout="", stderr="boom")
+        return subprocess.CompletedProcess(argv, 0, stdout="usage: ok\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("Popen used"))
+    repo = cache_repo(tmp_path)
+    doc = perf_doc(repo)
+    distinct = len(set(PERF_VERBS))
+    per_cold_analyze = distinct + len(PERF_VERBS)  # prefetch + uncached serial cards
+    runs = 0
+    for state in ("timeout", "fail"):
+        mode["state"] = state
+        data = refs.analyze(str(doc), str(repo))
+        runs += 1
+        assert len(calls) == runs * per_cold_analyze
+        assert refs._HELP_CACHE == {}  # a failing run is never memoized
+        cards = command_cards(data)
+        assert len(cards) == len(PERF_VERBS)
+        assert all(c["known"] is True and c["help"] == "" for c in cards)
+    mode["state"] = "ok"
+    data = refs.analyze(str(doc), str(repo))
+    assert len(calls) == 2 * per_cold_analyze + distinct  # prefetch only, cards all hit
+    assert len(refs._HELP_CACHE) == distinct
+    assert all(c["help"] == "usage: ok\n" for c in command_cards(data))
+    refs.analyze(str(doc), str(repo))
+    assert len(calls) == 2 * per_cold_analyze + distinct  # warm cache: no spawns
+
+
+def test_analyze_without_cli_py_signature_keeps_serial_no_cache(tmp_path, monkeypatch):
+    calls = _fake_help(monkeypatch, "usage: refdes\n")
+    repo = make_repo(tmp_path)  # no src/refdes/cli.py: the help cache stays off
+    doc = perf_doc(repo)
+    refs.analyze(str(doc), str(repo))
+    assert len(calls) == len(PERF_VERBS)  # one per command ref: no dedup, no caching
+    assert refs._HELP_CACHE == {}
+
+
+def test_prefetch_gates_metachar_and_unknown_before_any_spawn(tmp_path, monkeypatch):
+    calls = _no_spawn(monkeypatch)
+    repo = cache_repo(tmp_path)
+    doc_text = (
+        "A `refdes navis archive; rm -rf` here.\n\n"
+        "B `refdes rm` nowhere.\n\n"
+        "C bare prose refdes build with no backticks.\n"
+    )
+    doc = repo / "docs" / "perf.md"
+    doc.write_text(doc_text, encoding="utf-8", newline="")
+    data = refs.analyze(str(doc), str(repo))
+    assert calls == []
+    cards = command_cards(data)
+    assert cards
+    assert all(c["known"] is False and c["help"] == "" for c in cards)

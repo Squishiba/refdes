@@ -898,3 +898,36 @@ def test_repo_discovery_accepts_a_dotgit_file_like_a_worktree(tmp_path):
         status, body = get_at(port, "/api/mtime")
         assert status == 200, body
         assert json.loads(body)["mtime"] == os.stat(doc).st_mtime
+
+
+# ---- appended by the implementer: PERF-2 analyze() prefetches --help
+# ---- concurrently. Existing tests untouched.
+
+
+def test_api_doc_with_warmable_help_cache_matches_refs_analyze(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    (repo / "src" / "refdes").mkdir(parents=True)
+    (repo / "src" / "refdes" / "cli.py").write_text(
+        "def main(argv):\n    raise SystemExit(0)\n", encoding="utf-8", newline=""
+    )
+    doc = repo / "docs" / "a.md"
+
+    def run(argv, **kwargs):
+        verbs = " ".join(argv[3:-1])
+        return subprocess.CompletedProcess(
+            argv, 0, stdout=f"usage: refdes {verbs}\n", stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("Popen used"))
+    expected = refs.analyze(str(doc), str(repo))
+    with running(repo) as base:
+        status, data, _ = get_json(base, "/api/doc")
+        assert status == 200
+        assert data["blocks"] == expected["blocks"]
+    cards = [
+        r["card"] for b in data["blocks"] for r in b["refs"] if r["kind"] == "command"
+    ]
+    assert cards
+    assert all(c["known"] is True for c in cards)
+    assert all(c["help"].startswith("usage: refdes ") for c in cards)
