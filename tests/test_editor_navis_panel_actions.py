@@ -79,6 +79,25 @@ BASE_ROWS = [
 # after alpha is archived on the server: one active row, alpha last.
 AFTER_ROWS = BASE_ROWS[1:] + [dict(BASE_ROWS[0], archived=True, changed=False)]
 
+# a project with NO keyless marker: the mint UI must not appear at all.
+KEYED_ROWS = [
+    {
+        "key": "aaaaaa11111", "key6": "aaaaaa", "text": "Active alpha reminder.",
+        "item": "NOTE-001", "href": "note-001.html", "file": "items/note-a.md",
+        "line": 5, "archived": False, "changed": False, "orphan": False,
+    },
+]
+
+# after a successful mint of NOTE-004: it is keyed, so it gains an Archive
+# button and the panel has no keyless row left.
+MINTED_ROWS = [
+    dict(BASE_ROWS[0]),
+    dict(BASE_ROWS[1], key="eeeeee11111", key6="eeeeee"),
+    BASE_ROWS[2],
+    BASE_ROWS[3],
+    BASE_ROWS[4],
+]
+
 
 def _payload(rows):
     return {
@@ -92,6 +111,8 @@ def _payload(rows):
 
 BASE_PAYLOAD = _payload(BASE_ROWS)
 AFTER_PAYLOAD = _payload(AFTER_ROWS)
+KEYED_PAYLOAD = _payload(KEYED_ROWS)
+MINTED_PAYLOAD = _payload(MINTED_ROWS)
 
 HARNESS = r"""
 const STATIC = __STATIC__;
@@ -177,10 +198,18 @@ const flush = async () => { for (let i = 0; i < 60; i++) await Promise.resolve()
 const { mountNavisPanel } = await import(url('navis-panel.js'));
 
 function stubApi(payload) {
-  const state = { calls: [], payload, post: null };
+  const state = { calls: [], payload, post: null, mint: null };
   const apiFn = async (path, init = {}) => {
     const method = (init && init.method) || 'GET';
     state.calls.push({ path, method, body: init && init.body });
+    if (method === 'POST' && path === '/api/navis/mint') {
+      if (state.mint) return state.mint(path, init);
+      return {
+        kind: 'ok', changed: true,
+        minted: [{ key: 'eeeeee11111', key6: 'eeeeee', item: 'NOTE-004', file: 'items/note-d.md' }],
+        still_keyless: 0,
+      };
+    }
     if (method === 'POST') {
       if (state.post) return state.post(path, init);
       return { kind: 'ok', verb: 'archive', key: 'x', changed: true };
@@ -190,7 +219,7 @@ function stubApi(payload) {
   return { apiFn, state };
 }
 
-const [BASE_PAYLOAD, AFTER_PAYLOAD] = PAYLOADS;
+const [BASE_PAYLOAD, AFTER_PAYLOAD, KEYED_PAYLOAD, MINTED_PAYLOAD] = PAYLOADS;
 
 function openPanel(payload) {
   const root = new FakeNode('div');
@@ -456,6 +485,202 @@ const gets = (state) => state.calls.filter((c) => c.method === 'GET');
   };
 }
 
+// -- M0: the mint button is offered when there are keyless rows, with the
+// spec's exact label/aria/title, at the top above the list; a keyless active
+// row's key span carries the discoverability title; a fully-keyed project
+// gets no mint UI at all.
+{
+  const { panel } = openPanel(BASE_PAYLOAD);
+  await flush();
+  const mint = find(panel, 'navis-mint');
+  const lists = findAll(panel, 'navis-list');
+  const topList = lists[0];
+  const keylessTop = topList.children.find(
+    (li) => find(li, 'navis-text') && find(li, 'navis-text').textContent === 'Keyless marker.'
+  );
+  const keySpan = find(keylessTop, 'navis-key');
+  results.mintWired = {
+    text: mint ? mint.textContent : null,
+    label: mint ? mint.getAttribute('aria-label') : null,
+    title: mint ? mint.getAttribute('title') : null,
+    disabled: mint ? mint.disabled : null,
+    isTop: mint ? panel.children[0] === mint : null,
+    aboveList: mint ? panel.children.indexOf(mint) < panel.children.indexOf(topList) : null,
+    keySpanTitle: keySpan ? keySpan.getAttribute('title') : null,
+  };
+
+  const { panel: keyedPanel } = openPanel(KEYED_PAYLOAD);
+  await flush();
+  results.mintNone = {
+    mintCount: findAll(keyedPanel, 'navis-mint').length,
+  };
+}
+
+// -- M1: clicking Mint disables it, POSTs {} to /api/navis/mint, and on a
+// 200 re-fetches through refresh() (panel stays open, no reload), shows the
+// status line, and the minted row gains its Archive button.
+{
+  const { toggle, panel, apiState } = openPanel(BASE_PAYLOAD);
+  await flush();
+  apiState.mint = () => {
+    apiState.payload = MINTED_PAYLOAD; // the server rebuilt + refreshed before answering
+    return {
+      kind: 'ok', changed: true,
+      minted: [{ key: 'eeeeee11111', key6: 'eeeeee', item: 'NOTE-004', file: 'items/note-d.md' }],
+      still_keyless: 0,
+    };
+  };
+  const mint = find(panel, 'navis-mint');
+  const getsBefore = gets(apiState).length;
+  mint.click();
+  const disabledDuring = mint.disabled;
+  await flush();
+  const notes = findAll(panel, 'navis-note').filter((n) => n.getAttribute('role') === 'status');
+  results.minted = {
+    disabledDuring,
+    posts: posts(apiState)
+      .filter((c) => c.path === '/api/navis/mint')
+      .map((c) => ({ path: c.path, body: c.body })),
+    refetched: gets(apiState).length === getsBefore + 1,
+    panelHidden: panel.hidden,
+    toggleLabel: toggle.textContent,
+    noteCount: notes.length,
+    noteCls: notes[0] ? notes[0].className : null,
+    role: notes[0] ? notes[0].getAttribute('role') : null,
+    text: notes[0] ? notes[0].textContent : null,
+    noteChildren: notes[0] ? notes[0].children.length : null,
+    archiveCount: findAll(panel, 'navis-archive').length,
+  };
+}
+
+// -- M2: the three status-line shapes -- minted + refused, minted only, and
+// the empty no-op. Each is one status paragraph, textContent-only.
+{
+  const shape = async (resp, payload) => {
+    const { panel, apiState } = openPanel(BASE_PAYLOAD);
+    await flush();
+    apiState.mint = () => {
+      apiState.payload = payload;
+      return resp;
+    };
+    find(panel, 'navis-mint').click();
+    await flush();
+    const notes = findAll(panel, 'navis-note').filter((n) => n.getAttribute('role') === 'status');
+    return { count: notes.length, text: notes[0] ? notes[0].textContent : null };
+  };
+  const minted2 = {
+    kind: 'ok', changed: true,
+    minted: [
+      { key: 'eeeeee11111', key6: 'eeeeee', item: 'NOTE-004', file: 'items/note-d.md' },
+      { key: 'ffffff22222', key6: 'ffffff', item: 'NOTE-005', file: 'items/note-e.md' },
+    ],
+    still_keyless: 1,
+  };
+  const minted1 = {
+    kind: 'ok', changed: true,
+    minted: [{ key: 'eeeeee11111', key6: 'eeeeee', item: 'NOTE-004', file: 'items/note-d.md' }],
+    still_keyless: 0,
+  };
+  const nothing = { kind: 'ok', changed: false, minted: [], still_keyless: 0 };
+  results.mintShapes = {
+    both: await shape(minted2, MINTED_PAYLOAD),
+    mintedOnly: await shape(minted1, MINTED_PAYLOAD),
+    nothing: await shape(nothing, BASE_PAYLOAD),
+  };
+}
+
+// -- M3: a non-200 mint re-enables the button and shows the payload's error
+// in the shared alert, hostile text literal; the status line is not shown.
+{
+  const { panel, apiState } = openPanel(BASE_PAYLOAD);
+  await flush();
+  apiState.mint = () => {
+    const err = new Error('store exploded');
+    err.status = 500;
+    err.payload = { kind: 'error', error: HOSTILE };
+    throw err;
+  };
+  const mint = find(panel, 'navis-mint');
+  mint.click();
+  await flush();
+  const alerts = findAll(panel, 'navis-error');
+  const notes = findAll(panel, 'navis-note').filter((n) => n.getAttribute('role') === 'status');
+  results.mintFailed = {
+    disabledAfter: mint.disabled,
+    alertCount: alerts.length,
+    alertText: alerts[0] ? alerts[0].textContent : null,
+    alertRole: alerts[0] ? alerts[0].getAttribute('role') : null,
+    statusCount: notes.length,
+    panelHidden: panel.hidden,
+  };
+}
+
+// -- M4: a 403 mint (--no-write) disables the mint button too, with the rest
+// of the actions, and keeps the message.
+{
+  const { panel, apiState } = openPanel(BASE_PAYLOAD);
+  await flush();
+  apiState.mint = () => {
+    const err = new Error('refused');
+    err.status = 403;
+    err.payload = { kind: 'refused', error: NO_WRITE };
+    throw err;
+  };
+  find(panel, 'navis-mint').click();
+  await flush();
+  const actions = [
+    ...findAll(panel, 'navis-archive'),
+    ...findAll(panel, 'navis-restore'),
+    ...findAll(panel, 'navis-mint'),
+  ];
+  results.mintRefused = {
+    actionCount: actions.length,
+    allDisabled: actions.every((b) => b.disabled === true),
+    mintDisabled: find(panel, 'navis-mint').disabled,
+    message: findAll(panel, 'navis-error')[0].textContent,
+  };
+}
+
+// -- M5: the status line clears on the next action and on reopen, like the
+// alert (the mint button is gone once every row is keyed, so the next action
+// is an Archive).
+{
+  const { toggle, panel, apiState } = openPanel(BASE_PAYLOAD);
+  await flush();
+  apiState.mint = () => {
+    apiState.payload = MINTED_PAYLOAD;
+    return {
+      kind: 'ok', changed: true,
+      minted: [{ key: 'eeeeee11111', key6: 'eeeeee', item: 'NOTE-004', file: 'items/note-d.md' }],
+      still_keyless: 0,
+    };
+  };
+  find(panel, 'navis-mint').click();
+  await flush();
+  const sawStatus =
+    findAll(panel, 'navis-note').filter((n) => n.getAttribute('role') === 'status').length === 1;
+  apiState.post = () => {
+    const err = new Error('store exploded');
+    err.status = 500;
+    err.payload = { kind: 'error', error: 'store exploded' };
+    throw err;
+  };
+  findAll(panel, 'navis-archive')[0].click(); // the next action clears the status
+  await flush();
+  const afterAction =
+    findAll(panel, 'navis-note').filter((n) => n.getAttribute('role') === 'status').length;
+  toggle.click(); // close
+  toggle.click(); // open
+  await flush();
+  results.mintClears = {
+    sawStatus,
+    afterAction,
+    afterReopen:
+      findAll(panel, 'navis-note').filter((n) => n.getAttribute('role') === 'status').length,
+    panelHidden: panel.hidden,
+  };
+}
+
 // the SPA rule holds across every scenario above
 results.reloadsTotal = results.reloads;
 
@@ -466,7 +691,7 @@ console.log(JSON.stringify(results));
 def _run_harness():
     script = (
         HARNESS.replace("__STATIC__", json.dumps(STATIC.replace(os.sep, "/")))
-        .replace("__PAYLOADS__", json.dumps([BASE_PAYLOAD, AFTER_PAYLOAD]))
+        .replace("__PAYLOADS__", json.dumps([BASE_PAYLOAD, AFTER_PAYLOAD, KEYED_PAYLOAD, MINTED_PAYLOAD]))
         .replace("__HOSTILE__", json.dumps(HOSTILE))
         .replace("__NO_WRITE__", json.dumps(NO_WRITE))
     )
@@ -574,6 +799,78 @@ def test_the_panel_actions_behaviour():
     assert h["genericRole"] == "alert", h
     assert h["genericChildren"] == 0, h
 
+    # M0. mint wiring: `Mint keys (N)` pill (N = keyless rows) at the top
+    # above the list, the exact label/aria/title, enabled; the keyless row's
+    # key span carries the discoverability title; a fully-keyed project has
+    # no mint UI at all.
+    m0 = r["mintWired"]
+    assert m0["text"] == "Mint keys (2)", m0
+    assert m0["label"] == "Mint keys for 2 unkeyed Navis", m0
+    assert m0["title"] == "Writes a key into each unkeyed Navi marker in your item files", m0
+    assert m0["disabled"] is False, m0
+    assert m0["isTop"] is True, "the mint pill sits at the very top of the panel"
+    assert m0["aboveList"] is True, m0
+    assert m0["keySpanTitle"] == "No key yet -- use Mint keys", m0
+    assert r["mintNone"]["mintCount"] == 0, "no keyless rows, no mint UI"
+
+    # M1. mint click: disabled during, POST {} to the mint route; a 200
+    # refreshes through the module's own refresh() (panel open, no reload),
+    # shows the status line (with the draft sentence), and the minted row
+    # gains its Archive button.
+    m1 = r["minted"]
+    assert m1["disabledDuring"] is True, m1
+    assert m1["posts"] == [{"path": "/api/navis/mint", "body": {}}], m1
+    assert m1["refetched"] is True, m1
+    assert m1["panelHidden"] is False, "the panel stays open (this is the SPA)"
+    assert m1["toggleLabel"] == "Navis (2)", m1
+    assert m1["noteCount"] == 1, m1
+    assert m1["noteCls"] == "navis-note", m1
+    assert m1["role"] == "status", m1
+    assert m1["text"] == (
+        "Minted 1 key(s). Item files were edited: an open unsaved draft will ask you to "
+        "resolve a conflict when you Save."
+    ), m1
+    assert m1["noteChildren"] == 0, "the status text is never parsed as markup"
+    assert m1["archiveCount"] == 2, "the minted NOTE-004 row gained its Archive button"
+
+    # M2. the three status-line shapes.
+    shapes = r["mintShapes"]
+    assert shapes["both"]["count"] == 1, shapes
+    assert shapes["both"]["text"] == (
+        "Minted 2 key(s). 1 marker(s) could not be keyed -- refdes will not mint into those "
+        "bodies (for example a YAML list body). Item files were edited: an open unsaved draft "
+        "will ask you to resolve a conflict when you Save."
+    ), shapes
+    assert shapes["mintedOnly"]["text"] == (
+        "Minted 1 key(s). Item files were edited: an open unsaved draft will ask you to "
+        "resolve a conflict when you Save."
+    ), shapes
+    assert shapes["nothing"]["text"] == "Nothing to mint.", shapes
+
+    # M3. a non-200 mint: the button re-enables, the shared alert shows the
+    # hostile payload.error literal, no status line, panel open.
+    m3 = r["mintFailed"]
+    assert m3["disabledAfter"] is False, m3
+    assert m3["alertCount"] == 1, m3
+    assert m3["alertText"] == HOSTILE, m3
+    assert m3["alertRole"] == "alert", m3
+    assert m3["statusCount"] == 0, "a failed mint shows the alert, not a status line"
+    assert m3["panelHidden"] is False, m3
+
+    # M4. a 403 mint disables every action including the mint pill, and keeps
+    # the refusal visible.
+    m4 = r["mintRefused"]
+    assert m4["allDisabled"] is True, m4
+    assert m4["mintDisabled"] is True, "the mint pill joins the lockout"
+    assert m4["message"] == NO_WRITE, m4
+
+    # M5. the status line clears on the next action and on reopen, like the alert.
+    m5 = r["mintClears"]
+    assert m5["sawStatus"] is True, m5
+    assert m5["afterAction"] == 0, "the next action clears the status line"
+    assert m5["afterReopen"] == 0, m5
+    assert m5["panelHidden"] is False, m5
+
     # The SPA rule: no scenario reloaded the page.
     assert r["reloadsTotal"] == 0, "success re-fetches through refresh(); never a page reload"
 
@@ -587,7 +884,9 @@ def test_the_module_acts_over_the_serve_api_only():
         panel = fh.read()
     assert "'/api/navis/archive'" in panel
     assert "'/api/navis/restore'" in panel
+    assert "'/api/navis/mint'" in panel
     assert "{ navi: key }" in panel, "the POST body carries the full key"
+    assert "body: {}" in panel, "the mint POST carries an empty object body"
     for sink in ("innerHTML", "insertAdjacentHTML", "outerHTML", "document.write", "eval("):
         assert sink not in panel
     assert "fetch(" not in panel

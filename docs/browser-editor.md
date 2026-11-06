@@ -153,27 +153,46 @@ a row whose marker text has moved since is noted *marker text has
 changed since archived*. A keyed active row has an **Archive** pill; an
 archived keyed row in Show-all has **Restore**. An orphaned archived row
 keeps Restore disabled and points at the hand-restore path. A keyless
-row has no button. The actions use the same serve routes as the CLI,
-with the marker's full key in the request; the row's 6-character key is
-only the display.
+row has no button, and its key slot names the reason (*No key yet — use
+Mint keys*). While the panel has any unkeyed rows it shows a **Mint keys
+(N)** pill at the top; it writes a key into every unkeyed marker in your
+item files (`POST /api/navis/mint`), refreshes the panel in place, and
+reports what it minted — and any marker it refused to key (a YAML list
+body, for example). Because the mint edits item files, a draft open in
+the editor at Save time meets the conflict screen, not a silent
+overwrite. The actions use the same serve routes as the CLI, with the
+marker's full key in the request; the row's 6-character key is only the
+display.
 
 A successful action refreshes the panel in place and leaves it open —
 the page does not reload, so an unsaved item draft survives it. A failed
 request re-enables the clicked button and shows the server's message at
 the top of the panel. A `--no-write` server disables every remaining
-action for the rest of the editing session and keeps its refusal shown.
-The message clears on the next successful action and when the panel is
-reopened. The panel refetches when the editor learns the project changed
-and each time you open it; Escape closes it. The `refdes navis` CLI
-commands ([markdown](markdown.md#navis-markers)) remain available.
+action — the mint included — for the rest of the editing session and
+keeps its refusal shown. The message clears on the next successful
+action and when the panel is reopened. The panel refetches when the
+editor learns the project changed and each time you open it; Escape
+closes it. The `refdes navis` CLI commands ([markdown](markdown.md#navis-markers))
+remain available.
 
-On 2026-11-05 the new actions were verified in Chromium against a live
-`refdes serve`: the Archive button posted the full key, the refreshed
-panel showed the server's response, a hostile server error remained
-literal, and a read-only server showed its refusal with every action
-disabled. The Chromium run also checked the row set (active, archived,
-orphan, keyless) and the panel at 375×640. Node tests cover the full
-action rule set, including a refresh that lands after the 403.
+On 2026-11-05 the mint was verified in Chromium and Firefox against a
+live `refdes serve`: **Mint keys (N)** counted the unkeyed rows, posted
+the empty body, refreshed the panel in place with no reload, keyed the
+rows it accepted (which gained Archive buttons), left a folded YAML list
+body unkeyed, and showed the mint/refuse status line; item files changed
+only by the key splices. With an unsaved draft open on a file the mint
+edited, the minted key landed on disk, the draft was not written, and
+Save met the conflict screen; a draft on a file the mint did not touch
+saved with no conflict. A read-only server showed its refusal with the
+mint and every action disabled and left the tree unchanged; the hostile
+marker text stayed literal; the panel fit 375×640. Picking *Keep mine*
+at the conflict screen writes your draft over the minted key — the mint
+is reported, not silently kept, in that case. The earlier
+Archive/Restore actions were verified in Chromium: the Archive button
+posted the full key, the refreshed panel showed the server's response, a
+hostile server error remained literal, and a read-only server showed its
+refusal with every action disabled. Node tests cover the full action and
+mint rule sets, including a refresh that lands after the 403.
 
 ## Font setting
 
