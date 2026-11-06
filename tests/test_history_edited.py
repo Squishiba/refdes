@@ -583,8 +583,9 @@ def test_the_label_strip_leaves_unlabelled_digests_byte_identical(tmp_path):
 # F5, the release blocker, whose documented remedy (`history capture`) the
 # one-capture-per-item rule refuses. The fixture replays such a capture:
 # the digest, object and event the old code wrote, built from
-# `legacy_semantic_payload`/`legacy_object_payload` (the exact payload the
-# old digest hashed), not from a captured store binary.
+# `legacy_semantic_payload` plus the identity/provenance keys
+# `object_payload` adds (the exact payload the old digest hashed), not from a
+# captured store binary.
 
 CALC_ONE = (
     "defaults: { type: log }\n"
@@ -605,12 +606,14 @@ def _capture_pre_323(root, item_id):
     project, _stale = loader.load_tree(str(Path(root) / "refdes-project.yaml"), write=True)
     item = project.item_by_id(item_id)
     digest = history.legacy_semantic_digest(item)
+    payload = dict(history.legacy_semantic_payload(item))
+    payload["key"] = item.key
+    payload["id"] = item.id
+    payload["source"] = {"file": item.source_file, "line": item.source_line}
     path = history.object_path(root, digest)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     Path(path).write_text(
-        history._format_yaml(
-            history.legacy_object_payload(item), history._OBJECT_HEADER
-        ),
+        history._format_yaml(payload, history._OBJECT_HEADER),
         encoding="utf-8",
     )
     history.append_event(root, "captured", item.key, digest, reason="manual capture")
