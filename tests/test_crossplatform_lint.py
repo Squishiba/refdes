@@ -1,10 +1,14 @@
-"""Cross-platform lint: mechanically visible Windows hazards in tests and src.
+"""Cross-platform lint: mechanically visible Windows hazards and
+post-3.11 APIs in tests, src and tools.
 
 Two PRs went green on Linux and red on Windows CI the same month: a test
 wrote multi-line fixtures with text-mode ``write_text`` (Windows rewrites
 ``\\n`` to ``\\r\\n``) and asserted on raw ``'\\n'`` byte reads; a
 diagnostic path built with ``os.path.relpath`` was asserted with ``'/'``
-separators. These rules scan the tree for that class of code. Hits on the
+separators. Separately, CI's floor is Python 3.11 while developers run
+3.13 locally, so a ``Path.read_text(newline=...)`` (3.13-only) test passed
+locally and died on CI twice in one week. These rules scan the tree for
+that class of code. Hits on the
 day the rules landed are frozen in ``crossplatform_lint_baseline.json``
 (``rule -> file -> count``); the test fails if a count rises, a new file
 appears, or a count falls below baseline. Lower the baseline in the same
@@ -33,18 +37,54 @@ R2 (src/refdes/**/*.py)
     baseline to zero); ``parse._relpath`` call sites are clean by
     construction since they contain no ``relpath`` call.
 
+Python 3.11 floor (pyproject.toml's ``requires-python``): CI's ubuntu and
+windows jobs run 3.11, developers and workers run 3.13 locally, so an
+API newer than the floor passes locally and goes red on CI. R3/R4/R5
+(over ``src/refdes``, ``tests`` and ``tools``) catch that class:
+
+R3 (src/refdes/**/*.py, tests/**/*.py, tools/**/*.py)
+    ``.read_text(..., newline=...)``: ``Path.read_text`` gained the
+    ``newline=`` keyword in 3.13, so a test that reads with it is a
+    ``TypeError`` on 3.11. (``write_text(newline=)`` is 3.10+, and
+    ``open(newline=)`` has always worked -- both stay clean.)
+
+R4 (same trees)
+    Attribute/import use of stdlib APIs that are unambiguous by name and
+    newer than 3.11: ``itertools.batched``, ``math.sumprod``,
+    ``typing.override``, ``warnings.deprecated``, ``copy.replace``,
+    ``os.path.isjunction``/``Path.is_junction``, ``Path.walk`` (only
+    when the receiver is plausibly a Path, so ``os.walk``/``ast.walk``
+    stay clean), and ``shutil.rmtree(onexc=)`` (3.11 spells it
+    ``onerror=``). ``tomllib`` is 3.11 and stays clean.
+
+R5 (same trees)
+    Source the 3.11 parser rejects: ``ast.parse(source, feature_version=(3, 11))``
+    over every scanned file, which on 3.12+ interpreters catches PEP 695
+    (``type X = ...``, ``def f[T]()...``, ``class C[T]:``). See the
+    ``check_syntax_311_floor`` docstring for what feature_version does
+    and does not enforce (it does not re-tokenize f-strings with 3.11
+    rules -- the 3.11 CI job's own parse is what rejects those).
+
 Known limits, by design: R1 does not follow content through call
 expressions (``write_text(json.dumps(x))`` is not flagged) and the
-byte-read gate is module-wide; R2 accepts any enclosing ``as_posix()``.
+byte-read gate is module-wide; R2 accepts any enclosing ``as_posix()``;
+R4 matches the qualified name (``import itertools as it`` aliasing
+``it.batched`` is not followed), and a bare imported name (``from typing
+import override`` + ``@override``) is caught at the import, not the use;
+R5 is a parser check only -- stdlib APIs need R3/R4, and constructs
+that parse on 3.11 are by definition not syntax violations.
 """
 
 from __future__ import annotations
 
 import ast
 import json
+import sys
 import time
 from collections import namedtuple
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BASELINE_PATH = Path(__file__).with_name("crossplatform_lint_baseline.json")
@@ -52,9 +92,14 @@ UPDATE_COMMAND = "python tests/crossplatform_lint_baseline_update.py"
 
 R1 = "R1-multiline-text-write"
 R2 = "R2-relpath-not-normalized"
+R3 = "R3-read-text-newline-kwarg"
+R4 = "R4-post-311-stdlib-api"
+R5 = "R5-syntax-newer-than-311"
 
 R1_SCOPE = "tests"
 R2_SCOPE = "src/refdes"
+R345_SCOPES = ("src/refdes", "tests", "tools")
+SCANNED_SCOPES = ("src/refdes", "tests", "tools")
 
 R1_FIX = (
     "write the fixture as bytes (write_bytes) or pass newline='' to "
@@ -64,6 +109,75 @@ R2_FIX = (
     "normalize in the same expression: .replace(os.sep, '/') / "
     ".replace('\\\\', '/') / Path(...).as_posix()"
 )
+R3_FIX = (
+    "use Path.open(newline='').read() or read_bytes().decode() -- "
+    "Path.read_text gained newline= in 3.13, the floor is 3.11"
+)
+R4_FIX_SUFFIX = "is newer than the 3.11 floor (pyproject requires-python)"
+R5_FIX = (
+    "rewrite for the 3.11 floor: PEP 695 (type X = ..., def f[T]()) and "
+    "PEP 701 f-strings are 3.12+"
+)
+
+R4_CHAINS = {
+    ("itertools", "batched"): ("itertools.batched", "3.12", "chunk with a manual loop (e.g. over itertools.islice)"),
+    ("math", "sumprod"): ("math.sumprod", "3.12", "use sum(a * b for a, b in zip(xs, ys))"),
+    ("typing", "override"): (
+        "typing.override",
+        "3.12",
+        "drop the decorator -- @override is a type-checker hint only",
+    ),
+    ("warnings", "deprecated"): (
+        "warnings.deprecated",
+        "3.13",
+        "use typing_extensions.deprecated, which backports it",
+    ),
+    ("copy", "replace"): (
+        "copy.replace",
+        "3.13",
+        "copy.copy()/copy.deepcopy() the object, then assign the changed fields",
+    ),
+    ("os", "path", "isjunction"): (
+        "os.path.isjunction",
+        "3.12",
+        "inspect os.lstat() st_mode, or drop the junction check",
+    ),
+    ("Path", "walk"): ("Path.walk", "3.12", "use os.walk(...) on 3.11"),
+}
+
+R4_FROM_IMPORTS = {
+    ("itertools", "batched"): R4_CHAINS[("itertools", "batched")],
+    ("math", "sumprod"): R4_CHAINS[("math", "sumprod")],
+    ("typing", "override"): R4_CHAINS[("typing", "override")],
+    ("warnings", "deprecated"): R4_CHAINS[("warnings", "deprecated")],
+    ("copy", "replace"): R4_CHAINS[("copy", "replace")],
+    ("os.path", "isjunction"): R4_CHAINS[("os", "path", "isjunction")],
+}
+
+R4_PATH_ATTRS = {
+    "is_junction": ("Path.is_junction", "3.12", "inspect os.lstat() st_mode, or drop the junction check"),
+    "full_match": ("Path.full_match", "3.13", "use fnmatch.fnmatch(str(path), pattern)"),
+}
+
+PATH_CALL_NAMES = {"Path", "PurePath", "PosixPath", "WindowsPath"}
+PATH_METHOD_NAMES = {
+    "parent",
+    "parents",
+    "anchor",
+    "name",
+    "suffix",
+    "stem",
+    "parts",
+    "joinpath",
+    "with_name",
+    "with_suffix",
+    "with_stem",
+    "with_parents",
+    "absolute",
+    "resolve",
+    "home",
+    "cwd",
+}
 
 Finding = namedtuple("Finding", "rule path line message fix")
 
@@ -337,42 +451,252 @@ def check_relpath_not_normalized(relpath, tree):
     return findings
 
 
+def check_read_text_newline(relpath, tree):
+    """R3: ``.read_text(newline=...)``, a Python 3.13 keyword.
+
+    Flags every ``read_text`` call passed ``newline=``. ``Path.read_text``
+    gained the keyword in 3.13, so the call is a ``TypeError`` on the 3.11
+    floor. The 3.10+ spellings stay clean: ``write_text(newline=)`` and
+    ``open(newline=)`` are exactly what the fix suggests.
+    """
+    findings = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "read_text"
+            and _has_keyword(node, "newline")
+        ):
+            findings.append(
+                _finding(R3, relpath, node, "Path.read_text(newline=...) is Python 3.13+ (floor is 3.11)", R3_FIX)
+            )
+    return findings
+
+
+def _attr_chain(node):
+    """Names of a plain dotted attribute chain, e.g. ``os.path.isjunction``
+    -> ``('os', 'path', 'isjunction')``; () if the base is not a Name."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return tuple(reversed(parts))
+    return ()
+
+
+def _is_pathish(node, path_names):
+    """True if the receiver of a ``.walk()`` call is plausibly a Path: a
+    name assigned from a Path expression, a ``/`` join (the path-join
+    idiom, left non-constant), a Path() call, a Path method/property
+    chain, or a subscript of one. Deliberately conservative --
+    ``os.walk``/``ast.walk``/unknown attribute receivers stay clean."""
+    if isinstance(node, ast.Name):
+        return node.id in path_names
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return not isinstance(node.left, ast.Constant)
+    if isinstance(node, ast.Attribute):
+        return node.attr in PATH_METHOD_NAMES and _is_pathish(node.value, path_names)
+    if isinstance(node, ast.Call):
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in PATH_CALL_NAMES:
+            return True
+        return (
+            isinstance(func, ast.Attribute)
+            and func.attr in PATH_METHOD_NAMES
+            and _is_pathish(func.value, path_names)
+        )
+    if isinstance(node, ast.Subscript):
+        return _is_pathish(node.value, path_names)
+    return False
+
+
+def _pathish_names(tree):
+    names = set()
+    assigns = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    assigns.append((target.id, node.value))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            assigns.append((node.target.id, node.value))
+    for _ in range(3):
+        added = False
+        for name, value in assigns:
+            if name not in names and _is_pathish(value, names):
+                names.add(name)
+                added = True
+        if not added:
+            break
+    return names
+
+
+def _is_shutil_rmtree(node, bare_rmtree_imported):
+    func = node.func
+    if isinstance(func, ast.Attribute) and func.attr == "rmtree":
+        return isinstance(func.value, ast.Name) and func.value.id == "shutil"
+    return bare_rmtree_imported and isinstance(func, ast.Name) and func.id == "rmtree"
+
+
+def check_post_311_apis(relpath, tree):
+    """R4: stdlib APIs newer than the 3.11 floor, unambiguous by name.
+
+    Flags qualified attribute uses (``itertools.batched``, ``math.sumprod``,
+    ``typing.override``, ``warnings.deprecated``, ``copy.replace``,
+    ``os.path.isjunction``, ``Path.walk``), the matching
+    ``from <module> import <name>`` lines (a bare ``@override`` after
+    ``from typing import override`` is caught at the import), the
+    Path-only attribute names ``is_junction``/``full_match`` on any
+    receiver, ``.walk()`` calls whose receiver is plausibly a Path, and
+    ``shutil.rmtree(onexc=)`` (3.11's spelling is ``onerror=``). Aliased
+    imports (``import itertools as it``) are not followed, by design.
+    """
+    findings = []
+    path_names = None
+    bare_rmtree_imported = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module is not None:
+            for alias in node.names:
+                if node.module == "shutil" and alias.name == "rmtree":
+                    bare_rmtree_imported = True
+                spec = R4_FROM_IMPORTS.get((node.module, alias.name))
+                if spec is not None:
+                    findings.append(_r4_finding(relpath, node, spec))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            spec = R4_CHAINS.get(_attr_chain(node))
+            if spec is None and node.attr in R4_PATH_ATTRS:
+                spec = R4_PATH_ATTRS[node.attr]
+            if spec is not None:
+                findings.append(_r4_finding(relpath, node, spec))
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "walk":
+                if path_names is None:
+                    path_names = _pathish_names(tree)
+                if _is_pathish(node.func.value, path_names):
+                    findings.append(_r4_finding(relpath, node, ("Path.walk", "3.12", "use os.walk(...) on 3.11")))
+            elif _has_keyword(node, "onexc") and _is_shutil_rmtree(node, bare_rmtree_imported):
+                findings.append(
+                    _r4_finding(
+                        relpath,
+                        node,
+                        ("shutil.rmtree(onexc=...)", "3.12", "use the 3.11 spelling, onerror="),
+                    )
+                )
+    return findings
+
+
+def _r4_finding(relpath, node, spec):
+    label, since, fix = spec
+    return _finding(R4, relpath, node, f"{label} is Python {since}+ -- {R4_FIX_SUFFIX}", fix)
+
+
+def check_syntax_311_floor(relpath, tree):
+    """R5: source the Python 3.11 parser rejects.
+
+    ``ast.parse(source, feature_version=(3, 11))`` re-parses the file as
+    the floor interpreter would see it. feature_version=(3, 11) rejects
+    PEP 695: the ``type X = ...`` statement and ``[T]`` type-parameter
+    lists on functions and classes (verified on 3.13: SyntaxError "only
+    supported in Python 3.12 and greater"). What it does NOT catch: the
+    PEP 701 f-string changes (nested same quotes, newlines inside
+    f-strings) -- the f-string tokenizer follows the *running*
+    interpreter, not feature_version -- so those are only caught where
+    they are caught today, by the 3.11 CI job's own parse of the file;
+    nor anything the 3.11 parser also accepts, i.e. runtime stdlib
+    additions (new functions, new keywords like ``read_text(newline=)``
+    parse fine on 3.11 -- that is R3/R4's job). In short: on 3.12+ this
+    catches PEP 695 syntax; the floor's real teeth are CI's 3.11
+    interpreter parsing every file.
+    """
+    source = getattr(tree, "_source", None)
+    if source is None:
+        return []
+    try:
+        ast.parse(source, feature_version=(3, 11))
+    except SyntaxError as exc:
+        snippet = (exc.text or "").strip()
+        message = f"syntax newer than Python 3.11: {exc.msg}"
+        if snippet:
+            message = f"{message} ({snippet})"
+        return [Finding(R5, relpath, exc.lineno or 1, message, R5_FIX)]
+    return []
+
+
 def _finding(rule, relpath, node, message, fix):
     return Finding(rule, relpath, node.lineno, message, fix)
 
 
-RULE_CHECKS = {R1: check_multiline_text_writes, R2: check_relpath_not_normalized}
-RULE_SCOPES = {R1: R1_SCOPE, R2: R2_SCOPE}
+RULE_CHECKS = {
+    R1: check_multiline_text_writes,
+    R2: check_relpath_not_normalized,
+    R3: check_read_text_newline,
+    R4: check_post_311_apis,
+    R5: check_syntax_311_floor,
+}
+RULE_SCOPES = {
+    R1: (R1_SCOPE,),
+    R2: (R2_SCOPE,),
+    R3: R345_SCOPES,
+    R4: R345_SCOPES,
+    R5: R345_SCOPES,
+}
 
 
-def _rule_for(relpath):
+def rules_for(relpath):
+    """Every rule whose scope contains `relpath` (a file can carry several)."""
     posix = Path(relpath).as_posix()
-    for rule, scope in RULE_SCOPES.items():
-        if posix.startswith(scope + "/") and posix.endswith(".py"):
-            return rule
-    return None
+    if not posix.endswith(".py"):
+        return []
+    return [
+        rule
+        for rule, scopes in RULE_SCOPES.items()
+        if any(posix.startswith(scope + "/") for scope in scopes)
+    ]
 
 
 def scan_source(source, relpath):
-    """Run the rule that applies to `relpath` over a source string."""
-    rule = _rule_for(relpath)
-    if rule is None:
+    """Run every rule that applies to `relpath` over a source string."""
+    rules = rules_for(relpath)
+    if not rules:
         return []
-    return RULE_CHECKS[rule](relpath, ast.parse(source))
+    tree = ast.parse(source)
+    tree._source = source
+    findings = []
+    for rule in rules:
+        findings.extend(RULE_CHECKS[rule](relpath, tree))
+    return findings
 
 
 def iter_scanned_files(root):
-    for rule, scope in RULE_SCOPES.items():
+    for scope in SCANNED_SCOPES:
         base = root / scope
         for path in sorted(base.rglob("*.py")):
             if "__pycache__" not in path.parts:
-                yield rule, path.relative_to(root).as_posix(), path
+                relpath = path.relative_to(root).as_posix()
+                yield tuple(rules_for(relpath)), relpath, path
 
 
 def scan_repo(root=REPO_ROOT):
     findings = []
-    for rule, relpath, path in iter_scanned_files(root):
-        findings.extend(RULE_CHECKS[rule](relpath, ast.parse(path.read_bytes())))
+    for rules, relpath, path in iter_scanned_files(root):
+        try:
+            source = path.read_bytes()
+            tree = ast.parse(source)
+        except SyntaxError as exc:
+            # a file the running interpreter (3.11 on CI) cannot parse is
+            # itself the floor violation: report it, do not crash the scan
+            snippet = (exc.text or "").strip()
+            message = f"syntax newer than Python 3.11: {exc.msg}"
+            if snippet:
+                message = f"{message} ({snippet})"
+            findings.append(Finding(R5, relpath, exc.lineno or 1, message, R5_FIX))
+            continue
+        tree._source = source
+        for rule in rules:
+            findings.extend(RULE_CHECKS[rule](relpath, tree))
     return findings
 
 
@@ -580,9 +904,10 @@ def test_rules_scan_the_tree_fast():
     process's CPU seconds, which other jobs on other cores cannot inflate;
     the 60s ceiling is ~17x the measured cost, so it fires only on a real
     algorithmic blow-up -- a pathological rule check (e.g. quadratic
-    scanning) burns CPU seconds and crosses it. Measured on this tree:
-    3.4s of CPU for 273 file-scans; a per-file burn of 0.25s CPU (~13
-    files' worth per second) reaches ~68s and trips the assert.
+    scanning) burns CPU seconds and crosses it. Measured on this tree
+    (296 files, five rules, R5 reparsing each file under
+    ``feature_version=(3, 11)``): 6.0s of CPU; a per-file burn of 0.25s
+    CPU (~4 files' worth per second) reaches ~75s and trips the assert.
     """
     scanned = list(iter_scanned_files(REPO_ROOT))
     assert len(scanned) >= 250  # a scan that skipped the tree is also "fast"
@@ -591,3 +916,228 @@ def test_rules_scan_the_tree_fast():
     elapsed = time.process_time() - started
     assert len(findings) > 0
     assert elapsed < 60.0, f"cross-platform lint burned {elapsed:.1f}s of CPU"
+
+
+def test_rules_for_returns_every_applicable_rule():
+    assert set(rules_for("tests/test_a.py")) == {R1, R3, R4, R5}
+    assert rules_for("README.md") == []
+    assert rules_for("docs/index.md") == []
+    assert set(rules_for("src/refdes/build.py")) == {R2, R3, R4, R5}
+    assert set(rules_for("tools/pr_size.py")) == {R3, R4, R5}
+    assert rules_for("README.md") == []
+    assert rules_for("docs/index.md") == []
+    assert set(rules_for("src/refdes/model.py")) == {R2, R3, R4, R5}
+
+
+def test_r3_flags_read_text_newline_kwarg():
+    source = (
+        "def test_x(tmp_path):\n"
+        "    text = (tmp_path / 'a.md').read_text(encoding='utf-8', newline='')\n"
+    )
+    findings = scan_source(source, "tests/test_serve_navis_mint.py")
+    assert [f.line for f in findings] == [2]
+    assert findings[0].rule == R3
+    assert "3.13" in findings[0].message
+    assert findings[0].fix.startswith("use Path.open(newline='').read()")
+
+
+def test_r3_ignores_the_always_available_spellings():
+    source = (
+        "def test_x(tmp_path):\n"
+        "    a = (tmp_path / 'a.md').read_text(encoding='utf-8')\n"
+        "    (tmp_path / 'b.md').write_text('x', newline='')\n"
+        "    fh = open(tmp_path / 'c.md', 'w', newline='')\n"
+        "    raw = (tmp_path / 'd.md').read_bytes()\n"
+    )
+    assert scan_source(source, "tests/test_a.py") == []
+
+
+def test_r4_flags_itertools_batched_use_and_import():
+    use = scan_source(
+        "import itertools\n"
+        "\n"
+        "for group in itertools.batched(range(9), 3):\n"
+        "    pass\n",
+        "tests/test_a.py",
+    )
+    assert [f.line for f in use] == [3]
+    assert use[0].rule == R4
+    assert "3.12" in use[0].message
+    imported = scan_source("from itertools import batched\n", "tools/pr_size.py")
+    assert [f.line for f in imported] == [1]
+    clean = scan_source(
+        "import itertools\n"
+        "\n"
+        "for pair in itertools.pairwise(range(9)):\n"
+        "    pass\n",
+        "tests/test_a.py",
+    )
+    assert clean == []
+
+
+def test_r4_flags_path_walk_only_on_plausible_paths():
+    source = (
+        "import os\n"
+        "import ast\n"
+        "from pathlib import Path\n"
+        "\n"
+        "def f(root):\n"
+        "    base = Path('items')\n"
+        "    for dirpath, _dirs, names in os.walk(root):\n"
+        "        pass\n"
+        "    for entry in (root / 'items').walk():\n"
+        "        pass\n"
+        "    for entry in base.walk():\n"
+        "        pass\n"
+        "    for node in ast.walk(ast.parse('x = 1')):\n"
+        "        pass\n"
+        "    obj.walk()\n"
+    )
+    findings = scan_source(source, "tests/test_a.py")
+    assert [f.line for f in findings] == [9, 11]
+    assert all("Path.walk" in f.message for f in findings)
+
+
+def test_r4_flags_path_predicates_and_os_path_isjunction():
+    source = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "\n"
+        "def f(p: Path):\n"
+        "    if p.is_junction():\n"
+        "        return os.path.isjunction(str(p))\n"
+        "    return p.full_match('items/*.md')\n"
+    )
+    findings = scan_source(source, "tests/test_a.py")
+    assert sorted(f.line for f in findings) == [5, 6, 7]
+    good = scan_source(
+        "def f(p):\n"
+        "    return p.is_dir() and p.match('items/*.md')\n",
+        "tests/test_b.py",
+    )
+    assert good == []
+
+
+def test_r4_flags_copy_replace_sumprod_override_deprecated():
+    source = (
+        "import copy\n"
+        "import math\n"
+        "import typing\n"
+        "import warnings\n"
+        "\n"
+        "a = copy.replace(obj, x=1)\n"
+        "b = math.sumprod([1], [2])\n"
+        "\n"
+        "class C:\n"
+        "    @typing.override\n"
+        "    def m(self):\n"
+        "        return warnings.deprecated('use n')(self.m)\n"
+    )
+    findings = scan_source(source, "tests/test_a.py")
+    assert [f.line for f in findings] == [6, 7, 10, 12]
+    imported = scan_source(
+        "from typing import override\n"
+        "\n"
+        "class C:\n"
+        "    @override\n"
+        "    def m(self):\n"
+        "        pass\n",
+        "tests/test_a.py",
+    )
+    assert [f.line for f in imported] == [1]
+    good = scan_source(
+        "import copy\n"
+        "import math\n"
+        "import warnings\n"
+        "\n"
+        "a = copy.deepcopy(obj)\n"
+        "b = math.fsum([1, 2])\n"
+        "warnings.warn('x')\n",
+        "tests/test_b.py",
+    )
+    assert good == []
+
+
+def test_r4_flags_shutil_rmtree_onexc_keyword():
+    source = (
+        "import shutil\n"
+        "\n"
+        "shutil.rmtree(path, onexc=_handler)\n"
+    )
+    assert [f.line for f in scan_source(source, "tests/test_a.py")] == [3]
+    good = scan_source(
+        "import shutil\n"
+        "\n"
+        "shutil.rmtree(path)\n"
+        "shutil.rmtree(path, ignore_errors=True)\n"
+        "shutil.rmtree(path, onerror=_handler)\n",
+        "tests/test_b.py",
+    )
+    assert good == []
+    bare = scan_source(
+        "from shutil import rmtree\n"
+        "\n"
+        "rmtree(path, onexc=_handler)\n",
+        "tools/pr_size.py",
+    )
+    assert [f.line for f in bare] == [3]
+    local = scan_source(
+        "def rmtree(path, onexc):\n"
+        "    pass\n"
+        "\n"
+        "rmtree(path, onexc=_handler)\n",
+        "tests/test_a.py",
+    )
+    assert local == []
+
+
+def test_r4_ignores_tomllib():
+    assert scan_source("import tomllib\n", "src/refdes/parse.py") == []
+    assert scan_source("from tomllib import loads\n", "src/refdes/parse.py") == []
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="3.11 cannot parse the snippet at all")
+def test_r5_flags_pep695_syntax():
+    findings = scan_source("type Numbers = list[int]\n", "tests/test_a.py")
+    assert [f.line for f in findings] == [1]
+    assert findings[0].rule == R5
+    assert "3.11" in findings[0].message
+    assert "PEP 695" in findings[0].fix
+    assert [f.line for f in scan_source("def f[T](x: T) -> T:\n    return x\n", "tests/test_a.py")] == [1]
+    assert [f.line for f in scan_source("class Box[T]:\n    pass\n", "tests/test_a.py")] == [1]
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="3.11 cannot parse the snippet at all")
+def test_r5_fstring_changes_are_a_documented_feature_version_limit():
+    # feature_version=(3, 11) does NOT re-tokenize f-strings with 3.11
+    # rules on a 3.12+ interpreter (verified: parses clean), so PEP 701
+    # nesting is not catchable here -- the 3.11 CI job rejects it at its
+    # own parse. The check_syntax_311_floor docstring records the limit.
+    assert scan_source('print(f"{d["key"]}")\n', "tests/test_a.py") == []
+
+
+def test_r5_ignores_311_valid_syntax():
+    source = (
+        "from typing import Generic, TypeAlias, TypeVar\n"
+        "\n"
+        "T = TypeVar('T')\n"
+        "Numbers: TypeAlias = list[int]\n"
+        "\n"
+        "class Box(Generic[T]):\n"
+        "    def __init__(self, x: T) -> None:\n"
+        "        self.x = x\n"
+    )
+    assert scan_source(source, "tests/test_a.py") == []
+
+
+def test_r5_failure_report_names_location_fix_and_command():
+    finding = Finding(R5, "tests/test_a.py", 1, "syntax newer than Python 3.11: invalid syntax", R5_FIX)
+    report = build_failure_report([finding], {R5: {"tests/test_a.py": 1}}, {})
+    assert "tests/test_a.py:1" in report
+    assert "PEP 695" in report
+    assert UPDATE_COMMAND in report
+
+
+def test_new_rules_find_no_hits_on_the_real_tree():
+    hits = [f for f in scan_repo() if f.rule in (R3, R4, R5)]
+    assert format_findings(hits) == []
