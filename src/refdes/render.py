@@ -340,6 +340,8 @@ def _log_entries(
 
 
 def _check_state(item: Item) -> str:
+    """The check rollup one item reports, shared by `items.json`, the
+    templates and the serve filters (`serve/filters.py` imports this)."""
     if not item.checks:
         return "none"
     if any(c.ok is False for c in item.checks):
