@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 
 from conftest import write_project_config
+from helpers import scan_body
 
 from refdes import build as build_mod
 from refdes import loader, navis, render
@@ -66,7 +67,7 @@ def _project(tmp_path, files: dict[str, str]) -> Project:
 
 
 def test_scan_keyless_marker():
-    found, bad = navis.scan_body("before\n<!--navi: remember the copper thing-->\nafter")
+    found, bad = scan_body("before\n<!--navi: remember the copper thing-->\nafter")
     assert bad == []
     assert len(found) == 1
     assert found[0].key == ""
@@ -79,14 +80,14 @@ def test_scan_two_markers_on_one_line():
     # line (CRLF safety, exact line reporting, panel row a sentence); it
     # does not bind a line to one marker. The first `-->` closes the first
     # marker, and a second closed marker on the same line is its own Navi.
-    found, bad = navis.scan_body("<!--navi: first--><!--navi: second-->")
+    found, bad = scan_body("<!--navi: first--><!--navi: second-->")
     assert bad == []
     assert [(n.text, n.line_offset) for n in found] == [("first", 0), ("second", 0)]
     assert navis.strip_markers("<!--navi: first--><!--navi: second--> tail") == "tail"
 
 
 def test_scan_keyed_marker():
-    found, bad = navis.scan_body("<!--navi:k7f3q2x8d0m Model worst-case copper temperature.-->")
+    found, bad = scan_body("<!--navi:k7f3q2x8d0m Model worst-case copper temperature.-->")
     assert bad == []
     assert found[0].key == "k7f3q2x8d0m"
     assert found[0].text == "Model worst-case copper temperature."
@@ -95,7 +96,7 @@ def test_scan_keyed_marker():
 
 def test_scan_multiple_markers_line_offsets():
     body = "a\n<!--navi: one-->\nb\n<!--navi: two-->\n<!--navi: three-->"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert bad == []
     assert [n.text for n in found] == ["one", "two", "three"]
     assert [n.line_offset for n in found] == [1, 3, 4]
@@ -106,14 +107,14 @@ def test_marker_is_one_line_only():
     # line was never a marker: it is a warning naming the opening line.
     # A `<!--navi:` that never closes is the existing unclosed-comment
     # machinery's territory (build.py), not this one.
-    found, bad = navis.scan_body("<!--navi: spans\ntwo lines-->\n")
+    found, bad = scan_body("<!--navi: spans\ntwo lines-->\n")
     assert found == []
     assert bad == [(0, ("navi marker spans lines; a marker is one line: "
                         "`<!--navi: the reminder-->`"))]
 
 
 def test_malformed_empty_text_is_a_warning():
-    found, bad = navis.scan_body("text\n<!--navi:  -->\nmore")
+    found, bad = scan_body("text\n<!--navi:  -->\nmore")
     assert found == []
     assert len(bad) == 1
     assert bad[0][0] == 1
@@ -123,14 +124,14 @@ def test_malformed_empty_text_is_a_warning():
 def test_malformed_key_alphabet_is_a_warning():
     # An 11-character key-shaped head in the wrong alphabet is reported,
     # never silently read as text (report-on-typo posture).
-    found, bad = navis.scan_body("<!--navi:K7F3Q2X8D0M text-->")
+    found, bad = scan_body("<!--navi:K7F3Q2X8D0M text-->")
     assert found == []
     assert len(bad) == 1
     assert "key alphabet" in bad[0][1]
 
 
 def test_malformed_key_with_empty_text():
-    found, bad = navis.scan_body("<!--navi:k7f3q2x8d0m-->")
+    found, bad = scan_body("<!--navi:k7f3q2x8d0m-->")
     assert found == []
     assert len(bad) == 1
     assert "no text" in bad[0][1]
@@ -138,7 +139,7 @@ def test_malformed_key_with_empty_text():
 
 def test_short_token_is_text_not_a_key():
     # 10 characters is not key-shaped; the whole thing is a keyless Navi.
-    found, bad = navis.scan_body("<!--navi:k7f3q2x8d0 Model the thing-->")
+    found, bad = scan_body("<!--navi:k7f3q2x8d0 Model the thing-->")
     assert bad == []
     assert found[0].key == ""
     assert found[0].text == "k7f3q2x8d0 Model the thing"
@@ -147,7 +148,7 @@ def test_short_token_is_text_not_a_key():
 def test_marker_text_keeps_grammar_edges():
     # Text may contain colons, references, braces, arrows-as-bytes; only
     # `-->` terminates the marker.
-    found, bad = navis.scan_body("<!--navi: see REQ-001 {{temp}} a:b [x] < b-->")
+    found, bad = scan_body("<!--navi: see REQ-001 {{temp}} a:b [x] < b-->")
     assert bad == []
     assert found[0].text == "see REQ-001 {{temp}} a:b [x] < b"
 
@@ -155,7 +156,7 @@ def test_marker_text_keeps_grammar_edges():
 def test_nested_marker_first_close_wins():
     # Comments do not nest; the first `-->` terminates (same rule as the
     # inline-calc comment tracking).
-    found, bad = navis.scan_body("<!--navi: a <!--navi: b--> tail")
+    found, bad = scan_body("<!--navi: a <!--navi: b--> tail")
     assert bad == []
     assert len(found) == 1
     assert found[0].text == "a <!--navi: b"
@@ -163,14 +164,14 @@ def test_nested_marker_first_close_wins():
 
 def test_marker_inside_fenced_code_is_inert():
     body = "text\n```\n<!--navi: in a fence-->\n```\n"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert found == []
     assert bad == []
 
 
 def test_marker_inside_tilde_fence_is_inert():
     body = "~~~\n<!--navi: in a fence-->\n~~~\n"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert found == []
     assert bad == []
 
@@ -178,13 +179,13 @@ def test_marker_inside_tilde_fence_is_inert():
 def test_marker_inside_inline_code_is_inert():
     # Code spans are literal text (design §4 inertness inventory): the
     # marker in a code span is prose about markers, not a Navi.
-    found, bad = navis.scan_body("write `<!--navi: text-->` to add a Navi")
+    found, bad = scan_body("write `<!--navi: text-->` to add a Navi")
     assert found == []
     assert bad == []
 
 
 def test_marker_inside_html_comment_is_inert():
-    found, bad = navis.scan_body("<!-- a comment <!--navi: x--> more -->")
+    found, bad = scan_body("<!-- a comment <!--navi: x--> more -->")
     assert found == []
     assert bad == []
 
@@ -192,7 +193,7 @@ def test_marker_inside_html_comment_is_inert():
 def test_marker_line_with_span_after_closed_comment():
     # An inert comment that closes mid-line does not shield a later
     # marker on the same line.
-    found, bad = navis.scan_body("<!-- plain --> <!--navi: real-->")
+    found, bad = scan_body("<!-- plain --> <!--navi: real-->")
     assert len(found) == 1
     assert found[0].text == "real"
     assert bad == []
@@ -200,7 +201,7 @@ def test_marker_line_with_span_after_closed_comment():
 
 def test_marker_in_indented_code_is_inert():
     body = "para\n\n    <!--navi: indented code-->\n"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert found == []
     assert bad == []
 
@@ -208,7 +209,7 @@ def test_marker_in_indented_code_is_inert():
 def test_scan_handles_unicode_and_long_lines():
     long_text = "x" * 5000
     body = f"<!--navi: Ω µ ± {long_text}-->\n"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert bad == []
     assert found[0].text.startswith("Ω µ ±")
     assert len(found[0].text) == len(long_text) + 6
@@ -332,7 +333,7 @@ def test_strip_marker_only_line_in_blockquote():
 
 
 def test_scan_marker_spanning_lines_warns():
-    found, bad = navis.scan_body("text <!--navi: spans\ntwo lines--> more\n")
+    found, bad = scan_body("text <!--navi: spans\ntwo lines--> more\n")
     assert found == []
     assert len(bad) == 1
     assert bad[0][0] == 0  # reported at the line the marker opened on
@@ -344,7 +345,7 @@ def test_scan_marker_spanning_lines_warns():
 def test_scan_marker_spanning_lines_never_closes_stays_quiet():
     # An unclosed `<!--navi:` is the existing unclosed-comment warning's
     # territory (design §4) -- no second diagnostic for it.
-    found, bad = navis.scan_body("text <!--navi: spans\nand stays open forever\n")
+    found, bad = scan_body("text <!--navi: spans\nand stays open forever\n")
     assert found == [] and bad == []
 
 
@@ -352,14 +353,14 @@ def test_multiline_inline_code_span_is_inert():
     # CommonMark code spans close on LATER lines; the marker inside is
     # literal code text, not a Navi, and strip must not delete code.
     body = "`alpha\n<!--navi: inside span--> beta`\n"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert found == [] and bad == []
     assert navis.strip_markers(body) is body
 
 
 def test_fence_inside_blockquote_is_inert():
     body = "> q1\n> ```\n> <!--navi: x-->\n> ```\n> q2\n"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert found == [] and bad == []
     assert navis.strip_markers(body) is body
 
@@ -368,11 +369,11 @@ def test_scan_is_inert_after_fence_on_crlf_body():
     # The functions advertise CRLF; every marker after a fence used to
     # vanish on a CRLF body because the close regex lacked a CR.
     body = "a\r\n```\r\n<!--navi: x-->\r\n```\r\nb\r\n"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert found == [] and bad == []
     assert navis.strip_markers(body) is body
     # and a live marker on a CRLF body still lives
-    live = navis.scan_body("a\r\n<!--navi: x-->\r\nb\r\n")
+    live = scan_body("a\r\n<!--navi: x-->\r\nb\r\n")
     assert [n.text for n in live[0]] == ["x"]
 
 
@@ -754,14 +755,14 @@ def test_strip_removes_the_live_marker_not_its_inert_twin():
     body = "> `<!--navi: x-->` then <!--navi: x--> real\n"
     out = navis.strip_markers(body)
     assert out == "> `<!--navi: x-->` then real\n"
-    assert [n.text for n in navis.scan_body(body)[0]] == ["x"]
+    assert [n.text for n in scan_body(body)[0]] == ["x"]
 
 
 def test_strip_honours_escaped_backtick():
     # Round-5 review B: `\`` is a literal backtick, not a code-span
     # opener; the marker after it is live.
     body = "write \\` here <!--navi: live--> and `code` later\n"
-    assert [n.text for n in navis.scan_body(body)[0]] == ["live"]
+    assert [n.text for n in scan_body(body)[0]] == ["live"]
     assert navis.strip_markers(body) == "write \\` here and `code` later\n"
 
 
@@ -770,7 +771,7 @@ def test_escaped_lt_is_not_a_marker():
     # it is authored text, kept byte-identical, and must not become a
     # Navi (the old strip ate it and left a stray backslash).
     body = "text \\<!--navi: esc--> tail\n"
-    assert navis.scan_body(body) == ([], [])
+    assert scan_body(body) == ([], [])
     assert navis.strip_markers(body) == body
 
 
@@ -779,7 +780,7 @@ def test_markers_in_one_table_row_scan_in_document_order():
     # order is left to right, not the order the tokenizer's per-cell
     # offsets sort to.
     body = "| a | b |\n|---|---|\n| xxxx <!--navi: second--> | <!--navi: first--> y |\n"
-    assert [(n.text, n.line_offset) for n in navis.scan_body(body)[0]] == [
+    assert [(n.text, n.line_offset) for n in scan_body(body)[0]] == [
         ("second", 2),
         ("first", 2),
     ]
@@ -802,7 +803,7 @@ def test_strip_fails_closed_on_an_unmappable_span(monkeypatch):
     assert msg.startswith(navis.MAPPING_MESSAGE)
     # the warning names the failure so a bug report is actionable
     assert "NavisMappingError" in msg and "test-injected mapping failure" in msg
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert found == []
     assert len(bad) == 1 and bad[0][1].startswith(navis.MAPPING_MESSAGE)
 
@@ -828,7 +829,7 @@ def test_strip_never_inserts_a_space_before_punctuation():
 
 def test_lone_cr_marker_offsets_and_strip():
     body = "a\r<!--navi: x-->\rb"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert bad == []
     assert [n.line_offset for n in found] == [1]
     assert navis.strip_markers(body) == "a\rb"
@@ -838,7 +839,7 @@ def test_nul_and_separators_before_marker_preserve_raw_body():
     for body in ("a\x00b <!--navi: x-->\n", "a\x0cb <!--navi: x-->\n",
                  "a\u2028b <!--navi: x-->\n", "a\u2029b <!--navi: x-->\n",
                  "\ufeffa <!--navi: x-->\n"):
-        found, bad = navis.scan_body(body)
+        found, bad = scan_body(body)
         assert bad == [] and len(found) == 1, body
         stripped = navis.strip_markers(body)
         assert stripped == body.split(" <!--navi: x-->")[0] + "\n", body
@@ -846,7 +847,7 @@ def test_nul_and_separators_before_marker_preserve_raw_body():
 
 def test_table_escaped_pipe_raw_span():
     body = "| a\\|b | <!--navi: x--> |\n|---|---|\n| c | d |\n"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert bad == [] and len(found) == 1
     stripped = navis.strip_markers(body)
     assert stripped == "| a\\|b |  |\n|---|---|\n| c | d |\n"
@@ -855,7 +856,7 @@ def test_table_escaped_pipe_raw_span():
 
 def test_table_duplicate_cells_without_final_pipe():
     body = "|a|b|\n|-|-|\n| <!--navi: x--> | <!--navi: y-->\n"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert bad == []
     assert [n.text for n in found] == ["x", "y"]
     assert navis.strip_markers(body) == "|a|b|\n|-|-|\n| |\n"
@@ -864,7 +865,7 @@ def test_table_duplicate_cells_without_final_pipe():
 def test_comment_state_across_blank_and_heading():
     for body in ("<!-- outer\n\n<!--navi: x-->\ntail -->\n",
                  "<!-- outer\n# <!--navi: x-->\ntail -->\n"):
-        found, bad = navis.scan_body(body)
+        found, bad = scan_body(body)
         assert found == [] and bad == [], body
         assert navis.strip_markers(body) == body
 
@@ -872,7 +873,7 @@ def test_comment_state_across_blank_and_heading():
 def test_residue_thematic_breaks_and_plus_text():
     for residue in ("---", "***", "- - -", "___", "+++"):
         body = f"{residue} <!--navi: x-->\n"
-        found, bad = navis.scan_body(body)
+        found, bad = scan_body(body)
         assert bad == [] and len(found) == 1
         assert navis.strip_markers(body) == f"{residue}\n"
     for residue in ("1.", ">", "-", "*", "+", ">>", "1. -"):
@@ -884,7 +885,7 @@ def test_marker_in_link_attributes_is_inert():
     for body in ('[t](u "<!--navi: x-->") tail\n',
                  ("[a]: /url\n"
                   "text <!--navi: x-->\n")):
-        found, bad = navis.scan_body(body)
+        found, bad = scan_body(body)
         assert bad == []
         title = body.startswith("[t](")
         assert (len(found) == 0) == title, body
@@ -892,7 +893,7 @@ def test_marker_in_link_attributes_is_inert():
 
 def test_image_alt_marker_is_inline():
     body = "![a <!--navi: x--> b](u.png) tail\n"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert bad == [] and len(found) == 1
     assert navis.strip_markers(body) == "![a b](u.png) tail\n"
 
@@ -913,7 +914,7 @@ def test_no_marker_scan_skips_parser(monkeypatch):
 
     monkeypatch.setattr(navis, "_marker_parser", boom)
     body = "plain text with no markers and no <!-- at all\n"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert found == [] and bad == []
     assert navis.strip_markers(body) is body
     analysis = navis.analyze_navis(body)
@@ -925,7 +926,7 @@ def test_analysis_reused_for_scan_and_render():
     first = navis.analyze_navis(body)
     assert navis.analyze_navis(body) is first
     assert navis.strip_markers(body) is first.stripped
-    found, _ = navis.scan_body(body)
+    found, _ = scan_body(body)
     assert [n.text for n in found] == [n.text for n in first.navis]
 
 
@@ -943,7 +944,7 @@ def test_hardbreak_adjacent_to_marker(tmp_path):
 
 def test_marker_payload_syntax_is_never_evaluated(tmp_path):
     body = "text <!--navi: {{missing}} [[x]] `a := b`-->\n"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert bad == [] and len(found) == 1
     project = _project(
         tmp_path, {"note.md": _md("NOTE-001", "note", "P", body)}
@@ -955,7 +956,7 @@ def test_marker_payload_syntax_is_never_evaluated(tmp_path):
 
 def test_original_line_mapping_after_mixed_terminators():
     body = "a\r\n<!--navi: x-->\rb\n<!--navi: y-->\n"
-    found, bad = navis.scan_body(body)
+    found, bad = scan_body(body)
     assert bad == []
     assert [n.line_offset for n in found] == [1, 3]
     assert [n.text for n in found] == ["x", "y"]

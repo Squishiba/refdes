@@ -23,6 +23,7 @@ on a line, spanning two lines.
 from __future__ import annotations
 
 import pytest
+from helpers import scan_body
 
 from refdes import navis
 from refdes.build import _markdown_parser
@@ -207,7 +208,7 @@ def expected_texts(context: str, placement: str) -> list[str]:
 @pytest.mark.parametrize("placement", list(MARKERS))
 def test_navis_context_matrix(context, placement, ending):
     body = CONTEXTS[context](MARKERS[placement]).replace("\n", ending)
-    navis_found, warnings = navis.scan_body(body)
+    navis_found, warnings = scan_body(body)
     want_navis, want_warnings, gone = expected(context, placement)
     assert [n.text for n in navis_found] == expected_texts(context, placement), (
         f"{context}/{placement}"

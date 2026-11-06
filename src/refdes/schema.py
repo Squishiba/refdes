@@ -174,7 +174,7 @@ def _standard_pin(raw: dict[str, Any]) -> tuple[str, int | None]:
     `load_project` needs the pin before it has a resolved standard, because
     one setting's legal values depend on it (the pre-v3 `on_change: log`
     spelling). Anything malformed about `standard:` is still
-    `standards.resolve_schema`'s to report -- this reads only what is already
+    `standards.resolve_namespaces`'s to report -- this reads only what is already
     plain: a known base and a plain integer version.
     """
     standard_cfg = raw.get("standard")
@@ -783,7 +783,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     blocks = validate_settings(raw, PROJECT_SETTINGS_NAME, legacy_log_ok=legacy_log_ok)
     validate_overlay(overlay, SCHEMA_NAME, legacy_log_ok=legacy_log_ok)
     # The two are disjoint by validation, so one dict is all
-    # standards.resolve_schema needs: `standard:` from the settings, the
+    # standards.resolve_namespaces needs: `standard:` from the settings, the
     # project's own types:/link_types:/sets: from the overlay.
     raw = {**raw, **overlay}
 

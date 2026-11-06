@@ -14,7 +14,7 @@ import os
 
 import yaml
 from conftest import write_project_config
-from helpers import PARTS_SCHEMA
+from helpers import PARTS_SCHEMA, resolve_schema
 
 from refdes import build as build_mod
 from refdes import cli, lifecycle, parse, revise, standards
@@ -275,7 +275,7 @@ def test_the_parts_fixture_matches_the_bundled_standard():
     supposed to have, not the one it shipped. A fixture that can quietly
     diverge from the dictionary it stands in for is a trap for whoever reads
     it next, so this pins the two together."""
-    _link_types, types = standards.resolve_schema(
+    _link_types, types = resolve_schema(
         {"standard": {"base": "hardware", "version": standards.latest_version("hardware")}},
         require_rejection_rationale=True,
     )

@@ -3420,13 +3420,6 @@ def hash_for_format_variants(item: Item, project: Project, hash_format: int) -> 
     return variants
 
 
-def legacy_hash_for(item: Item, project: Project) -> str:
-    """hash_for_format(item, project, 1) -- kept as its own name because it
-    predates hash_for_format and is still the common case callers reach for
-    when they mean specifically "the pre-keys hash"."""
-    return hash_for_format(item, project, 1)
-
-
 # -------------------------------------------------------------------------- markdown
 
 

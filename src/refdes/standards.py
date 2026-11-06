@@ -94,17 +94,6 @@ def resolve_namespaces(
     return sets, link_types, types, warnings, sealing_optins
 
 
-def resolve_schema(
-    raw: dict[str, Any], require_rejection_rationale: bool
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """The two-value form of `resolve_namespaces`, for callers that have no
-    use for the set namespace."""
-    _sets, link_types, types, _warnings, _optins = resolve_namespaces(
-        raw, require_rejection_rationale
-    )
-    return link_types, types
-
-
 def build_sealing_optins(
     base_types: dict[str, Any],
     project_types_raw: dict[str, Any],

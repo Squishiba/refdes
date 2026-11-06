@@ -622,8 +622,8 @@ class TipFold:
     """One field's branch-local fold at one thread tip, as `fold_field_at_tip`
     reports it.
 
-    The (value, source) pair `fold_at_tip` returns cannot answer a question a
-    thread *view* has to ask: an ambiguous fold — two entries tied at the same
+    The (value, source) pair a bare per-tip fold returns cannot answer a question
+    a thread *view* has to ask: an ambiguous fold — two entries tied at the same
     distance declaring different values — returns `(None, None)`, which is
     byte-for-byte what "nothing in this branch ever declared the field"
     returns. `declared` separates them (some entry's own keys said so, whatever
@@ -635,9 +635,9 @@ class TipFold:
     reached the same way: recording what the walk's `declared_of` was asked
     about (the walk itself only ever reports its conclusion).
 
-    * `value`/`source` — exactly `fold_at_tip`'s pair: the folded value and the
-      entry it came from; `(None, None)` when the fold is ambiguous or nothing
-      declared.
+    * `value`/`source` — exactly the pair a thin wrapper over this returns: the
+      folded value and the entry it came from; `(None, None)` when the fold is
+      ambiguous or nothing declared.
     * `declared` — whether the walk's nearest declaring level declared the
       field with a non-null value: a `field: null` declaration does not
       count (it is the walk's own no-hit, and it does not stop the walk),
@@ -661,17 +661,18 @@ def fold_field_at_tip(
     *,
     graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
 ) -> "TipFold | None":
-    """`fold_at_tip`'s walk, plus what it saw: the field fold's `TipTasks`.
+    """One field's branch-local fold at one tip, plus what the walk saw: the
+    field fold's `TipTasks`.
 
     One backward walk from `tip`, identical declaration rule (`_declares`) and
     same ambiguity posture as every other fold — the recording list is the only
-    addition, and it changes no answer, only reports one (`fold_at_tip` is a
-    thin wrapper over this, so the equivalence test against
-    `resolve_current_with_source` still pins the walk itself).
+    addition, and it changes no answer, only reports one (the thin wrapper the
+    equivalence test in `tests/test_threads_projection.py` runs over this keeps
+    the walk itself pinned against `resolve_current_with_source`).
 
     Returns None only when `tip` names no item; every real tip gets a
     `TipFold`, including a thread of one and an ambiguous branch. Not
-    memoized, for `fold_at_tip`'s own reason: the component cache keys on the
+    memoized, for the per-tip fold's own reason: the component cache keys on the
     one current value, which a per-tip fold does not ask for.
     """
     predecessors, _successors, handles, items, _cg = _graph_view(graph, project)
@@ -703,38 +704,6 @@ def fold_field_at_tip(
         declared=bool(declared),
         ambiguous=value is None and bool(declared),
     )
-
-
-def fold_at_tip(
-    project: Project,
-    tip: Item | str,
-    field: str,
-    *,
-    graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
-) -> tuple[Any, Item | None]:
-    """The same fold `resolve_current_with_source` runs, anchored at ONE tip.
-
-    On a thread with exactly one tip this returns what `resolve_current_with_source`
-    returns — same walk, same declaration rule (`_declares`), same
-    ambiguity posture — because that fold walks backward from exactly this tip.
-    The difference is an unmerged fork: `resolve_current` answers "what does the
-    thread currently conclude", and a thread with two open tips has no such
-    single answer (None), while a thread *view* must still show each open
-    branch its own branch-local value (living-notes.md §5: "forked values
-    remain branch-local"). `fold_tasks` is that per-tip fold for `tasks:`;
-    this is the same machinery for any field, so the thread view never needs a
-    second fold of its own.
-
-    Not memoized: the component cache keys on "the component's one current
-    value", which is exactly the question a per-tip fold does not ask.
-
-    A thin wrapper over `fold_field_at_tip` — same single walk, minus the
-    recording that pair cannot carry.
-    """
-    folded = fold_field_at_tip(project, tip, field, graph=graph)
-    if folded is None:
-        return None, None
-    return folded.value, folded.source
 
 
 def resolve_current_link_with_source(
