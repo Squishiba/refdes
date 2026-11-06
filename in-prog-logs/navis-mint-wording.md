@@ -54,8 +54,6 @@ touches.
 ## Docs / changelog
 
 `docs/navis.md` preview section grepped: it does not quote the
-`Minted 0 key(s).` wording (it describes the K>0 shape and the
-refusal sentence), so no docs change. Added
-`changelog.d/navis-mint-wording.fixed.md`.
-
-Status: complete.
+`Minted 0 key(s).` wording (it describes the K>0 shape and the refusal
+sentence), so no docs change. Added
+`changelog.d/navis-mint-wording.fixed.md`. Status: complete.
