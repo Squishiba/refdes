@@ -52,3 +52,35 @@ gate-blocking row -> Invalid, no write; older entry ref continues the tip
   test relies on that, not on a hand-written seal file.
 
 Status: DONE — 22 red tests written and verified red, log written.
+
+## W5b.1 implementation pass
+
+Implemented `serve.edit.continue_thread` and `ContinueRequest` in
+`src/refdes/serve/edit.py`; no tests, HTTP/UI/CLI endpoints, templates, JS,
+or changelog fragment were added. The operation appends one entry to the tip's
+own file, copies the tip's scalar declared fields and complete task list,
+applies ticks, mints id/key, writes server-spelled `follows`, and uses the
+same destination/revision/journal/reserve path as `create_item`.
+
+Green evidence:
+- `tests/test_serve_continue.py`: 21 passed, 1 failed.
+- Touched-file lint: `ruff check src/refdes/serve/edit.py --select I001,F,E4,E7,E9`
+  passes. Existing `E501` findings remain on untouched lines.
+- Neighboring tests (`tests/test_serve_continue.py`,
+  `tests/test_serve_edit*.py`, `tests/test_serve_create.py`,
+  `tests/test_serve_api.py`, `tests/test_crossplatform_lint.py`):
+  535 passed, 1 failed (same setup flaw below).
+- Full suite: 5959 passed, 2 skipped, 1 failed.
+- Added `src/` lines: 346, under the 350 PR size gate.
+
+Stopping point: `test_a_continuation_the_delta_gate_would_block_is_invalid_and_writes_nothing`
+fails before calling the operation because it asserts the task-row state
+diagnostic is present from `_load` (`parse.load_items` only). That diagnostic
+is emitted by `build.validate_items`, not parse. Proposed test change: build
+the snapshot before that assertion, e.g. `build_mod.build(project, seal_write=False,
+reseal=False)` after `_load(tmp_path)`, as `_mint_and_seal` does. Probe
+`.scratch/w5b1-impl/probe_gate.py` shows the operation itself returns
+`Invalid`, names `closed`, and writes nothing.
+
+Status: Implementation DONE for W5b.1; test suite blocked by the one red-test
+premise above.
