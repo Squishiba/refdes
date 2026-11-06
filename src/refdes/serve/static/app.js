@@ -82,9 +82,6 @@ window.addEventListener('hashchange', renderRoute);
 const gitBadge = document.getElementById('git-badge');
 let openRevision = null;   // the revision the current view was loaded against
 
-export function currentRevision() { return openRevision; }
-export function setOpenRevision(rev) { openRevision = rev; }
-
 function showGit(git) {
   if (!git || !git.available) { gitBadge.hidden = true; return; }
   const dirty = git.worktree_dirty ? ' \u00b7 modified' : '';
