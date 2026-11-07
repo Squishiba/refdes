@@ -127,16 +127,9 @@ reloads as a YAML date). L2: plan_new_id refusal passes "" as ref. L3:
 `Applied.plan: PatchPlan | _ContinuationPlan`. Local evidence: 25 passed in
 the file, full suite 6001 passed / 2 skipped, ruff baseline-identical.
 
-STOP: the gate counts every added src line including comments — round 1 is
-348/350, round 2's approved src edits add +17 (M1 comment+docstring +16,
-L1 +2; L2/L3 are line-swaps +1 each in numstat) → 365, and the minimum
-faithful combination (~354) still exceeds the budget. Rules: no size-exempt,
-do not widen, STOP and report. Reverted (plain push, tree byte-identical to
-c215e472); all four CI checks green on the revert. Round 2 lives intact at
-304c7edc for a follow-up PR (src +17 alone: fits any budget).
-
-Status: #448 green at 51bceb29 (= c215e472 tree); round 2 awaits the
-orchestrator's split decision.
+STOPPED by pr-size (round 1 sits at 348/350 src added lines; the approved
+round-2 edits add +17): reverted (plain push) so the PR stayed green on the
+approved tree; the split was reported to the orchestrator.
 
 ## Option (b): compression (2026-11-07)
 
