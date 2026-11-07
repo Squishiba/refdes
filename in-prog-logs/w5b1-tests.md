@@ -84,3 +84,29 @@ reseal=False)` after `_load(tmp_path)`, as `_mint_and_seal` does. Probe
 
 Status: Implementation DONE for W5b.1; test suite blocked by the one red-test
 premise above.
+
+## Review follow-ups (2026-11-07, PR #448)
+
+Merged `origin/main` into the branch (no conflicts; the worktree base had
+diverged 15 commits, and ff-only is impossible for a branch with its own
+commits — orchestrator authorised the plain merge over a force-push rebase).
+Test fixes, all authorised: the delta-gate precondition above now builds the
+snapshot (`build_mod.build(project, seal_write=False, reseal=False)`, as
+`_build_before` does) before asserting the `tasks`/`closed` diagnostic; the
+Q2 test asserts `f"key: {result.handle}"` (`Applied.handle` is the minted key,
+`edit.py`'s continuation `Applied(..., handle=key)`) instead of the
+`tautological hasattr` spelling; the unused module-level `TIP_ROWS` is
+deleted. A probe of `continue_thread` found non-ASCII task text written
+escaped (`\xNN`/`\uNNNN`), so `_continuation_lines`'s flow dump gained
+`allow_unicode=True`; the red test
+`test_non_ascii_task_text_is_written_as_is_not_escaped` fails before that
+src change (asserts the literal text, no escape sequences, round-trip fold)
+and passes after.
+
+Evidence: `tests/test_serve_continue.py` 23 passed (21+1+1);
+`tests/test_crossplatform_lint.py` passes;
+`ruff check` (I,F,E,W) on the two touched files shows only the pre-existing
+E501 lines (baseline-identical via `git show HEAD:...`).
+
+Status: W5b.1 DONE — implementation and green test file; full suite runs
+once pre-push.

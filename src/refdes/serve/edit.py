@@ -2688,6 +2688,8 @@ def _continuation_lines(project: Project, tip: Item, rows: list):
         reason = emit(name, value)
         if reason:
             return None, reason
-    flow = yaml.safe_dump(rows, default_flow_style=True, sort_keys=False, width=10**9)
+    flow = yaml.safe_dump(
+        rows, default_flow_style=True, sort_keys=False, width=10**9, allow_unicode=True
+    )
     lines.append(f"tasks: {flow.strip()}")
     return lines, None
