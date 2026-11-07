@@ -241,17 +241,6 @@ def legacy_semantic_digest(item: Item) -> str:
     return digest_of(legacy_semantic_payload(item))
 
 
-def legacy_object_payload(item: Item) -> dict[str, object]:
-    """The pre-#323 object-file payload: ``legacy_semantic_payload`` plus the
-    stored-but-undigested identity/provenance keys, exactly as
-    ``object_payload`` adds them."""
-    payload = dict(legacy_semantic_payload(item))
-    payload["key"] = item.key
-    payload["id"] = item.id
-    payload["source"] = {"file": item.source_file, "line": item.source_line}
-    return payload
-
-
 def _stored_snapshot_matches_current(root: str, digest: str, current: str) -> bool:
     """Whether a stored snapshot, digested under the *current* formula, is the
     item's current digest.

@@ -21,6 +21,7 @@
 // createElement/textContent, so a hostile string stays literal.
 
 import { api as sharedApi } from './api.js';
+import { el } from './dom.js';
 
 const CHANGED_NOTE = 'marker text has changed since archived';
 const ORPHAN_TITLE = 'Marker not found -- hand-restore the marker, then it re-links by key';
@@ -28,13 +29,6 @@ const MINT_TITLE = 'Writes a key into each unkeyed Navi marker in your item file
 const KEYLESS_TITLE = 'No key yet -- use Mint keys';
 const DRAFT_SENTENCE =
   'Item files were edited: an open unsaved draft will ask you to resolve a conflict when you Save.';
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 function rowNode(row, wire, withArchive) {
   // wire: {act(button, path, key), registry, locked()}, the mount's action

@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import threading
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -33,6 +34,50 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 ASSET_DIR = os.path.join(TEMPLATE_DIR, "assets")
 
 
+# Jinja compiles every template the first time a given Environment loads it
+# -- 12 compiles, ~150 ms, per render_site call (audit §3.3). Reusing one
+# Environment per (template dir, compile options) keeps those compiles for
+# the life of the process; the key means a caller that renders against a
+# different template tree, or with different options, gets its own. The
+# `render_site` globals are project state, so they are written in full on
+# every call below -- nothing a previous render set is ever read as this
+# render's default. `auto_reload` (set explicitly below) keeps a template
+# edited on disk recompiling on the next render, exactly what a fresh
+# Environment per call used to buy.
+_ENVIRONMENTS: dict[tuple, Environment] = {}
+_ENVIRONMENTS_LOCK = threading.Lock()
+
+
+def _environment() -> Environment:
+    # (template dir, autoescape, trim_blocks, lstrip_blocks)
+    key = (TEMPLATE_DIR, True, True, True)
+    env = _ENVIRONMENTS.get(key)
+    if env is None:
+        with _ENVIRONMENTS_LOCK:
+            env = _ENVIRONMENTS.get(key)
+            if env is None:
+                env = Environment(
+                    loader=FileSystemLoader(TEMPLATE_DIR),
+                    # autoescape=True, not select_autoescape(["html"]): select_autoescape
+                    # matches on the template name's SUFFIX, and every template here is
+                    # named *.html.j2 -- ending in ".j2", not ".html" -- so it returned
+                    # False for every template and nothing was ever escaped. Every template
+                    # in this project is HTML, so escaping can simply always be on; the
+                    # intentional raw-markup sites are already marked | safe in render_site.
+                    autoescape=True,
+                    trim_blocks=True,
+                    lstrip_blocks=True,
+                    # The Environment default (None) serves the cached
+                    # template without a disk check; with one Environment
+                    # for the process, an edited template would stay
+                    # invisible to `serve`. The per-call Environment got
+                    # freshness by being brand new -- this keeps it.
+                    auto_reload=True,
+                )
+                _ENVIRONMENTS[key] = env
+    return env
+
+
 PAGE_HREF_RE = re.compile(r'href="([a-z0-9][a-z0-9\-_.]*)\.html"')
 
 
@@ -54,8 +99,33 @@ def _anchorize(html: str, known_slugs: set[str]) -> str:
     return PAGE_HREF_RE.sub(swap, html)
 
 
-_ID_ATTR_RE = re.compile(r'(?<![-\w])id="([^"]*)"')
+_ID_ATTR_RE = re.compile(r'id="([^"]*)"')
+
+
+def _id_attr_values(html: str) -> list[str]:
+    """The ids a DOM would see on `html`: every `id="..."` whose `id` is not
+    the tail of a longer attribute name (`data-id=`, `hiddenid=`, the
+    generated `data-where-id=`).
+
+    This is the lookbehind rule `(?<![-\\w])id="` written as a plain scan
+    plus a check of the preceding character: same rule, same output, ~20x
+    cheaper per page (audit §3.1). `str.isalnum() or == "_"` is exactly
+    `\\w` for `str` patterns in Python.
+    """
+    values = []
+    for match in _ID_ATTR_RE.finditer(html):
+        start = match.start()
+        prev = html[start - 1] if start else ""
+        if prev != "-" and not (prev.isalnum() or prev == "_"):
+            values.append(match.group(1))
+    return values
+
+
 _CALC_TABLE_ID_RE = re.compile(r'(<table class="calc" id=")(calc-[^"]*)(")')
+# `_CALC_TABLE_ID_RE` can only match text containing this literal, so a page
+# without it needs neither scan below. Keep the two adjacent and change them
+# together: if `_calc_table_html` ever emits different markup, both move.
+_CALC_TABLE_MARKER = 'class="calc"'
 
 
 def _unique_calc_anchors(html: str) -> str:
@@ -77,11 +147,13 @@ def _unique_calc_anchors(html: str) -> str:
     `hiddenid=`, the generated `data-where-id=`) or plain escaped text, and
     a value inside such an attribute is not a DOM id -- matching only the
     generated tag keeps this pass from reading or moving anything it does
-    not own. The collision inventory (`_ID_ATTR_RE`) is attribute-bounded
+    not own. The collision inventory (`_id_attr_values`) is attribute-bounded
     for the same reason: `data-id="calc-losses-2"` must not push a rename
     one suffix further.
     """
-    taken = set(_ID_ATTR_RE.findall(html))
+    if _CALC_TABLE_MARKER not in html:
+        return html
+    taken = set(_id_attr_values(html))
     emitted: set[str] = set()
 
     def swap(match: re.Match) -> str:
@@ -268,6 +340,8 @@ def _log_entries(
 
 
 def _check_state(item: Item) -> str:
+    """The check rollup one item reports, shared by `items.json`, the
+    templates and the serve filters (`serve/filters.py` imports this)."""
     if not item.checks:
         return "none"
     if any(c.ok is False for c in item.checks):
@@ -1175,6 +1249,18 @@ TASKPANE_DIR = os.path.join(TEMPLATE_DIR, "taskpane")
 TASKPANE_ASSET_NAMES = ("taskpane.css", "taskpane.js")
 
 
+def _write_assets(
+    out_dir: str, written: set[str], enabled: bool, names: tuple[str, ...], src_dir: str
+) -> None:
+    if not enabled:
+        return
+    asset_out = os.path.join(out_dir, "assets")
+    os.makedirs(asset_out, exist_ok=True)
+    for name in names:
+        shutil.copyfile(os.path.join(src_dir, name), os.path.join(asset_out, name))
+        written.add(f"assets/{name}")
+
+
 def _write_taskpane_assets(out_dir: str, written: set[str], enabled: bool) -> None:
     """Emit the pane's assets only when this render shows a pane anywhere
     (`enabled` = the projection had at least one thread). Same posture as
@@ -1182,15 +1268,7 @@ def _write_taskpane_assets(out_dir: str, written: set[str], enabled: bool) -> No
     site stays "no build step, works with JavaScript disabled" for every
     project, and here additionally byte-identical for the ones with no
     threads."""
-    if not enabled:
-        return
-    asset_out = os.path.join(out_dir, "assets")
-    os.makedirs(asset_out, exist_ok=True)
-    for name in TASKPANE_ASSET_NAMES:
-        shutil.copyfile(
-            os.path.join(TASKPANE_DIR, name), os.path.join(asset_out, name)
-        )
-        written.add(f"assets/{name}")
+    _write_assets(out_dir, written, enabled, TASKPANE_ASSET_NAMES, TASKPANE_DIR)
 
 
 #: The Navis panel's stylesheet (design §11, slice 4a). Outside `ASSET_DIR`
@@ -1206,13 +1284,7 @@ def _write_navis_assets(out_dir: str, written: set[str], enabled: bool) -> None:
     anywhere (`enabled` = the projection had at least one Navi). Same
     posture as `_write_taskpane_assets`: a Navi-free project publishes
     neither the file nor the `<link>`, byte-identical output."""
-    if not enabled:
-        return
-    asset_out = os.path.join(out_dir, "assets")
-    os.makedirs(asset_out, exist_ok=True)
-    for name in NAVIS_ASSET_NAMES:
-        shutil.copyfile(os.path.join(NAVIS_DIR, name), os.path.join(asset_out, name))
-        written.add(f"assets/{name}")
+    _write_assets(out_dir, written, enabled, NAVIS_ASSET_NAMES, NAVIS_DIR)
 
 
 def _prune_stale_output(out_dir: str, written: set[str]) -> None:
@@ -1264,18 +1336,7 @@ def render_site(project: Project, draft: bool = False) -> str:
     os.makedirs(out_dir, exist_ok=True)
     written: set[str] = set()
 
-    env = Environment(
-        loader=FileSystemLoader(TEMPLATE_DIR),
-        # autoescape=True, not select_autoescape(["html"]): select_autoescape
-        # matches on the template name's SUFFIX, and every template here is
-        # named *.html.j2 -- ending in ".j2", not ".html" -- so it returned
-        # False for every template and nothing was ever escaped. Every template
-        # in this project is HTML, so escaping can simply always be on; the
-        # intentional raw-markup sites are already marked | safe below.
-        autoescape=True,
-        trim_blocks=True,
-        lstrip_blocks=True,
-    )
+    env = _environment()
     # The theme's generated stylesheet, or "" when there is none. A global
     # rather than a per-call argument because base.html.j2 is the only consumer
     # and every page inherits it; the empty string is what keeps the `<link>`

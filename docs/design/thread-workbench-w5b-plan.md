@@ -1,10 +1,13 @@
-Status: Proposed, and **blocked on the owner**. Ten questions in §Open
-questions for Jared are open as this is written; each phase below names the
-answers it needs, and §8 tabulates which phases each answer gates. The rules this plan implements
+Status: Proposed, and **unblocked**. All ten conservative defaults in §Open
+questions for Jared were ratified by Jared on 2026-11-06, as written, as the
+defaults this plan assumed; every phase below (W5b.1–W5b.5) is now unblocked.
+Each phase names the answers it needs, and §8 tabulates which phases each
+answer gates. The rules this plan implements
 are decided already — `docs/design/thread-workbench.md` §7a — and nothing here
 reopens them. Unlike `docs/design/living-notes-plan.md`, which was written
 after its questions were ratified, this one is written before: the shape of the
-work is stable, the answers are not.
+work is stable, the answers are not. The answers have since landed: Jared
+ratified all ten defaults on 2026-11-06.
 
 **Citations.** Line numbers are against `main` at `374a4aa`. The read-only task
 pane is on `main`: PR #197 merged as `7c72311`, so `task_pane.py`, the pane
@@ -419,6 +422,11 @@ nothing new on disk. Reload survives; an unpinned `serve` restart kills the
 draft, a pinned-port restart can keep it; a second tab has its own draft and
 never a merged one.
 
+**Ratified 2026-11-06: (b)** — same lifetime promise as the editor's drafts,
+nothing new on disk. Reload survives; an unpinned `serve` restart kills the
+draft, a pinned-port restart can keep it; a second tab has its own draft and
+never a merged one.
+
 **Q2 — what exactly does save write, and through what door?**
 Concretely: a new entry appended to the thread's own file, by the creation
 mechanism (`append-yaml` / `append-md`, `edit.py:1289-1330`), with `follows:`
@@ -468,6 +476,11 @@ capturing (§2), so (b)'s real promise is "eventually captured, with an
 undiagnosed gap in between" — and that gap being invisible is itself the
 argument for (a), which closes it in the one locked operation.
 
+**Ratified 2026-11-06: (a) + (i)** for what is copied — copy the declared
+fields, leave the body empty; **(iii)** for the door — one new endpoint,
+`POST /api/item/<ref>/continue`; **(a)** for the sub-question — W5b.5 writes
+both from the one locked operation.
+
 **Q3 — the tip moves while a draft is open** (another tab, VS Code, a CLI
 write, another author).
 (a) refuse the save and show the current tip's list against the pending ticks,
@@ -488,6 +501,10 @@ already auto-reloads on revision change (W1's `_reload_probe`,
 `server.py:62-73`), so "the list you are ticking is stale" is partly a freshness
 problem before it is a conflict problem.
 
+**Ratified 2026-11-06: (a)**, implemented as W5b.1's revision compare, with
+(c) — a per-task-row diff rather than a text diff — held as the follow-up if
+refusals turn out to be annoying.
+
 **Q4 — ticks shown on an older entry: the save continues the tip, not that
 entry.** §7a.1 puts the tip's list on an older entry's page
 ("`viewing LOG-007 · tasks as of tip LOG-012`"), and §7a.2's save "appends a
@@ -497,6 +514,10 @@ reader is looking at. The alternative — continuing the older entry — would f
 the thread from the pane, which is a different act (§7a.3's tabs are for tips
 that already exist, not for creating one). Only flag it if that is not what you
 meant.
+
+**Ratified 2026-11-06: confirmed** — the operation names the tip, and an older
+entry's page saves a successor to the tip, never to the entry the reader is
+looking at.
 
 **Q5 — forks, tabs, and whose draft is whose.**
 (a) a draft belongs to exactly one tip, keyed by that tip's key (not its display
@@ -510,6 +531,9 @@ implies for the write side, and costs one key. (b) silently drops ticks when
 you switch tabs — the exact surprise the tab rule was written to avoid. (c) is
 safe but hostile.
 **Conservative default: (a)**, with the tab-switch UI simply showing each tip's
+own pending count.
+
+**Ratified 2026-11-06: (a)**, with the tab-switch UI simply showing each tip's
 own pending count.
 
 **Q6 — states beyond `done`: `dropped`, reopening, and un-ticking.**
@@ -531,6 +555,10 @@ row back to `open` is a true record of the author's current judgment. Flagging
 this one as *not obviously conservative in either direction*: if you want (a),
 say so and W5b.1 refuses a wanted-state change on a row that is not `open`.
 
+**Ratified 2026-11-06: (b)** — un-ticking a row in the *draft* is free (the
+draft is not history; nothing is on disk yet), and writing an entry that flips
+a row back to `open` is a true record of the author's current judgment.
+
 **Q7 — captured / recorded entries: is there any interaction?**
 **Assumed: none, and this is a request to confirm the reasoning rather than the
 conclusion.** The check: `history.semantic_payload` digests an item's *own*
@@ -547,6 +575,9 @@ allow-and-detect policy (`:267-284`) is unaffected either way. If you read
 §3 as intending a marker for "the thread's task state moved", that is a design
 change, not a W5b implementation detail, and it should be said out loud.
 
+**Ratified 2026-11-06: none** — confirmed, the reasoning as well as the
+conclusion.
+
 **Q8 — discard, undo, and what an unsaved draft looks like.**
 (a) the editor's rules verbatim: an "unsaved" badge, an enabled Save only when
 dirty, Discard, and the generic `beforeunload` prompt (`drafts.js:132-136`,
@@ -556,6 +587,10 @@ the same thing); (c) autosave-with-undo into a draft the server knows about.
 shows the pending count ("3 unsaved ticks"), because the pane is floating over a
 document and a badge the size of the editor's is easy to miss. (c) is (Q1)'s
 option (c) by another route and inherits its objection.
+
+**Ratified 2026-11-06: (a)** with one addition worth naming: the pane's header
+shows the pending count ("3 unsaved ticks"), because the pane is floating over
+a document and a badge the size of the editor's is easy to miss.
 
 **Q9 — the static site, forever read-only.**
 **Assumed: confirmed and enforced by test, not by review.** §7a.6 and the rule
@@ -567,6 +602,8 @@ out of the generation by construction — the checkbox and its module arrive in
 no tick module, no token and no write route (W5b.3). Nothing to decide unless
 the intent is actually "the site's pane grows a control of some kind", which
 this plan reads as forbidden.
+
+**Ratified 2026-11-06: confirmed**, enforced by test, not by review.
 
 **Q10 — CLI parity: is there a `refdes continue`?**
 The rule is semantic reachability: `refdes --help` today has `thread` and `work`
@@ -587,6 +624,9 @@ it that way from the start. **Conservative default: (a) for W5b, with W5b.1
 shaped so (b) is a thin `cli.py` addition** — that way choosing (b) later is
 one commit, and choosing it now costs one phase. If you want (b) in W5b, that is
 a scope change, not a redesign.
+
+**Ratified 2026-11-06: (a) for W5b, with W5b.1 shaped so (b) is a thin
+`cli.py` addition.**
 
 ## 7. Not in W5b
 
@@ -611,9 +651,10 @@ a scope change, not a redesign.
 ## 8. What this plan does not decide
 
 Nothing in `docs/design/thread-workbench.md` §§1–9 or
-`docs/design/living-notes.md` §§1–9, and no §7a sub-decision. It does not
-decide Q1–Q10 either: it assumes defaults and says which phase each answer
-gates. The map, from each phase's "Gates on" line:
+`docs/design/living-notes.md` §§1–9, and no §7a sub-decision. Q1–Q10 are no
+longer undecided: all ten defaults were ratified by Jared on 2026-11-06, as
+this plan assumed them; the table keeps showing which phase each one fed,
+from each phase's "Gates on" line:
 
 | Answer | Phases it gates |
 |---|---|

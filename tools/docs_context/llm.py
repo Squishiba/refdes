@@ -210,18 +210,6 @@ def ask_model(
     return content.strip()
 
 
-def _get_json_body(request, timeout: float) -> dict:
-    with _urlopen(request, timeout=timeout) as response:
-        raw = response.read()
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise LlmError("bad_response", "the llm sent a body that is not json") from exc
-    if not isinstance(payload, dict):
-        raise LlmError("bad_response", "the llm sent a body that is not an object")
-    return payload
-
-
 def _card_facts(ref: dict, card: dict) -> list[str]:
     """The card's facts, as quoted lines for the user message. Document text
     is data quoted here, never an instruction."""

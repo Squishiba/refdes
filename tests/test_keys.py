@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 from conftest import write_project_config
+from helpers import legacy_hash_for
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
@@ -1376,7 +1377,7 @@ def test_storage_conversion_conditionally_rekeys_and_reports_uncomparable(tmp_pa
         "  - id: REQ-003\n    text: Keyless.\n",
     )
     project = _built_keys_project(root)
-    legacy_hash = build_mod.legacy_hash_for(project.item_by_id("REQ-001"), project)
+    legacy_hash = legacy_hash_for(project.item_by_id("REQ-001"), project)
     assert legacy_hash != project.item_by_id("REQ-001").content_hash
     baseline_items = {
         "REQ-001": {

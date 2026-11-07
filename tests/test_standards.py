@@ -10,7 +10,7 @@ import os
 import pytest
 import yaml
 from conftest import write_project_config
-from helpers import _build_at
+from helpers import _build_at, resolve_schema
 
 from refdes import build as build_mod
 from refdes import standards
@@ -185,7 +185,7 @@ def test_preset_colliding_with_the_base_is_a_hard_error(tmp_path, monkeypatch):
         SchemaError,
         match="declares type 'widget', which the fake standard also declares",
     ):
-        standards.resolve_schema(
+        resolve_schema(
             {"standard": {"base": "fake", "version": 1, "presets": ["clashing"]}}, True
         )
 
@@ -204,7 +204,7 @@ def test_two_presets_colliding_with_each_other_is_a_hard_error(tmp_path, monkeyp
         SchemaError,
         match="preset 'two' declares type 'gadget', which preset 'one' also declares",
     ):
-        standards.resolve_schema(
+        resolve_schema(
             {"standard": {"base": "fake", "version": 1, "presets": ["one", "two"]}}, True
         )
 

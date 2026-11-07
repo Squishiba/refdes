@@ -20,7 +20,7 @@ quoted `"no"` read as true.
 Two entry points. `validate_settings` checks the blocks of
 `refdes-project.yaml` and returns the resolved values, so `load_project` never
 reads a block it has not validated. `validate_overlay` checks the three
-namespaces of `refdes-schema.yaml` in the shape `standards.resolve_schema`
+namespaces of `refdes-schema.yaml` in the shape `standards.resolve_namespaces`
 consumes them.
 
 `check_duplicate_keys` is the third, and the earliest: a key the file spells
@@ -440,7 +440,7 @@ class BlockChecker:
 
     def standard(self, raw: dict) -> None:
         """Only the keys of a mapping form: `none`, and a value that is neither
-        a mapping nor the escape hatch, are `standards.resolve_schema`'s to
+        a mapping nor the escape hatch, are `standards.resolve_namespaces`'s to
         report -- it has the message about what `standard:` may be."""
         block = raw.get("standard")
         if isinstance(block, dict):
@@ -667,7 +667,7 @@ def validate_settings(
     Returns the resolved values -- defaults filled, types checked -- so
     `load_project` builds its objects from these and never re-reads a block
     unvalidated. `standard:` is checked for keys only and resolved by
-    `standards.resolve_schema`, which owns what it may be. `legacy_log_ok`
+    `standards.resolve_namespaces`, which owns what it may be. `legacy_log_ok`
     (see `BlockChecker`) is the caller's standard-pin answer for the
     pre-v3 `on_change: log` spelling.
     """

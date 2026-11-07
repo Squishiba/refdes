@@ -1168,21 +1168,6 @@ def parse_marker(inner: str) -> tuple[str, str, str | None]:
     return "", text, None
 
 
-def scan_body(body: str) -> tuple[list[Navi], list[tuple[int, str]]]:
-    """``([Navi...], [(line_offset, message)...])`` for one item body.
-
-    `line_offset` is 0-indexed within the body (add `Item.body_line` for
-    the absolute source line, the `inline_calc` pattern). Malformed
-    markers -- empty text, a key-shaped head outside the key alphabet --
-    and a marker that spans two lines are returned as (offset, message)
-    and never become Navis; an unclosed `<!--navi:` is not a malformed
-    marker (the existing unclosed-comment warning owns it, §4) and is
-    silently inert here because it is already reported there.
-    """
-    analysis = analyze_navis(body)
-    return list(analysis.navis), list(analysis.diagnostics)
-
-
 def strip_markers(body: str) -> str:
     """`body` with every live marker's bytes removed, at their exact raw
     spans, so the published HTML contains no marker bytes (design §4)

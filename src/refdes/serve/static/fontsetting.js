@@ -6,6 +6,8 @@
 // and persists immediately. Storage failures degrade to in-memory defaults
 // instead of taking the editor down.
 
+import { el } from './dom.js';
+
 const STORAGE_KEY = 'refdes.editor.font';
 const DEFAULT_FONT = Object.freeze({ family: 'mono', size: 12, lineHeight: 1.5 });
 const FONT_STACKS = Object.freeze({
@@ -24,13 +26,6 @@ const LINE_HEIGHT_VALUES = Object.freeze(Object.values(LINE_HEIGHT_STEPS));
 const LINE_HEIGHT_KEYS = Object.freeze(
   Object.fromEntries(Object.entries(LINE_HEIGHT_STEPS).map(([key, value]) => [String(value), key]))
 );
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 function defaultPreference() {
   return {

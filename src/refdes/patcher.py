@@ -291,43 +291,6 @@ def apply_patch(text: str, plan: PatchPlan | Refusal) -> str:
     return text[: plan.start] + plan.replacement + text[plan.end :]
 
 
-def revert_plan(plan: PatchPlan) -> PatchPlan:
-    """The exact inverse of a plan: put the span back the way it was.
-
-    This is byte-identical restore, not "set the field back to the value it
-    had". The distinction matters for a folded scalar, whose original wrapping
-    is not recoverable from its value: re-setting the old value can re-wrap the
-    text, while replaying the recorded span cannot. Apply the original plan
-    first, then this one against the patched text.
-    """
-    if isinstance(plan, Refusal):
-        raise PatchRefused("a refusal has nothing to revert")
-    return PatchPlan(
-        ref=plan.ref,
-        op="revert",
-        shape=plan.shape,
-        start=plan.start,
-        end=plan.start + len(plan.replacement),
-        replacement=plan.original,
-        original=plan.replacement,
-        start_line=plan.start_line,
-        end_line=plan.end_line,
-        old_value=plan.new_value,
-        new_value=plan.old_value,
-        field=plan.field,
-        notes=("replay of the recorded span, byte-identical to the original",),
-        path=plan.path,
-    )
-
-
-def patch_item(text: str, ref: str, op: Any, *, path: str | None = None) -> tuple[str, PatchPlan | Refusal]:
-    """Convenience: plan and, if it holds, apply. Returns (text, plan)."""
-    plan = plan_patch(text, ref, op, path=path)
-    if isinstance(plan, Refusal):
-        return text, plan
-    return apply_patch(text, plan), plan
-
-
 def _op_name(op: Any) -> str:
     if isinstance(op, SetField):
         return "set_field"

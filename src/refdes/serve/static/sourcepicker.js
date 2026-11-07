@@ -2,13 +2,7 @@
 // the calc line; this module displays its answers and asks the author for a
 // unit before sending the line and pin through the editor's body save.
 import { api } from './api.js';
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
+import { el } from './dom.js';
 
 function fact(label, value) {
   const row = el('div', 'source-fact');

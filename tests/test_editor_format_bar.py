@@ -1681,9 +1681,75 @@ def _node_json(tmp_path, harness_source, timeout=NODE_TIMEOUT_S):
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
+def _node_json_shards(tmp_path, harness_source, shards, timeout):
+    """Run `harness_source` as `shards` concurrent node processes, argv =
+    [index, count], and combine the last-line JSON reports.
+
+    The sweep harness is pure JS over a generated string list, so the shards
+    are disjoint index ranges and the combined report is exactly what one
+    process over the whole list reports: cases and expectedCases are summed,
+    bad is concatenated in shard order, and the [from, to) ranges must tile
+    [0, n) -- a missing shard fails. Each shard keeps its own first-bad
+    early-exit; the Python-side assertions (`bad == []`,
+    `cases == expectedCases`) are unchanged.
+    """
+    script = harness_source.replace(
+        "__STATIC__", json.dumps(STATIC.replace(os.sep, "/"))
+    )
+    harness = tmp_path / "formatbar-node-sweep.mjs"
+    harness.write_text(script, encoding="utf-8")
+    procs = [
+        subprocess.Popen(
+            [NODE, str(harness), str(i), str(shards)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        for i in range(shards)
+    ]
+    reports = []
+    for i, proc in enumerate(procs):
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            for other in procs:
+                other.kill()
+            # Reap so the message reports the real status (TimeoutExpired's
+            # returncode is None for a Popen pipe, and after kill() the
+            # process is a SIGTERM death, not the hung state worth naming).
+            killed_out, killed_err = proc.communicate()
+            pytest.fail(
+                f"format bar node sweep shard {i} hung and was killed: "
+                f"exit={proc.returncode}\nstdout:\n{_decoded(killed_out)}\n"
+                f"stderr:\n{_decoded(killed_err)}"
+            )
+        assert proc.returncode == 0, (
+            f"format bar node sweep shard {i} failed:\n{out}\n{err}"
+        )
+        reports.append(json.loads(out.strip().splitlines()[-1]))
+    n = reports[0]["n"]
+    reports.sort(key=lambda r: r["from"])
+    covers = [r["from"] for r in reports] == [0] + [r["to"] for r in reports[:-1]]
+    assert covers and reports[-1]["to"] == n, f"shard ranges do not tile [0,{n}): {reports}"
+    return {
+        "cases": sum(r["cases"] for r in reports),
+        "expectedCases": sum(r["expectedCases"] for r in reports),
+        "bad": [entry for r in reports for entry in r["bad"]],
+    }
+
+
 MARKER_TIMEOUT_S = 20
 FENCE_TIMEOUT_S = 20
 SWEEP_TIMEOUT_S = 300
+# The sweep is the suite's slowest single test (73 s serial on a loaded box).
+# It is a pure JS computation over a generated string list, so it splits into
+# disjoint shards checked by concurrent node processes. The default leaves
+# half the cpus to the rest of the suite (a 4-vCPU runner under -n 4 gets 2
+# shards, not 4 -- saturating the box makes other tests' lock races likelier);
+# REFDES_TEST_SWEEP_SHARDS overrides it for debugging.
+SWEEP_SHARDS = min(4, max(1, int(os.environ.get("REFDES_TEST_SWEEP_SHARDS")
+                                  or (os.cpu_count() or 2) // 2)))
 
 MARKER_HARNESS = r'''
 globalThis.sessionStorage = {
@@ -1929,6 +1995,19 @@ function build(prefix, codePoints) {
   for (const c of chars) build(prefix + c, codePoints + 1);
 }
 build('', 0);
+
+// Sharding: the sweep is pure (no disk, no server, no shared state -- OPS
+// mutate only the Area stub), so the string list splits into disjoint index
+// ranges and each shard checks exactly the cases it owns. The Python side
+// passes [index, count] in argv, runs the shards as separate node processes
+// at once, and requires the ranges to tile [0, strings.length): the
+// whole-list coverage the test claims is the tiling plus every shard's own
+// cases == expectedCases, not one process grinding all 137k strings.
+const SWEEP_SHARD = Number(process.argv[2] ?? 0);
+const SWEEP_SHARDS = Number(process.argv[3] ?? 1);
+const SWEEP_N = strings.length;
+const sweepFrom = Math.floor((SWEEP_N * SWEEP_SHARD) / SWEEP_SHARDS);
+const sweepTo = Math.floor((SWEEP_N * (SWEEP_SHARD + 1)) / SWEEP_SHARDS);
 
 const inlineOps = ['bold', 'italic', 'strike', 'code'];
 const blockOps = ['heading', 'list', 'numbered', 'quote', 'link', 'table', 'hr'];
@@ -2236,13 +2315,16 @@ function isSubsequence(needle, haystack) {
 
 const area = new Area();
 const expectedCases = strings.reduce(
-  (sum, text) => sum + ((text.length + 1) * (text.length + 2) / 2) * allOps.length,
+  (sum, text, si) =>
+    si >= sweepFrom && si < sweepTo
+      ? sum + ((text.length + 1) * (text.length + 2) / 2) * allOps.length
+      : sum,
   0,
 );
 let cases = 0;
 const bad = [];
 
-for (let si = 0; si < strings.length && bad.length === 0; si += 1) {
+for (let si = sweepFrom; si < sweepTo && bad.length === 0; si += 1) {
   const text = strings[si];
   const baseSeq = text.replace(/[*~`]/g, '');
   const len = text.length;
@@ -2296,7 +2378,7 @@ for (let si = 0; si < strings.length && bad.length === 0; si += 1) {
   }
 }
 
-console.log(JSON.stringify({ cases, expectedCases, bad }));'''
+console.log(JSON.stringify({ cases, expectedCases, bad, n: SWEEP_N, from: sweepFrom, to: sweepTo }));'''
 
 @pytest.mark.skipif(NODE is None, reason="no node on PATH to run the served formatbar module")
 def test_the_format_bar_inline_toggles_terminate_on_marker_only_selections(tmp_path):
@@ -2329,6 +2411,8 @@ def test_the_format_bar_block_inserts_land_outside_every_fence_shape(tmp_path):
 
 @pytest.mark.skipif(NODE is None, reason="no node on PATH to run the served formatbar module")
 def test_the_format_bar_survives_the_exhaustive_marker_selection_sweep(tmp_path):
-    results = _node_json(tmp_path, SWEEP_HARNESS, timeout=SWEEP_TIMEOUT_S)
+    results = _node_json_shards(
+        tmp_path, SWEEP_HARNESS, SWEEP_SHARDS, timeout=SWEEP_TIMEOUT_S
+    )
     assert results["bad"] == [], results["bad"]
     assert results["cases"] == results["expectedCases"]
