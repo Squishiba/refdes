@@ -481,6 +481,10 @@ fields, leave the body empty; **(iii)** for the door — one new endpoint,
 `POST /api/item/<ref>/continue`; **(a)** for the sub-question — W5b.5 writes
 both from the one locked operation.
 
+Implementation note (2026-11-07): scalars + tasks are copied; list/dict
+fields and links other than follows are carried by the fold and deliberately
+not re-declared.
+
 **Q3 — the tip moves while a draft is open** (another tab, VS Code, a CLI
 write, another author).
 (a) refuse the save and show the current tip's list against the pending ticks,
