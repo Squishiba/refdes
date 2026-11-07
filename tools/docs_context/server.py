@@ -64,10 +64,11 @@ FOCUS_MAX_LINE = 10_000_000
 
 
 class DocState:
-    """The served doc, the repo it resolves in, the analyze cache, the LLM
-    endpoint the ask buttons post to (loopback, validated at startup), the
-    one-at-a-time lock around the model, and the in-memory focus the editor
-    posts (lock-protected; nothing about it is ever written to disk)."""
+    """The served doc, the repo it resolves in, the analyze cache (guarded
+    by ``cache_lock``), the LLM endpoint the ask buttons post to (loopback,
+    validated at startup), the one-at-a-time lock around the model, and the
+    in-memory focus the editor posts (lock-protected; nothing about it is
+    ever written to disk)."""
 
     def __init__(
         self,
@@ -87,6 +88,7 @@ class DocState:
         self.llm_url = llm_url
         self.llm_model = llm_model
         self.ask_lock = threading.Lock()
+        self.cache_lock = threading.Lock()
         self._cache: dict[str, tuple[tuple[int, int], dict]] = {}
         self.focus_lock = threading.Lock()
         self.focus_seq = 0
@@ -120,13 +122,22 @@ class DocState:
         return Path(rel).as_posix(), None
 
     def doc_payload(self, rel: str) -> dict:
-        """refs.analyze's blocks for one page, cached by (mtime_ns, size)."""
+        """refs.analyze's blocks for one page, cached by (mtime_ns, size).
+        The cache is shared by every handler thread -- and POST /api/focus
+        made it a second concurrent writer -- so the hit-check, the eviction
+        and the store run under ``cache_lock`` (unlocked, two threads at the
+        cap evicting the same first key raise KeyError, and iterating the
+        dict while another thread mutates it raises RuntimeError). The
+        analyze itself runs OUTSIDE the lock: two threads may both miss and
+        both analyze the same page -- a rare duplicate -- never a corrupted
+        cache."""
         target = self.doc_abs if rel == self.rel_doc else self.target_for(rel)
         st = os.stat(target)
         key = (st.st_mtime_ns, st.st_size)
-        cached = self._cache.get(rel)
-        if cached is not None and cached[0] == key:
-            return cached[1]
+        with self.cache_lock:
+            cached = self._cache.get(rel)
+            if cached is not None and cached[0] == key:
+                return cached[1]
         analyzed = refs.analyze(target, self.repo_root)
         payload = {
             "doc": rel,
@@ -134,10 +145,11 @@ class DocState:
             "mtime": st.st_mtime,
             "blocks": analyzed["blocks"],
         }
-        # dict order is insertion order: the oldest page is the first key.
-        if len(self._cache) >= CACHE_MAX:
-            self._cache.pop(next(iter(self._cache)))
-        self._cache[rel] = (key, payload)
+        with self.cache_lock:
+            # dict order is insertion order: the oldest page is the first key.
+            if len(self._cache) >= CACHE_MAX:
+                self._cache.pop(next(iter(self._cache)))
+            self._cache[rel] = (key, payload)
         return payload
 
     def mtime_payload(self) -> dict:
