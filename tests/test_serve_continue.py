@@ -133,13 +133,6 @@ tasks: [{id: T-boot, text: Measure idle current., state: open}]
 ---
 """
 
-TIP_ROWS = [
-    {"id": "T-rail", "text": "Settle the rail budget.", "state": "open"},
-    {"id": "T-bom", "text": "Freeze the BOM.", "state": "done"},
-    {"id": "T-old", "text": "Retire the old antenna.", "state": "dropped"},
-    {"id": "T-probe", "text": "Probe the SWD pins.", "state": "open"},
-]
-
 
 def _write(root, name, text):
     with open(os.path.join(str(root), name), "w", encoding="utf-8", newline="\n") as fh:
@@ -281,7 +274,7 @@ def test_the_continuation_copies_the_tips_declared_fields_and_names_its_tip(proj
 
     text = _read_bytes(project_root, "items/log.yaml").decode("utf-8")
     new_block = text.split("- id: LOG-SYS-003", 1)[1]
-    assert f"key: {result.key}" in new_block if hasattr(result, "key") else "key: " in new_block
+    assert f"key: {result.handle}" in new_block
     assert f"follows: [LOG-SYS-002@{tip_key}]" in text
     assert "summary: Rail work continues." in new_block  # the tip's, verbatim
     assert "date: 01/09/2026" in new_block  # the tip's, verbatim
@@ -290,6 +283,39 @@ def test_the_continuation_copies_the_tips_declared_fields_and_names_its_tip(proj
     new = project.item_by_id("LOG-SYS-003")
     assert new.key and new.key != tip_key
     assert new.links["follows"] == [f"LOG-SYS-002@{tip_key}"]
+
+
+def test_non_ascii_task_text_is_written_as_is_not_escaped(tmp_path):
+    r"""The copied list must stay readable in a hand-authored file: the flow
+    dump writes non-ASCII row text as itself (é, —, Ω), not as `\xNN`/`\uNNNN`
+    escapes, and the reloaded row text equals the original."""
+    write_project_config(tmp_path, SCHEMA)
+    os.mkdir(os.path.join(str(tmp_path), "items"))
+    row_text = "Résumé — 5 Ω ≤ 3 µF"
+    _write(
+        tmp_path,
+        "items/log.yaml",
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - {id: LOG-A, summary: Opens., date: 01/09/2026, tasks: "
+        f"[{{id: T-a, text: {row_text}, state: open}}]}}\n",
+    )
+    _mint_keys(tmp_path)
+
+    result = continue_thread(
+        tmp_path, "LOG-A", [("T-a", "done")], _tip_revision(tmp_path, "items/log.yaml")
+    )
+    assert isinstance(result, Applied), result.message
+
+    text = _read_bytes(tmp_path, "items/log.yaml").decode("utf-8")
+    new_block = text.split(f"- id: {result.item_id}", 1)[1]
+    assert row_text in new_block
+    assert "\\x" not in new_block.lower()
+    assert "\\u" not in new_block.lower()
+
+    tip_id, rows, ambiguous = _fold_tip(tmp_path, result.item_id)
+    assert (tip_id, ambiguous) == (result.item_id, False)
+    assert rows == [{"id": "T-a", "text": row_text, "state": "done"}]
 
 
 # ---------------------------------------------------------------- R2: tip bytes
@@ -742,6 +768,7 @@ def test_a_continuation_the_delta_gate_would_block_is_invalid_and_writes_nothing
     )
     _mint_keys(tmp_path)
     project = _load(tmp_path)
+    build_mod.build(project, seal_write=False, reseal=False)
     assert any("tasks" in d.message and "closed" in d.message for d in project.errors)
     before = tree(tmp_path, "items", ".refdes")
 
