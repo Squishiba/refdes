@@ -21,15 +21,16 @@ function row(item, filters) {
   if (item.workspace) head.appendChild(badge(item.workspace, 'board'));
   if (item.external) head.appendChild(badge('imported', 'muted-badge'));
   if (item.blocked) head.appendChild(badge('blocked', 'bad'));
-  li.appendChild(head);
+  link.appendChild(head);
 
-  li.appendChild(el('div', 'item-title', item.title));
+  link.appendChild(el('div', 'item-title', item.title));
 
   const meta = el('div', 'item-meta');
   if (item.stage) meta.appendChild(badge(item.stage, `stage-${item.stage}`));
   if (item.check !== 'none') meta.appendChild(badge(`check: ${item.check}`, item.check === 'fail' ? 'bad' : item.check === 'pass' ? 'ok' : 'warn'));
   meta.appendChild(el('span', 'muted', `${item.source_file}:${item.source_line}`));
-  li.appendChild(meta);
+  link.appendChild(meta);
+  li.appendChild(link);
   return li;
 }
 
