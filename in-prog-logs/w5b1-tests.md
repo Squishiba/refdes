@@ -137,3 +137,16 @@ c215e472); all four CI checks green on the revert. Round 2 lives intact at
 
 Status: #448 green at 51bceb29 (= c215e472 tree); round 2 awaits the
 orchestrator's split decision.
+
+## Option (b): compression (2026-11-07)
+
+Cherry-picked round 2 (b177a121) and compressed the W5b.1 block's round-1
+comments/docstrings (header block -> deleted, the two one-line docstrings ->
+deleted, M1 decision text -> 4-line docstring keeping its full meaning) so
+src additions land at exactly 350. Proof: `.scratch/ast_proof.py` (strip
+docstrings, `ast.dump` head vs 304c7edc) prints IDENTICAL -- only
+comments/docstrings changed; a walrus micro-optimization found by that proof
+was reverted. `tools/pr_size.py` (CI-style): 350/350, verdict PASS. File
+25 passed, full suite 6001 passed 2 skipped, ruff baseline-identical.
+
+Status: round 2 + compression pushed (b99b585d); awaiting CI.
