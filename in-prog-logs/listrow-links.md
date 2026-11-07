@@ -65,6 +65,59 @@ serve`, /edit/#/items):
 - filter query preserved: with a filter active (e.g. `?board=x`) the row href
   and post-click hash keep the query (e.g. `#/items/<handle>?board=x`).
 
-## Status
+## Status (test-author slice)
 
 Done. Test file only; branch pushed; NO PR (per instructions).
+
+# Implementer slice (LISTROW-impl, 2026-11-07)
+
+Fix: `row()` in `src/refdes/serve/static/list.js` — the three content
+appends (`head`, the title div, `meta`) moved from `li` to `link`, and
+`li.appendChild(link)` added before `return li`. 4 insertions / 3
+deletions, one file. No other behaviour changed; text stays on `el()`
+(no innerHTML). Changelog fragment
+`changelog.d/editor-list-rows-link.fixed.md` added.
+
+## Red/green
+
+All 3 pins RED on the pre-fix tree (each fails on
+`assert 'li.appendChild(link)' in body`); GREEN after the fix with the
+test file untouched. Targeted run green:
+`tests/test_serve_list_rows.py tests/test_serve_static.py
+tests/test_crossplatform_lint.py` → 97 passed. Full suite once:
+5973 passed, 2 skipped (`-n 4 --dist worksteal`). `ruff check` on
+`tests/test_serve_list_rows.py` (new file, the only Python touched):
+clean.
+
+## Real browser (port 8951, worktree serve, project = this repo)
+
+Recipe from `.scratch/pptr447` (probe pattern in
+`.scratch/pptr/rows.mjs`, playwright-core; Chromium
+`/usr/bin/chromium`, Firefox headless). PASS = case met, 0 console/
+page/HTTP errors in both browsers.
+
+| case | Chromium | Firefox |
+| --- | --- | --- |
+| `li.item-row a` == `li.item-row` | PASS 20/20 | PASS 20/20 |
+| click row → hash `#/items/<handle>`, `.editor` + detail render (`#detail[data-rendered-handle]`, 8 `.detail-block`) | PASS | PASS |
+| facet `type=log` first, click row → hash keeps `?type=log`, detail renders | PASS | PASS |
+| Tab reaches `a.item-link`, Enter opens (`tabsToLink` 1 / 2) | PASS | PASS |
+| console/page errors | 0 | 0 |
+
+The repo project's top type facet is `log`, not `requirement` (the
+slice text's example); the case is the filter-query ride-along, which
+holds.
+
+## Notes
+
+- ff-only merge of origin/main into the branch is not possible (branch
+  carries the test commit); base is `1b9efa14` (#447), recent, so the
+  old-base guard did not fire. Main has since moved by 3 commits
+  (perf docs-context, archive-guard move, W5b docs plan) — none touch
+  `serve/static`.
+- PR opened as `fix(serve): item rows in the editor list link to the
+  item view`.
+
+## Status (implementer slice)
+
+Done. Fix + changelog + log; PR open, CI run reported in the reply.
