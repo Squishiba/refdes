@@ -110,3 +110,30 @@ E501 lines (baseline-identical via `git show HEAD:...`).
 
 Status: W5b.1 DONE — implementation and green test file; full suite runs
 once pre-push.
+
+## Round 2 — review items (2026-11-07, mimo chunk 1): DONE at 304c7edc, STOPPED by pr-size
+
+M1 (scalar-only is intended: the fold carries list/dict fields and non-
+follows links; re-declaring would duplicate edges/checks): fixed the false
+`_continuation_lines` docstring and the comment above `continue_thread`,
+pinned the behaviour with a test (local schema: `tags` list field + `relates`
+link at the tip; new entry carries scalars/tasks/follows only;
+`chains.resolve_current` still answers the tip's tags) and added the dated
+note to the plan's Q2. Doc fixes can't be red-first; the mutation check
+stands in (relaxing both skip-guards so the code copies the list field makes
+the test fail at the `tags:` assertion; reverted). L1: date fallback now
+rides `emit()` (red-first shown: bare `date: 2026-11-07` under YYYY-MM-DD
+reloads as a YAML date). L2: plan_new_id refusal passes "" as ref. L3:
+`Applied.plan: PatchPlan | _ContinuationPlan`. Local evidence: 25 passed in
+the file, full suite 6001 passed / 2 skipped, ruff baseline-identical.
+
+STOP: the gate counts every added src line including comments — round 1 is
+348/350, round 2's approved src edits add +17 (M1 comment+docstring +16,
+L1 +2; L2/L3 are line-swaps +1 each in numstat) → 365, and the minimum
+faithful combination (~354) still exceeds the budget. Rules: no size-exempt,
+do not widen, STOP and report. Reverted (plain push, tree byte-identical to
+c215e472); all four CI checks green on the revert. Round 2 lives intact at
+304c7edc for a follow-up PR (src +17 alone: fits any budget).
+
+Status: #448 green at 51bceb29 (= c215e472 tree); round 2 awaits the
+orchestrator's split decision.
