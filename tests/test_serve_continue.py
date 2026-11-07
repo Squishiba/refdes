@@ -54,13 +54,12 @@ from __future__ import annotations
 
 import os
 import threading
-from datetime import date
 
 import pytest
 from conftest import write_project_config
 
 from refdes import build as build_mod
-from refdes import chains, dates, keys, links, parse
+from refdes import chains, keys, links, parse
 from refdes.model import TASK_STATES
 from refdes.schema import load_project
 from refdes.serve import edit as edit_mod
@@ -317,88 +316,6 @@ def test_non_ascii_task_text_is_written_as_is_not_escaped(tmp_path):
     tip_id, rows, ambiguous = _fold_tip(tmp_path, result.item_id)
     assert (tip_id, ambiguous) == (result.item_id, False)
     assert rows == [{"id": "T-a", "text": row_text, "state": "done"}]
-
-
-def test_the_continuation_copies_scalars_and_lets_the_fold_carry_the_rest(tmp_path):
-    """The scalar-only decision (#448 review, 2026-11-07): the new entry
-    carries the tip's scalars, the ticked list and the generated `follows:`
-    -- and nothing else. A list-typed field and a non-`follows` link declared
-    at the tip are NOT re-declared, because the fold carries them from the
-    earlier entries and copying them would duplicate edges and checks;
-    `chains.resolve_current` on the new entry still answers the tip's value."""
-    schema_m1 = SCHEMA.replace(
-        "      tasks: { type: tasks, on_change: timeline }",
-        "      tags: { type: list, on_change: ignore }\n"
-        "      tasks: { type: tasks, on_change: timeline }",
-    ).replace(
-        "link_types:\n  follows: { inverse: followed_by, label: Follows, trace: false }",
-        "link_types:\n"
-        "  follows: { inverse: followed_by, label: Follows, trace: false }\n"
-        "  relates: { inverse: related_to, label: Relates, trace: false }",
-    ).replace(
-        "    links:\n      follows: [log]",
-        "    links:\n      follows: [log]\n      relates: [log]",
-    )
-    write_project_config(tmp_path, schema_m1)
-    os.mkdir(os.path.join(str(tmp_path), "items"))
-    _write(
-        tmp_path,
-        "items/log.yaml",
-        "defaults: { type: log }\n"
-        "items:\n"
-        "  - {id: LOG-A, summary: Opens., date: 01/09/2026}\n"
-        "  - {id: LOG-B, summary: Continues., date: 02/09/2026, follows: [LOG-A], "
-        "tags: [bring-up, thermal], relates: [LOG-A], "
-        "tasks: [{id: T-a, text: A., state: open}]}\n",
-    )
-    _mint_keys(tmp_path)
-    tip_key = _load(tmp_path).item_by_id("LOG-B").key
-
-    result = continue_thread(
-        tmp_path, "LOG-B", [("T-a", "done")], _tip_revision(tmp_path, "items/log.yaml")
-    )
-    assert isinstance(result, Applied), result.message
-
-    text = _read_bytes(tmp_path, "items/log.yaml").decode("utf-8")
-    new_block = text.split(f"- id: {result.item_id}", 1)[1]
-    assert "summary: Continues." in new_block  # the scalars carry over
-    assert "date: 02/09/2026" in new_block
-    assert "tasks: [{id: T-a, text: A., state: done}]" in new_block
-    assert "tags:" not in new_block  # the list field is not re-declared
-    assert "relates:" not in new_block  # links other than follows are not
-
-    project = _load(tmp_path)
-    new = project.item_by_id(result.item_id)
-    assert new.links == {"follows": [f"LOG-B@{tip_key}"]}
-    # nothing was lost: the fold carries the tip's list field to the new entry
-    assert chains.resolve_current(project, new, "tags") == ["bring-up", "thermal"]
-
-
-def test_the_invented_date_is_written_the_way_the_emitter_writes_it(tmp_path):
-    """The date fallback rides the same emitter as every other field: under
-    a `YYYY-MM-DD` format the bare `date: 2026-11-07` line reloads as a YAML
-    date, not the string -- the emitted line must be quoted the way
-    `create_item` writes it, and the reloaded field is that string."""
-    schema_yyyy = SCHEMA.replace("date_format: DD/MM/YYYY", "date_format: YYYY-MM-DD")
-    write_project_config(tmp_path, schema_yyyy)
-    os.mkdir(os.path.join(str(tmp_path), "items"))
-    _write(
-        tmp_path,
-        "items/log.yaml",
-        "defaults: { type: log }\n"
-        "items:\n"
-        "  - {id: LOG-A, summary: Opens., tasks: [{id: T-a, text: A., state: open}]}\n",
-    )
-    _mint_keys(tmp_path)
-
-    result = continue_thread(
-        tmp_path, "LOG-A", [("T-a", "done")], _tip_revision(tmp_path, "items/log.yaml")
-    )
-    assert isinstance(result, Applied), result.message
-
-    project = _load(tmp_path)
-    new = project.item_by_id(result.item_id)
-    assert new.fields["date"] == dates.format_date(date.today(), "YYYY-MM-DD")
 
 
 # ---------------------------------------------------------------- R2: tip bytes

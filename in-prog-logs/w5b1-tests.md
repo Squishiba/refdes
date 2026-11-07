@@ -110,27 +110,3 @@ E501 lines (baseline-identical via `git show HEAD:...`).
 
 Status: W5b.1 DONE — implementation and green test file; full suite runs
 once pre-push.
-
-## Round 2 — review items (2026-11-07, mimo chunk 1)
-
-M1: scalar-only copying is the intended behaviour (fold carries list/dict
-fields and non-follows links; re-declaring would duplicate edges/checks).
-Fixed the `_continuation_lines` docstring ("Tip fields verbatim" was false)
-and the comment above `continue_thread`; pinned with
-`test_the_continuation_copies_scalars_and_lets_the_fold_carry_the_rest`
-(local schema, `tags` list field + `relates` link at the tip; new entry has
-scalars/tasks/follows only, and `chains.resolve_current` still answers the
-tip's tags). Doc fixes can't be red-first, so the mutation check stands in:
-relaxing both skip-guards so the code copies the list field makes the test
-fail at the `tags:` assertion (reverted after). Dated note added to the
-plan's Q2. L1: the date fallback now goes through `emit()` (bare
-`date: 2026-11-07` under YYYY-MM-DD reloads as a YAML date — the new test
-was red on the old code, green after). L2: plan_new_id refusal passes ""
-as ref, like create_item. L3: `Applied.plan` annotated
-`PatchPlan | _ContinuationPlan`. Skipped L4/Info per the decision.
-
-Evidence round 2: test_serve_continue.py 25 passed; crossplatform lint
-passes (51 combined); ruff (I,F,E,W) on both files = 6 pre-existing E501s
-only; full suite 6001 passed, 2 skipped.
-
-Status: round 2 DONE; awaiting CI.
