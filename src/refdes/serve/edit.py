@@ -193,7 +193,7 @@ class Applied:
     ref: str
     path: str
     revision: str
-    plan: PatchPlan
+    plan: PatchPlan | _ContinuationPlan
     diagnostics: tuple = ()
     # What an accept pinned, as `{path, key, reader, value}` -- the value the
     # reader read. Empty for an ordinary save, and never a value the client sent.
@@ -2352,7 +2352,15 @@ def preview_creation(
 
 # W5b.1: append the tick draft as one new entry using create_item's machinery.
 # Client sends ticks + revision; server re-folds, refuses no-list postures,
-# copies tip fields/list, appends a new follows entry (plan §4, §5 R1/R2/R5).
+# copies the tip's scalar declared fields and its whole tasks list, mints
+# id/key, appends a new follows entry, and gates the candidate build before
+# it writes (plan §4, §5 R1/R2/R5). Non-scalar declared fields and every
+# link except the generated `follows:` are deliberately not copied:
+# `chains._declares`/`_fold` resolve any field to the nearest declaring
+# entry, so a continuation that omits `checks:`/`options:`/list fields and
+# links like `addresses:` loses nothing -- the fold carries them from the
+# earlier entries -- while copying them would duplicate edges and report a
+# failing check twice (review of #448, 2026-11-07).
 
 
 @dataclass(frozen=True)
@@ -2498,7 +2506,7 @@ def _continue_locked(config: str, request: ContinueRequest):
         prefix_hint=str((dest.get("defaults") or {}).get("prefix") or ""),
     )
     if reason is not None:
-        return Refused(who, new_id, reason, path=path)
+        return Refused(who, "", reason, path=path)
     key = _fresh_key(before)
     composite = links.composite_for(tip)
     if composite is None:
@@ -2658,7 +2666,13 @@ def _planned_rows(rows: list, ticks: tuple):
 
 
 def _continuation_lines(project: Project, tip: Item, rows: list):
-    """Tip fields verbatim plus copied-and-updated tasks; body empty."""
+    """Copies the tip's scalar declared fields (plus the board/workspace
+    hints, plus a date when the type declares one and the tip has none) and
+    the whole `tasks:` list; body empty. List/dict fields, non-scalar
+    declared types and every link except the generated `follows:` are
+    deliberately NOT copied: the fold carries them from the earlier entries
+    (chains' nearest-declaring-entry resolution), and re-declaring them
+    would duplicate edges and checks."""
     spec = project.types.get(tip.type)
     lines: list[str] = []
 
@@ -2678,7 +2692,9 @@ def _continuation_lines(project: Project, tip: Item, rows: list):
                 return None, reason
     fspec = spec.fields.get("date") if spec is not None else None
     if fspec is not None and fspec.type == "date" and "date" not in tip.fields:
-        lines.append(f"date: {dates.format_date(date.today(), project.date_format)}")
+        reason = emit("date", dates.format_date(date.today(), project.date_format))
+        if reason:
+            return None, reason
     for name, value in tip.fields.items():
         if name == "tasks" or value is None or isinstance(value, (list, dict)):
             continue
