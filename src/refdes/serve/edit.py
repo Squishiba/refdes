@@ -2350,17 +2350,6 @@ def preview_creation(
     return {"id": new_id, "reason": reason, "destination": dest, "destination_exists": exists}
 
 
-# W5b.1: append the tick draft as one new entry using create_item's machinery.
-# Client sends ticks + revision; server re-folds, refuses no-list postures,
-# copies the tip's scalar declared fields and its whole tasks list, mints
-# id/key, appends a new follows entry, and gates the candidate build before
-# it writes (plan §4, §5 R1/R2/R5). Non-scalar declared fields and every
-# link except the generated `follows:` are deliberately not copied:
-# `chains._declares`/`_fold` resolve any field to the nearest declaring
-# entry, so a continuation that omits `checks:`/`options:`/list fields and
-# links like `addresses:` loses nothing -- the fold carries them from the
-# earlier entries -- while copying them would duplicate edges and report a
-# failing check twice (review of #448, 2026-11-07).
 
 
 @dataclass(frozen=True)
@@ -2389,7 +2378,6 @@ def continue_thread(
     *,
     read_only: bool = False,
 ):
-    """Append the tip's copied-and-updated task list as one new thread entry."""
     root = os.path.abspath(project_root)
     config = os.path.abspath(config_path) if config_path else os.path.join(root, CONFIG_NAME)
     if read_only:
@@ -2625,7 +2613,6 @@ def _continue_locked(config: str, request: ContinueRequest):
 
 
 def _planned_rows(rows: list, ticks: tuple):
-    """Validate ticks against the fold's list and return the copied rows."""
     by_id = {
         r["id"]: r for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str)
     }
@@ -2666,13 +2653,11 @@ def _planned_rows(rows: list, ticks: tuple):
 
 
 def _continuation_lines(project: Project, tip: Item, rows: list):
-    """Copies the tip's scalar declared fields (plus the board/workspace
-    hints, plus a date when the type declares one and the tip has none) and
-    the whole `tasks:` list; body empty. List/dict fields, non-scalar
-    declared types and every link except the generated `follows:` are
-    deliberately NOT copied: the fold carries them from the earlier entries
-    (chains' nearest-declaring-entry resolution), and re-declaring them
-    would duplicate edges and checks."""
+    """Copies the tip's scalar declared fields (+ hints, + a date the type declares
+    and the tip lacks) and the whole `tasks:` list; body empty. List/dict fields,
+    non-scalar types and links except the generated `follows:` are deliberately NOT
+    copied: the fold carries them, and re-declaring them would duplicate edges and
+    checks."""
     spec = project.types.get(tip.type)
     lines: list[str] = []
 
