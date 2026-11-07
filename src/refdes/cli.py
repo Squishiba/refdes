@@ -1715,6 +1715,14 @@ def cmd_fetch(args) -> int:
             print(f"         source value changed  {change}")
         for note in r.source_notes:
             print(f"         source: {note}")
+        for dropped in r.source_dropped:
+            # Informational, like `source_notes`: the key left because no
+            # `source()` span references it -- the record's documented shape.
+            # Named so a hand-inserted key is never lost in silence.
+            print(
+                f"         source: dropped {dropped} "
+                "(no source() span references it any more)"
+            )
         for warning in r.source_warnings:
             print(f"WARNING  {warning}", file=sys.stderr)
         for warning in r.page_warnings:

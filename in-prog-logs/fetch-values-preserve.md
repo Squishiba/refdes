@@ -121,29 +121,27 @@ Cross-platform: no `Path.read_text(newline=)`; writes use `newline=""`, reads us
 ports. `tests/test_crossplatform_lint.py` 26 passed with the new file present;
 `ruff check tests/test_fetch_values_preserve.py --select I,F,E,W` clean.
 
-## Alternatives for the orchestrator
+## Alternatives for the orchestrator (resolved)
 
-1. **REPORT the removal (recommended, pinned here).** Smallest honest change,
-   consistent with the documented record shape: two sites, one new `FetchResult`
-   field, one print.
-2. **KEEP keys the reader cannot re-emit, prune the rest.** Keep a key the
-   extraction over the pinned bytes cannot produce (a CSV key with no row, as in
-   the probe), drop one the extractor would emit differently: preserves pins the
-   tool cannot rebuild, keeps the record clean of the rest. Needs a per-reader
-   "cannot extract" answer (the CSV reader raises a problem today) — and it
-   still needs (1)'s report, so it is additive.
-3. **KEEP everything unreferenced (the task's preferred option).** Contradicts
-   `citations.py:2349`, `:2421-2424` and `calc-sources.md:534-558`; makes
-   "the record holds exactly the keys in use" un-true, so a key whose item was
-   deleted survives forever and `values:` grows monotonically. If chosen, the
-   three KEEP-FLIPS assertions and the design doc's matrix row move with it.
-4. **Make it an error, not a report.** Refuses the fetch over an author key
-   nobody references; blocks the routine command for a benign residue — the
-   fetch's existing `FAILED` vocabulary is for pins that could not be written.
+Four options were tabled (REPORT; keep-unre-emit-able-keys; KEEP-all; make-it-
+an-error); the orchestrator ACCEPTED option 1, REPORT — the KEEP-FLIPS
+assertions stay as pinned.
 
-## Not verified
+## Implementation (slice FETCH-VALUES-impl) — DONE
 
-- Windows CI (ubuntu-only box; the pins avoid the known hazards by construction),
-  the full suite (per the slice instruction), and PDF/xlsx records (CSV only).
-- No changelog.d fragment: this slice ships no user-visible behaviour; the
-  fragment belongs with the implementation that turns these tests green.
+Per the accepted REPORT decision: `FetchResult.source_dropped` (citations.py),
+filled at every prune site — the whole-map pop and the map replacement in
+`_refresh_pinned_sources`, and the whole-record rebuild in `fetch_all` — and
+printed by `cmd_fetch` as
+`         source: dropped <path>: <key> (no source() span references it any
+more)` on a run that still exits 0; the prune itself, the hashing, and the
+lockfile bytes are untouched, and a run that prunes nothing prints nothing
+new. `docs/cli-reference.md`'s fetch `values:` paragraph gained one sentence
+(quote taken from a real scratch-project run, `.scratch/fvimpl/`); fragment
+`changelog.d/fetch-reports-pruned-values.fixed.md`. 27 added lines in src.
+
+Green: all 6 new tests; neighbours `test_fetch_values_preserve` +
+citations/calc/sources/fetch/lockfile/serve-sources/cli set → 911 passed,
+1 skipped; full suite once before push. ruff on the two touched src files:
+same 8 pre-existing findings as their HEAD versions, none mine. Not verified
+locally: Windows CI (relies on CI), PDF/xlsx records (CSV only).

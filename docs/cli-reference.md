@@ -991,6 +991,10 @@ record is left exactly as it was. Without `--update`, missing keys are
 extracted only while the file still matches its pin; a changed file is skipped
 (its locked values are kept) or, when a key was never extracted, refused --
 `--update` accepts the change and prints each moved value as `old -> new`.
+A key of the record that no `source()` span references any more is removed by
+both halves, and each removal is named on its own line --
+`source: dropped datasheet.csv: Q (no source() span references it any more)`
+-- on a run that still exits 0.
 
 ```bash
 refdes fetch

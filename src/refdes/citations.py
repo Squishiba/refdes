@@ -2231,6 +2231,12 @@ class FetchResult:
     source_changes: list[str] = field(default_factory=list)
     source_warnings: list[str] = field(default_factory=list)
     source_notes: list[str] = field(default_factory=list)
+    # One line per `values:` key this fetch removed from the record, as
+    # `"{path}: {key}"` -- a key no `source()` span references any more. The
+    # removal itself is the record's documented shape (calc-sources.md); this
+    # reports it, because a key the author hand-inserted must never leave in
+    # silence. Informational: it never fails the run.
+    source_dropped: list[str] = field(default_factory=list)
     # One line per cited `page:` this fetch could not confirm against the bytes
     # it pinned, for the same reason `section_errors` is separate from `error`:
     # the pin succeeded, and a warning (not a failure) is the honest severity
@@ -2347,6 +2353,7 @@ def _refresh_pinned_sources(
     if not keys:
         if values:
             existing.pop("values")  # nothing cites a key from this file any more
+            result.source_dropped.extend(f"{canon}: {key}" for key in sorted(values))
             return True
         return False
     target = os.path.join(project.root, canon)
@@ -2388,6 +2395,12 @@ def _refresh_pinned_sources(
     if new_values == values:
         return False
     _diff_source_values(canon, values, new_values, result)
+    # Keys the extraction did not re-emit: no `source()` span names them, and
+    # the record's documented content is exactly the keys in use. `_diff_
+    # source_values` only sees the new map, so name each departing key here.
+    result.source_dropped.extend(
+        f"{canon}: {key}" for key in sorted(values) if key not in new_values
+    )
     existing["values"] = new_values
     existing["fetched"] = _now_iso()
     return True
@@ -3077,6 +3090,12 @@ def fetch_all(
             section_errors=[_section_failure(canon, f, sections) for f in failures],
             size_warnings=[oversize] if oversize else [],
         )
+        # The whole-record replacement above drops every old `values:` key the
+        # extraction did not re-emit -- no `source()` span names them. Report
+        # each one; the removal itself is the record's documented shape.
+        for key in sorted((previous or {}).get("values") or {}):
+            if key not in new_values:
+                result.source_dropped.append(f"{canon}: {key}")
         # The page count, for the same reason and with the same scope argument as
         # the sections above: these are the bytes being pinned, so every cited
         # page is checked against them -- including the pages of items this run
