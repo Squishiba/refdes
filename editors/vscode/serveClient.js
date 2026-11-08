@@ -284,6 +284,16 @@ class ServeClient {
   }
 
   /**
+   * `GET /api/navis` -- `{navis: rows, counts: {active, archived}}`, the panel
+   * rows with the archive store merged at request time (plan S3 of
+   * docs/design/navis-vscode-panel-plan.md). Rides the one GET path above --
+   * S6.1's tree is read-only, and the write path is S6.2's to add.
+   */
+  navis() {
+    return this.request("/api/navis");
+  }
+
+  /**
    * The editor deep link for one item key -- the same `/edit/#/items/<key>` the
    * server injects into its own preview toolbar (`serve/server.py:_decorate`).
    *
