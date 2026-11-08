@@ -68,7 +68,6 @@ windows alike (fixtures written with newline='', no platform path asserts).
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import socket
@@ -82,11 +81,8 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VSCODE_DIR = REPO_ROOT / "editors" / "vscode"
-# The satisfiability hook only: the tree's files are the default, and no test
-# sets the variables. (Same one-file-swap posture the DC-4a prototype log
-# describes; here it runs through the harness instead of a tree edit.)
-EXTENSION_JS = os.environ.get("REFDES_DC4B_EXTENSION_JS") or str(VSCODE_DIR / "extension.js")
-PACKAGE_JSON = os.environ.get("REFDES_DC4B_PACKAGE_JSON") or str(VSCODE_DIR / "package.json")
+EXTENSION_JS = str(VSCODE_DIR / "extension.js")
+PACKAGE_JSON = str(VSCODE_DIR / "package.json")
 NODE = shutil.which("node")
 NODE_TIMEOUT_S = 90
 
@@ -492,6 +488,22 @@ async function main() {
     } else if (step.a === "snap") {
       phases[step.name] = await httpJson(cfg.server + "/__captures");
       outAt[step.name] = state.output.slice();
+    } else if (step.a === "out") {
+      outAt[step.name] = state.output.slice();
+    } else if (step.a === "waitposts") {
+      // Poll until n posts have arrived (deadline-bounded), then drain a
+      // quiet window too: the count is proved without a load-sensitive
+      // fixed sleep, and the quiet drain proves nothing further arrived.
+      const got = [];
+      const t0 = Date.now();
+      while (got.length < step.n && Date.now() - t0 < step.deadline) {
+        got.push(...(await httpJson(cfg.server + "/__captures")));
+        if (got.length < step.n) await sleep(50);
+      }
+      await sleep(step.quiet);
+      got.push(...(await httpJson(cfg.server + "/__captures")));
+      phases[step.name] = got;
+      outAt[step.name] = state.output.slice();
     } else {
       state.errors.push("unknown step " + step.a);
     }
@@ -597,6 +609,20 @@ def docs_context_lines(lines: list) -> list:
     return [line for line in lines if re.search(r"docs.?context", line, re.IGNORECASE)]
 
 
+REFUSAL_TEXT = "names the non-loopback host"
+
+
+def refusal_lines(lines: list, needle: str = "") -> list:
+    """Only the lines docsFocus.js really logs for a REFUSED host (its
+    refusal wording), not the swallowed-failure line, not any other
+    docs-context output. `needle` pins which host the refusal names."""
+    return [
+        line
+        for line in docs_context_lines(lines)
+        if REFUSAL_TEXT in line and (not needle or needle in line)
+    ]
+
+
 def closed_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -670,8 +696,7 @@ def test_enabled_url_posts_the_active_cursor(tmp_path):
                 [
                     {"a": "editor", "name": "a", "file": "a"},
                     {"a": "fire", "name": "a", "line": 4},
-                    {"a": "sleep", "ms": 800},
-                    {"a": "snap", "name": "p1"},
+                    {"a": "waitposts", "name": "p1", "n": 1, "deadline": 5000, "quiet": 600},
                 ],
             ),
         )
@@ -712,12 +737,10 @@ def test_paths_are_workspace_relative_with_forward_slashes(tmp_path):
                 [
                     {"a": "editor", "name": "deep", "file": "deep"},
                     {"a": "fire", "name": "deep", "line": 1},
-                    {"a": "sleep", "ms": 700},
-                    {"a": "snap", "name": "p1"},
+                    {"a": "waitposts", "name": "p1", "n": 1, "deadline": 5000, "quiet": 600},
                     {"a": "editor", "name": "root", "file": "root"},
                     {"a": "fire", "name": "root", "line": 9},
-                    {"a": "sleep", "ms": 700},
-                    {"a": "snap", "name": "p2"},
+                    {"a": "waitposts", "name": "p2", "n": 1, "deadline": 5000, "quiet": 600},
                 ],
             ),
         )
@@ -743,8 +766,7 @@ def test_rapid_selection_changes_debounce_to_one_post(tmp_path):
                 [
                     {"a": "editor", "name": "a", "file": "a"},
                     *[{"a": "fire", "name": "a", "line": line} for line in range(5)],
-                    {"a": "sleep", "ms": 900},
-                    {"a": "snap", "name": "p1"},
+                    {"a": "waitposts", "name": "p1", "n": 1, "deadline": 5000, "quiet": 600},
                 ],
             ),
         )
@@ -769,14 +791,12 @@ def test_same_path_and_line_are_not_reposted(tmp_path):
                 [
                     {"a": "editor", "name": "a", "file": "a"},
                     {"a": "fire", "name": "a", "line": 4},
-                    {"a": "sleep", "ms": 800},
-                    {"a": "snap", "name": "p1"},
+                    {"a": "waitposts", "name": "p1", "n": 1, "deadline": 5000, "quiet": 600},
                     {"a": "fire", "name": "a", "line": 4},
                     {"a": "sleep", "ms": 800},
                     {"a": "snap", "name": "p2"},
                     {"a": "fire", "name": "a", "line": 6},
-                    {"a": "sleep", "ms": 800},
-                    {"a": "snap", "name": "p3"},
+                    {"a": "waitposts", "name": "p3", "n": 1, "deadline": 5000, "quiet": 600},
                 ],
             ),
         )
@@ -806,15 +826,13 @@ def test_returning_to_the_posted_pair_cancels_the_pending_post(tmp_path):
                 [
                     {"a": "editor", "name": "a", "file": "a"},
                     {"a": "fire", "name": "a", "line": 4},  # A = (docs/a.md, 5)
-                    {"a": "sleep", "ms": 800},
-                    {"a": "snap", "name": "p1"},
+                    {"a": "waitposts", "name": "p1", "n": 1, "deadline": 5000, "quiet": 600},
                     {"a": "fire", "name": "a", "line": 6},  # B armed...
                     {"a": "fire", "name": "a", "line": 4},  # ...cancelled by A
                     {"a": "sleep", "ms": 800},
                     {"a": "snap", "name": "p2"},
                     {"a": "fire", "name": "a", "line": 8},  # a lone post after A
-                    {"a": "sleep", "ms": 800},
-                    {"a": "snap", "name": "p3"},
+                    {"a": "waitposts", "name": "p3", "n": 1, "deadline": 5000, "quiet": 600},
                 ],
             ),
         )
@@ -851,8 +869,7 @@ def test_only_the_active_workspace_file_editor_is_posted(tmp_path):
                     {"a": "editor", "name": "b", "file": "b"},
                     {"a": "active", "name": "a"},
                     {"a": "fireOn", "name": "b", "line": 2, "active": "a"},
-                    {"a": "sleep", "ms": 800},
-                    {"a": "snap", "name": "p1"},
+                    {"a": "waitposts", "name": "p1", "n": 1, "deadline": 5000, "quiet": 600},
                     {"a": "editor", "name": "t", "file": "a", "scheme": "untitled"},
                     {"a": "fire", "name": "t", "line": 3},
                     {"a": "sleep", "ms": 700},
@@ -910,8 +927,7 @@ def test_body_carries_only_path_and_line(tmp_path):
                 [
                     {"a": "editor", "name": "a", "file": "a"},
                     {"a": "fire", "name": "a", "line": 2},
-                    {"a": "sleep", "ms": 800},
-                    {"a": "snap", "name": "p1"},
+                    {"a": "waitposts", "name": "p1", "n": 1, "deadline": 5000, "quiet": 600},
                 ],
             ),
         )
@@ -933,9 +949,11 @@ def test_body_carries_only_path_and_line(tmp_path):
 def test_non_loopback_url_is_ignored_with_one_output_line(tmp_path):
     """Default 3: a setting naming a non-loopback host posts NOTHING (the
     host never resolves to our capture server by design: .invalid) and says
-    so with exactly the one output-channel line naming the docs-context
-    setting. No popup, no crash. The one line is the pin: the tree today
-    produces zero output for the setting."""
+    so with EXACTLY ONE refusal line naming the host -- matched by the
+    refusal wording itself, not by "any line mentioning docs-context", so a
+    swallowed failure line cannot masquerade as the refusal. No popup, no
+    crash. The one line is the pin: the tree today produces zero output for
+    the setting."""
     ws = make_workspace(tmp_path)
     with FakeFocusServer() as server:
         out = run_extension(
@@ -955,10 +973,11 @@ def test_non_loopback_url_is_ignored_with_one_output_line(tmp_path):
         )
     assert out["phases"]["p1"] == []
     assert out["popups"] == []
-    lines = docs_context_lines(out["outAt"]["p1"])
-    assert 1 <= len(lines) <= 3, (
-        f"a non-loopback refdes.docsContext.url must be refused with one "
-        f"output-channel line naming it; output was: {out['outAt']['p1']!r}"
+    lines = refusal_lines(out["outAt"]["p1"], "evil.invalid")
+    assert len(lines) == 1, (
+        "a non-loopback refdes.docsContext.url must be refused with EXACTLY "
+        "ONE refusal line naming the host; output was: "
+        f"{out['outAt']['p1']!r}"
     )
 
 
@@ -981,8 +1000,7 @@ def test_localhost_and_ipv6_loopback_urls_are_honoured(tmp_path):
                 [
                     {"a": "editor", "name": "a", "file": "a"},
                     {"a": "fire", "name": "a", "line": 4},
-                    {"a": "sleep", "ms": 800},
-                    {"a": "snap", "name": "p1"},
+                    {"a": "waitposts", "name": "p1", "n": 1, "deadline": 5000, "quiet": 600},
                     {"a": "set", "url": f"http://[::1]:{server.port}"},
                     {"a": "configChange"},
                     {"a": "fire", "name": "a", "line": 6},
@@ -1028,8 +1046,7 @@ def test_clearing_the_url_stops_posting_immediately(tmp_path):
                 [
                     {"a": "editor", "name": "a", "file": "a"},
                     {"a": "fire", "name": "a", "line": 4},
-                    {"a": "sleep", "ms": 800},
-                    {"a": "snap", "name": "p1"},
+                    {"a": "waitposts", "name": "p1", "n": 1, "deadline": 5000, "quiet": 600},
                     {"a": "set", "url": ""},
                     {"a": "configChange"},
                     {"a": "fire", "name": "a", "line": 6},
@@ -1066,8 +1083,7 @@ def test_server_errors_are_swallowed_with_one_throttled_line(tmp_path):
                     {"a": "fire", "name": "a", "line": 5},
                     {"a": "sleep", "ms": 600},
                     {"a": "fire", "name": "a", "line": 6},
-                    {"a": "sleep", "ms": 900},
-                    {"a": "snap", "name": "p1"},
+                    {"a": "waitposts", "name": "p1", "n": 3, "deadline": 5000, "quiet": 600},
                     {"a": "set", "url": f"http://127.0.0.1:{dead}"},
                     {"a": "configChange"},
                     {"a": "fire", "name": "a", "line": 8},
@@ -1082,3 +1098,159 @@ def test_server_errors_are_swallowed_with_one_throttled_line(tmp_path):
     assert len(docs_context_lines(out["outAt"]["p1"])) <= 1, out["outAt"]["p1"]
     assert len(docs_context_lines(out["outAt"]["p2"])) <= 2, out["outAt"]["p2"]
     assert out["popups"] == []
+
+
+# --------------------------------------------------- the silent branch (round 2)
+
+
+@skip_no_node
+def test_unparseable_urls_are_ignored_silently(tmp_path):
+    """The docstring's silent branch, pinned by running it: garbage text,
+    a non-http scheme aimed at a loopback host, and https:// all post
+    NOTHING and print NOTHING (the spec's one output line belongs to
+    "any other host", not to unparseable input; the https case pins the
+    round-1 skipped finding AS IS -- silently ignored)."""
+    ws = make_workspace(tmp_path)
+    with FakeFocusServer() as server:
+        out = run_extension(
+            tmp_path,
+            base_cfg(
+                tmp_path,
+                ws,
+                server,
+                "",
+                [
+                    {"a": "editor", "name": "a", "file": "a"},
+                    {"a": "set", "url": "not a url"},
+                    {"a": "configChange"},
+                    {"a": "fire", "name": "a", "line": 4},
+                    {"a": "sleep", "ms": 700},
+                    {"a": "snap", "name": "g1"},
+                    {"a": "set", "url": f"ftp://127.0.0.1:{server.port}"},
+                    {"a": "configChange"},
+                    {"a": "fire", "name": "a", "line": 6},
+                    {"a": "sleep", "ms": 700},
+                    {"a": "snap", "name": "g2"},
+                    {"a": "set", "url": f"https://127.0.0.1:{server.port}"},
+                    {"a": "configChange"},
+                    {"a": "fire", "name": "a", "line": 8},
+                    {"a": "sleep", "ms": 700},
+                    {"a": "snap", "name": "g3"},
+                ],
+            ),
+        )
+    for name in ("g1", "g2", "g3"):
+        assert out["phases"][name] == [], (name, out["phases"][name])
+    assert docs_context_lines(out["outAt"]["g3"]) == [], out["outAt"]["g3"]
+    assert out["popups"] == []
+
+
+# ------------------------------------------------ loopback lookalikes (round 2)
+
+# The PR's claim, now driven: hosts a startsWith-style check would wave
+# through. Each refused host must produce zero posts AND exactly one
+# refusal line naming it (the refusal line is the observable witness;
+# port 8099 is not the capture server, so the post would be lost). The
+# bracketed shape fails WHATWG host parsing (a bracketed IPv6 literal
+# must be the whole host), so it lands in the silent branch with NO
+# output line -- pinned per case.
+LOOKALIKES = [
+    ("http://127.0.0.1.evil.example:8099", "127.0.0.1.evil.example"),
+    ("http://localhost.evil.example:8099", "localhost.evil.example"),
+    ("http://evil.example/127.0.0.1", "evil.example"),
+    ("http://[::1].evil.example:8099", None),
+]
+
+
+@skip_no_node
+@pytest.mark.parametrize("url,needle", LOOKALIKES, ids=[u for u, _ in LOOKALIKES])
+def test_loopback_lookalikes_are_refused(tmp_path, url, needle):
+    ws = make_workspace(tmp_path)
+    with FakeFocusServer() as server:
+        out = run_extension(
+            tmp_path,
+            base_cfg(
+                tmp_path,
+                ws,
+                server,
+                url,
+                [
+                    {"a": "editor", "name": "a", "file": "a"},
+                    {"a": "fire", "name": "a", "line": 4},
+                    {"a": "sleep", "ms": 700},
+                    {"a": "snap", "name": "p1"},
+                ],
+            ),
+        )
+    assert out["phases"]["p1"] == [], out["phases"]["p1"]
+    if needle is None:
+        # Unparseable (bracketed host is not a valid IPv6 literal):
+        # the silent branch -- no post AND no output line.
+        assert docs_context_lines(out["outAt"]["p1"]) == [], out["outAt"]["p1"]
+    else:
+        lines = refusal_lines(out["outAt"]["p1"], needle)
+        assert len(lines) == 1, (
+            f"{url} must be refused with exactly one refusal line naming "
+            f"the host; output was: {out['outAt']['p1']!r}"
+        )
+    assert out["popups"] == []
+
+
+# --------------------------------- refusals observed against the capture (round 2)
+
+# Refused urls that WOULD reach the capture server if wrongly accepted,
+# so "zero posts" is observable there (not vacuous against a dead host):
+#   * 0.0.0.0:<capture-port> -- on Linux connect(0.0.0.0) goes to
+#     loopback, so a wrongly-accepted 0.0.0.0 lands on the capture
+#     server; on Windows the connect fails, degrading that one case to
+#     vacuous (the refusal line stays observable everywhere);
+#   * the userinfo shapes pin that the host is what follows the '@':
+#     "127.0.0.1@evil.example" has host evil.example (refused), while
+#     "evil.example@127.0.0.1" has host 127.0.0.1 -- genuinely loopback,
+#     so it must be HONOURED (a substring rule over the url text accepts
+#     both; a WHATWG-host rule splits them exactly here).
+USERINFO_CASES = [
+    ("0.0.0.0", "refused", "0.0.0.0"),
+    ("127.0.0.1@evil.example", "refused", "evil.example"),
+    ("evil.example@127.0.0.1", "honoured", None),
+]
+
+
+@skip_no_node
+@pytest.mark.parametrize(
+    "hostpart,expect,needle", USERINFO_CASES, ids=[c[0] for c in USERINFO_CASES]
+)
+def test_url_host_observability_against_the_capture_server(tmp_path, hostpart, expect, needle):
+    ws = make_workspace(tmp_path)
+    with FakeFocusServer() as server:
+        out = run_extension(
+            tmp_path,
+            base_cfg(
+                tmp_path,
+                ws,
+                server,
+                f"http://{hostpart}:{server.port}",
+                [
+                    {"a": "editor", "name": "a", "file": "a"},
+                    {"a": "fire", "name": "a", "line": 4},
+                    {"a": "sleep", "ms": 700},
+                    {"a": "snap", "name": "p1"},
+                ],
+            ),
+        )
+    assert out["popups"] == []
+    if expect == "refused":
+        assert out["phases"]["p1"] == [], (
+            f"http://{hostpart}:{server.port} is not loopback and must not "
+            f"post; captured: {out['phases']['p1']!r}"
+        )
+        assert len(refusal_lines(out["outAt"]["p1"], needle)) == 1, out["outAt"]["p1"]
+    else:
+        requests = out["phases"]["p1"]
+        assert len(requests) == 1, (
+            f"http://{hostpart}:{server.port} parses to the loopback host "
+            f"127.0.0.1 (userinfo is not the host) and must be honoured"
+        )
+        assert requests[0]["headers"].get("origin") == f"http://127.0.0.1:{server.port}"
+        assert body_json(requests[0]) == {"path": "docs/a.md", "line": 5}
+        assert refusal_lines(out["outAt"]["p1"]) == [], out["outAt"]["p1"]

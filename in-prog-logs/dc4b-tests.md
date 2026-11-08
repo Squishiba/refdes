@@ -124,26 +124,26 @@ and silently on every platform.
 
 - `editors/vscode/docsFocus.js` (new, vscode injected — drivable like
   serveClient.js): 300 ms debounce, (path, line) dedupe cleared on
-  config change, drop-while-in-flight, loopback host allow-list
-  (`[::1]` bracket-stripped; lookalikes refused), Content-Length-framed
-  POST with `X-Docs-Context: 1` + `Origin`, swallow with one 1500 ms
-  throttled output line (refusal message contains "ignoring"/"host";
-  failure messages deliberately avoid /ignor|refus|host/i so the [::1]
-  pin stays green), 5 s request timeout. Wired from `extension.js`
-  (selection listener + config-change hook + deactivate dispose);
-  setting declared in `package.json`; README section + settings-table
-  row; changelog fragment added.
-- No test file edited; no Python touched. Green: 13 passed (was 12
-  red/1 guard), ~28 s; test_vscode_extension + test_crossplatform_lint +
-  test_vscode_adapter_contract: 46 passed. `node --check` clean on both
-  touched js files. Branch ff-merged to origin/main (#452 base).
-- Review round 1 (PR #454, Qwen chunk 1; Luna approved chunk 2) in one
-  pass: README section was splicing the Live snapshot paragraphs (moved
-  after them; README now purely additive vs main), log bullet re-split,
-  README+changelog say `/api/focus` on the url's ORIGIN (path ignored);
-  real bug fixed: the de-dupe early-return left an armed burst
-  (A->B->A posted B) — it now CANCELS the pending post, pinned by a new
-  test (red: B posted; green: p2 empty) in the test file (additive,
-  authorised). 14/14 green. https urls stay silently ignored (skipped
-  per orchestrator).
-- Status: COMPLETE (round 1 delivered; head on the PR branch).
+  config change, drop-while-in-flight, loopback allow-list (`[::1]`
+  bracket-stripped), Content-Length-framed POST with `X-Docs-Context: 1`
+  + `Origin`, swallow with one 1500 ms throttled line; failure messages
+  avoid /ignor|refus|host/i (the [::1] pin), 5 s timeout. Wired from
+  `extension.js`; setting in `package.json`; README + changelog added.
+- Green: 13 passed (was 12 red/1 guard), ~28 s; neighbours 46 passed.
+- Round 1 (Qwen chunk 1; Luna approved chunk 2): README section moved
+  out of the Live snapshot splice (additive vs main), log split, wording
+  `/api/focus` on the url's origin; real bug: the de-dupe early-return
+  left an armed burst (A->B->A posted B) — now CANCELS it, pinned by a
+  new test (red shown). https stays silently ignored per orchestrator.
+- Round 2 (mimo chunk 2, six items, tests file only; docsFocus.js
+  untouched — no new bug found): refusals made OBSERVABLE (0.0.0.0 +
+  WHATWG userinfo host shapes against the capture server; 0.0.0.0 is
+  Linux-observable, vacuous on Windows — commented), lookalikes pinned
+  per shape (bracket shape: unparseable -> silent; needles name the
+  hostname, no port) — a temporary startsWith("127.0.0.1") mutation of
+  docsFocus.js made the lookalike case FAIL, then was reverted;
+  unparseable/ftp/https silence pinned; refusal lines counted exactly
+  (wording matcher); exact-count fixed sleeps -> polled waitposts
+  (5 s deadline + 600 ms quiet window); REFDES_DC4B_* env hooks removed.
+  22 cases green (~43 s); full suite 6100 passed, 2 skipped.
+- Status: COMPLETE (rounds 1-2 delivered; head on the PR branch).
