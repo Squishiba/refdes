@@ -74,19 +74,15 @@ TICK_TARGETS = {
 _SAFE_DOM_ID_RE = re.compile(r"[^A-Za-z0-9_-]")
 
 
-def _safe_dom_id(value: object) -> str:
-    return _SAFE_DOM_ID_RE.sub("_", str(value))
-
-
 def _tick_id(tip: str, row: dict, index: int, used: set[str]) -> str:
     raw = row.get("id")
     usable = isinstance(raw, str) and raw.strip() != ""
-    dom_id = _safe_dom_id(f"{tip}-{raw}" if usable else f"{tip}-row{index}")
+    dom_id = _SAFE_DOM_ID_RE.sub("_", str(f"{tip}-{raw}" if usable else f"{tip}-row{index}"))
     if not usable or dom_id in used:
-        dom_id = _safe_dom_id(f"{tip}-row{index}")
+        dom_id = _SAFE_DOM_ID_RE.sub("_", f"{tip}-row{index}")
         suffix = 2
         while dom_id in used:
-            dom_id = _safe_dom_id(f"{tip}-row{index}-{suffix}")
+            dom_id = _SAFE_DOM_ID_RE.sub("_", f"{tip}-row{index}-{suffix}")
             suffix += 1
     used.add(dom_id)
     return dom_id
