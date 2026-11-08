@@ -115,3 +115,28 @@ passed (`26 passed`). The full suite was not rerun after that narrow lint fix.
 - No source changes.
 - No PR.
 - No changelog fragment: this is test-only.
+
+## W5b.3 implementation pass
+
+Merged and pushed `fb8d6028`; the 19 new tests then passed.
+
+The worktree carries the implementation. Interactive rows are computed in
+`task_pane.py`; serve re-renders `pane.html.j2`, injects the marked preview CSS
+and `/edit/static/taskpane-ticks.js`, and only writable threaded pages get
+controls. A click or Space toggles native checkbox state; it records nothing,
+and reload restores the file. Src additions total 338 lines.
+
+Byte-identity trees against merged HEAD:
+
+- repo `_site`: `ae57b83317c7943d90aee9299bdccacc853a3fa113e646768f4029602bd8c8d9`
+- docs `_docs`: `679b6d7b4e20f230f10a99f5d0770a982677a06038ec659357aad7f539878673`
+- threaded `_site`: `f62973ddfe4f08de33a6cb6a7cfc894307d20906db62a77b855d485d66bd2a86`
+
+The one authorized test edit removes the exact W5b.3 tick label/input before the
+no-`<input` scan; token/API/form/fetch checks remain. Chromium and Firefox pass
+all browser cases: built pane clean, preview states correct, click/Space toggle,
+done un-tick, derived rows inert, pane show/hide/tabs unchanged. Both report zero
+app page/console errors; Chromium has two favicon-only resource 404s.
+
+Full suite: `6120 passed, 2 skipped`. Ruff is clean on touched py. The changelog
+fragment is added.
