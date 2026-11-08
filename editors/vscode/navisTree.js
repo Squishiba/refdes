@@ -86,10 +86,20 @@ function navisBadge(payload) {
  * join the project root with the row's file and land on line - 1 (0-based
  * for the editor, clamped at 0). An orphan row keeps the record's snapshot
  * location, so the same arithmetic applies. No file, no target.
+ *
+ * The joined path is normalised to `/` separators (the index's own `file`
+ * fields arrive that way, and Uri.file/open accept them on every platform)
+ * so one comparison spelling works on every OS -- the row shape carries
+ * forward slashes, and the tree must not be the one thing that re-spells
+ * them per platform.
  */
 function navisOpenTarget(row, root) {
   if (!root || !row.file) return null;
-  return { file: path.join(root, row.file), line: Math.max(0, row.line - 1) };
+  const joined = path.join(root, row.file);
+  return {
+    file: path.sep === "/" ? joined : joined.split(path.sep).join("/"),
+    line: Math.max(0, row.line - 1),
+  };
 }
 
 /**

@@ -76,9 +76,21 @@ push, no PR).
 
 # N6.1-impl: the implementer's pass (2026-11-08)
 
-STATUS: complete. S6.1 implemented as pinned; all 22 tests of
-tests/test_vscode_navis_tree.py green; targeted neighbours green; full suite
-green (counts below); PR opened, CI green.
+STATUS: complete on Linux; CI: ubuntu green, windows red on 4 tests of
+this file only -- harness bug, reported below, implementer cannot fix it.
+
+## Windows CI finding (PR #457)
+
+- `test_click_through_arithmetic...` failed on Windows: the expectation is
+  slash-normalised (`_joined`) while `path.join` is per-OS. Fixed in the
+  module: the joined target is normalised to `/` (Uri.file/open accept it
+  everywhere; a no-op on Linux).
+- `test_top_level_rows...`, `test_show_all_children...`,
+  `test_labels_are_truncated...`, `test_hostile_row_text...` fail on
+  Windows only: `run_logic_tree`'s `subprocess.run(text=True)` decodes the
+  node driver's UTF-8 stdout with the Windows locale codec, so `·` arrives
+  as `Â·`. Unfixable from the module (no JS string UTF-8-encodes to a
+  lone 0xB7); proposed test fix: pass `encoding="utf-8"` to `subprocess.run`.
 
 ## What landed
 
