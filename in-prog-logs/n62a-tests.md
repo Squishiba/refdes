@@ -126,7 +126,11 @@ themselves are correct.
 Tests run: new file (7p/1f), test_vscode_extension.py,
 test_vscode_adapter_contract.py, test_vscode_navis_tree.py,
 test_vscode_docs_focus.py, test_crossplatform_lint.py — all green;
-`node --check` clean. No real VS Code window: this slice has no UI, so
-only the wire contract is proven.
+`node --check` clean. CI (PR #458): pr-size pass; all three Tests jobs
+fail on exactly the one test above (ubuntu 1 failed/6124 passed/8
+skipped, windows 1 failed/6038 passed/94 skipped; py3.13 logs not
+downloadable, same runner+suite as ubuntu). No implementation fix is
+possible without editing the test (forbidden here). No real VS Code
+window: this slice has no UI, so only the wire contract is proven.
 
 Status: implementation complete.
