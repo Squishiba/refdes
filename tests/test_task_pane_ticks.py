@@ -51,10 +51,9 @@ from serve_support import Client
 
 from refdes import cli as cli_mod
 from refdes import render as render_mod
+from refdes import task_pane as task_pane_mod
 from refdes.serve import server as server_mod
 from refdes.serve.server import EditorApp
-
-CONFIG = "site: { title: Task Pane Ticks, out: _site }\nstandard: { base: hardware, version: 3 }\n"
 
 HOSTILE = 'Model <script>alert("a&b")</script> copper.'
 
@@ -121,6 +120,29 @@ FORK = (
     "    follows: LOG-001\n"
     "    tasks:\n"
     "      - {id: T-decoupling, text: Recheck decoupling near U14., state: open}\n"
+)
+
+# Missing ids, a repeated id, and an id outside the safe DOM-id charset:
+# every checkbox/label pair must be addressable and keep the authored text.
+DUPES = (
+    "defaults: { type: log }\n"
+    "items:\n"
+    "  - id: LOG-001\n"
+    "    summary: Power work list.\n"
+    "    date: 2026-08-30\n"
+    "    tasks:\n"
+    "      - {id: T-same, text: First same., state: open}\n"
+    "      - {id: T-same, text: Second same., state: done}\n"
+    "      - {text: No id one., state: open}\n"
+    "      - {text: No id two., state: dropped}\n"
+    '      - id: T "quote" <x>\n'
+    "        text: Weird id.\n"
+    "        state: open\n"
+    "  - id: LOG-002\n"
+    "    summary: Thermal modelling accepted.\n"
+    "    date: 2026-09-02\n"
+    "    follows: LOG-001\n"
+    "    status: accepted\n"
 )
 
 # A thread nobody ever gave a task list: no checkboxes, no module (Q6's
@@ -271,6 +293,16 @@ def _inputs(markup: str) -> list[dict]:
     return boxes
 
 
+def _tick_pairs(markup: str) -> list[tuple[str, str, str]]:
+    """Tick checkboxes as (DOM id, authored data-refdes-task, label text)."""
+    labels = dict(LABEL_TAG.findall(markup))
+    pairs = []
+    for box in _inputs(markup):
+        dom_id = re.search(r'\bid="([^"]*)"', box["tag"]).group(1)
+        pairs.append((dom_id, box["attrs"]["task"], labels.get(dom_id, "")))
+    return pairs
+
+
 def _box(markup: str, task_id: str) -> dict:
     for box in _inputs(markup):
         if box["attrs"]["task"] == task_id:
@@ -302,6 +334,11 @@ def served_fork(tmp_path):
         yield app, Client(app)
     finally:
         app.stop()
+
+
+@pytest.fixture
+def served_dupes(tmp_path):
+    yield from _serve(tmp_path, DUPES)
 
 
 @pytest.fixture
@@ -544,6 +581,34 @@ def test_every_checkbox_names_the_tip_its_tick_writes_against(served):
         assert box["attrs"]["tip"] == "LOG-002", box["tag"]
 
 
+def test_task_ids_are_unique_and_safe_only_in_the_dom_pair(served_dupes):
+    """Missing/repeated task ids are validation-legal, and the page must not
+    ship two checkboxes under one DOM id (the second label would activate the
+    first). The authored data-refdes-task value stays as authored; id/for are
+    sanitized and unique within the pane."""
+    app, client = served_dupes
+    body = pane(_body(client, app, "LOG-002"))
+    pairs = _tick_pairs(body)
+    assert len(pairs) == 5
+    ids = [dom_id for dom_id, _task, _label in pairs]
+    assert len(ids) == len(set(ids)), ids
+    assert all(re.fullmatch(r"[A-Za-z0-9_-]+", dom_id) for dom_id in ids), ids
+    assert sorted(task for _dom, task, _label in pairs) == [
+        "",
+        "",
+        "T &#34;quote&#34; &lt;x&gt;",
+        "T-same",
+        "T-same",
+    ]
+    labels_by_id = {dom_id: label for dom_id, _task, label in pairs}
+    assert set(labels_by_id) == set(re.findall(r'<label\b[^>]*\bfor="([^"]*)"', body))
+    first = next(pair for pair in pairs if "First same." in pair[2])
+    second = next(pair for pair in pairs if "Second same." in pair[2])
+    weird = next(pair for pair in pairs if "Weird id." in pair[2])
+    assert first[0] != second[0]
+    assert weird[1] == "T &#34;quote&#34; &lt;x&gt;"
+
+
 # ------------------------------------------------------------------- Q4
 
 def test_an_older_entry_shows_the_tips_checkboxes(served):
@@ -626,6 +691,41 @@ def test_a_thread_with_no_declared_list_grows_no_controls(served_undeclared, ser
     assert TICK_MODULE in control
 
 
+def test_a_state_outside_the_q6_target_table_gets_the_glyph_row_with_no_control():
+    """Q6 gives open/done/dropped a tick. A row with any other state remains
+    a read-only glyph row even when the pane model is interactive."""
+    block = task_pane_mod._task_block(
+        {
+            "state": "declared",
+            "rows": [{"id": "T-closed", "text": "Closed.", "state": "closed"}],
+        },
+        "LOG-002",
+        True,
+    )
+    assert block["rows"][0]["tick"] is None
+    html = render_mod.render_taskpane_fragment(
+        {
+            "ref": "LOG-002",
+            "forked": False,
+            "tabs": [
+                {
+                    "tip": "LOG-002",
+                    "date": None,
+                    "summary": None,
+                    "heading": "Tasks at tip:",
+                    "note": None,
+                    "verdict": None,
+                    "tasks": block,
+                }
+            ],
+            "derived": [],
+            "derived_heading": "Derived",
+        }
+    )
+    assert task_pane_mod.threads_mod.TASK_GLYPH_UNKNOWN in html
+    assert "<input" not in html
+
+
 # ------------------------------------------------------------ escaped text
 
 def test_hostile_task_text_is_escaped_in_the_checkbox_markup(served):
@@ -635,7 +735,7 @@ def test_hostile_task_text_is_escaped_in_the_checkbox_markup(served):
     escaping is proven on the tick markup, not on an absent row."""
     app, client = served
     body = pane(_body(client, app, "LOG-002"))
-    box = _box(body, "T-hostile")  # fails today: the row has no checkbox
+    box = _box(body, "T-hostile")  # the row carries the hostile task text
     id_at = box["tag"].find('id="')
     box_id = box["tag"][id_at + 4 : box["tag"].find('"', id_at + 4)]
     labels = dict(LABEL_TAG.findall(body))
@@ -680,6 +780,8 @@ def test_the_tick_module_follows_the_served_js_rules():
     assert "innerHTML" not in text
     assert "textContent" in text
     assert "tasks:" not in text
+    for needle in ("fetch(", "XMLHttpRequest", "X-Refdes-Token", "/api/"):
+        assert needle not in text, f"{TICK_MODULE} grew {needle!r}: it is W5b.3 chrome"
 
 
 def test_taskpane_js_stays_a_show_hide_tab_script(served):

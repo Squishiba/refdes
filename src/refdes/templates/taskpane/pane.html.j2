@@ -61,7 +61,7 @@
          later save writes against. The row's age line rides inside the
          label, like the read-only row's; the pane module taskpane-ticks.js
          (served with this response only) annotates the list. #}
-      <li><span class="mono">{{ loop.index }}.</span> <label class="refdes-taskpane-tick" for="{{ row.tick.id }}"><input type="checkbox" id="{{ row.tick.id }}" data-refdes-task="{{ row.id }}" data-refdes-task-state="{{ row.tick.state }}" data-refdes-tick-states="{{ row.tick.targets }}" data-refdes-tip="{{ row.tick.tip }}"{% if row.tick.checked %} checked{% endif %}> <span class="mono">{{ row.id }}</span> {{ row.text }}{% if row.since %} <span class="small muted">{{ row.since }}</span>{% endif %}</label></li>
+      <li><span class="mono">{{ loop.index }}.</span> <label class="refdes-taskpane-tick" for="{{ row.tick.id }}"><input type="checkbox" id="{{ row.tick.id }}" data-refdes-task="{{ row.tick.task }}" data-refdes-task-state="{{ row.tick.state }}" data-refdes-tick-states="{{ row.tick.targets }}" data-refdes-tip="{{ row.tick.tip }}"{% if row.tick.checked %} checked{% endif %}> <span class="mono">{{ row.id }}</span> {{ row.text }}{% if row.since %} <span class="small muted">{{ row.since }}</span>{% endif %}</label></li>
       {% else %}
       {# The same facts `refdes thread` prints, the checkbox glyph as text
          — this is the read-only pane; ticking happens in files or /edit/. #}

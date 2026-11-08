@@ -48,6 +48,8 @@ published page.
 
 from __future__ import annotations
 
+import re
+
 from . import threads as threads_mod
 from .model import Item, Project
 
@@ -82,30 +84,53 @@ TICK_TARGETS = {
     "dropped": "open",
 }
 
+_SAFE_DOM_ID_RE = re.compile(r"[^A-Za-z0-9_-]")
 
-def _tick_for(row: dict, tip: str) -> dict | None:
-    """The row's tick control data (W5b.3), or None when the row gets no
-    control: its checkbox id, the tip a tick writes against (Q4: the TIP,
-    never the entry the page shows), the row's own state, and the Q6 target
-    set. The id shape -- `refdes-taskpane-tick-<tip>-<task id>` -- is pinned
-    by the pane's tests; it is unique per pane (ids are page-scoped) and
-    stable across the tip's and an older entry's page, where the same tip's
-    list rides together.
-    """
-    target = TICK_TARGETS.get(row.get("state"))
-    if target is None:
-        return None
-    # `or`, like the row's own id/text above: `id`/`state` may be explicitly
-    # null in the authored YAML (validation owns the error) and `.get(key,
-    # default)` would spell "None" into the id.
-    task_id = row.get("id") or "?"
-    return {
-        "id": f"refdes-taskpane-tick-{tip}-{task_id}",
-        "tip": tip,
-        "state": row.get("state"),
-        "targets": target,
-        "checked": row.get("state") == "done",
-    }
+
+def _safe_dom_id(value: object) -> str:
+    return _SAFE_DOM_ID_RE.sub("_", str(value))
+
+
+def _tick_id(tip: str, row: dict, index: int, used: set[str]) -> str:
+    raw = row.get("id")
+    usable = isinstance(raw, str) and raw.strip() != ""
+    dom_id = _safe_dom_id(f"{tip}-{raw}" if usable else f"{tip}-row{index}")
+    if not usable or dom_id in used:
+        dom_id = _safe_dom_id(f"{tip}-row{index}")
+        suffix = 2
+        while dom_id in used:
+            dom_id = _safe_dom_id(f"{tip}-row{index}-{suffix}")
+            suffix += 1
+    used.add(dom_id)
+    return dom_id
+
+
+def _ticks_for(rows: list[dict], tip: str) -> list[dict | None]:
+    """The declared rows' tick control data (W5b.3), one entry per row, with
+    None for any state outside Q6. The DOM id is `refdes-taskpane-tick-` +
+    `<tip>-<task id>`, falling back to `<tip>-row<N>` for a missing, empty,
+    or repeated id; non-`[A-Za-z0-9_-]` characters are sanitized in the DOM
+    id only. The control keeps its authored `data-refdes-task` text so W5b.4
+    still sees the task identity, and the id/for pair stays addressable."""
+    used: set[str] = set()
+    ticks: list[dict | None] = []
+    for index, row in enumerate(rows, start=1):
+        target = TICK_TARGETS.get(row.get("state"))
+        if target is None:
+            ticks.append(None)
+            continue
+        task_id = row.get("id")
+        ticks.append(
+            {
+                "id": _tick_id(tip, row, index, used),
+                "task": task_id if isinstance(task_id, str) else "",
+                "tip": tip,
+                "state": row.get("state"),
+                "targets": target,
+                "checked": row.get("state") == "done",
+            }
+        )
+    return ticks
 
 
 def _unknown_state_message(state: object) -> str:
@@ -214,7 +239,7 @@ def _verdict_line(verdict: dict | None, open_count: int) -> str | None:
     return threads_mod.verdict_line(verdict, open_count)
 
 
-def _task_block(tasks: dict, tip: str = "", interactive: bool = False) -> dict:
+def _task_block(tasks: dict, tip: str, interactive: bool) -> dict:
     """The authored list under the CLI's own heading (`Tasks at tip:` /
     `Tasks at <tip>:`), with the fold's distinct postures kept distinct —
     the same four lines `cmd_thread` prints, in `threads`' shared strings.
@@ -253,6 +278,8 @@ def _task_block(tasks: dict, tip: str = "", interactive: bool = False) -> dict:
     if tasks["state"] != "declared":
         raise ValueError(_unknown_state_message(tasks["state"]))
     malformed = tasks.get("malformed")
+    authored_rows = tasks["rows"] or []
+    ticks = _ticks_for(authored_rows, tip) if interactive else [None] * len(authored_rows)
     rows = [
         {
             "glyph": threads_mod.TASK_GLYPHS.get(row.get("state"), threads_mod.TASK_GLYPH_UNKNOWN),
@@ -269,9 +296,9 @@ def _task_block(tasks: dict, tip: str = "", interactive: bool = False) -> dict:
             # an interactive render fills it for a state Q6 gives a control
             # to (it carries the row's own state). The read-only template
             # reads neither key, so the published pane stays byte-identical.
-            "tick": _tick_for(row, tip) if interactive else None,
+            "tick": tick,
         }
-        for row in (tasks["rows"] or [])
+        for row, tick in zip(authored_rows, ticks, strict=True)
     ]
     return {
         "state": "declared",
