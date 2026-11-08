@@ -1248,6 +1248,45 @@ def _write_theme_css(project: Project, out_dir: str, written: set[str]) -> None:
 TASKPANE_DIR = os.path.join(TEMPLATE_DIR, "taskpane")
 TASKPANE_ASSET_NAMES = ("taskpane.css", "taskpane.js")
 
+#: CSS authored in `taskpane.css` for the preview's tick controls (W5b.3).
+#: `build` writes every asset with this block removed, so a site's stylesheet
+#: bytes stay exactly what they were while the pane's read-only rows shipped;
+#: `serve` reads the same marked text back out and injects it in the preview
+#: response beside the interactive pane markup.
+PREVIEW_CSS_START = "/* refdes:preview-css-start */"
+PREVIEW_CSS_END = "/* refdes:preview-css-end */"
+PREVIEW_CSS_BYTES_RE = re.compile(
+    re.escape(PREVIEW_CSS_START.encode("utf-8"))
+    + b".*?"
+    + re.escape(PREVIEW_CSS_END.encode("utf-8")),
+    re.DOTALL,
+)
+
+
+def _strip_preview_css_bytes(data: bytes) -> bytes:
+    return PREVIEW_CSS_BYTES_RE.sub(b"", data, count=1)
+
+
+def preview_taskpane_css() -> str:
+    """The marked preview-only CSS, as CSS text (not a `<style>` element)."""
+    path = os.path.join(TASKPANE_DIR, "taskpane.css")
+    with open(path, "rb") as fh:
+        match = PREVIEW_CSS_BYTES_RE.search(fh.read())
+    return match.group(0).decode("utf-8") if match is not None else ""
+
+
+def render_taskpane_fragment(pane: dict) -> str:
+    """Render the pane's own markup (its toggle + aside) for one pane model,
+    on its own. W5b.3 (docs/design/thread-workbench-w5b-plan.md §4): `serve`
+    re-renders this for the model flagged `interactive` and swaps it into the
+    preview HTTP response, so the tick checkboxes reach the response and never
+    the file on disk (which `item.html.j2` includes with the same non-
+    interactive model `build` used). The item page renders the identical
+    markup through the include; this is the one entry point that renders it
+    standalone, so the two can never drift.
+    """
+    return _environment().get_template("taskpane/pane.html.j2").render(pane=pane)
+
 
 def _write_assets(
     out_dir: str, written: set[str], enabled: bool, names: tuple[str, ...], src_dir: str
@@ -1257,7 +1296,15 @@ def _write_assets(
     asset_out = os.path.join(out_dir, "assets")
     os.makedirs(asset_out, exist_ok=True)
     for name in names:
-        shutil.copyfile(os.path.join(src_dir, name), os.path.join(asset_out, name))
+        source = os.path.join(src_dir, name)
+        target = os.path.join(asset_out, name)
+        if name.endswith(".css"):
+            with open(source, "rb") as fh:
+                data = _strip_preview_css_bytes(fh.read())
+            with open(target, "wb") as fh:
+                fh.write(data)
+        else:
+            shutil.copyfile(source, target)
         written.add(f"assets/{name}")
 
 

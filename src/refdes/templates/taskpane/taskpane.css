@@ -138,7 +138,37 @@
 .refdes-taskpane-tasks li {
   margin: var(--space-2) var(--space-0);
 }
+/* refdes:preview-css-start */
+/* W5b.3 (docs/design/thread-workbench-w5b-plan.md §4): the tick row. A
+   checkbox is a real `<input>` (no inline handler; CSP is script-src 'self'),
+   so its label wraps the box and the row's own text; the box is a control,
+   not paint, so it sits on the text baseline with a comfortable click target
+   and keeps the site's accent colour. The read-only glyph row is unchanged;
+   these rules only shape the interactive rows the preview response grows.
+   `render._write_assets` strips this marked block from the stylesheet it
+   writes into a site; `serve` injects it, response-only, beside the tick
+   markup. */
+.refdes-taskpane-tick {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  cursor: pointer;
+}
 
+.refdes-taskpane-tick input[type="checkbox"] {
+  flex: none;
+  width: var(--space-14);
+  height: var(--space-14);
+  margin: var(--space-2) var(--space-0);
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.refdes-taskpane-tick-note {
+  color: var(--muted);
+  margin: var(--space-4) var(--space-0);
+}
+/* refdes:preview-css-end */
 .refdes-taskpane-derived {
   border-top: 1px solid var(--line);
   margin-top: var(--space-8);
