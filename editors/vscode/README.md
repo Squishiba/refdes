@@ -153,9 +153,10 @@ posting immediately.
 
 The Explorer gains a **Refdes Navis** section listing the project's Navis —
 the same rows the site panel and the served preview render, read live from
-`GET /api/navis` on the window's `refdes serve`. Expanding the section asks
-for the server, exactly like the first hover does (one per project per
-window, killed when the window closes).
+`GET /api/navis` on the window's `refdes serve`. The section starts collapsed,
+and expanding it asks for the server, exactly like the first hover does (one
+per project per window, killed when the window closes) — opening a project
+starts nothing.
 
 - Active Navis are listed in the projection's order, labelled `key6 · text`
   (long texts truncate; the full text is in the tooltip). Archived ones sit

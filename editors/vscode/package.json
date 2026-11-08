@@ -63,7 +63,8 @@
         {
           "id": "refdes.navisTree",
           "name": "Refdes Navis",
-          "when": "refdes.active"
+          "when": "refdes.active",
+          "visibility": "collapsed"
         }
       ]
     },

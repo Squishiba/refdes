@@ -107,8 +107,10 @@ source level (plan S7: "Cannot prove: any VS Code UI behavior"; the manual
 checklist is Jared's).
 
 Cross-platform: fixtures written with newline='', node subprocesses bounded by
-NODE_TIMEOUT_S, servers bind port 0 (the EditorApp fixture), path expectations
-built with os.path.join and normalised, no fixed ports, no POSIX-only tools.
+NODE_TIMEOUT_S and read with encoding="utf-8" (node speaks UTF-8; a Windows
+runner's locale is cp1252 and would mojibake the middot in the pinned labels),
+servers bind port 0 (the EditorApp fixture), path expectations built with
+os.path.join and normalised, no fixed ports, no POSIX-only tools.
 """
 
 from __future__ import annotations
@@ -387,9 +389,13 @@ for (const state of ["no-project", "no-server", "server-died", "no-navis"]) {
 }
 
 // childrenOf takes the item the provider handed out, not a plainified copy:
-// the same object childrenFor returned for the group.
+// the same object childrenFor returned for the group. Payloads with no
+// archived rows have no group, and the driver does not ask about a leaf --
+// the tests must not depend on unspecified leniency there.
 const handed = tree.childrenFor(cfg.payload, cfg.root);
-results.groupChildren = tree.childrenOf(handed[handed.length - 1], cfg.payload).map(plainify);
+results.groupChildren = cfg.payload.counts.archived
+  ? tree.childrenOf(handed[handed.length - 1], cfg.payload).map(plainify)
+  : [];
 
 results.targets = {};
 for (const [name, row] of Object.entries(cfg.rows)) {
@@ -426,6 +432,10 @@ def run_logic_tree(tmp_path, cfg: dict) -> dict:
         [NODE, str(script), json.dumps(cfg)],
         capture_output=True,
         text=True,
+        # node speaks UTF-8; a Windows runner's locale is cp1252 and would
+        # mojibake the U+00B7 in the pinned `key6 · text` labels on the way
+        # back in (the posture of tests/test_editor_live_calc.py's harness).
+        encoding="utf-8",
         timeout=NODE_TIMEOUT_S,
         check=False,
     )
@@ -478,12 +488,12 @@ PAYLOAD = {
     ],
     "counts": {"active": 4, "archived": 2},
 }
-POSIX_ROOT = "D:/posix/root"
+WIN_DRIVE_ROOT = "D:/posix/root"
 
 
 @pytest.fixture
 def logic(tmp_path):
-    return run_logic_tree(tmp_path, {"module": NAVIS_TREE_JS, "root": POSIX_ROOT, "rows": ROWS, "payload": PAYLOAD})
+    return run_logic_tree(tmp_path, {"module": NAVIS_TREE_JS, "root": WIN_DRIVE_ROOT, "rows": ROWS, "payload": PAYLOAD})
 
 
 def _joined(*parts):
@@ -620,11 +630,11 @@ def test_click_through_arithmetic_matches_the_definition_provider(logic):
     targets = logic["targets"]
     keyed = ROWS["keyed"]
     assert targets["keyed"] == {
-        "file": _joined(POSIX_ROOT.replace("/", os.sep), "items", "note-a.md"),
+        "file": _joined(WIN_DRIVE_ROOT.replace("/", os.sep), "items", "note-a.md"),
         "line": keyed["line"] - 1,
     }, targets
     assert targets["archived"]["file"] == _joined(
-        POSIX_ROOT.replace("/", os.sep), "items", "note-c.md"
+        WIN_DRIVE_ROOT.replace("/", os.sep), "items", "note-c.md"
     )
     assert targets["archived"]["line"] == 8
     # the orphan row's snapshot location (same file/line as the keyed row in
@@ -652,7 +662,7 @@ def test_line_one_and_missing_file_targets(tmp_path):
         tmp_path,
         {
             "module": NAVIS_TREE_JS,
-            "root": POSIX_ROOT,
+            "root": WIN_DRIVE_ROOT,
             "rows": script_rows,
             "payload": {
                 "navis": [script_rows["first"], script_rows["nofile"]],
@@ -707,6 +717,22 @@ def test_package_json_contributes_the_view_in_the_explorer_only():
         assert container == "explorer", f"views contributed to {container!r}, not the Explorer"
         for entry in items:
             assert "icon" not in entry, entry
+
+
+def test_the_view_entry_starts_collapsed_so_expand_is_the_boot():
+    """Ratified Q5: expanding the view IS the ask. VS Code shows a contributed
+    view expanded/visible by default, and extension.js treats the view becoming
+    visible as that gesture (it refreshes with boot=true) -- so an
+    expanded-by-default section would boot a Python `refdes serve` child on
+    the first Explorer open of any refdes project, with no user gesture
+    (plan §3 "no boot at activation", §9). The contribution's
+    `visibility: "collapsed"` is what makes the first expansion the ask."""
+    manifest = json.loads(_read(PACKAGE_JSON))
+    entries = manifest["contributes"]["views"]["explorer"]
+    entry = next(e for e in entries if e.get("id") == VIEW_ID)
+    assert entry.get("visibility") == "collapsed", (
+        f"the {VIEW_ID} view entry does not start collapsed: {entry}"
+    )
 
 
 def test_the_tree_wiring_lives_in_the_extension_and_the_pure_module():

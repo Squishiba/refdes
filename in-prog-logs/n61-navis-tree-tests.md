@@ -76,80 +76,61 @@ push, no PR).
 
 # N6.1-impl: the implementer's pass (2026-11-08)
 
-STATUS: complete on Linux; CI: ubuntu green, windows red on 4 tests of
-this file only -- harness bug, reported below, implementer cannot fix it.
+STATUS: complete. All 22 tests green; neighbours green; full suite
+6122 passed / 2 skipped; PR #457 opened. First CI run: ubuntu, py3.13,
+pr-size green; windows-latest red on 5 tests, diagnosed:
 
-## Windows CI finding (PR #457)
-
-- `test_click_through_arithmetic...` failed on Windows: the expectation is
-  slash-normalised (`_joined`) while `path.join` is per-OS. Fixed in the
-  module: the joined target is normalised to `/` (Uri.file/open accept it
-  everywhere; a no-op on Linux).
-- `test_top_level_rows...`, `test_show_all_children...`,
-  `test_labels_are_truncated...`, `test_hostile_row_text...` fail on
-  Windows only: `run_logic_tree`'s `subprocess.run(text=True)` decodes the
-  node driver's UTF-8 stdout with the Windows locale codec, so `·` arrives
-  as `Â·`. Unfixable from the module (no JS string UTF-8-encodes to a
-  lone 0xB7); proposed test fix: pass `encoding="utf-8"` to `subprocess.run`.
+- `test_click_through_arithmetic...`: the expectation is slash-normalised
+  (`_joined`) while `path.join` is per-OS -> the module normalises the
+  joined target to `/` (Uri.file/open accept it everywhere; no-op Linux).
+- The four label tests: `run_logic_tree`'s `subprocess.run(text=True)`
+  decoded the node driver's UTF-8 stdout with the Windows locale codec
+  (cp1252), so `·` arrived as `Â·` (reproduced the decode locally). No JS
+  string UTF-8-encodes to a lone 0xB7 -- the fix belongs in the harness.
 
 ## What landed
 
-- `editors/vscode/navisTree.js` -- the pure module, exactly the author's
-  exported surface (TEXT_LIMIT, truncateText, navisLabel, navisDescription,
-  navisTooltip, navisContextValue, navisBadge, navisOpenTarget,
-  createNavisTree). No vscode/http/fs import; `path.join` only. Kept the
-  reference module's shapes, with two deliberate departures:
-  - `childrenOf` resolves the group's rows AND the root captured at
-    childrenFor time, so archived children get the same click-through as
-    top-level rows (the .scratch reference passed an undefined root and
-    dropped the archived rows' command -- untested by the pins, plan §5
-    wants the click to survive).
-  - the word "token" (any case) appears nowhere in the module, as the
-    never-names-the-token pin requires. The .scratch reference used a
-    `tokens` local, which contains it -- that reference validated only the
-    15 logic/live tests, not the 7 source pins; the shipped file passes all
-    22.
-- `serveClient.js`: `navis()` delegating to `this.request("/api/navis")`
-  (shared token-header GET; no second http path, no POST -- S6.2's).
-- `package.json`: `contributes.views.explorer` entry
-  `refdes.navisTree` ("Refdes Navis", `when: refdes.active`), no icon, no
-  viewsContainers (ratified Q3). No version bump (Q6/S6.4).
-- `extension.js`: require + `let navisTree = null`,
-  `async function refreshNavisTree(boot)` (ensureServe on boot = ratified
-  Q5, serve.navis(), placeholder per failure), refresh from refreshIndex
-  (save + refdes.refreshIndex; also the no-root early return), from
-  pollServeRevision on serial move, from onServeExit, and from the view's
+- `navisTree.js` -- the pure module, exactly the author's exported
+  surface; no vscode/http/fs import, `path.join` only. Two deliberate
+  departures from the .scratch reference: the group captures the root at
+  childrenFor time so archived children keep the same click-through
+  (plan §5); and the word "token" (any case) appears nowhere, as the
+  never-names-the-token pin requires (the reference's `tokens` local
+  contains it -- it validated only the 15 logic/live tests, not the
+  source pins).
+- `serveClient.js`: `navis()` -> `this.request("/api/navis")` (shared
+  token-header GET; no POST -- S6.2's).
+- `package.json`: views.explorer entry `refdes.navisTree`
+  (`when: refdes.active`), no icon, no viewsContainers (Q3), no version
+  bump (Q6/S6.4).
+- `extension.js`: `refreshNavisTree(boot)` (ensureServe on boot = Q5,
+  serve.navis(), placeholder per failure) refreshed from refreshIndex
+  (save + refdes.refreshIndex, incl. the no-root return),
+  pollServeRevision on serial move, onServeExit, and the view's
   onDidExpandElement/onDidChangeVisibility with `refreshNavisTree(true)`;
-  `createTreeView("refdes.navisTree", { treeDataProvider })`; badge set
-  behind a `"badge" in navisView` guard (ViewBadge is newer than the
-  ^1.85 engine floor).
-- README: a "Navis tree (read-only)" section; changelog fragment
-  `navis-vscode-tree.added.md` (read-only list, actions come next).
+  ViewBadge behind a `"badge" in view` guard (newer than ^1.85).
+- README section + `changelog.d/navis-vscode-tree.added.md`.
+- Design fit (not conflict): test_vscode_docs_focus.py activates the
+  REAL extension.js under a fake vscode with no
+  EventEmitter/TreeItem/createTreeView -- the emitter/view are built in
+  `activate` behind a createTreeView-exists guard, TreeItems only inside
+  the provider (the fake never drives it).
 
-## The one design point the tests forced (not a conflict, a fit)
+# N6.1-impl round 1 (review + orchestrator, 2026-11-08)
 
-tests/test_vscode_docs_focus.py activates the REAL extension.js under a
-fake vscode that has no EventEmitter, no TreeItem and no
-window.createTreeView. So the emitter and view are created in `activate`
-behind `typeof vscode.window.createTreeView === "function"`, and
-TreeItems are built only inside the provider (which the fake never
-drives). No test edited; no src/ change; the pins' regexes all match
-inside the guard.
+STATUS: complete; CI all checks green incl. windows-latest.
 
-## Red -> green
-
-- Red before the change: `8 failed, 4 passed, 10 errors` (matches the
-  author's baseline exactly).
-- Green after: `22 passed`.
-- Neighbours: test_vscode_extension.py + test_vscode_adapter_contract.py +
-  test_vscode_docs_focus.py + test_crossplatform_lint.py: `90 passed`.
-- Full suite once: see the PR's CI (ubuntu+windows) -- all checks green.
-- `node --check` clean on extension.js, navisTree.js, serveClient.js.
-- ruff: no .py file touched.
-
-## Not verifiable here
-
-Same as the author's note: no real VS Code window existed, so view
-rendering, `when` clauses, menus, native tooltips and the real vscode API
-are verified only at source/logic level; the plan's manual checklist
-(items 1, 2, 6 for S6.1) is Jared's.
+- HIGH (windows-latest): added `encoding="utf-8"` to the file's one
+  `subprocess.run` (a grep found no other text=True reader of node
+  output) with the test_editor_live_calc.py rationale, and named it in
+  the docstring's cross-platform checklist.
+- NITs: `POSIX_ROOT` -> `WIN_DRIVE_ROOT` (the value is a Windows drive
+  root); the driver only asks `childrenOf` when the payload has an
+  archived group, so no test leans on provider leniency.
+- Orchestrator addendum: the views entry carries
+  `visibility: "collapsed"` (+ pinning test; Q5: expand = the ask -- an
+  expanded-by-default view would boot the child with no gesture) and
+  the README says the section starts collapsed. NOT verified against a
+  real window: that `visibility` is the accepted property name and that
+  first expansion fires the boot (an unknown property is ignored, not
+  an error).
