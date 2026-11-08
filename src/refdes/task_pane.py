@@ -35,15 +35,9 @@ Page-side: an item page shows exactly one thread entry, so the pane's
 one pane per thread member, which is also the mechanism a hypothetical
 multi-thread page would switch over.
 
-W5b.3 (docs/design/thread-workbench-w5b-plan.md §4, gates Q6/Q4/Q9) adds one
-flag, `interactive`: a declared row then carries its tick data — the Q6
-target states, the tip a later save names, the checkbox's id — and the pane
-template renders the row's checkbox behind it. The flag is False for every
-render that writes bytes (the published site, and the preview generation on
-disk alike: §5 R3/Q9 keep the generation the published bytes); only the
-serve response decoration re-renders the pane's own template with it True.
-The pane model is data; nothing here writes, and no checkbox reaches a
-published page.
+W5b.3 adds the `interactive` flag: only the serve response decoration passes
+it, and it asks the template to render preview-only tick controls. Renderers
+that write bytes leave it False, so no checkbox reaches a published page.
 """
 
 from __future__ import annotations
@@ -68,16 +62,9 @@ RENDERED_DERIVED_KINDS = ("coverage", "blocked", "check", "citation")
 #: review nit), never silently rendered as a `declared` list.
 TASK_BLOCK_STATES = ("ambiguous", "undeclared", "cleared", "declared")
 
-#: W5b.3 / Q6 (ratified (b), docs/design/thread-workbench-w5b-plan.md §6):
-#: the states a tick on a row in each state may name, in the order spelled
-#: into `data-refdes-tick-states`. open -> done/dropped; done and dropped
-#: un-tick back to open only -- never a direct done<->dropped transition.
-#: A state with no entry has no tick control at all (the pane renders its
-#: glyph as text, the site's read-only posture); the checkbox's enabled/
-#: checked shape and its target set ride in the markup (tests/
-#: test_task_pane_ticks.py), so W5b.4's save obeys them without re-deriving.
-#: `dropped` -> "open" is the same string as `done` -> "open" by design (Q6
-#: (b)); the two rows differ in `checked`, so the checkbox never lies.
+#: W5b.3 / Q6 (ratified (b)): the states a tick on a row in each state may
+#: name, in the order spelled into `data-refdes-tick-states`. A state with no
+#: entry gets the glyph row, not a control; W5b.4's save obeys the markup.
 TICK_TARGETS = {
     "open": "done,dropped",
     "done": "open",
@@ -106,12 +93,8 @@ def _tick_id(tip: str, row: dict, index: int, used: set[str]) -> str:
 
 
 def _ticks_for(rows: list[dict], tip: str) -> list[dict | None]:
-    """The declared rows' tick control data (W5b.3), one entry per row, with
-    None for any state outside Q6. The DOM id is `refdes-taskpane-tick-` +
-    `<tip>-<task id>`, falling back to `<tip>-row<N>` for a missing, empty,
-    or repeated id; non-`[A-Za-z0-9_-]` characters are sanitized in the DOM
-    id only. The control keeps its authored `data-refdes-task` text so W5b.4
-    still sees the task identity, and the id/for pair stays addressable."""
+    """One tick per declared row, `None` outside Q6. The DOM id is sanitized
+    and unique, falling back to `<tip>-row<N>`; `task` keeps the authored id."""
     used: set[str] = set()
     ticks: list[dict | None] = []
     for index, row in enumerate(rows, start=1):
@@ -181,9 +164,7 @@ def panes_by_entry(views: list[dict], *, interactive: bool = False) -> dict[str,
     page shows), so a member's pane differs from its tip's only in that
     note.
 
-    `interactive` (W5b.3) flags every pane for the tick controls; the
-    renders that write bytes never pass it, the serve response decoration
-    is the only caller that does.
+    `interactive` (W5b.3) is passed only by the serve response decoration.
     """
     panes: dict[str, dict] = {}
     for view in views:
@@ -194,9 +175,7 @@ def panes_by_entry(views: list[dict], *, interactive: bool = False) -> dict[str,
 
 def pane_for(view: dict, viewing: str, *, interactive: bool = False) -> dict:
     """One thread's pane, as the page of `viewing` shows it. The
-    `interactive` flag reaches the rows that carry tick data; the template
-    renders the tick markup behind them (see the module docstring for who
-    may set it)."""
+    `interactive` flag reaches the rows rendered with preview tick markup."""
     single_tip = not view["forked"]
     return {
         "ref": view["ref"],
@@ -249,10 +228,8 @@ def _task_block(tasks: dict, tip: str, interactive: bool) -> dict:
     valid rows under it, and a pane that let the count hide the rows made
     a partly-broken list look like an empty one (PR #197 review B1).
 
-    `tip`/`interactive` (W5b.3): every declared row carries a `tick` key.
-    An interactive render fills it with the control data (None for a state
-    Q6 gives no control), computed against the TIP's label; every other
-    render leaves it None, so the read-only template ignores it.
+    `tip`/`interactive` (W5b.3): declared rows carry a `tick` key; interactive
+    rows get control data keyed by the TIP, other rows get `None`.
     """
     if tasks["state"] == "ambiguous":
         return {
@@ -292,10 +269,8 @@ def _task_block(tasks: dict, tip: str, interactive: bool) -> dict:
             # CLI's gate (PR #197 review B4): the projection's `dict(row)`
             # carries an authored `open_since:` through on any state.
             "since": _age(row) if row.get("state") == "open" else "",
-            # W5b.3: the row's tick control data. The key is always present;
-            # an interactive render fills it for a state Q6 gives a control
-            # to (it carries the row's own state). The read-only template
-            # reads neither key, so the published pane stays byte-identical.
+            # W5b.3: control data for interactive rows; the read-only template
+            # ignores it, keeping the published pane's bytes unchanged.
             "tick": tick,
         }
         for row, tick in zip(authored_rows, ticks, strict=True)
