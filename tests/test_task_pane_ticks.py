@@ -321,8 +321,8 @@ def _walk_text(root: str):
 
 
 @pytest.fixture
-def served(tmp_path):
-    yield from _serve(tmp_path, ONE_TIP)
+def served(tmp_path_factory):
+    yield from _serve(tmp_path_factory.mktemp("served"), ONE_TIP)
 
 
 @pytest.fixture
@@ -337,18 +337,18 @@ def served_fork(tmp_path):
 
 
 @pytest.fixture
-def served_dupes(tmp_path):
-    yield from _serve(tmp_path, DUPES)
+def served_dupes(tmp_path_factory):
+    yield from _serve(tmp_path_factory.mktemp("dupes"), DUPES)
 
 
 @pytest.fixture
-def served_undeclared(tmp_path):
-    yield from _serve(tmp_path, UNDECLARED)
+def served_undeclared(tmp_path_factory):
+    yield from _serve(tmp_path_factory.mktemp("undeclared"), UNDECLARED)
 
 
 @pytest.fixture
-def served_no_write(tmp_path):
-    yield from _serve(tmp_path, ONE_TIP, read_only=True)
+def served_no_write(tmp_path_factory):
+    yield from _serve(tmp_path_factory.mktemp("no-write"), ONE_TIP, read_only=True)
 
 
 # ------------------------------- §7a.6 / Q9 / R3: the build stays plain,
