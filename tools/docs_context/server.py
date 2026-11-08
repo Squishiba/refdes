@@ -7,7 +7,11 @@ flagged. Each card carries three ask buttons (explain / misread / match)
 answered by a local model as a READING AID: ``POST /api/ask`` takes only a
 block line, a ref index and a question name, builds the prompt from the
 server's own current analysis via ``llm.build_messages``, and the browser
-can never supply prompt text. Stdlib only; binds 127.0.0.1; writes nothing;
+can never supply prompt text. ``POST /api/focus`` takes an editor cursor
+``{path, line}`` and remembers, IN MEMORY ONLY, the block under that line of
+the served doc (any other path is answered by string comparison alone, never
+opened); the page polls ``GET /api/focus`` so the viewer can follow the
+cursor. Stdlib only; binds 127.0.0.1; writes nothing;
 the only outbound connection is the LLM request, whose url is refused at
 startup unless it is loopback. Path safety lives in ``refs.py`` -- this
 module imports it and never copies its checks.
@@ -55,12 +59,16 @@ CACHE_MAX = 32
 DRAIN_MAX = 1024 * 1024
 ASK_MAX_BODY = 4096
 ASK_ORIGINS = ("http://127.0.0.1", "http://localhost", "http://[::1]")
+FOCUS_MAX_BODY = 1024
+FOCUS_MAX_LINE = 10_000_000
 
 
 class DocState:
-    """The served doc, the repo it resolves in, the analyze cache, the LLM
-    endpoint the ask buttons post to (loopback, validated at startup), and
-    the one-at-a-time lock around the model."""
+    """The served doc, the repo it resolves in, the analyze cache (guarded
+    by ``cache_lock``), the LLM endpoint the ask buttons post to (loopback,
+    validated at startup), the one-at-a-time lock around the model, and the
+    in-memory focus the editor posts (lock-protected; nothing about it is
+    ever written to disk)."""
 
     def __init__(
         self,
@@ -80,7 +88,12 @@ class DocState:
         self.llm_url = llm_url
         self.llm_model = llm_model
         self.ask_lock = threading.Lock()
+        self.cache_lock = threading.Lock()
         self._cache: dict[str, tuple[tuple[int, int], dict]] = {}
+        self.focus_lock = threading.Lock()
+        self.focus_seq = 0
+        self.focus_line: int | None = None
+        self.focus_block: int | None = None
 
     def target_for(self, rel: str) -> str:
         return os.path.join(self.repo_root, *rel.split("/"))
@@ -109,13 +122,22 @@ class DocState:
         return Path(rel).as_posix(), None
 
     def doc_payload(self, rel: str) -> dict:
-        """refs.analyze's blocks for one page, cached by (mtime_ns, size)."""
+        """refs.analyze's blocks for one page, cached by (mtime_ns, size).
+        The cache is shared by every handler thread -- and POST /api/focus
+        made it a second concurrent writer -- so the hit-check, the eviction
+        and the store run under ``cache_lock`` (unlocked, two threads at the
+        cap evicting the same first key raise KeyError, and iterating the
+        dict while another thread mutates it raises RuntimeError). The
+        analyze itself runs OUTSIDE the lock: two threads may both miss and
+        both analyze the same page -- a rare duplicate -- never a corrupted
+        cache."""
         target = self.doc_abs if rel == self.rel_doc else self.target_for(rel)
         st = os.stat(target)
         key = (st.st_mtime_ns, st.st_size)
-        cached = self._cache.get(rel)
-        if cached is not None and cached[0] == key:
-            return cached[1]
+        with self.cache_lock:
+            cached = self._cache.get(rel)
+            if cached is not None and cached[0] == key:
+                return cached[1]
         analyzed = refs.analyze(target, self.repo_root)
         payload = {
             "doc": rel,
@@ -123,14 +145,56 @@ class DocState:
             "mtime": st.st_mtime,
             "blocks": analyzed["blocks"],
         }
-        # dict order is insertion order: the oldest page is the first key.
-        if len(self._cache) >= CACHE_MAX:
-            self._cache.pop(next(iter(self._cache)))
-        self._cache[rel] = (key, payload)
+        with self.cache_lock:
+            # dict order is insertion order: the oldest page is the first key.
+            if len(self._cache) >= CACHE_MAX:
+                self._cache.pop(next(iter(self._cache)))
+            self._cache[rel] = (key, payload)
         return payload
 
     def mtime_payload(self) -> dict:
         return {"mtime": os.stat(self.doc_abs).st_mtime}
+
+    def focus_payload(self) -> dict:
+        """GET /api/focus: the remembered focus. Reads in-memory fields only
+        -- it never parses the doc -- and the path is always the served
+        doc's repo-relative path (the spec types it str; nulls are line/block
+        only)."""
+        with self.focus_lock:
+            return {
+                "seq": self.focus_seq,
+                "line": self.focus_line,
+                "block": self.focus_block,
+                "path": self.rel_doc,
+            }
+
+    def block_at(self, line: int) -> int | None:
+        """The start_line of the block containing LINE, else of the nearest
+        block starting at or before it, else of the first block; a line past
+        the last block clamps to the last. Computed at POST time from the
+        same (mtime_ns, size) cache /api/doc uses: an unchanged file resolves
+        nothing, an edited file's POST reflects the NEW analysis."""
+        blocks = self.doc_payload(self.rel_doc)["blocks"]
+        chosen = None
+        for block in blocks:
+            if block["start_line"] <= line:
+                chosen = block
+            else:
+                break
+        if chosen is None and blocks:
+            chosen = blocks[0]
+        return chosen["start_line"] if chosen is not None else None
+
+    def accept_focus(self, line: int) -> dict:
+        """Record an accepted focus in memory: seq increments on every
+        accepted POST (the same line twice included; the UI de-dupes by
+        block)."""
+        block = self.block_at(line)
+        with self.focus_lock:
+            self.focus_seq += 1
+            self.focus_line = line
+            self.focus_block = block
+        return {"followed": True, "line": line, "block": block}
 
     def file_payload(self, raw: str, line: int) -> dict:
         """The +/-FILE_WINDOW window around one line, via refs' own reader."""
@@ -200,15 +264,21 @@ class DocsContextHandler(BaseHTTPRequestHandler):
         state: DocState = self.server.state
         path, _, query = self.path.partition("?")
         if self.command == "POST":
-            # POST is only ever the ask route; every other POST is a 405.
+            # POST is only ever the ask and focus routes; every other POST is a 405.
             if path == "/api/ask":
                 self._ask(state)
+            elif path == "/api/focus":
+                self._focus(state)
             else:
                 self._method_not_allowed()
             return
         if path == "/api/ask":
             # the ask route is POST-only, on every method word
             self._json(405, {"error": "method not allowed"})
+            return
+        if path == "/api/focus":
+            # the focus state is in memory: the GET reads fields, never parses
+            self._json(200, state.focus_payload())
             return
         qs = parse_qs(query, keep_blank_values=True)
         if path == "/":
@@ -274,6 +344,85 @@ class DocsContextHandler(BaseHTTPRequestHandler):
             remaining -= len(chunk)
         return b"".join(chunks)
 
+    def _json_post(self, max_body: int) -> bytes | None:
+        """The shared guards of the JSON POST routes (/api/ask, /api/focus):
+        the X-Docs-Context header, the absent-or-own Origin, the JSON
+        Content-Type, and a fully drained body within max_body bytes. The
+        bytes of the body, or None when this responded already."""
+        if self.headers.get("X-Docs-Context") != "1":
+            self._drain_body()
+            self._json(403, {"error": "forbidden"})
+            return None
+        origin = self.headers.get("Origin")
+        port = str(self.server.server_address[1])
+        if origin is not None and origin not in {f"{scheme}:{port}" for scheme in ASK_ORIGINS}:
+            self._drain_body()
+            self._json(403, {"error": "forbidden"})
+            return None
+        ctype = self.headers.get("Content-Type", "")
+        if ctype.split(";", 1)[0].strip().lower() != "application/json":
+            self._drain_body()
+            self._json(415, {"error": "application/json body required"})
+            return None
+        body = self._read_ask_body()
+        if body is None:
+            return None
+        if len(body) > max_body:
+            self._json(400, {"error": "body too large"})
+            return None
+        return body
+
+    @staticmethod
+    def _json_object(body: bytes) -> tuple[dict | None, str]:
+        """(decoded object, error) of a POST body: the object and "" when it
+        is a JSON object; (None, "json") for an undecodable body and
+        (None, "object") for a JSON value that is not an object. Each caller
+        answers the error with its own 400 text."""
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None, "json"
+        if not isinstance(payload, dict):
+            return None, "object"
+        return payload, ""
+
+    def _focus(self, state: DocState) -> None:
+        """POST /api/focus: {"path": repo-relative posix path, "line": int
+        1-based}. When the path names the served doc -- posix, case-sensitive,
+        a leading ``./`` normalised, by STRING COMPARISON alone: the path is
+        never opened, never resolved on disk -- the block under that line is
+        remembered in memory (seq increments) and the reply is
+        ``{"followed": true, "line": N, "block": B}``. Any other path
+        (``..``, absolute, NUL and dot-prefixed lookalikes included) is
+        answered ``{"followed": false, "reason": "other-doc"}`` and changes
+        nothing, not even seq."""
+        body = self._json_post(FOCUS_MAX_BODY)
+        if body is None:
+            return
+        payload, error = self._json_object(body)
+        if error == "json":
+            self._json(400, {"error": "body must be json"})
+            return
+        if error == "object":
+            self._json(400, {"error": "body must be a json object"})
+            return
+        raw_path = payload.get("path")
+        line = payload.get("line")
+        if not isinstance(raw_path, str):
+            self._json(400, {"error": "path must be a string"})
+            return
+        if isinstance(line, bool) or not isinstance(line, int):
+            self._json(400, {"error": "line must be an integer"})
+            return
+        if line < 1 or line > FOCUS_MAX_LINE:
+            self._json(400, {"error": "line out of range"})
+            return
+        raw_rel = raw_path.removeprefix("./")
+        if raw_rel != state.rel_doc:
+            self._json(200, {"followed": False, "reason": "other-doc"})
+            return
+        self._json(200, state.accept_focus(line))
+
     def _ask(self, state: DocState) -> None:
         """POST /api/ask: {"block": start_line, "ref": index, "question": name}.
         Only the three fixed questions exist and only the server's own
@@ -281,33 +430,14 @@ class DocsContextHandler(BaseHTTPRequestHandler):
         are ignored, so no client-supplied prompt, text, or messages can
         reach the model. One request at a time (409 busy); LLM failures are
         502/504 with the LlmError kind."""
-        if self.headers.get("X-Docs-Context") != "1":
-            self._drain_body()
-            self._json(403, {"error": "forbidden"})
-            return
-        origin = self.headers.get("Origin")
-        port = str(self.server.server_address[1])
-        if origin is not None and origin not in {f"{scheme}:{port}" for scheme in ASK_ORIGINS}:
-            self._drain_body()
-            self._json(403, {"error": "forbidden"})
-            return
-        ctype = self.headers.get("Content-Type", "")
-        if ctype.split(";", 1)[0].strip().lower() != "application/json":
-            self._drain_body()
-            self._json(415, {"error": "application/json body required"})
-            return
-        body = self._read_ask_body()
+        body = self._json_post(ASK_MAX_BODY)
         if body is None:
             return
-        if len(body) > ASK_MAX_BODY:
-            self._json(400, {"error": "body too large"})
-            return
-        try:
-            payload = json.loads(body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        payload, error = self._json_object(body)
+        if error == "json":
             self._json(400, {"error": "body must be json"})
             return
-        if not isinstance(payload, dict):
+        if error == "object":
             self._json(400, {"error": "body must be a json object"})
             return
         block_line = payload.get("block")

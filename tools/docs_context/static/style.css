@@ -69,6 +69,21 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+#follow-label {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+#follow {
+  accent-color: var(--badge);
+}
+
 #layout {
   display: grid;
   grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
