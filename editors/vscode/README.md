@@ -149,6 +149,28 @@ the machine. Posts are debounced (~300 ms) and fire-and-forget: failures produce
 most one throttled output-channel line, never a popup, and clearing the setting stops
 posting immediately.
 
+## Navis tree (read-only)
+
+The Explorer gains a **Refdes Navis** section listing the project's Navis —
+the same rows the site panel and the served preview render, read live from
+`GET /api/navis` on the window's `refdes serve`. The section starts collapsed,
+and expanding it asks for the server, exactly like the first hover does (one
+per project per window, killed when the window closes) — opening a project
+starts nothing.
+
+- Active Navis are listed in the projection's order, labelled `key6 · text`
+  (long texts truncate; the full text is in the tooltip). Archived ones sit
+  behind a **Show all (N)** group, and a keyless row says *No key yet — use
+  Mint keys*.
+- Clicking a row opens the marker's file at its line; an archived row opens
+  the location its record snapshot saved.
+- The section's badge counts the active rows. The list refreshes on save, on
+  **Refdes: Refresh index**, and whenever the snapshot serial moves.
+
+This view is read-only: Archive, Restore and Mint commands come in the next
+slice. The rows come from the served snapshot, which is disk state, so a row
+can lag an unsaved editor buffer — the same lag the preview panel has.
+
 ## Settings
 
 | Setting | Default | Purpose |
