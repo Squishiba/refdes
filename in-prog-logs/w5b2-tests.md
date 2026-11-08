@@ -88,3 +88,35 @@ cross-platform rules; `tests/test_crossplatform_lint.py` passes clean
 Finished: tests authored, red-first, contract verified satisfiable,
 lint-clean, committed and pushed. No PR (per task), no browser surface
 touched.
+
+## Implementation (W5b.2, implementer pass 2026-11-07)
+
+Implemented the route in `src/refdes/serve/api.py`; no test was edited and
+no pinned shape disagreed with the plan, so no STOP fired.
+
+- Dispatcher: `/api/item/<ref>/continue` branch modelled on the `/edit`
+  branch (unquote the ref, POST only, 405 otherwise, `_write_outcome`
+  wrapper -- so the same `_relative_paths` scrubbing as the neighbours).
+- Handler `_continue_item`: read-only 403 naming `--no-write` (the route's
+  own top check, neighbours' shape), then the shape gates (not-an-object,
+  missing/blank/non-string `expected_revision`, `ticks` not a list of
+  2-element pairs -> 400 with "error"); everything inside the pair
+  (non-string state, unknown task, duplicate) is the service's, 422.
+  `who="local"`, `config_path=app.state.config_path`, as on `/edit`.
+- Reuse: `_apply_edit`'s result-to-status tail moved verbatim into a module
+  helper `_apply_outcome` (Applied 200 / Conflict 409 / Invalid 422 /
+  Refused 422 with the `shown()` relative-path projection); `_apply_edit`
+  and `_continue_item` both call it. Behaviour unchanged (edit/create/serve
+  suites green). 122 src lines added, 59 removed (the moved tail).
+- Changelog: added `changelog.d/continue-endpoint.added.md` (endpoint, no
+  UI yet).
+
+Evidence: red baseline reproduced first (`32 failed, 6 passed`); after the
+change `38 passed`; neighbours `test_serve_api.py + test_serve_edit_http.py
++ test_serve_create.py + test_serve_continue.py + test_crossplatform_lint.py`
+229 passed; ruff on api.py reports only the 6 findings that pre-exist on
+HEAD (verified by ruffing `git show HEAD` of the file). The merge of main
+into the branch brought only `tools/docs_context` files (no conflicts).
+
+Status: finished -- full suite run, committed, PR opened.
+

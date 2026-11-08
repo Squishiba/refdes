@@ -56,6 +56,11 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
         if method == "POST":
             return _write_outcome(app, _apply_edit(app, ref, body))
         return 405, {"error": "method not allowed"}
+    if path.startswith("/api/item/") and path.endswith("/continue"):
+        ref = urllib.parse.unquote(path[len("/api/item/"):-len("/continue")])
+        if method == "POST":
+            return _write_outcome(app, _continue_item(app, ref, body))
+        return 405, {"error": "method not allowed"}
     if path.startswith("/api/item/") and path.endswith("/calc"):
         ref = urllib.parse.unquote(path[len("/api/item/"):-len("/calc")])
         if method == "POST":
@@ -1156,6 +1161,74 @@ def _parse_pins(raw) -> tuple[tuple, str]:
     return tuple(pins), ""
 
 
+def _apply_outcome(app, result) -> tuple[int, dict]:
+    """The shared tail of the write routes that answer with `serve.edit`
+    results: Applied 200, Conflict 409 (with the current span text and the
+    diff), Refused 422 (a reason), Invalid 422 (the blocking diagnostics).
+    Paths are shown project-relative when possible: the browser has no use
+    for a server filesystem root, and a path it cannot read is a path it
+    cannot leak. Shared by `/edit` and `/continue`; the shapes here are the
+    shapes their tests pin."""
+    project = app.state.snapshot.project
+
+    def shown(path):
+        if not path:
+            return None
+        text = os.path.relpath(path, project.root).replace("\\", "/")
+        return path.replace("\\", "/") if text.startswith("..") else text
+
+    if isinstance(result, edit_mod.Applied):
+        # The design's "full rebuild after save": the model and the preview
+        # come back from the same refresh the file watcher uses, so the next
+        # GET and the rendered site both show the saved bytes.
+        app.state.refresh()
+        return 200, {
+            "kind": "applied",
+            "ok": True,
+            "message": result.message,
+            "path": shown(result.path),
+            "revision": result.revision,
+            "describe": result.plan.describe(),
+            # The item's CURRENT display id and live handle. When the edit was
+            # posted under a retired id these differ from the URL's ref, which
+            # is exactly the correction the browser needs to make (EDIT-03).
+            "id": result.item_id,
+            "handle": result.handle,
+            # What an accept pinned, as `{path, key, reader, value}` -- the
+            # value the reader read. Empty for an ordinary save, and never a
+            # value the client sent.
+            "pinned": [dict(entry) for entry in result.pinned],
+            "diagnostics": [diag_dict(d) for d in result.diagnostics if d.level != CHECK_VIOLATION],
+        }
+    if isinstance(result, edit_mod.Conflict):
+        return 409, {
+            "kind": "conflict",
+            "ok": False,
+            "message": result.message,
+            "path": shown(result.path),
+            "expected_revision": result.expected_revision,
+            "current_revision": result.current_revision,
+            "current_text": result.current_text,
+            "diff": result.diff,
+        }
+    if isinstance(result, edit_mod.Invalid):
+        return 422, {
+            "kind": "invalid",
+            "ok": False,
+            "message": result.message,
+            "reason": result.message,
+            "path": shown(result.path),
+            "diagnostics": [diag_dict(d) for d in result.diagnostics],
+        }
+    return 422, {
+        "kind": "refused",
+        "ok": False,
+        "message": result.message,
+        "reason": result.reason,
+        "path": shown(result.path),
+    }
+
+
 def _apply_edit(app, ref: str, body) -> tuple[int, dict]:
     """`POST /api/item/<ref>/edit` -- the HTTP face of `serve.edit.apply_edit`.
 
@@ -1218,65 +1291,7 @@ def _apply_edit(app, ref: str, body) -> tuple[int, dict]:
         # from instead of rebuilding the default marker's path from the root.
         config_path=app.state.config_path,
     )
-
-    def shown(path):
-        """Project-relative when possible: the browser has no use for a server
-        filesystem root, and a path it cannot read is a path it cannot leak."""
-        if not path:
-            return None
-        text = os.path.relpath(path, project.root).replace("\\", "/")
-        return path.replace("\\", "/") if text.startswith("..") else text
-
-    if isinstance(result, edit_mod.Applied):
-        # The design's "full rebuild after save": the model and the preview
-        # come back from the same refresh the file watcher uses, so the next
-        # GET and the rendered site both show the saved bytes.
-        app.state.refresh()
-        return 200, {
-            "kind": "applied",
-            "ok": True,
-            "message": result.message,
-            "path": shown(result.path),
-            "revision": result.revision,
-            "describe": result.plan.describe(),
-            # The item's CURRENT display id and live handle. When the edit was
-            # posted under a retired id these differ from the URL's ref, which
-            # is exactly the correction the browser needs to make (EDIT-03).
-            "id": result.item_id,
-            "handle": result.handle,
-            # What the reader read and the lockfile now pins, for an accept.
-            # Nothing here came from the request: a `value` sent by the client is
-            # ignored, which is the point (§5 -- one parser of a source file).
-            "pinned": [dict(entry) for entry in result.pinned],
-            "diagnostics": [diag_dict(d) for d in result.diagnostics if d.level != CHECK_VIOLATION],
-        }
-    if isinstance(result, edit_mod.Conflict):
-        return 409, {
-            "kind": "conflict",
-            "ok": False,
-            "message": result.message,
-            "path": shown(result.path),
-            "expected_revision": result.expected_revision,
-            "current_revision": result.current_revision,
-            "current_text": result.current_text,
-            "diff": result.diff,
-        }
-    if isinstance(result, edit_mod.Invalid):
-        return 422, {
-            "kind": "invalid",
-            "ok": False,
-            "message": result.message,
-            "reason": result.message,
-            "path": shown(result.path),
-            "diagnostics": [diag_dict(d) for d in result.diagnostics],
-        }
-    return 422, {
-        "kind": "refused",
-        "ok": False,
-        "message": result.message,
-        "reason": result.reason,
-        "path": shown(result.path),
-    }
+    return _apply_outcome(app, result)
 
 
 # ---------------------------------------------------------------- creation
@@ -1462,6 +1477,54 @@ def _create_item(app, body) -> tuple[int, dict]:
         "reason": result.reason,
         "path": shown(result.path),
     }
+
+
+# ---------------------------------------------------------------- continuation
+
+
+def _continue_item(app, ref: str, body) -> tuple[int, dict]:
+    """`POST /api/item/<ref>/continue` -- the HTTP face of
+    `serve.edit.continue_thread`, the W5b.1 continuation operation (plan §4
+    W5b.2). The body is the ticks pairs and the target file's revision; the
+    service folds the tip's task list, applies the ticks to a copy and
+    appends the entry. Same mapping as the edit route (`_apply_outcome`):
+    Applied 200, Conflict 409, Refused and Invalid 422. A malformed request
+    -- not an authoring outcome -- is a 400; the operation's own vocabulary
+    and fold refusals are the service's, 422. `who` is `local` like every
+    other request."""
+    if getattr(app, "read_only", False):
+        return 403, {
+            "kind": "refused",
+            "error": "this server was started with --no-write: continuations are disabled",
+        }
+    if not isinstance(body, dict):
+        return 400, {"error": "expected a JSON object"}
+    expected = body.get("expected_revision")
+    if not isinstance(expected, str) or not expected:
+        return 400, {"error": "expected_revision is required: the file_revision from GET /api/item/<ref>"}
+    raw_ticks = body.get("ticks")
+    if not isinstance(raw_ticks, list):
+        return 400, {"error": "ticks is required: a list of [task id, wanted state] pairs"}
+    ticks = []
+    for tick in raw_ticks:
+        if not isinstance(tick, list) or len(tick) != 2:
+            return 400, {"error": "every tick is a [task id, wanted state] pair"}
+        ticks.append((tick[0], tick[1]))
+
+    project = app.state.snapshot.project
+    result = edit_mod.continue_thread(
+        project.root,
+        edit_mod.ContinueRequest(
+            who="local",
+            ref=ref,
+            ticks=tuple(tick for tick in ticks),
+            expected_revision=expected,
+        ),
+        # Same threading as the edit route: the configured settings file,
+        # not a path rebuilt from the default marker name.
+        config_path=app.state.config_path,
+    )
+    return _apply_outcome(app, result)
 
 
 # ---------------------------------------------------------------- image picker
