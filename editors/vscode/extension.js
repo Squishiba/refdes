@@ -24,6 +24,7 @@ const cp = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const { ServeClient, parseLaunchUrl } = require("./serveClient");
+const { createDocsFocusWatcher } = require("./docsFocus");
 
 const ID_RE = /\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{1,6}\b/;
 const CALC_FENCE_RE = /^\s*```calc\b/;
@@ -38,6 +39,9 @@ let output;
 let calcDecoration;
 let showCalcResults = true;
 let refreshTimer = null;
+/** The docs-context focus watcher (DC-4b): posts the active cursor to a
+ * loopback docs-context viewer while `refdes.docsContext.url` is set. */
+let docsFocus = null;
 
 /** The one `refdes serve` handle this window has, or null (§3.1: one per project). */
 let serve = null;
@@ -942,6 +946,7 @@ function activate(context) {
   serveStatusBar.command = "refdes.showServerLog";
   calcDecoration = vscode.window.createTextEditorDecorationType({});
   showCalcResults = config().get("showCalcResults") !== false;
+  docsFocus = createDocsFocusWatcher(vscode, () => output);
 
   vscode.commands.executeCommand("setContext", "refdes.active", true);
 
@@ -980,12 +985,15 @@ function activate(context) {
     vscode.window.onDidChangeActiveTextEditor((editor) =>
       updateCalcDecorations(editor)
     ),
+    vscode.window.onDidChangeTextEditorSelection(() => docsFocus.note()),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("refdes")) {
         showCalcResults = config().get("showCalcResults") !== false;
+        docsFocus.configChanged();
         refreshIndex(true);
       }
-    })
+    }),
+    docsFocus
   );
 
   setServeState("none", "no server started yet for this window");
@@ -994,6 +1002,7 @@ function activate(context) {
 
 function deactivate() {
   if (refreshTimer) clearTimeout(refreshTimer);
+  if (docsFocus) docsFocus.dispose();
   // The child is ours, so it dies with the extension host (§3.1). Its token dies
   // with it: nothing about a launch outlives the launch (§3.2 row 5).
   stopServe();
