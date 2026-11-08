@@ -25,6 +25,7 @@ const path = require("path");
 const fs = require("fs");
 const { ServeClient, parseLaunchUrl } = require("./serveClient");
 const { createDocsFocusWatcher } = require("./docsFocus");
+const { createNavisTree } = require("./navisTree");
 
 const ID_RE = /\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{1,6}\b/;
 const CALC_FENCE_RE = /^\s*```calc\b/;
@@ -42,6 +43,21 @@ let refreshTimer = null;
 /** The docs-context focus watcher (DC-4b): posts the active cursor to a
  * loopback docs-context viewer while `refdes.docsContext.url` is set. */
 let docsFocus = null;
+
+/** The read-only Navis tree (S6.1): the pure row->TreeItem module and the
+ * view are built in `activate`; the payload/placeholder/root are what the
+ * provider renders, and every change to them ends in one fire(). */
+let navisTree = null;
+let navisView = null;
+let navisChanged = null;
+/** The last `GET /api/navis` payload, or null when there is nothing to render. */
+let navisPayload = null;
+/** The placeholder state ("no-project" | …) that replaces the rows. The
+ * TreeItem is built by the provider, never here: the headless harnesses
+ * activate this file against a minimal fake host with no TreeItem. */
+let navisPlaceholderState = null;
+/** The project root the last payload was rendered against (click-through). */
+let navisRoot = null;
 
 /** The one `refdes serve` handle this window has, or null (§3.1: one per project). */
 let serve = null;
@@ -121,7 +137,11 @@ function run(args, root) {
 
 async function refreshIndex(silent) {
   const root = currentRoot();
-  if (!root) return;
+  if (!root) {
+    // The tree shares the "no project" fact with this function's caller.
+    refreshNavisTree(false);
+    return;
+  }
 
   const result = await run(["index", "--compact"], root);
   if (result.code !== 0 || !result.stdout.trim()) {
@@ -149,6 +169,9 @@ async function refreshIndex(silent) {
   publishDiagnostics(root, data);
   updateStatusBar(data);
   updateCalcDecorations(vscode.window.activeTextEditor);
+  // A save (scheduleRefresh) and `refdes.refreshIndex` both run through
+  // here, so this one call is the tree's refresh trigger for both (plan S3).
+  refreshNavisTree(false);
 }
 
 function scheduleRefresh() {
@@ -444,9 +467,14 @@ async function pollServeRevision() {
     stopServePoll();
     return;
   }
+  const serialMoved = serveSerial !== res.body.serial;
   serveSerial = res.body.serial;
   if (res.body.load_error) logServe(`snapshot could not rebuild: ${res.body.load_error}`);
   setServeState("connected");
+  // Every navis write forces a rebuild before it answers, so a moved serial
+  // is the tree's refresh signal (plan S3 -- the same one the editor panel
+  // rides): "on serial change, refresh the tree".
+  if (serialMoved) refreshNavisTree(false);
 }
 
 /**
@@ -486,6 +514,9 @@ function onServeExit(code, signal, stderr) {
   if (stderr && stderr.trim()) logServe(stderr.trim());
   logServe(`the server process exited (code ${code}${signal ? ", signal " + signal : ""})`);
   setServeState("died", `the server process exited with code ${code}`);
+  // Checklist 6: the tree placeholder says "server died" too, and Attach
+  // to running server recovers both.
+  refreshNavisTree(false);
 }
 
 async function stopServe() {
@@ -527,6 +558,100 @@ function setServeState(state, detail) {
       : "Hover an item id, or run Refdes: Attach to running server.") +
     "\nClick to show the Refdes output channel.";
   serveStatusBar.show();
+}
+
+// ------------------------------------------------------------------ navis tree
+
+/** The payload an empty tree renders against (plan Q7: a visible empty state,
+ * never a silent nothing). */
+const EMPTY_NAVIS = { navis: [], counts: { active: 0, archived: 0 } };
+
+/**
+ * The thin host half of S6.1: everything that turns rows into items lives in
+ * the pure ./navisTree module (node-drivable, test-pinned); this provider
+ * only hands it the last payload, the placeholder, or a group's children.
+ * It is the only code that builds TreeItems here, and the real view is the
+ * only thing that calls it.
+ */
+const navisTreeProvider = {
+  getTreeItem(item) {
+    return item;
+  },
+  getChildren(element) {
+    if (!navisTree) return [];
+    if (element) return navisTree.childrenOf(element, navisPayload || EMPTY_NAVIS);
+    if (navisPlaceholderState) return [navisTree.placeholderFor(navisPlaceholderState)];
+    if (!navisPayload) return [navisTree.placeholderFor("no-server")];
+    return navisTree.childrenFor(navisPayload, navisRoot);
+  },
+};
+
+function fireNavisChanged() {
+  if (navisChanged) navisChanged.fire();
+}
+
+function showNavisPlaceholder(state) {
+  navisPayload = null;
+  navisPlaceholderState = state;
+  if (navisView && "badge" in navisView) navisView.badge = undefined;
+  fireNavisChanged();
+}
+
+/** The view badge shows the active count (plan checklist 1). `badge` is a
+ * newer ViewBadge API than this extension's engine floor, so it is set only
+ * when the host has it -- the tree itself never depends on it. */
+function setNavisBadge(payload) {
+  if (!navisView || !("badge" in navisView)) return;
+  const value = navisTree ? navisTree.badgeFor(payload) : 0;
+  navisView.badge = { value, tooltip: `${value} active Navi${value === 1 ? "" : "s"}` };
+}
+
+/**
+ * Re-render the Navis tree from `GET /api/navis` (plan S3's data path).
+ *
+ * `boot` is the ratified Q5 gesture: expanding the view asks for the server,
+ * and this boots it lazily through the hover's own `ensureServe()` -- no boot
+ * at activation. Every failure is a placeholder, never a silent empty tree
+ * (serveClient.js's own rule): no project, no server, a dead server, and a
+ * Navis-free project each say so out loud.
+ */
+async function refreshNavisTree(boot) {
+  if (!navisTree) return;
+  const root = currentRoot();
+  if (!root) {
+    showNavisPlaceholder("no-project");
+    return;
+  }
+  navisRoot = root;
+  if (boot) await ensureServe();
+  if (!serve || !serve.ready) {
+    showNavisPlaceholder(serve || serveFailed ? "server-died" : "no-server");
+    return;
+  }
+  const res = await serve.navis();
+  if (!res || res.error) {
+    showNavisPlaceholder("server-died");
+    return;
+  }
+  if (res.status === 403) {
+    // A stale launch token, not a refusal: the poll's own recovery handles it.
+    handleServeForbidden();
+    showNavisPlaceholder("server-died");
+    return;
+  }
+  if (res.status !== 200) {
+    logServe(`GET /api/navis -> ${res.status}`);
+    showNavisPlaceholder("server-died");
+    return;
+  }
+  navisPayload = res.body;
+  if (!(navisPayload.navis || []).length) {
+    showNavisPlaceholder("no-navis");
+    return;
+  }
+  navisPlaceholderState = null;
+  setNavisBadge(navisPayload);
+  fireNavisChanged();
 }
 
 // ------------------------------------------------------------------- providers
@@ -948,6 +1073,32 @@ function activate(context) {
   showCalcResults = config().get("showCalcResults") !== false;
   docsFocus = createDocsFocusWatcher(vscode, () => output);
 
+  // The read-only Navis tree (S6.1). The provider is built here, inside
+  // activate (plan §9); the server it reads is NOT booted here -- ratified
+  // Q5 boots it lazily on the view's own expand/visible gesture. The
+  // createTreeView guard is for the headless harnesses that activate this
+  // file against a minimal fake host (tests/test_vscode_docs_focus.py);
+  // every real window since the engine floor has the API.
+  navisTree = createNavisTree(vscode);
+  let navisSubscriptions = [];
+  if (typeof vscode.window.createTreeView === "function") {
+    navisChanged = new vscode.EventEmitter();
+    navisView = vscode.window.createTreeView("refdes.navisTree", {
+      treeDataProvider: navisTreeProvider,
+    });
+    navisSubscriptions = [
+      navisView,
+      navisChanged,
+      // Expanding the view (an element, or the section becoming visible) is
+      // the ratified Q5 gesture: it refreshes the tree and boots the server
+      // lazily, so the child exists because a feature was used.
+      navisView.onDidExpandElement(() => refreshNavisTree(true)),
+      navisView.onDidChangeVisibility(() => {
+        if (navisView.visible) refreshNavisTree(true);
+      }),
+    ];
+  }
+
   vscode.commands.executeCommand("setContext", "refdes.active", true);
 
   const selector = [
@@ -961,6 +1112,7 @@ function activate(context) {
     statusBar,
     serveStatusBar,
     calcDecoration,
+    ...navisSubscriptions,
     vscode.commands.registerCommand("refdes.build", commandBuild),
     vscode.commands.registerCommand("refdes.check", commandCheck),
     vscode.commands.registerCommand("refdes.allocateIds", commandAllocateIds),

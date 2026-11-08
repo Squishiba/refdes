@@ -73,3 +73,71 @@ file (by design, red-first).
 Real VS Code UI (rendering, when-clauses, native tooltips, menus) -- plan
 S7.2 says so; pinned at logic/source level only. No PR (task said commit +
 push, no PR).
+
+# N6.1-impl: the implementer's pass (2026-11-08)
+
+STATUS: complete. S6.1 implemented as pinned; all 22 tests of
+tests/test_vscode_navis_tree.py green; targeted neighbours green; full suite
+green (counts below); PR opened, CI green.
+
+## What landed
+
+- `editors/vscode/navisTree.js` -- the pure module, exactly the author's
+  exported surface (TEXT_LIMIT, truncateText, navisLabel, navisDescription,
+  navisTooltip, navisContextValue, navisBadge, navisOpenTarget,
+  createNavisTree). No vscode/http/fs import; `path.join` only. Kept the
+  reference module's shapes, with two deliberate departures:
+  - `childrenOf` resolves the group's rows AND the root captured at
+    childrenFor time, so archived children get the same click-through as
+    top-level rows (the .scratch reference passed an undefined root and
+    dropped the archived rows' command -- untested by the pins, plan §5
+    wants the click to survive).
+  - the word "token" (any case) appears nowhere in the module, as the
+    never-names-the-token pin requires. The .scratch reference used a
+    `tokens` local, which contains it -- that reference validated only the
+    15 logic/live tests, not the 7 source pins; the shipped file passes all
+    22.
+- `serveClient.js`: `navis()` delegating to `this.request("/api/navis")`
+  (shared token-header GET; no second http path, no POST -- S6.2's).
+- `package.json`: `contributes.views.explorer` entry
+  `refdes.navisTree` ("Refdes Navis", `when: refdes.active`), no icon, no
+  viewsContainers (ratified Q3). No version bump (Q6/S6.4).
+- `extension.js`: require + `let navisTree = null`,
+  `async function refreshNavisTree(boot)` (ensureServe on boot = ratified
+  Q5, serve.navis(), placeholder per failure), refresh from refreshIndex
+  (save + refdes.refreshIndex; also the no-root early return), from
+  pollServeRevision on serial move, from onServeExit, and from the view's
+  onDidExpandElement/onDidChangeVisibility with `refreshNavisTree(true)`;
+  `createTreeView("refdes.navisTree", { treeDataProvider })`; badge set
+  behind a `"badge" in navisView` guard (ViewBadge is newer than the
+  ^1.85 engine floor).
+- README: a "Navis tree (read-only)" section; changelog fragment
+  `navis-vscode-tree.added.md` (read-only list, actions come next).
+
+## The one design point the tests forced (not a conflict, a fit)
+
+tests/test_vscode_docs_focus.py activates the REAL extension.js under a
+fake vscode that has no EventEmitter, no TreeItem and no
+window.createTreeView. So the emitter and view are created in `activate`
+behind `typeof vscode.window.createTreeView === "function"`, and
+TreeItems are built only inside the provider (which the fake never
+drives). No test edited; no src/ change; the pins' regexes all match
+inside the guard.
+
+## Red -> green
+
+- Red before the change: `8 failed, 4 passed, 10 errors` (matches the
+  author's baseline exactly).
+- Green after: `22 passed`.
+- Neighbours: test_vscode_extension.py + test_vscode_adapter_contract.py +
+  test_vscode_docs_focus.py + test_crossplatform_lint.py: `90 passed`.
+- Full suite once: see the PR's CI (ubuntu+windows) -- all checks green.
+- `node --check` clean on extension.js, navisTree.js, serveClient.js.
+- ruff: no .py file touched.
+
+## Not verifiable here
+
+Same as the author's note: no real VS Code window existed, so view
+rendering, `when` clauses, menus, native tooltips and the real vscode API
+are verified only at source/logic level; the plan's manual checklist
+(items 1, 2, 6 for S6.1) is Jared's.

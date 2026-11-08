@@ -58,6 +58,15 @@
         }
       ]
     },
+    "views": {
+      "explorer": [
+        {
+          "id": "refdes.navisTree",
+          "name": "Refdes Navis",
+          "when": "refdes.active"
+        }
+      ]
+    },
     "configuration": {
       "title": "Refdes",
       "properties": {
