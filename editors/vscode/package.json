@@ -75,6 +75,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show evaluated calc results inline at the end of each line."
+        },
+        "refdes.docsContext.url": {
+          "type": "string",
+          "default": "",
+          "description": "URL of a running docs-context viewer to follow the cursor (POST <url>/api/focus with the workspace-relative path and 1-based line of the active editor — never file contents). Loopback only (127.0.0.1, localhost, ::1); any other host is ignored. Empty (the default) posts nothing."
         }
       }
     },
