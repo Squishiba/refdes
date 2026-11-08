@@ -1,4 +1,4 @@
-Status: **plan, proposed** (2026-11-05). It answers the one deferred item of
+Status: **plan, questions ratified** (2026-11-08). It answers the one deferred item of
 the Navis design — `in-prog-logs/navis-design-20261025.md` §13 slice 6
 "(Deferred, see §14) VS Code panel from the `index` payload" (line 424) and
 its §14 question 5 (lines 438-440: "is a VS Code panel wanted, and is it v1
@@ -444,7 +444,9 @@ no-server table; a "In VS Code" section in `docs/navis.md`;
 ## 12. Open questions for Jared
 
 Each has options, the trade-off, and the recommended default this plan
-assumes until told otherwise.
+assumes until told otherwise. All seven recommended defaults were ratified
+by Jared on 2026-11-08, as written; each question below carries its Ratified
+line.
 
 **Q1 — data path: `GET /api/navis`, or the `index` payload the design's
 slice-6 sentence named?** (a) `/api/navis` (b) `index` payload (c) both,
@@ -455,6 +457,8 @@ only, ships raw rows the extension must present, and pays a build per
 refresh; the design's sentence predates V0's ServeClient. (c) is §6 Q3's
 two-fetch-paths smell with no unique-fact justification. **Recommended
 default: (a)**; design §13 slice 6's wording superseded for this slice.
+
+**Ratified 2026-11-08: (a)** — `GET /api/navis` is the data path.
 
 **Q2 — surface: TreeView, a webview panel, or the V1 sidebar webview
 first?** (a) native TreeView (b) its own webview (c) wait for the V1
@@ -467,6 +471,8 @@ Navis panel should not be V1's reason to exist. **Recommended default:
 (a)**; if V1 ships later, moving the list is a rendering swap over the
 same `ServeClient.navis()`.
 
+**Ratified 2026-11-08: (a)** — the native TreeView.
+
 **Q3 — where does the view live?** (a) the Explorer (a `views` entry,
 no activity-bar icon) (b) a dedicated "Refdes" container with its own
 icon. **Trade-offs:** (a) is one collapsible section, zero permanent
@@ -474,6 +480,8 @@ chrome for a window that already has two status-bar items; (b) is
 findable at a glance and buys the activity bar a third icon for every
 user. **Recommended default: (a)** for the panel; promote to (b) on
 demand.
+
+**Ratified 2026-11-08: (a)** — an Explorer section, no activity-bar icon.
 
 **Q4 — ship Mint in VS Code?** (a) yes, as an explicit command (b) ship
 it CLI/preview-only. **Trade-offs:** (a) completes panel parity (§11's
@@ -484,6 +492,8 @@ window to mint. **Recommended default: (a)** — the write is the
 tool's, announced by the server, idempotent
 (`docs/navis.md:395-397`), and the risk is one named checklist item.
 
+**Ratified 2026-11-08: (a)** — Mint ships as an explicit command.
+
 **Q5 — does the tree boot the server on expand?** (a) lazy-boot on
 expand (the hover's `ensureServe` posture) (b) placeholder + explicit
 "Start server"/"Attach" only. **Trade-offs:** (a) is one click to
@@ -492,12 +502,17 @@ unambiguous; (b) never spawns without an explicit ask, costs two
 clicks. **Recommended default: (a)** — expanding a view named "Refdes
 Navis" is the ask.
 
+**Ratified 2026-11-08: (a)** — expanding the view lazily boots the server.
+
 **Q6 — version + publish.** (a) bump `0.1.0 → 0.2.0` with the
 first shipped slice and publish; (b) bump at S6.4; (c) ship to
 open-vsx/marketplace on Jared's cadence only. **Trade-offs:** (a)
 earliest user-visible delta; (b) one publish, one changelog set.
 **Recommended default: (b)**; publishing itself stays Jared's call (the
 extension is published under `SquishingCo`).
+
+**Ratified 2026-11-08: (b)** — bump at S6.4, one publish; publishing
+itself stays Jared's call.
 
 **Q7 — what does the tree show for a Navis-free project?** (a) an empty
 "no Navis" placeholder (b) hide the view (a `when` context — no shipped
@@ -506,6 +521,8 @@ after Navis exist (no shipped mechanism either). **Recommended
 default: (a)** — the payload is the same shape with zero counts
 (`navis_read.py:22-24`), and a visible empty state is the extension's
 own rule ("a quiet failure is the bug class", `serveClient.js:137-140`).
+
+**Ratified 2026-11-08: (a)** — a visible empty "no Navis" state.
 
 ## 13. What this plan does not decide
 
