@@ -592,6 +592,7 @@ def test_task_ids_are_unique_and_safe_only_in_the_dom_pair(served_dupes):
     assert len(pairs) == 5
     ids = [dom_id for dom_id, _task, _label in pairs]
     assert len(ids) == len(set(ids)), ids
+    assert all(dom_id.startswith("refdes-taskpane-tick-") for dom_id in ids), ids
     assert all(re.fullmatch(r"[A-Za-z0-9_-]+", dom_id) for dom_id in ids), ids
     assert sorted(task for _dom, task, _label in pairs) == [
         "",
