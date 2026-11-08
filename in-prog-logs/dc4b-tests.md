@@ -89,8 +89,7 @@ and silently on every platform.
 ## Status
 
 - Red: 12 failed / 1 passed on the untouched tree (the pass is the
-  documented empty-url guard; every pin of a default fails red), ~28 s.
-- Satisfiability: a throwaway prototype (focus watcher in a copy of
+  documented empty-url guard; every pin of a default fails red), ~28 s.- Satisfiability: a throwaway prototype (focus watcher in a copy of
   `extension.js`, setting in a copy of `package.json`, driven via the
   module's env-var path overrides) turns all 13 green (~30 s). The tree
   carries only the test file. Prototype kept in `.scratch/dc4b-proto/`.
@@ -119,3 +118,22 @@ and silently on every platform.
   "at most one throttled line" is pinned as ≤1 per burst (window length
   not pinned), and test 8 accepts 1..2 posts against the slow server
   (drop OR coalesce, per the spec's "drop or coalesce").
+
+## Implementation (DC-4b-impl, same branch)
+
+- `editors/vscode/docsFocus.js` (new, vscode injected — drivable like
+  serveClient.js): 300 ms debounce, (path, line) dedupe cleared on
+  config change, drop-while-in-flight, loopback host allow-list
+  (`[::1]` bracket-stripped; lookalikes refused), Content-Length-framed
+  POST with `X-Docs-Context: 1` + `Origin`, swallow with one 1500 ms
+  throttled output line (refusal message contains "ignoring"/"host";
+  failure messages deliberately avoid /ignor|refus|host/i so the [::1]
+  pin stays green), 5 s request timeout. Wired from `extension.js`
+  (selection listener + config-change hook + deactivate dispose);
+  setting declared in `package.json`; README section + settings-table
+  row; changelog fragment added.
+- No test file edited; no Python touched. Green: 13 passed (was 12
+  red/1 guard), ~28 s; test_vscode_extension + test_crossplatform_lint +
+  test_vscode_adapter_contract: 46 passed. `node --check` clean on both
+  touched js files. Branch ff-merged to origin/main (#452 base).
+- Status: COMPLETE.

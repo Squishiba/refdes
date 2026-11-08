@@ -123,6 +123,22 @@ visible in a second status bar item:
 Click it for the Refdes output channel, which carries everything the server printed,
 prefixed `[serve]`.
 
+## Follow the cursor (docs-context)
+
+`refdes.docsContext.url` points the extension at a running docs-context viewer
+(`python tools/docs_context/server.py <page>.md`), a maintainer tool that renders the
+references one docs page makes. With the setting on, moving the cursor in an open file
+inside the workspace posts `{path, line}` — the workspace-relative path and the 1-based
+cursor line — to `<url>/api/focus`, so the viewer scrolls to the block you are looking
+at. Nothing else travels: never file contents, never selection text.
+
+Off by default (empty string = no network call of any kind). Only loopback urls are
+honoured (`127.0.0.1`, `localhost`, `::1`); any other host is ignored with a single
+line in the Refdes output channel, because the extension never posts file paths off
+the machine. Posts are debounced (~300 ms) and fire-and-forget: failures produce at
+most one throttled output-channel line, never a popup, and clearing the setting stops
+posting immediately.
+
 The server starts on demand — the first hover on an ID asks for it — one per project
 per window, and it is killed when the window closes. Its launch token lives in the
 extension host's memory and nowhere else: not in a setting, not on disk, not in a
@@ -139,6 +155,7 @@ If a hover shows no snapshot facts, the status item says why.
 | `refdes.command` | `refdes` | How to invoke the CLI |
 | `refdes.checkOnSave` | `true` | Re-index and publish diagnostics on save |
 | `refdes.showCalcResults` | `true` | Inline calc values |
+| `refdes.docsContext.url` | `""` | Docs-context viewer url to follow the cursor (loopback only; empty = off) |
 
 ## How it works
 
