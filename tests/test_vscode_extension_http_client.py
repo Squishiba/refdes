@@ -508,7 +508,7 @@ def test_post_round_trips_the_three_routes_over_the_wire(tmp_path, writable):
 
 @skip_no_node
 def test_a_no_write_server_refuses_all_three_and_the_json_reaches_the_caller(
-    tmp_path, no_write
+    tmp_path_factory, no_write
 ):
     """Plan §3 "With --no-write" + §7.3: every write action answers 403
     gate-first with the JSON kind:"refused" -- and post() PARSES it (the GET
@@ -517,7 +517,7 @@ def test_a_no_write_server_refuses_all_three_and_the_json_reaches_the_caller(
     app, root = no_write
     before = snapshot_tree(root)
     out = run_client(
-        tmp_path,
+        tmp_path_factory.mktemp("driver"),
         client_cfg(
             app,
             [

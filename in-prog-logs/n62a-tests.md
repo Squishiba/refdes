@@ -109,28 +109,30 @@ interpolation — V8 quotes a body slice) on 200 parse failure, not-ready
 literal, refused/timeout `{error}` on the 10 s timeout. Added
 `changelog.d/navis-vscode-post.added.md`.
 
-Red→green: 6 failed / 2 passed before → 7 passed / 1 failed after.
+Red→green: 6 failed / 2 passed before → 7 passed / 1 failed after the
+implementation; 8 passed after the authorised test fix below.
 
-**One test cannot go green — reported, not edited (hard rule 1):**
+**Structurally-red test — reported, then fixed by authoriser ruling:**
 `test_a_no_write_server_refuses_all_three_and_the_json_reaches_the_caller`
-passes every wire assertion (3x 403, parsed `kind:"refused"`,
-`--no-write` in the error) and fails only its final
-`snapshot_tree(root) == before`: the test's own `run_client` writes
+passed every wire assertion (3x 403, parsed `kind:"refused"`,
+`--no-write` in the error) and failed only its final
+`snapshot_tree(root) == before`: the test's own `run_client` wrote
 `post-driver.js` into `tmp_path`, which the `no_write` fixture *is* the
-project root, so the driver script itself is the one new file. No
-implementation can fix this. Proposed change: keep the project under
-`tmp_path / "project"` (fixture writes config/items there, yields that
-root) and leave `tmp_path` for the driver script; the assertions
-themselves are correct.
+project root. Reported first (hard rule 1); the authoriser then approved
+exactly one narrow edit to that test: driver script goes to
+`tmp_path_factory.mktemp("driver")` (signature `tmp_path` →
+`tmp_path_factory`), project root and fixture untouched, snapshot
+assertion unchanged. Control probe: writing a stray file into `root`
+inside the test makes it fail (removed after).
 
-Tests run: new file (7p/1f), test_vscode_extension.py,
+Tests run: new file (8/8), test_vscode_extension.py,
 test_vscode_adapter_contract.py, test_vscode_navis_tree.py,
 test_vscode_docs_focus.py, test_crossplatform_lint.py — all green;
-`node --check` clean. CI (PR #458): pr-size pass; all three Tests jobs
-fail on exactly the one test above (ubuntu 1 failed/6124 passed/8
-skipped, windows 1 failed/6038 passed/94 skipped; py3.13 logs not
-downloadable, same runner+suite as ubuntu). No implementation fix is
-possible without editing the test (forbidden here). No real VS Code
-window: this slice has no UI, so only the wire contract is proven.
+`node --check` clean. Pre-fix CI (heads 5ac94ea/e956d2b): pr-size
+pass; the three Tests jobs failed on exactly the one test above
+(ubuntu 1 failed/6124 passed/8 skipped, windows 1 failed/6038
+passed/94 skipped). Post-fix CI is expected green on all four checks.
+No real VS Code window: this slice has no UI, so only the wire
+contract is proven.
 
 Status: implementation complete.
