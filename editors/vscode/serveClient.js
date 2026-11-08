@@ -273,6 +273,73 @@ class ServeClient {
     });
   }
 
+  /**
+   * One authenticated write. `POST`s `body`, JSON-encoded, to `pathname`.
+   *
+   * Resolves `{status, body}` on any HTTP response and `{error}` when there
+   * was no response at all -- never rejects, never hangs (plan §4 of
+   * docs/design/navis-vscode-panel-plan.md). Unlike `request()` the body is
+   * JSON-parsed for EVERY status: the write routes answer 403/404/409 with
+   * JSON the caller branches on (`kind: "refused"` etc.), and a non-JSON
+   * body on a non-200 -- the security layer's `text/plain` 403, a proxy's
+   * HTML 500 -- comes back as the raw text so the caller can tell them
+   * apart. A 200 that will not parse is an `{error}`, and its message
+   * deliberately omits V8's parse detail: V8 quotes a leading slice of the
+   * body in that message, and a body must never reach the caller's eyes
+   * through an error string.
+   */
+  post(pathname, body) {
+    return new Promise((resolve) => {
+      if (!this.ready) {
+        resolve({ error: "refdes serve is not running" });
+        return;
+      }
+      const payload = JSON.stringify(body);
+      const req = http.request(
+        {
+          // The printed IPv4 form, as in request(). The Origin below must
+          // match the Host Node derives from host+port: the server's
+          // origin_ok refuses the localhost/127.0.0.1 mismatch pair
+          // (serve/security.py), and Node sends no Origin on its own, so
+          // this header is what the CSRF-style gate reads (plan §4).
+          host: "127.0.0.1",
+          port: this.port,
+          method: "POST",
+          path: pathname,
+          headers: {
+            Origin: `http://127.0.0.1:${this.port}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            // The server reads exactly Content-Length bytes (server.py),
+            // so it is the UTF-8 BYTE length of the payload -- a JS string
+            // length under-counts every multibyte character.
+            "Content-Length": Buffer.byteLength(payload),
+            [TOKEN_HEADER]: this.token,
+          },
+        },
+        (res) => {
+          let text = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk) => (text += chunk));
+          res.on("end", () => {
+            try {
+              resolve({ status: res.statusCode, body: JSON.parse(text) });
+            } catch (err) {
+              if (res.statusCode === 200) {
+                resolve({ error: `could not parse the response from ${pathname}` });
+                return;
+              }
+              resolve({ status: res.statusCode, body: text });
+            }
+          });
+        }
+      );
+      req.on("error", (err) => resolve({ error: err && err.message ? err.message : String(err) }));
+      req.setTimeout(REQUEST_TIMEOUT_MS, () => req.destroy(new Error("timed out")));
+      req.end(payload);
+    });
+  }
+
   /** `GET /api/revision` -- `{revision, serial, stale, load_error, git}`. */
   revision() {
     return this.request("/api/revision");
@@ -291,6 +358,28 @@ class ServeClient {
    */
   navis() {
     return this.request("/api/navis");
+  }
+
+  /**
+   * `POST /api/navis/archive` -- body `{"navi": <selector>}`; the selector
+   * is a full key, a unique key prefix, or a `refdes navis all` ordinal
+   * (`navis_write.py`). The result mapping is the caller's (plan §4's
+   * table): 200 refreshes, 403 locks the session, 404/409 warn.
+   */
+  navisArchive(selector) {
+    return this.post("/api/navis/archive", { navi: selector });
+  }
+
+  /** `POST /api/navis/restore` -- the inverse; restoring an ACTIVE Navi is
+   *  a 409 `kind:"conflict", reason:"not_archived"`. */
+  navisRestore(selector) {
+    return this.post("/api/navis/restore", { navi: selector });
+  }
+
+  /** `POST /api/navis/mint` -- body `{}`, project-wide (docs/navis.md
+   *  "The serve API"): keys every keyless marker, idempotent. */
+  navisMint() {
+    return this.post("/api/navis/mint", {});
   }
 
   /**

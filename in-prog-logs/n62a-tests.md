@@ -94,4 +94,39 @@ pinned via refused/hang/not-ready `{error}` shapes — a real spawned child
 is exercised by the shipped launch-line tests, and the wire result of
 dialing a dead port is the same `{error}` contract.
 
-Status: complete (test-author half). Red until S6.2 lands `post()`.
+Status: test-author half complete.
+
+## N6.2a-impl (implementer half)
+
+Implemented `post(pathname, body)` + `navisArchive`/`navisRestore`/
+`navisMint` in `editors/vscode/serveClient.js` only (89 inserted lines,
+0 removed — GET path byte-identical). Headers per §4: explicit
+`Origin: http://127.0.0.1:<port>` from `this.port`, `Content-Type`/
+`Accept: application/json`, `[TOKEN_HEADER]: this.token`,
+`Content-Length: Buffer.byteLength(payload)`; JSON-parsed body for every
+status, raw text on non-200 parse failure, `{error}` (no `${err}`
+interpolation — V8 quotes a body slice) on 200 parse failure, not-ready
+literal, refused/timeout `{error}` on the 10 s timeout. Added
+`changelog.d/navis-vscode-post.added.md`.
+
+Red→green: 6 failed / 2 passed before → 7 passed / 1 failed after.
+
+**One test cannot go green — reported, not edited (hard rule 1):**
+`test_a_no_write_server_refuses_all_three_and_the_json_reaches_the_caller`
+passes every wire assertion (3x 403, parsed `kind:"refused"`,
+`--no-write` in the error) and fails only its final
+`snapshot_tree(root) == before`: the test's own `run_client` writes
+`post-driver.js` into `tmp_path`, which the `no_write` fixture *is* the
+project root, so the driver script itself is the one new file. No
+implementation can fix this. Proposed change: keep the project under
+`tmp_path / "project"` (fixture writes config/items there, yields that
+root) and leave `tmp_path` for the driver script; the assertions
+themselves are correct.
+
+Tests run: new file (7p/1f), test_vscode_extension.py,
+test_vscode_adapter_contract.py, test_vscode_navis_tree.py,
+test_vscode_docs_focus.py, test_crossplatform_lint.py — all green;
+`node --check` clean. No real VS Code window: this slice has no UI, so
+only the wire contract is proven.
+
+Status: implementation complete.
