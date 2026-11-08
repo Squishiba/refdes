@@ -123,22 +123,6 @@ visible in a second status bar item:
 Click it for the Refdes output channel, which carries everything the server printed,
 prefixed `[serve]`.
 
-## Follow the cursor (docs-context)
-
-`refdes.docsContext.url` points the extension at a running docs-context viewer
-(`python tools/docs_context/server.py <page>.md`), a maintainer tool that renders the
-references one docs page makes. With the setting on, moving the cursor in an open file
-inside the workspace posts `{path, line}` — the workspace-relative path and the 1-based
-cursor line — to `<url>/api/focus`, so the viewer scrolls to the block you are looking
-at. Nothing else travels: never file contents, never selection text.
-
-Off by default (empty string = no network call of any kind). Only loopback urls are
-honoured (`127.0.0.1`, `localhost`, `::1`); any other host is ignored with a single
-line in the Refdes output channel, because the extension never posts file paths off
-the machine. Posts are debounced (~300 ms) and fire-and-forget: failures produce at
-most one throttled output-channel line, never a popup, and clearing the setting stops
-posting immediately.
-
 The server starts on demand — the first hover on an ID asks for it — one per project
 per window, and it is killed when the window closes. Its launch token lives in the
 extension host's memory and nowhere else: not in a setting, not on disk, not in a
@@ -147,6 +131,23 @@ command line. It never appears in the output channel either.
 To run the server yourself instead — to watch it, or to share it with a browser tab —
 start it and paste the launch URL it prints into **Refdes: Attach to running server**.
 If a hover shows no snapshot facts, the status item says why.
+
+## Follow the cursor (docs-context)
+
+`refdes.docsContext.url` points the extension at a running docs-context viewer
+(`python tools/docs_context/server.py <page>.md`), a maintainer tool that renders the
+references one docs page makes. With the setting on, moving the cursor in an open file
+inside the workspace posts `{path, line}` — the workspace-relative path and the 1-based
+cursor line — to `/api/focus` on the url's origin (a path in the url is ignored), so
+the viewer scrolls to the block you are looking at. Nothing else travels: never file
+contents, never selection text.
+
+Off by default (empty string = no network call of any kind). Only loopback urls are
+honoured (`127.0.0.1`, `localhost`, `::1`); any other host is ignored with a single
+line in the Refdes output channel, because the extension never posts file paths off
+the machine. Posts are debounced (~300 ms) and fire-and-forget: failures produce at
+most one throttled output-channel line, never a popup, and clearing the setting stops
+posting immediately.
 
 ## Settings
 

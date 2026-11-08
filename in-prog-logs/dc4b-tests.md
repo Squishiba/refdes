@@ -89,7 +89,8 @@ and silently on every platform.
 ## Status
 
 - Red: 12 failed / 1 passed on the untouched tree (the pass is the
-  documented empty-url guard; every pin of a default fails red), ~28 s.- Satisfiability: a throwaway prototype (focus watcher in a copy of
+  documented empty-url guard; every pin of a default fails red), ~28 s.
+- Satisfiability: a throwaway prototype (focus watcher in a copy of
   `extension.js`, setting in a copy of `package.json`, driven via the
   module's env-var path overrides) turns all 13 green (~30 s). The tree
   carries only the test file. Prototype kept in `.scratch/dc4b-proto/`.
@@ -136,4 +137,13 @@ and silently on every platform.
   red/1 guard), ~28 s; test_vscode_extension + test_crossplatform_lint +
   test_vscode_adapter_contract: 46 passed. `node --check` clean on both
   touched js files. Branch ff-merged to origin/main (#452 base).
-- Status: COMPLETE.
+- Review round 1 (PR #454, Qwen chunk 1; Luna approved chunk 2) in one
+  pass: README section was splicing the Live snapshot paragraphs (moved
+  after them; README now purely additive vs main), log bullet re-split,
+  README+changelog say `/api/focus` on the url's ORIGIN (path ignored);
+  real bug fixed: the de-dupe early-return left an armed burst
+  (A->B->A posted B) — it now CANCELS the pending post, pinned by a new
+  test (red: B posted; green: p2 empty) in the test file (additive,
+  authorised). 14/14 green. https urls stay silently ignored (skipped
+  per orchestrator).
+- Status: COMPLETE (round 1 delivered; head on the PR branch).

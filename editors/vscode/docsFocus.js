@@ -142,7 +142,19 @@ function createDocsFocusWatcher(vscode, getOutput) {
       return;
     }
     const pair = activePair();
-    if (!pair || pair.key === lastSentKey) return;
+    if (!pair) return;
+    if (pair.key === lastSentKey) {
+      // The cursor settled on the pair the last post already showed the
+      // viewer: a burst A -> B -> A must end with NOTHING pending, so the
+      // de-dupe CANCELS the armed move — returning early over a live
+      // timer would post B after the cursor came home to A.
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      pending = null;
+      return;
+    }
     pending = pair;
     if (timer) clearTimeout(timer);
     timer = setTimeout(flush, DEBOUNCE_MS);

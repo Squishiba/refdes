@@ -788,6 +788,50 @@ def test_same_path_and_line_are_not_reposted(tmp_path):
 
 
 @skip_no_node
+def test_returning_to_the_posted_pair_cancels_the_pending_post(tmp_path):
+    """Round-1 review pin (the de-dupe is a CANCELLED post, not an early
+    return over a live timer): after A is posted, a burst B -> A -- the
+    cursor back on the posted pair inside the debounce window -- must
+    leave NOTHING pending, so the viewer ends where the cursor settled;
+    a burst A -> B -> C (never returning to A) posts only C."""
+    ws = make_workspace(tmp_path)
+    with FakeFocusServer() as server:
+        out = run_extension(
+            tmp_path,
+            base_cfg(
+                tmp_path,
+                ws,
+                server,
+                server.url,
+                [
+                    {"a": "editor", "name": "a", "file": "a"},
+                    {"a": "fire", "name": "a", "line": 4},  # A = (docs/a.md, 5)
+                    {"a": "sleep", "ms": 800},
+                    {"a": "snap", "name": "p1"},
+                    {"a": "fire", "name": "a", "line": 6},  # B armed...
+                    {"a": "fire", "name": "a", "line": 4},  # ...cancelled by A
+                    {"a": "sleep", "ms": 800},
+                    {"a": "snap", "name": "p2"},
+                    {"a": "fire", "name": "a", "line": 8},  # a lone post after A
+                    {"a": "sleep", "ms": 800},
+                    {"a": "snap", "name": "p3"},
+                ],
+            ),
+        )
+    requests = out["phases"]["p1"]
+    assert len(requests) == 1, requests
+    assert body_json(requests[0]) == {"path": "docs/a.md", "line": 5}, requests
+    assert out["phases"]["p2"] == [], (
+        "the cursor returned to the posted pair inside the debounce window, "
+        "so the armed B must be CANCELLED, not posted: "
+        f"{[body_json(r) for r in out['phases']['p2']]!r}"
+    )
+    requests = out["phases"]["p3"]
+    assert len(requests) == 1, requests
+    assert body_json(requests[0]) == {"path": "docs/a.md", "line": 9}, requests
+
+
+@skip_no_node
 def test_only_the_active_workspace_file_editor_is_posted(tmp_path):
     """Default 2's gate: the ACTIVE editor, whose document is a file INSIDE
     the workspace. A selection event naming a non-active editor posts the
