@@ -142,8 +142,8 @@ Full suite: `6120 passed, 2 skipped`. Ruff is clean on touched py. The changelog
 fragment is added.
 
 Round 1 added CSS byte tests, byte-mode CRLF/BOM stripping, and case-insensitive
-head/body insertion (the U+0130 case exposed preview-bar's pre-existing offset).
-Round 2 made DOM ids unique/safe for missing, repeated, and unsafe task ids while
-preserving the authored data-refdes-task, pinned the tick module write-free, and
-pinned non-Q6 row states as glyph-only. Mutation probes made the new tests red.
-Full suite after the fixes: `6148 passed, 2 skipped`.
+head/body insertion. Round 2 made DOM ids unique/safe while preserving authored
+data-refdes-task, pinned the tick module write-free and non-Q6 rows glyph-only.
+Mutation probes made new tests red. Tick tests 24, targeted tests 100; Windows
+exposed serve fixtures sharing tmp_path, so each fixture gets its own directory.
+Final full suite: `6056 passed, 94 skipped`. PR-size: 349/350 src additions.
