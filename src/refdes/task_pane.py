@@ -108,7 +108,6 @@ def _tick_for(row: dict, tip: str) -> dict | None:
     }
 
 
-
 def _unknown_state_message(state: object) -> str:
     return (
         f"task pane cannot render task-block state {state!r}: it renders "
@@ -225,10 +224,10 @@ def _task_block(tasks: dict, tip: str = "", interactive: bool = False) -> dict:
     valid rows under it, and a pane that let the count hide the rows made
     a partly-broken list look like an empty one (PR #197 review B1).
 
-    `tip`/`interactive` (W5b.3): on an interactive render every declared
-    row also carries its tick control data under `tick` (None for a state
+    `tip`/`interactive` (W5b.3): every declared row carries a `tick` key.
+    An interactive render fills it with the control data (None for a state
     Q6 gives no control), computed against the TIP's label; every other
-    render's rows are the W5a bytes, key for key.
+    render leaves it None, so the read-only template ignores it.
     """
     if tasks["state"] == "ambiguous":
         return {
@@ -266,10 +265,10 @@ def _task_block(tasks: dict, tip: str = "", interactive: bool = False) -> dict:
             # CLI's gate (PR #197 review B4): the projection's `dict(row)`
             # carries an authored `open_since:` through on any state.
             "since": _age(row) if row.get("state") == "open" else "",
-            # W5b.3: the row's tick control data, present only on an
-            # interactive render and only for a state Q6 gives a control to
-            # (it carries the row's own state). The read-only template reads
-            # neither key, so the published pane stays byte-identical.
+            # W5b.3: the row's tick control data. The key is always present;
+            # an interactive render fills it for a state Q6 gives a control
+            # to (it carries the row's own state). The read-only template
+            # reads neither key, so the published pane stays byte-identical.
             "tick": _tick_for(row, tip) if interactive else None,
         }
         for row in (tasks["rows"] or [])

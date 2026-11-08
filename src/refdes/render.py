@@ -1255,21 +1255,24 @@ TASKPANE_ASSET_NAMES = ("taskpane.css", "taskpane.js")
 #: response beside the interactive pane markup.
 PREVIEW_CSS_START = "/* refdes:preview-css-start */"
 PREVIEW_CSS_END = "/* refdes:preview-css-end */"
-PREVIEW_CSS_RE = re.compile(
-    rf"{re.escape(PREVIEW_CSS_START)}.*?{re.escape(PREVIEW_CSS_END)}", re.DOTALL
+PREVIEW_CSS_BYTES_RE = re.compile(
+    re.escape(PREVIEW_CSS_START.encode("utf-8"))
+    + b".*?"
+    + re.escape(PREVIEW_CSS_END.encode("utf-8")),
+    re.DOTALL,
 )
 
 
-def _strip_preview_css(text: str) -> str:
-    return PREVIEW_CSS_RE.sub("", text, count=1)
+def _strip_preview_css_bytes(data: bytes) -> bytes:
+    return PREVIEW_CSS_BYTES_RE.sub(b"", data, count=1)
 
 
 def preview_taskpane_css() -> str:
     """The marked preview-only CSS, as CSS text (not a `<style>` element)."""
     path = os.path.join(TASKPANE_DIR, "taskpane.css")
-    with open(path, encoding="utf-8") as fh:
-        match = PREVIEW_CSS_RE.search(fh.read())
-    return match.group(0) if match is not None else ""
+    with open(path, "rb") as fh:
+        match = PREVIEW_CSS_BYTES_RE.search(fh.read())
+    return match.group(0).decode("utf-8") if match is not None else ""
 
 
 def render_taskpane_fragment(pane: dict) -> str:
@@ -1296,10 +1299,10 @@ def _write_assets(
         source = os.path.join(src_dir, name)
         target = os.path.join(asset_out, name)
         if name.endswith(".css"):
-            with open(source, encoding="utf-8") as fh:
-                text = _strip_preview_css(fh.read())
-            with open(target, "w", encoding="utf-8", newline="") as fh:
-                fh.write(text)
+            with open(source, "rb") as fh:
+                data = _strip_preview_css_bytes(fh.read())
+            with open(target, "wb") as fh:
+                fh.write(data)
         else:
             shutil.copyfile(source, target)
         written.add(f"assets/{name}")

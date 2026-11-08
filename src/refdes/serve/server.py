@@ -275,6 +275,8 @@ def _decorate_calc_values(page: str, item) -> str:
 _TICKS_TAG = '<script type="module" src="/edit/static/taskpane-ticks.js"></script>'
 _TICKS_STYLE_START = "<style>"
 _TICKS_STYLE_END = "</style>"
+_HEAD_END_RE = re.compile(r"</head>", re.IGNORECASE)
+_BODY_END_RE = re.compile(r"</body>", re.IGNORECASE)
 _PANE_SPAN_RE = re.compile(
     r'<button type="button" class="refdes-taskpane-toggle".*?</aside>', re.DOTALL
 )
@@ -313,12 +315,11 @@ def _decorate_task_ticks(page: str, project, item) -> str:
         + _TICKS_STYLE_END
         + _TICKS_TAG
     )
-    head_at = swapped.lower().rfind("</head>")
-    return (
-        swapped[:head_at] + head_extra + swapped[head_at:]
-        if head_at != -1
-        else swapped + head_extra
-    )
+    head_matches = list(_HEAD_END_RE.finditer(swapped))
+    if not head_matches:
+        return swapped + head_extra
+    head_at = head_matches[-1].start()
+    return swapped[:head_at] + head_extra + swapped[head_at:]
 
 
 class _Server(ThreadingHTTPServer):
@@ -832,18 +833,17 @@ class _Handler(BaseHTTPRequestHandler):
             + "</div>"
         )
         probe = _reload_probe(self.app.token, self.app.state.snapshot.serial)
-        lower = page.lower()
-        head_at = lower.rfind("</head>")
-        if head_at != -1:
+        head_matches = list(_HEAD_END_RE.finditer(page))
+        if head_matches:
+            head_at = head_matches[-1].start()
             page = page[:head_at] + _BAR_HEAD + probe + page[head_at:]
-            lower = page.lower()
         panel = _diagnostics_panel(project, item) if item is not None else ""
-        body_at = lower.rfind("</body>")
-        page = (
-            page[:body_at] + panel + bar + page[body_at:]
-            if body_at != -1
-            else page + panel + bar
-        )
+        body_matches = list(_BODY_END_RE.finditer(page))
+        if body_matches:
+            body_at = body_matches[-1].start()
+            page = page[:body_at] + panel + bar + page[body_at:]
+        else:
+            page += panel + bar
         return page.encode("utf-8")
 
     # ------------------------------------------------------------------ api

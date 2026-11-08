@@ -140,3 +140,9 @@ app page/console errors; Chromium has two favicon-only resource 404s.
 
 Full suite: `6120 passed, 2 skipped`. Ruff is clean on touched py. The changelog
 fragment is added.
+
+Review round 1 added CSS byte-identity tests, byte-mode CRLF/BOM stripping, and
+case-insensitive head/body insertion on the original page (the U+0130 case also
+exposed the pre-existing preview-bar insertion). A temporary no-op strip made
+both new CSS tests red; restoring the strip made them green. Full suite after the
+fixes: `6123 passed, 2 skipped`.

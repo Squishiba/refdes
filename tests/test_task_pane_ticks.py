@@ -50,6 +50,8 @@ from conftest import write_project_config
 from serve_support import Client
 
 from refdes import cli as cli_mod
+from refdes import render as render_mod
+from refdes.serve import server as server_mod
 from refdes.serve.server import EditorApp
 
 CONFIG = "site: { title: Task Pane Ticks, out: _site }\nstandard: { base: hardware, version: 3 }\n"
@@ -87,6 +89,16 @@ ONE_TIP = (
     "    type: log\n"
     "    summary: A lone entry with no thread.\n"
     "    date: 2026-09-06\n"
+)
+
+# ONE_TIP plus one Navi, so a build writes both gated stylesheets.
+WITH_NAVI = ONE_TIP + (
+    "  - id: LOG-900\n"
+    "    summary: Navi reminder.\n"
+    "    date: 2026-09-07\n"
+    "    body: >\n"
+    "      Check the board.\n"
+    "      <!--navi: reminder-->\n"
 )
 
 # A real fork: LOG-001's pane shows two tabs, each tip with its own list.
@@ -131,6 +143,14 @@ STATIC_DIR = os.path.join(SRC_REFDES, "serve", "static")
 TASKPANE_JS = os.path.join(SRC_REFDES, "templates", "taskpane", "taskpane.js")
 TASKPANE_CSS = os.path.join(SRC_REFDES, "templates", "taskpane", "taskpane.css")
 TICK_MODULE = "taskpane-ticks.js"
+PREVIEW_CSS_START = "/* refdes:preview-css-start */"
+PREVIEW_CSS_END = "/* refdes:preview-css-end */"
+PREVIEW_CSS_BYTES_RE = re.compile(
+    re.escape(PREVIEW_CSS_START.encode("utf-8"))
+    + b".*?"
+    + re.escape(PREVIEW_CSS_END.encode("utf-8")),
+    re.DOTALL,
+)
 
 INPUT_TAG = re.compile(r"<input\b[^>]*>", re.IGNORECASE)
 DATA_ATTR = re.compile(r'data-refdes-([\w-]+)="([^"]*)"')
@@ -155,7 +175,15 @@ FORBIDDEN_IN_PANE = ('type="checkbox"', *FORBIDDEN_IN_TREE)
 
 
 def _write(tmp_path, items_yaml):
-    write_project_config(tmp_path, CONFIG)
+    return _write_config(tmp_path, items_yaml, "Task Pane Ticks")
+
+
+def _write_config(tmp_path, items_yaml, title):
+    config = (
+        f"site: {{ title: {title}, out: _site }}\n"
+        "standard: { base: hardware, version: 3 }\n"
+    )
+    write_project_config(tmp_path, config)
     items = tmp_path / "items"
     items.mkdir(exist_ok=True)
     (items / "log.yaml").write_bytes(items_yaml.encode("utf-8"))
@@ -294,8 +322,8 @@ def test_the_build_writes_no_ticks_and_the_serve_response_carries_them(tmp_path)
     "Verified against", §5 R3): walk every byte of `refdes build` -- no
     checkbox, no tick module, no token string, no write route text, the W5a
     read-only glyph and toggle intact -- and see the SAME project under serve
-    grow the checkboxes and the module in the HTTP response. Today the build
-    half is green and the serve half red: exactly the feature W5b.3 adds."""
+    grow the checkboxes and the module in the HTTP response. The build half is
+    green and the serve half is green: this is the feature W5b.3 ships."""
     config = _write(tmp_path, ONE_TIP)
     assert cli_mod.main(["-c", config, "build"]) == 0
     out = os.path.join(str(tmp_path), "_site")
@@ -336,6 +364,65 @@ def test_the_build_writes_no_ticks_and_the_serve_response_carries_them(tmp_path)
         assert TICK_MODULE not in disk
     finally:
         app.stop()
+
+
+def test_the_built_stylesheets_strip_the_preview_block_the_response_carries(tmp_path):
+    """R3's CSS half: the build's own gated stylesheets carry neither marker
+    nor tick selector, `taskpane.css` is its source minus the marked block
+    (computed independently here), and the writable preview response injects
+    the same block beside the interactive pane."""
+    config = _write(tmp_path, WITH_NAVI)
+    assert cli_mod.main(["-c", config, "build"]) == 0
+    assets = os.path.join(str(tmp_path), "_site", "assets")
+    names = set(os.listdir(assets))
+    assert {"taskpane.css", "navis.css"} <= names
+    for name in sorted(name for name in names if name.endswith(".css")):
+        with open(os.path.join(assets, name), encoding="utf-8") as fh:
+            text = fh.read()
+        assert PREVIEW_CSS_START not in text, name
+        assert PREVIEW_CSS_END not in text, name
+        assert ".refdes-taskpane-tick" not in text, name
+    with open(os.path.join(assets, "taskpane.css"), "rb") as fh:
+        built_css = fh.read()
+    with open(TASKPANE_CSS, "rb") as fh:
+        expected_css = PREVIEW_CSS_BYTES_RE.sub(b"", fh.read(), count=1)
+    assert built_css == expected_css
+
+    app = EditorApp(config, poll_interval=0.05)
+    app.start()
+    try:
+        page = _body(Client(app), app, "LOG-002")
+        style_start = page.index("<style>")
+        style = page[style_start : page.index("</style>", style_start)]
+        assert PREVIEW_CSS_START in style
+        assert PREVIEW_CSS_END in style
+        assert ".refdes-taskpane-tick" in style
+    finally:
+        app.stop()
+
+
+def test_the_css_strip_is_a_byte_copy_outside_the_marked_block(tmp_path):
+    """The byte-identity guard preserves bytes it is not asked to remove. A
+    BOM and CRLF stylesheet, written as bytes, round-trips exactly around the
+    marker block; a text-mode rewrite would have normalized it away."""
+    source = tmp_path / "sample.css"
+    data = (
+        "\ufeff/* refdes-bom-css-test */\r\n"
+        "/* refdes:preview-css-start */\r\n"
+        ".refdes-taskpane-tick { color: red; }\r\n"
+        "/* refdes:preview-css-end */\r\n"
+        "/* after */\r\n"
+    ).encode("utf-8")
+    source.write_bytes(data)
+    out = str(tmp_path / "out")
+    render_mod._write_assets(out, set(), True, ("sample.css",), str(tmp_path))
+    with open(os.path.join(out, "assets", "sample.css"), "rb") as fh:
+        built = fh.read()
+    assert built == PREVIEW_CSS_BYTES_RE.sub(b"", data, count=1)
+    assert built.startswith(b"\xef\xbb\xbf")
+    assert b"/* refdes-bom-css-test */\r\n" in built
+    assert b"/* after */\r\n" in built
+    assert b".refdes-taskpane-tick" not in built
 
 
 def test_the_built_tree_ships_no_tick_module_while_serve_serves_it(tmp_path):
@@ -614,12 +701,47 @@ def test_taskpane_js_stays_a_show_hide_tab_script(served):
 
 def test_the_pane_css_styles_the_tick():
     """W5b.3's css lands in templates/taskpane/taskpane.css (the pane styles
-    its own list -- K4's rule), so the css carries a rule for the tick's own
-    class (comments stripped first: the round-4 C4 lesson)."""
+    its own list -- K4's rule). The match must be the tick's own selector,
+    not one merely naming it as a descendant or a `-note` class; comments are
+    stripped first (the round-4 C4 lesson)."""
     with open(TASKPANE_CSS, encoding="utf-8") as fh:
         css = re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.DOTALL)
-    rule = re.search(r"\.refdes-taskpane-tick\b[^{]*\{([^}]*)\}", css)
+    rule = re.search(r"(?m)^[ \t]*\.refdes-taskpane-tick[ \t]*\{([^}]*)\}", css)
     assert rule, "taskpane.css has no .refdes-taskpane-tick rule"
+    negative = (
+        ".refdes-taskpane-row:has(.refdes-taskpane-tick) input { width: auto; }\n"
+        ".refdes-taskpane-tick-note { color: red; }\n"
+    )
+    assert not re.search(r"(?m)^[ \t]*\.refdes-taskpane-tick[ \t]*\{([^}]*)\}", negative)
+
+
+def test_the_tick_head_insertion_uses_the_original_head_end(tmp_path):
+    """`str.lower()` is not length-preserving for U+0130. The insertion point
+    is the last `</head>` in the original response, not an offset borrowed
+    from a lowercased copy."""
+    config = _write_config(tmp_path, ONE_TIP, "İstanbul work list")
+    app = EditorApp(config, poll_interval=0.05)
+    app.start()
+    try:
+        with open(os.path.join(app.preview.current, "log-002.html"), encoding="utf-8") as fh:
+            page = fh.read()
+        title = re.search(r"<title>.*?</title>", page, re.DOTALL)
+        assert title is not None
+        assert "İ" in title.group(0)
+        project = app.state.snapshot.project
+        item = project.item_by_id("LOG-002")
+        decorated = server_mod._decorate_task_ticks(page, project, item)
+        extra = (
+            "<style>"
+            + render_mod.preview_taskpane_css()
+            + "</style>"
+            + f'<script type="module" src="/edit/static/{TICK_MODULE}"></script>'
+        )
+        at = decorated.index(extra)
+        tail = decorated[at + len(extra) : at + len(extra) + len("</head>")]
+        assert tail == "</head>"
+    finally:
+        app.stop()
 
 
 # ------------------------------------------------------------ --no-write (Q9)
