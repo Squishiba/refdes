@@ -275,11 +275,21 @@ class ServeClient {
 
   /**
    * One authenticated write. `POST`s `body`, JSON-encoded, to `pathname`.
+   * An omitted `body` is the empty JSON object `{}` -- the same bytes
+   * `navisMint()` passes explicitly -- because every POST route reads a JSON
+   * body (`serve/server.py:_api` answers an empty one with a 400 that carries
+   * no `kind`, and `JSON.stringify(undefined)` is `undefined`, which would
+   * poison the `Content-Length` below). `null` is not coerced: it serialises
+   * honestly to `null`, and the route's 400 "expected a JSON object" is the
+   * answer it earns.
    *
    * Resolves `{status, body}` on any HTTP response and `{error}` when there
-   * was no response at all -- never rejects, never hangs (plan §4 of
-   * docs/design/navis-vscode-panel-plan.md). Unlike `request()` the body is
-   * JSON-parsed for EVERY status: the write routes answer 403/404/409 with
+   * was no response at all -- never hangs (plan §4 of
+   * docs/design/navis-vscode-panel-plan.md). The one rejection is a body
+   * `JSON.stringify` cannot serialise (circular, BigInt): a caller bug, said
+   * as an `Error` naming the problem, and never a synchronous throw out of
+   * `post()`. Unlike `request()` the body is JSON-parsed for EVERY status:
+   * the write routes answer 403/404/409 with
    * JSON the caller branches on (`kind: "refused"` etc.), and a non-JSON
    * body on a non-200 -- the security layer's `text/plain` 403, a proxy's
    * HTML 500 -- comes back as the raw text so the caller can tell them
@@ -289,12 +299,26 @@ class ServeClient {
    * through an error string.
    */
   post(pathname, body) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       if (!this.ready) {
         resolve({ error: "refdes serve is not running" });
         return;
       }
-      const payload = JSON.stringify(body);
+      // Inside the executor on purpose: a body `JSON.stringify` refuses must
+      // REJECT the returned promise, never throw out of post() synchronously.
+      let payload;
+      try {
+        payload = JSON.stringify(body === undefined ? {} : body);
+      } catch (err) {
+        reject(
+          new Error(
+            `the POST body for ${pathname} is not JSON-serialisable: ${
+              err && err.message ? err.message : err
+            }`
+          )
+        );
+        return;
+      }
       const req = http.request(
         {
           // The printed IPv4 form, as in request(). The Origin below must
