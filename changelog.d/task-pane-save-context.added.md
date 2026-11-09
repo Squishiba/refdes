@@ -1,0 +1,1 @@
+- The preview task pane now carries, on each tip's panel, the tip key and the file revision that a save will compare (`data-refdes-tip-key` / `data-refdes-revision`, serve response only) — the save context a W5b.4 draft is built from. Nothing visible yet.
