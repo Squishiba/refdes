@@ -12,8 +12,13 @@ client asked for is replaced by a connection error.
 
 The mechanism, asserted on Linux where it is deterministic: a raw-socket
 client sends the headers of a request the server will refuse, then *drips*
-the body (4 KB per ~1 ms) so bytes are still in flight when the refusal
-lands. It asserts, per iteration:
+the body (at most `MAX_CHUNKS` pieces, `DRIP_SECONDS` apart) so bytes are
+still in flight when the refusal lands. The pacing is bounded on purpose:
+`time.sleep` on Windows returns no sooner than one timer tick (~15.6 ms),
+so a piece count derived from the body length -- not a piece size -- is
+what keeps the drip's wall time inside the server's bounded linger
+(`LINGER_SECONDS`) on both platforms. Guarded without sockets by
+`tests/test_serve_early_refusal_pacing.py`. It asserts, per iteration:
 
 (a) the status line it reads is the expected refusal --
 (b) every `sendall` of the body succeeded (today the RST kills the write:
@@ -43,14 +48,35 @@ from serve_support import make_project
 from refdes.serve.server import MAX_BODY_BYTES, EditorApp
 
 ITERATIONS = 20
-BODY_BYTES = 262144  # 256 KiB: dripped over ~64 ms, in flight when refused
-CHUNK = 4096
-DRIP_SECONDS = 0.001  # ~1 ms per 4 KB chunk
+BODY_BYTES = 262144  # 256 KiB: in flight when the refusal lands
+# The drip's wall time must fit the server's bounded linger on BOTH
+# platforms. `time.sleep(DRIP_SECONDS)` is a floor, not a duration: on
+# Windows it returns no sooner than one timer tick (~15.6 ms), so the
+# pieces-per-body, not the piece size, bounds the drip at
+# MAX_CHUNKS * max(DRIP_SECONDS, 0.0156) -- well under LINGER_SECONDS.
+# Deriving the chunk from the body length (below) keeps that true for
+# every case, including the 413's over-cap body.
+MAX_CHUNKS = 6
+DRIP_SECONDS = 0.005  # idle gap per piece; the Windows tick dominates it
 JOIN_TIMEOUT = 10.0
 SOCKET_TIMEOUT = 10.0
 
 ARCHIVE = "/api/navis/archive"
 RESTORE = "/api/navis/restore"
+
+
+def _drip_chunk(body_len: int) -> int:
+    """Chunk size splitting `body_len` into at most `MAX_CHUNKS` pieces.
+
+    A fixed small chunk makes the drip's duration proportional to the body
+    and to the platform's sleep granularity, so a body that drains in tens
+    of milliseconds here takes a full second on a Windows runner -- past
+    `LINGER_SECONDS`, where the server legitimately stops draining and
+    closes, and the writer's next send takes an RST (the windows-latest
+    flakes in runs 42606063274 and 42645047704). Capping the piece count
+    caps the wall time; `tests/test_serve_early_refusal_pacing.py` pins it.
+    """
+    return -(-body_len // MAX_CHUNKS)
 
 
 @pytest.fixture
@@ -144,7 +170,9 @@ def _one_refusal(app, method, path, headers, body_len, chunk):
         sock.close()
 
 
-def _assert_drains(app, method, path, headers, body_len, expected, chunk=CHUNK):
+def _assert_drains(app, method, path, headers, body_len, expected, chunk=None):
+    if chunk is None:
+        chunk = _drip_chunk(body_len)
     statuses, closes = [], []
     send_failures = 0
     for _ in range(ITERATIONS):
@@ -220,5 +248,4 @@ def test_the_413_size_refusal_lets_the_dripped_body_drain(served):
         },
         MAX_BODY_BYTES + BODY_BYTES // 2,
         413,
-        chunk=65536,  # the 1.5 MiB body drips in 24 pieces, not 384
     )
