@@ -259,5 +259,5 @@
   "discard": [],
   "moduleTag": false
  },
- "fatal": "Error: ENOENT: no such file or directory, open '/home/jorb/.paseo/worktrees/16msma8v/user-sim-run16/.scratch/pwr16/_site/log-a-005.html'\n    at Object.readFileSync (node:fs:440:20)\n    at file:///home/jorb/.paseo/worktrees/16msma8v/user-sim-run16/.scratch/pptr/r16_taskpane2.mjs:113:19"
+ "fatal": "Error: ENOENT: no such file or directory, open '.scratch/pwr16/_site/log-a-005.html'\n    at Object.readFileSync (node:fs:440:20)\n    at file://.scratch/pptr/r16_taskpane2.mjs:113:19"
 }

@@ -1,0 +1,74 @@
+{
+ "ts": "2026-11-09T08:56:27.610Z",
+ "base": "9f15af87",
+ "chromium": {
+  "sel": {
+   "exists": true,
+   "tickStates": "done,dropped",
+   "state": "open",
+   "checked": false,
+   "inLabel": "refdes-taskpane-tick"
+  },
+  "seq": [
+   {
+    "checked": true,
+    "mirror": {
+     "4jfd3hhpajc": {
+      "T-rerun": "done"
+     }
+    }
+   },
+   {
+    "checked": false,
+    "mirror": {}
+   },
+   {
+    "checked": true,
+    "mirror": {
+     "4jfd3hhpajc": {
+      "T-rerun": "done"
+     }
+    }
+   },
+   {
+    "checked": false,
+    "mirror": {}
+   }
+  ]
+ },
+ "firefox": {
+  "sel": {
+   "exists": true,
+   "tickStates": "done,dropped",
+   "state": "open",
+   "checked": false,
+   "inLabel": "refdes-taskpane-tick"
+  },
+  "seq": [
+   {
+    "checked": true,
+    "mirror": {
+     "4jfd3hhpajc": {
+      "T-rerun": "done"
+     }
+    }
+   },
+   {
+    "checked": false,
+    "mirror": {}
+   },
+   {
+    "checked": true,
+    "mirror": {
+     "4jfd3hhpajc": {
+      "T-rerun": "done"
+     }
+    }
+   },
+   {
+    "checked": false,
+    "mirror": {}
+   }
+  ]
+ }
+}

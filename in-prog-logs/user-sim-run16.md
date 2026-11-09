@@ -40,3 +40,12 @@ silenced, which read as a missing-pages bug; reran from the project
 root. Two sed probes damaged `items/board-a/requirements/power.yaml`
 (defaults block) and the citation ids collided; both repaired and
 `refdes check` is green on the probe (18 items, 0 errors).
+
+Review round (pre-merge): F16-3 re-run clean with plain `page.click` on
+the input in both browsers (identical, matching the reviewer) and
+re-filed Low/Unconfirmed — my fixture had advanced the tip between
+phases and I read the static state attribute as live; evidence kept
+plus the re-run (`r16-rerun.json`). Stripped machine-specific absolute
+paths from three evidence files; added the requested `--no-write`
+preview datum (no checkboxes, no ticks module) as undocumented. No
+product fixes made (dispatched to other workers).

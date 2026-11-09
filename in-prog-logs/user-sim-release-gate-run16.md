@@ -25,7 +25,7 @@ the documented API shapes; a real `refdes` 0.5.0 wheel (PyPI) + its
 |---|-----|---------|------------------|
 | F16-1 | Medium | navis / docs | navis markers in the body of an item that has no `id:` are invisible to every `refdes navis` verb, the `navis` key of `refdes index`, and both panels — the docs promise the scan reads every body, and the docs' own "write bodies, `refdes id` later" flow lands there. Reproduced identically at base `d9719a9`: **not a regression**, shipped before this scope |
 | F16-2 | Medium | task pane / continue endpoint | an id-less thread tip is refused by `/api/item/<ref>/continue` (" carries no artifact key" — note the empty subject) while the pane hands the browser exactly the save context (`data-refdes-tip-key` + revision) for that tip; no shipped doc says a tip needs an `id:` |
-| F16-3 | Medium | task pane / Firefox | on Firefox each click of a tick checkbox advances the row **two** transitions (open→dropped directly; reachable states depend on parity), where Chromium advances one — the changelog promises a click cycles open/done/dropped |
+| F16-3 | Low (Unconfirmed) | task pane / Firefox | a Firefox "tick double-step" observed mid-run **did not reproduce** on a clean re-run with plain `page.click` on the input: Firefox and Chromium are identical (checked true/false/true/false; mirror `{T:done}/{ }/{T:done}/{ }`, matching the reviewer's numbers). The original observation was self-inflicted: my continuation-endpoint test had appended a new tip that flipped the row's file state open→done between probe phases, and I read the row's static `data-refdes-task-state` attribute (the file state, never updated by a tick) as the live state — re-filed Unconfirmed, evidence kept |
 | F16-4 | Low | docs/upgrading.md | the item-level `history:`→`on_change:` hard error (which the docs' own probe class — a v2 entry sealed via item `history: log` — hits on the first current load) is absent from the step-2 quote and no step performs it, so the docs-ordered `calc-rewrite` (step 4) refuses until an off-menu hand-rename; and the design-debate "declare the four types yourself" remedy needs two more renames inside the copied overlay (`on_change: log`→`timeline`, `resolved_by: [decision]`→`[log]`) |
 | F16-5 | Cosmetic | navis / task pane CLI-render | id-less items render with an empty id column in `navis ls`/mint announcements and as an empty-text anchor row in the preview Navis panel |
 | F16-6 | Cosmetic | docs/cli-reference.md | the serve section still describes the task pane as computing and writing nothing with no control on it; the pane now ships preview-only tick checkboxes, a per-tab draft, Discard, and a leave prompt (only the changelog fragments say so) |
@@ -81,25 +81,34 @@ tip's `id:` made the same request apply in one call
 then 409 with `current_text`), so the fix is the pane gate (key AND id),
 the message label, and a doc line.
 
-## F16-3 — Firefox tick clicks double-step
+## F16-3 — Unconfirmed: "Firefox double-step" was a fixture race of mine
 
-Chromium: click → open→done→dropped→open, one transition per click
-(evidence `r16-surface2*`/`r16-taskpane.json`). Firefox
-(playwright-core, real events, evidence `r16-ff3.json`, `r16-ff4.json`):
-from open, one click lands on **dropped** (skips done); the parity of
-clicks decides which states are reachable; the draft mirror and the
-`1 unsaved tick` counter record the double step coherently, so the
-draft machinery is fine — it is the click→transition path.
-`taskpane-ticks.js` wires one `change` listener per box and derives the
-wanted state from the native toggle, so the rows are labelled by a
-label element that wraps the input: on Firefox a click on the box
-delivers two activation events through the wrapping label, the handler
-fires twice, and each firing reads the already-toggled box. Chromium
-coalesces the label forwarding; Firefox does not. The changelog's
-promise ("a click changes the visible state", cycling the three
-states) is met only on Chromium. Everything else on Firefox matched
-(preview-only note, per-tab draft across reload, counter, Discard,
-beforeunload prompt, editor Navi/fence buttons, mint, draft persistence).
+Mid-run I recorded Firefox tick clicks behaving like double-steps
+(evidence `r16-ff2.json`, `r16-ff3.json`, `r16-ff4.json` — kept). A
+clean re-run on request (`r16-rerun.json`, base `9f15af87`; the tick
+files are byte-identical between that base and current `origin/main`
+per `git diff`): a two-entry thread, id-bearing tip, one open task
+(`data-refdes-tick-states="done,dropped"`), plain `page.click` on the
+INPUT, four clicks, file untouched between clicks:
+
+- Chromium: checked true/false/true/false; mirror
+  `{4jfd3hhpajc:{T-rerun:"done"}}` / `{}` / same / `{}`.
+- Firefox: **identical**, same sequence and mirrors — matching the
+  reviewer's independent numbers exactly.
+
+What differed in the original run: my continue-endpoint test had
+appended a new tip carrying the ticked-up list, so between probe
+phases the row's **file state flipped open→done**. From a done row,
+click 1 is an untick — `checked=false` with mirror `{T-open:"open"}` —
+which I misread as "stays open"; and I was reading the rows' static
+`data-refdes-task-state` attribute, which is the file state rendered
+once and never updated by a tick, as if it were the live state. The
+live state (checked + mirror + counter) was coherent in every
+Firefox observation I re-checked. No double-step reproduces; I found
+no browser parity gap. Downgraded to Low/Unconfirmed with the
+mechanism of the false positive named: a gate report must freeze the
+fixture it ticks (the pane ticks a tip's fold — a continuation between
+tick probes silently re-bases every row).
 
 ## F16-4 — docs/upgrading.md gaps on the v2 seal path
 
@@ -190,6 +199,16 @@ Discard, and a leave prompt (all of which worked, see below).
   built `_site` pages have the toggle + read-only pane, no checkboxes,
   no ticks module; `viewing LOG-A-005 · tasks as of tip …` note on
   older entries including id-less ones.
+- **`--no-write` preview datum (requested at review):** on a
+  `--no-write` server the preview pages of a thread tip carry **no
+  tick checkboxes and no ticks module** — confirmed by inspection of
+  the served page. **Undocumented**: `docs/cli-reference.md` §serve
+  (line 2349) still promises preview and site show "the *same* thing"
+  with no `--no-write` qualification for the pane, the W5b changelog
+  fragments never mention `--no-write`, and `docs/navis.md:246+`
+  gates only the Navis panel's actions. The behavior is deliberate in
+  the code (a write-capable control the server refuses is "the UI
+  lying", `serve/server.py`) and test-pinned; no doc states it.
 - **`POST /api/item/<ref>/continue`** (#453): 200 applied (appends
   `id:`+`key:`, composite `follows: [ID@key]`, ticked-up task list,
   full diagnostics payload); 409 conflict with `current_revision` +
