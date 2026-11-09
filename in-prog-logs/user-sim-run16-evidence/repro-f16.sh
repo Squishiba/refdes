@@ -21,8 +21,11 @@ if [ -z "$REFDES" ]; then
 else
   RUN() { "$REFDES" "$@"; }
 fi
-FIX="$(mktemp -d)"
+SCRATCH="${REFDES_SCRATCH:-$PWD/.scratch}"
+mkdir -p "$SCRATCH"
+FIX="$(mktemp -d -p "$SCRATCH")"
 mkdir -p "$FIX/items"
+ROOT="$PWD"
 cd "$FIX"
 printf 'site:\n  title: Repro16\n  out: _site\nstandard:\n  base: hardware\n  version: 3\nid:\n  width: 3\n' > refdes-project.yaml
 cat > items/listfile.yaml <<'EOF'
@@ -61,4 +64,4 @@ RUN navis ls
 echo "== expected =="
 echo 'check: ERROR .../listfile.yaml:2 — item has no id — run '"'"'refdes id'"'"' to allocate one (entry A excluded from the project, marker A unlisted);'
 echo 'navis ls: marker B listed on the KEYED id-less THREAD tip with an EMPTY id column (F16-5); the project is red only because of entry A.'
-echo "fixture kept at $FIX"
+echo "fixture kept at ${FIX#"$ROOT"/}"

@@ -279,8 +279,16 @@ Discard, and a leave prompt (all of which worked, see below).
   beforeunload prompt all behave; cleared thread renders no checkboxes
   and no ticks module; project with no `follows:` publishes no pane;
   built `_site` pages have the toggle + read-only pane, no checkboxes,
-  no ticks module; `viewing LOG-A-005 · tasks as of tip …` note on
-  older entries including id-less ones.
+  no ticks module;   `viewing LOG-A-005 · tasks as of tip …` note on
+  older entries including id-less ones. Evidence note:
+  `r16-taskpane.json` captures the tick/draft flow through the
+  forked, id-less, and cleared-thread steps, then **stops early** —
+  its last step read the published pages from the wrong cwd and the
+  capture ends on that ENOENT; it is not a complete run, and the
+  built-site observations above come from the re-run of that step
+  after the cwd fix (stdout transcript of `r16_discard_pub.mjs`) and
+  from the Firefox captures (`r16-ff2.json`–`r16-ff5.json`) and the
+  parity re-run (`r16-rerun.json`).
 - **`--no-write` preview datum (requested at review):** on a
   `--no-write` server the preview pages of a thread tip carry **no
   tick checkboxes and no ticks module** — confirmed by inspection of

@@ -50,5 +50,6 @@ re-filed Low docs/UX with the `check`-loud/`navis`-silent asymmetry
 and corrected citations; machine paths and captured tokens stripped
 from the evidence, the uncited Firefox timeout run dropped, and
 reproduction scripts added, all run against a `git archive` extraction
-of current main), with no product fixes made (dispatched to other
-workers).
+of current main; repro fixtures moved under `.scratch/` per project
+rule and the truncated pane capture labelled as such in the report),
+with no product fixes made (dispatched to other workers).
