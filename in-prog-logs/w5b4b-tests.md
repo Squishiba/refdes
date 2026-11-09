@@ -103,9 +103,39 @@ real sessionStorage's per-tab isolation (faked here), quota behavior on real
 browsers, and reload semantics of a real tab. The pure contract above is what
 4b ships.
 
+## Implementer status (W5b.4b-impl)
+
+`src/refdes/serve/static/tick-drafts.js` landed (259 lines, pure, injected
+storage, Map-based so hostile ids are ordinary keys; mirror key on the pinned
+own prefix, corrupt envelope re-armed on every read, empty draft leaves no
+key, `persistent()` probes lazily and latches false on the first fault; after
+a fault all writes are skipped, so a blocked getItem leaves storage
+untouched). `drafts.js` untouched. One implementation bug found by the suite
+itself: `discard` first deleted the tip's memory entry, so when `removeItem`
+threw the mirror re-seeded the tip on the next read (storageRemoveThrows red)
+— fixed by setting memory to a clean draft, the shape of `clearDraft`.
+
+**Test-file conflict, reported not edited (HARD RULE 1).**
+`test_proto_is_a_real_tick_and_pollutes_nothing` line 542 asserts the mirror
+key SURVIVES `clearTick` emptying the draft, while
+`test_the_revision_rides_the_draft_and_leaves_with_it` (the `emptied` pin) and
+the file's own docstring rule ("a draft whose pending list is empty leaves NO
+mirror key behind") require `clearTick`-emptying to REMOVE it — identical call
+shape, opposite pinned outcome, differing only in the task id (`__proto__`
+vs `T-1`). No implementation passes both; the line reads as copied from the
+basic test, whose storage snapshot is taken before any clear. Proposed change
+for the test author: `assert r["storage"] == {}` (an emptied draft leaves no
+key, hostile id or not — a special case for `__proto__` would contradict the
+test's own "behaves as an ordinary id" purpose).
+
+Suite state: 30/31 pass, the one red is exactly line 542. Neighbours
+(test_serve_static, editor_draft_mirror, serve_drafts_corruption,
+editor_draft_revision) and test_crossplatform_lint: 125 passed.
+`node --check` (ESM): clean. pr_size: 259/350.
+
 ## Notes
 
-- No changelog.d fragment: test-only slice, no user-visible change.
+- No changelog.d fragment: internal module; W5b.4c carries the user-visible entry.
 - Python 3.11 floor kept (no PEP 695, no Path.read_text(newline=)); node
   subprocess passes `encoding="utf-8"` (Windows cp1252 rule); harness written
   with `newline=""`; unicode flows to node only inside `json.dumps` (ASCII
