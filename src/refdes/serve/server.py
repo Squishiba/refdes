@@ -290,28 +290,35 @@ _PANE_SPAN_RE = re.compile(
 )
 
 
-def _pane_save_context(project, pane) -> None:
+def _pane_save_context(project, pane, hashes: dict[str, str]) -> None:
     """Thread workbench W5b.4a: name each tip panel's save identity, in the
     interactive (response-only) pane model.
 
     `tip_key` is the tip item's artifact key (docs/design/keys.md): stable
     across renames, which the panel's display id (`data-refdes-tip`) is not
     -- a draft that outlives a reload must name the thread by the key.
-    `tip_revision` is `edit.file_revision` of the tip's source file, read at
-    render time: the same bytes `continue_thread` hashes (its
-    `_continue_locked` compares sha256 of the file `_item_path` gives for
-    the tip), and the endpoint's own resolution + revision spelling are
-    reused here, never recomputed, so markup and save cannot drift.
+    `tip_revision` is the tip's source file hash recorded in the SNAPSHOT
+    this page's rows were built from (`state.content_hashes`: the same
+    sha256 spelling `edit.file_revision` uses), NOT a disk read at response
+    time. The rows and the revision must describe the same bytes: a disk
+    read at render time pairs a fresh revision with rows folded from the
+    previous snapshot, so an external edit that changes a task lets an
+    author draft against the old list and save against the new bytes with
+    no Conflict (tests/test_task_pane_stale_revision.py). The endpoint
+    compares sha256 of the file `_item_path` gives for the tip, so naming
+    the snapshot's hash of that same file keeps markup and save honest: a
+    page built from old bytes names the old revision, and the save against
+    it is a Conflict; the poller's rebuild restores the fresh pair.
 
     A tip with no key (no composite for the save's `follows:`), one with no
     display id (F16-2: `links.composite_for` needs BOTH halves, so a keyed
     id-less tip is the same unwritable composite -- the pane labels it by
     key, and a save context naming it would offer a save the endpoint can
-    only refuse), one whose file escapes the root, or one whose file is
-    unreadable, names no context: a panel naming a save the endpoint refuses
-    is the UI lying. The template renders the attributes only for a tab
-    carrying `tip_key`, and the build's model never sets one -- the built
-    page stays byte-identical (R3/Q9)."""
+    only refuse), one whose file escapes the root, one whose file is
+    unreadable, or one the snapshot never hashed, names no context: a panel
+    naming a save the endpoint refuses is the UI lying. The template renders
+    the attributes only for a tab carrying `tip_key`, and the build's model
+    never sets one -- the built page stays byte-identical (R3/Q9)."""
     by_label = {}
     for candidate in project.items.values():
         by_label.setdefault(task_pane.label(candidate), candidate)
@@ -320,15 +327,21 @@ def _pane_save_context(project, pane) -> None:
         if tip is None or not tip.key or not tip.id:
             continue
         path = edit._item_path(project, tip)
-        revision = edit.file_revision(path) if path is not None else ""
+        revision = ""
+        if path is not None:
+            rel = os.path.relpath(path, project.root).replace("\\", "/")
+            revision = hashes.get(rel, "")
         if revision:
             tab["tip_key"] = tip.key
             tab["tip_revision"] = revision
 
 
-def _decorate_task_ticks(page: str, project, item) -> str:
+def _decorate_task_ticks(page: str, project, item, hashes: dict[str, str]) -> str:
     """Thread workbench W5b.3: the pane's tick checkboxes, in the preview
-    response only. The pane model is rebuilt from the projection with
+    response only. `hashes` is the snapshot's per-file content hash (the
+    bytes this page's model was built from), which names each panel's save
+    revision -- never a disk read at response time. The pane model is
+    rebuilt from the projection with
     `interactive=True` (the pane is a pure client of it -- the same call
     render.py makes per site, per page here) and, when it has a declared
     task list to tick, the pane's markup is re-rendered from the pane's own
@@ -350,7 +363,7 @@ def _decorate_task_ticks(page: str, project, item) -> str:
         return page
     # W5b.4a: after the gate -- a pane with no tickable row has no save to
     # name, and pays for no file hashes.
-    _pane_save_context(project, pane)
+    _pane_save_context(project, pane, hashes)
     swapped, spans = _PANE_SPAN_RE.subn(
         lambda _match: render.render_taskpane_fragment(pane), page, count=1
     )
@@ -928,7 +941,8 @@ class _Handler(BaseHTTPRequestHandler):
             page = data.decode("utf-8")
         except UnicodeDecodeError:
             return data
-        project = self.app.state.snapshot.project
+        snapshot = self.app.state.snapshot
+        project = snapshot.project
         links = ['<a href="/edit/">Editor</a>']
         item = None
         for key, slug_file in api.item_pages(project).items():
@@ -945,7 +959,7 @@ class _Handler(BaseHTTPRequestHandler):
             # so it ships the read-only pane exactly as W5a left it: offering a
             # control the server refuses is the UI lying (test_task_pane_ticks).
             if not self.app.read_only:
-                page = _decorate_task_ticks(page, project, item)
+                page = _decorate_task_ticks(page, project, item, snapshot.hashes)
         bar = (
             '<div class="refdes-serve-bar"><span>refdes serve &middot; preview</span>'
             + "".join(links)

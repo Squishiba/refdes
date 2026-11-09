@@ -833,7 +833,9 @@ def test_the_tick_head_insertion_uses_the_original_head_end(tmp_path):
         assert "İ" in title.group(0)
         project = app.state.snapshot.project
         item = project.item_by_id("LOG-002")
-        decorated = server_mod._decorate_task_ticks(page, project, item)
+        decorated = server_mod._decorate_task_ticks(
+            page, project, item, app.state.snapshot.hashes
+        )
         extra = (
             "<style>"
             + render_mod.preview_taskpane_css()
