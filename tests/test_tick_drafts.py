@@ -539,7 +539,9 @@ def test_proto_is_a_real_tick_and_pollutes_nothing(tmp_path):
     assert r["protoPolluted"] is False, "Object.prototype gained a property"
     assert r["protoHasDone"] is False
     assert r["protoHasOpen"] is False
-    assert list(r["storage"]) == [tick_key(TIP)]
+    # the draft was cleared, so no mirror remains (the mid-draft mirror is
+    # already pinned by the reload round-trip above)
+    assert r["storage"] == {}
 
 
 def test_hostile_and_empty_task_ids_are_handled(tmp_path):
@@ -573,7 +575,7 @@ def test_hostile_and_empty_task_ids_are_handled(tmp_path):
         '{"ticks":[["T-1","done"]]}',
     ],
 )
-def test_a_mirrors_that_is_not_a_tick_draft_never_reads_clean(tmp_path, raw):
+def test_a_mirror_that_is_not_a_tick_draft_never_reads_clean(tmp_path, raw):
     """An unreadable / wrong-shape mirror is evidence of unsaved ticks, never
     a clean slate: it is preserved under the module's own corrupt key, reported
     via corrupt(tipKey) with the raw bytes and a reason, and the draft opens

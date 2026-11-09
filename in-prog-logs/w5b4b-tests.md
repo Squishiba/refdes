@@ -115,23 +115,21 @@ itself: `discard` first deleted the tip's memory entry, so when `removeItem`
 threw the mirror re-seeded the tip on the next read (storageRemoveThrows red)
 — fixed by setting memory to a clean draft, the shape of `clearDraft`.
 
-**Test-file conflict, reported not edited (HARD RULE 1).**
-`test_proto_is_a_real_tick_and_pollutes_nothing` line 542 asserts the mirror
-key SURVIVES `clearTick` emptying the draft, while
-`test_the_revision_rides_the_draft_and_leaves_with_it` (the `emptied` pin) and
-the file's own docstring rule ("a draft whose pending list is empty leaves NO
-mirror key behind") require `clearTick`-emptying to REMOVE it — identical call
-shape, opposite pinned outcome, differing only in the task id (`__proto__`
-vs `T-1`). No implementation passes both; the line reads as copied from the
-basic test, whose storage snapshot is taken before any clear. Proposed change
-for the test author: `assert r["storage"] == {}` (an emptied draft leaves no
-key, hostile id or not — a special case for `__proto__` would contradict the
-test's own "behaves as an ordinary id" purpose).
+**Test-file conflict: reported, author-verified, authorized edits applied.**
+`test_proto_is_a_real_tick_and_pollutes_nothing` snapshotted storage AFTER
+`clearTick` emptied the draft and asserted the mirror key SURVIVED, while the
+file's own rule (docstring, `storage == {}` at ~411, `emptied` at ~445) says
+an emptied draft leaves NO key. Reported; the supervisor verified the read and
+authorized exactly two edits: the assertion (now `storage == {}`, with a
+comment noting the clear; the mid-draft mirror is pinned by the reload
+round-trip) and the `test_a_mirrors...` -> `test_a_mirror...` grammar rename.
+Nothing else in the file touched. Control proof: a module sabotaged to leave
+the mirror on an empty draft FAILS the corrected test (then restored).
 
-Suite state: 30/31 pass, the one red is exactly line 542. Neighbours
-(test_serve_static, editor_draft_mirror, serve_drafts_corruption,
-editor_draft_revision) and test_crossplatform_lint: 125 passed.
-`node --check` (ESM): clean. pr_size: 259/350.
+Suite state: 31/31 green. Neighbours (test_serve_static,
+editor_draft_mirror, serve_drafts_corruption, editor_draft_revision) and
+test_crossplatform_lint: 125 passed. `node --check` (ESM): clean.
+ruff on the touched test file: clean. pr_size: 259/350.
 
 ## Notes
 
