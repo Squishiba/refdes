@@ -20,63 +20,66 @@ forked design-log thread with two tips, keyless/id-less markers, a
 calc fence, a CSV citation with `source()` spans); CLI directly; curl for
 the documented API shapes; a real `refdes` 0.5.0 wheel (PyPI) + its
 `init`-built project for the upgrade. Evidence under
-`in-prog-logs/user-sim-run16-evidence/`.
+`in-prog-logs/user-sim-run16-evidence/` (tokens embedded in captured
+pages replaced with `REDACTED`).
 
 ## Findings
 
 | # | Sev | Surface | One-line summary |
 |---|-----|---------|------------------|
-| F16-1 | Retracted (Info) | navis / probe hygiene | my published claim that markers in id-less items are "invisible to every `refdes navis` verb" was **wrong as written**: my probe items were yaml list-file entries with no `id:`, which are a loud load **error** (`item has no id — run 'refdes id' to allocate one`, `parse.py:2033`) that excludes the entry from the project; the scan promise (`docs/markdown.md:77`) applies to loaded bodies. Keyed markdown thread entries with no `id:` **do** load and list (with the F16-5 cosmetic) |
+| F16-1 | Low (docs/UX) | navis verbs | on the docs' own pre-`refdes id` shape (yaml list-file entry, marker in the body, no `id:`), `check` is loud (`item has no id — run 'refdes id'`, exit 1) **but `navis ls` answers "no Navis: no `<!--navi: text-->` marker in any item body", exit 0, no hint** that the entry carrying the marker was skipped — an empty scan that skipped id-less entries should say so; docs PR #475 adds the sentence to `docs/navis.md`. First write-up over-claimed the mechanism (section records the imprecision) |
 | F16-2 | Medium | task pane / continue endpoint | a **keyed, id-less thread tip** (a markdown thread entry with a `key:` and no `id:`) is refused by `/api/item/<ref>/continue` (" carries no artifact key" — note the empty subject) while the pane hands the browser exactly the save context (`data-refdes-tip-key` + revision) for that tip; no shipped doc says a tip needs an `id:` |
 | F16-3 | Low (Unconfirmed) | task pane / Firefox | a Firefox "tick double-step" observed mid-run **did not reproduce** on a clean re-run with plain `page.click` on the input: Firefox and Chromium are identical (checked true/false/true/false; mirror `{T:done}/{ }/{T:done}/{ }`, matching the reviewer's numbers). The original observation was self-inflicted: my continuation-endpoint test had appended a new tip that flipped the row's file state open→done between probe phases, and I read the row's static `data-refdes-task-state` attribute (the file state, never updated by a tick) as the live state — re-filed Unconfirmed, evidence kept |
 | F16-4 | Low | docs/upgrading.md | the item-level `history:`→`on_change:` hard error (which the docs' own probe class — a v2 entry sealed via item `history: log` — hits on the first current load) is absent from the step-2 quote and no step performs it, so the docs-ordered `calc-rewrite` (step 4) refuses until an off-menu hand-rename; and the design-debate "declare the four types yourself" remedy needs two more renames inside the copied overlay (`on_change: log`→`timeline`, `resolved_by: [decision]`→`[log]`) |
 | F16-5 | Cosmetic | navis / task pane CLI-render | id-less items render with an empty id column in `navis ls`/mint announcements and as an empty-text anchor row in the preview Navis panel |
 | F16-6 | Cosmetic | docs/cli-reference.md | the serve section still describes the task pane as computing and writing nothing with no control on it; the pane now ships preview-only tick checkboxes, a per-tab draft, Discard, and a leave prompt (only the changelog fragments say so) |
 
-## F16-1 — RETRACTED: my "markers in id-less items invisible" claim was wrong as published
+## F16-1 (Low, docs/UX) — an empty `navis ls` claims "no marker in any body" when the marker's entry was skipped for having no id
 
-What I published: markers in id-less items "invisible to every
-`refdes navis` verb, the `navis` key of `refdes index`, and both
-panels", cited to "`docs/navis.md` §how-it-works: the scan 'reads
-every body'". Three things in that were wrong, found on re-run at
-current `origin/main` (`10a4a701`, `evidence/repro-f16.sh` +
-`repro-f16.out`):
+My first write-up of this finding was imprecise in two ways, recorded
+here so the history is visible: (a) it cited "`docs/navis.md`
+§how-it-works: the scan 'reads every body'" — there is no such section;
+the line is `docs/markdown.md:77` ("scans every body into one
+project-wide list", with the `index` `navis` key in the same sentence);
+(b) it said markers in id-less items are "invisible to every
+`refdes navis` verb", which is broader than what reproduces. The
+subject is the yaml **list-file** entry with a body and no `id:` —
+exactly the shape `docs/getting-started.md:112-135` teaches ("No IDs
+yet. Allocate them: `refdes id`"); a **keyed markdown thread entry**
+with no `id:` loads clean and lists normally (the F16-5 cosmetic is its
+whole residue). And the exclusion is loud **on `check`/`build`**:
+every command load reports `ERROR … item has no id — run 'refdes id'
+to allocate one` (`parse.py:2033`), `check` exits 1.
 
-1. **The citation is from the wrong file and slightly miscited.**
-   There is no "how-it-works" section in `docs/navis.md`. The line is
-   `docs/markdown.md:77`: the tool "scans every body into one
-   project-wide list" (with the `index` payload's `navis` key named in
-   the same sentence).
-2. **The subject was misdescribed, and the mechanism is the opposite
-   of silent.** My probe items were yaml list-file entries with no
-   `id:` — the exact shape `docs/getting-started.md:112-135` teaches
-   ("No IDs yet. Allocate them: `refdes id`"). Such an entry is a
-   **load error**, reported on every command
-   (`ERROR … item has no id — run 'refdes id' to allocate one`,
-   `parse.py:2033`), and `check` is red until `refdes id` runs. The
-   entry — marker included — is excluded because it never became part
-   of the project; the scan promise applies to loaded bodies. I
-   described the red-flagged, self-naming-the-fix window as a silent
-   scan skip. It is neither silent nor a scan bug.
-3. **The id-less shape that *does* load is not invisible.** A keyed
-   markdown thread entry (with `key:`, no `id:`) loads clean
-   (`check` green), and its marker **is** listed by `navis ls`/`all`,
-   **is** in `index`'s `navis` key (null display id), and **does**
-   appear in both panels — the only residue is the cosmetic F16-5.
-   My slice-2 "confirmed at base `d9719a9`" check reproduced the
-   load-error exclusion only, so it inherited the same misdescription.
+What survives, and is the finding: the **navis verbs themselves are
+silent**. On that exact getting-started shape (reproduced on current
+`origin/main`, `evidence/repro-f16-ls.sh` / `repro-f16-ls.out`):
 
-What survives: the F16-5 cosmetic, and — as a doc note, not a finding
-— that between `init`'s id-less skeleton and `refdes id`, navis verbs
-list nothing for the list-file entries, which is a consequence of the
-documented load error. My "Medium" headline for F16-1 was earned by my
-probe, not by the product.
+```
+$ refdes --no-write check
+ERROR   items/requirements/power.yaml:9 — item has no id — run 'refdes id' to allocate one
+0 items, 1 errors, 0 warnings      # exit 1
+$ refdes --no-write navis ls
+no Navis: no `<!--navi: text-->` marker in any item body    # exit 0
+$ refdes id && refdes --no-write navis ls
+allocated REQ-PWR-001  (items/requirements/power.yaml:9) ...
+1 Navis:
+  1. check the surge rating  REQ-PWR-001 (items/requirements/power.yaml:9)
+```
+
+A user who runs `navis ls` before `check` — the order the docs' own
+flow invites (write bodies, look around, allocate ids later) — gets an
+answer that asserts no marker exists in any body, when the true state
+is "the one body carrying a marker was skipped because it has no id".
+The message is silently wrong-looking; it should name the skipped
+entries (the load-error text for them already exists in the same
+load). docs PR #475 adds the sentence to `docs/navis.md`.
 
 ## F16-2 — continuation refused at an id-less tip; pane gate is key-only
 
 The subject is a keyed, id-less **thread tip** — a markdown thread
 entry with `key:` and no `id:` (not a yaml list-file entry, which is a
-load error and never reaches these gates; see the F16-1 retraction). It
+load error and never reaches these gates; see F16-1's recorded imprecision). It
 loads clean: `refdes check` on the probe project is green with the tip
 present, and the tip is the page's fold. The pane's save-context gate
 is "a tip with no key … names no context" (server docstring,
@@ -186,7 +189,7 @@ changed 0`, the `drop_in: CMP-PWR-001@…` composite, the anchored
 
 F16-5, on the same subject as F16-2 (a **keyed, id-less thread entry**
 — a markdown thread entry with `key:` and no `id:`, which loads
-cleanly; see the F16-1 retraction for why this is not a plain list-file
+cleanly; see F16-1's recorded imprecision for why this is not a plain list-file
 entry): `refdes navis ls` prints it with an empty id column —
 
 ```

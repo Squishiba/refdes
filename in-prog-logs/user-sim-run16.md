@@ -61,3 +61,10 @@ in range, +236, new; the click-path files are 0-diff). Added
 extracted by `git archive`) — which also reproduced the mint
 announcement's empty subject slot, restoring that F16-5 clause I had
 dropped. Header now reconciles base/range/main-moved in one sentence.
+Third round: F16-1 re-instated as Low (docs/UX) — `check` is loud
+about the id-less list-file entry but `navis ls` answers "no Navis: no
+marker in any item body" with exit 0, so the empty scan lies by
+omission in the docs' own pre-`refdes id` window (`repro-f16-ls.sh`/
+`.out`); docs PR #475 adds the `docs/navis.md` sentence. Captured-page
+tokens replaced with REDACTED (report evidence note added); dropped the
+incomplete Firefox timeout run `r16-ff.json` (uncited).

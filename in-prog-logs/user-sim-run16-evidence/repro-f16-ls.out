@@ -1,0 +1,21 @@
+== refdes --no-write check ==
+ERROR   items/requirements/power.yaml:9 — item has no id — run 'refdes id' to allocate one
+0 items, 1 errors, 0 warnings
+exit=1
+== refdes --no-write navis ls ==
+no Navis: no `<!--navi: text-->` marker in any item body
+exit=0
+== refdes id ==
+(minted 1 key(s) while loading)
+allocated REQ-PWR-001  (items/requirements/power.yaml:9) The unit shall survive 1.2 kV surges.
+allocated 1 id(s)
+exit=0
+== refdes --no-write navis ls (after id) ==
+1 Navis:
+  1. check the surge rating  REQ-PWR-001 (items/requirements/power.yaml:9)
+exit=0
+== expected ==
+check: ERROR items/requirements/power.yaml:9 — item has no id — run 'refdes id' to allocate one; 0 items, 1 errors; exit 1.
+navis ls BEFORE id: "no Navis: no `<!--navi: text-->` marker in any item body", exit 0 -- no error, no hint
+that the entry carrying the marker was skipped for having no id; after `refdes id` the same marker lists.
+fixture kept at /tmp/tmp.ACHfzF3Ugz
