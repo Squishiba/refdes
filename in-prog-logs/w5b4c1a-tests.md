@@ -20,71 +20,75 @@ Task: pin the export surface and behaviour of the NOT-YET-WRITTEN pure module
   the same checks (plus the file's presence in the dir) so the implementer
   sees them in one place.
 
-## Pinned export surface (runtime `typeof` + source-spelling pins)
+## Pinned export surface (exact export key-set + source-spelling pins)
 
 panelFromRows, wantedState, applyDraft, indicator, isStale, tabLabel,
 needsUnloadPrompt, discardPlan — signatures as specced in the task; the
-module's docstring in the test file spells each one out.
+module docstring in the test file spells each one out. The `exports`
+scenario pins the module's export key-set EXACTLY (nothing more, nothing
+less).
 
-Pinned strings (the 4c-1b glue renders verbatim; stated here as the task
+Pinned strings (the 4c-1b glue renders them; stated here as the task
 requires):
-- panel reason (keyless tip): "This tip has no key/revision -- ticks here
-  are preview-only."
-- row reason (id-less row): "This task has no id -- it cannot be saved."
-- indicator: "" + hidden at 0/0; "1 unsaved tick" / "N unsaved ticks";
-  stale suffix " -- this draft was made against an older version; saving
-  will ask to resolve."; orphan suffix " (K no longer match a task)";
-  keyless tip: "Ticks on this tip are preview-only -- nothing is saved."
+- indicator count text is pinned EXACTLY: "1 unsaved tick" / "N unsaved
+  ticks" (Q8's ratified header), "" + hidden at 0-pending-0-orphans.
+- The free-worded sentences are pinned by content substrings (conservative:
+  leaves the implementer the wording, pins the meaning): keyless-panel
+  reason and keyless indicator contain "preview-only"; id-less row reason
+  contains "no id" + "saved"; stale clause contains "older version" +
+  "resolve"; the orphan clause is pinned exactly: "(K no longer match a
+  task)".
 
-Conservative choices (no question tool per task): the two free-worded
-sentences above got the house `--` prose style (matching taskpane-ticks.js);
-`wantedState` on a row with no targets returns the row's rendered state
-(no-op click); `applyDraft` treats an empty taskId entry as an orphan and a
-row with id `__proto__` as an ordinary, matchable id (Map semantics) — the
-probe in the harness proves nothing lands on Object.prototype.
+Conservative choices (no question tool per task): `wantedState` on a row
+with no targets returns the row's rendered state (no-op click);
+`applyDraft` treats an empty taskId entry as an orphan and a row with id
+`__proto__` as an ordinary, matchable id (Map semantics) — the probe in the
+harness proves nothing lands on Object.prototype; duplicate pendingTicks
+entries resolve last-wins (Map.set semantics, pinned).
 
 ## Red evidence (module missing — all module-dependent tests fail)
 
 `PYTHONPATH=<wt>/src ... pytest tests/test_tick_pane.py -q -p no:cacheprovider`
-→ **24 failed, 1 passed**. Every failure is the missing module (node exits
+→ **22 failed, 1 passed**. Every failure is the missing module (node exits
 non-zero on the import; source pins hit FileNotFoundError). The single green
-test is `test_the_server_renders_a_dropped_row_unticked...` — it pins the
-MERGED server code (`task_pane._ticks_for`), not the new module, so it is
-green by construction; that is the honest state.
+test is `test_the_markup_renders_a_dropped_row_unticked_with_open_only` —
+it pins the MERGED server code (`task_pane._ticks_for`), not the new
+module, so it is green by construction; that is the honest state.
 
 ## Green proof (tests can go green, without touching src/)
 
-The harness honours `REFDES_TICK_PANE_JS` (dev hook, CI leaves it unset). A
-spec-conformant stub at `.scratch/w5b4c1a/tick-pane.js` (scratch, not
-committed) runs **24 passed, 1 failed**: the remaining red is the serve-js
-test's pin that the file lives in `static/` — greens ONLY when the
-implementer lands the real module at its served path (by design). The stub
-also passes the scan logic of every source pin (proven directly).
+A spec-conformant reference module at
+`.scratch/w5b4c1a/greencheck/static/tick-pane.js` (scratch, not committed)
+with a scratch copy of the test file (STATIC redirected to the scratch
+dir) runs **23 passed** — every pin, including the served-js rules and the
+export key-set, is satisfiable by a natural implementation. The deliverable
+test file contains no dev-override hook; it points at the served path only.
 
 ## Coverage list (all via one node process per scenario, skip_no_node,
 utf-8 on subprocess.run, NODE timeout 120 s)
 
-- panelFromRows: draftable panel; all three states draftable; id-less row
-  not (pinned reason); keyless/revisionless panel × 6 variants; targets
-  split/trim/empties; exact row key-set.
+- exports: exact key-set of the module namespace.
+- panelFromRows: draftable panel (all three states draftable, exact row
+  key-set); keyless/revisionless panel × 4 variants (missing key, empty
+  key, missing revision, nullish) all preview-only; id-less row reason;
+  targets split/trim/empties (incl. "done, dropped", "open,,", " ").
 - wantedState: all six click cases (tick/un-tick × open/done/dropped),
   un-tick-to-original = rendered state (Q6b).
-- applyDraft: checked=(wanted=="done"), pending flags, untouched rows,
-  orphans in input order (incl. "" id), hostile ids `__proto__` /
-  `constructor` matched as ordinary ids, Object.prototype probes, no
-  mutation of the input rows.
-- indicator: 0/1/N, stale clause, orphan clause (incl. 0-pending/2-orphans
-  visible), stale+orphans combined, keyless-tip preview text.
-- isStale: differs-only-when-two-non-empty-strings matrix (7 cases).
+- applyDraft: checked=(wanted=="done"), pending flags, rows stay as
+  rendered, orphans (incl. "" id never matches), hostile ids `__proto__` /
+  `constructor` matched as ordinary ids, Object.prototype probe,
+  duplicates last-wins.
+- indicator: 0/1/N exact count text, stale clause, orphan clause (incl.
+  0-pending/1-orphan visible), keyless-tip preview text.
+- isStale: differs-only-when-two-non-empty-strings matrix (8 cases).
 - tabLabel: 0 → bare label, N → "label (N)" (Q5 per-tip counts).
-- needsUnloadPrompt: plain {} zeros one, null, and null-prototype counts()
-  (incl. an own `__proto__` key) — Q1b/Q8.
-- discardPlan: undoes the draft to the RENDERED states (Q8), exact key-set,
-  order kept; round-trips against applyDraft in one scenario.
-- source pins: imports nothing, all 8 export spellings, forbidden globals
-  (document/window/fetch/XMLHttpRequest/eval/innerHTML/localStorage/
-  sessionStorage/globalThis) on the comment-stripped code, served-js rules
-  mirrored + file presence.
+- needsUnloadPrompt: {} / zeros / one, null-prototype counts() with zero
+  and with a pending tip — Q1b/Q5/Q8.
+- discardPlan: returns every row to the RENDERED state (Q8), exact shape.
+- source pins: imports nothing (no import of tick-drafts.js either),
+  forbidden globals (document/window/fetch/XMLHttpRequest/eval/innerHTML/
+  localStorage/sessionStorage/globalThis) on the comment-stripped code,
+  served-js rules mirrored + file presence.
 
 ## Cross-platform
 

@@ -1,69 +1,81 @@
-"""W5b.4c-1a contract tests: the tick pane's decision model (docs/design/
+"""W5b.4c-1a contract tests: the tick pane's DECISION MODEL (docs/design/
 thread-workbench-w5b-plan.md, §4 W5b.4 + §6 Q1/Q3/Q5/Q6/Q8, all RATIFIED
 2026-11-06).
 
 The module under test is `src/refdes/serve/static/tick-pane.js`: ONE new pure
-ES module holding the DECISION LOGIC of the tick pane's draft UI -- no DOM,
-no network, no storage, no globals. The DOM glue (4c-1b) will build the plain
-objects these functions read from the W5b.3/W5b.4a markup
-(`pane.html.j2` / `task_pane.py`) and feed them in; the draft itself is
-`tick-drafts.js` (merged #460). The harnesses below deliberately define NO
-`document`, `window`, `localStorage` or `sessionStorage` globals: a module
-that touches one of those fails the import itself (the purity proof runs, it
-is not only a text scan; `fetch` exists in modern node, so it is pinned by
-source scan only). Harness posture: tests/test_tick_drafts.py -- one node
-process per scenario, skip when node is absent, utf-8 decoding of node's
-output.
+ES module -- the pane's decision logic over plain objects the DOM glue builds
+(4c-1b). NO DOM, no network, no storage, no page globals, and it imports
+NOTHING. The harnesses below define no `document`, `window`, `fetch` or
+`sessionStorage` globals (node has none of them), so a module that touches
+one fails the import itself -- the purity proof runs, it is not only a text
+scan. Harness posture: tests/test_tick_drafts.py (one node process per
+scenario group, skip when node is absent, utf-8 decoding, node timeouts).
 
-The pinned export surface (the 4c-1b DOM glue builds against this):
+The pinned export surface, EXACTLY these names (the `exports` scenario pins
+the module's key set -- anything more or less fails):
 
-    panelFromRows(panel) -> {canDraft, reason, rows:[{taskId, draftable,
-                                reason, targets}]}
-        panel = {tipKey, revision, rows:[{taskId, state, tickStates,
-                                          checked}]}  // the rendered rows
-    wantedState(row, nowChecked) -> string   // the state a click names
-        row = {state, checked, tickStates}   // the rendered row
-    applyDraft(rows, pendingTicks) -> {rows: [{taskId, checked, pending}],
-                                       orphans: [[taskId, state], ...]}
-        pendingTicks = [[taskId, wantedState], ...]  // tick-drafts'
-        pendingTicks(tipKey) shape, exactly
+    panelFromRows(panel)
+      panel = {tipKey, revision, rows: [{taskId, state, tickStates, checked}]}
+        // the rendered rows: tickStates is the row's comma list of legal
+        // tick targets (data-refdes-tick-states), checked is the rendered
+        // `checked` attribute (present iff the state is `done`)
+      -> {canDraft, reason, rows: [{taskId, draftable, reason, targets}]}
+      canDraft is false -- with a plain-string reason naming the tip's
+      missing key/revision and PREVIEW-ONLY -- when tipKey or revision is
+      missing/empty; a row is draftable only when canDraft AND taskId is a
+      non-empty string AND tickStates is non-empty; an id-less row (taskId
+      "") is NOT draftable, its reason saying the task has no id so it
+      cannot be saved. targets is tickStates split, trimmed, empties dropped.
+
+    wantedState(row, nowChecked)
+      -> the state a click names: nowChecked EQUAL to the row's rendered
+      checked returns the row's rendered state (the un-tick back to the
+      original, Q6(b)); otherwise the FIRST target of its tickStates
+      (open -> "done"; done -> "open"; dropped -> "open" -- the markup
+      emits `checked` iff state is done, so ticking a dropped row names
+      "open": see test_the_markup...below, pinned from the server's own
+      _ticks_for).
+
+    applyDraft(rows, pendingTicks)
+      pendingTicks = [[taskId, wantedState], ...] (tick-drafts.js's
+      pendingTicks(tipKey) shape)
+      -> {rows: [{taskId, checked, pending}], orphans: [[taskId, state]]}
+      a pending tick sets that row's checked per its wanted state (checked
+      iff "done") and marks pending; a draft entry whose taskId matches no
+      row is an ORPHAN -- returned, NOT applied (nothing silently dropped);
+      the empty taskId never matches; hostile ids (`__proto__`,
+      `constructor`) are ordinary data: a row with such an id gets its tick,
+      an entry for a missing row is an orphan, and Object.prototype is
+      never polluted.
+
     indicator({pending, stale, orphans, canDraft}) -> {text, hidden}
-    isStale(draftRevision, panelRevision) -> bool
-    tabLabel(baseLabel, pendingCount) -> string
-    needsUnloadPrompt(counts) -> bool        // tick-drafts' counts() object
+      "" + hidden for 0 pending and no orphans; "1 unsaved tick" / "N
+      unsaved ticks" (Q8's ratified header count); a stale draft adds a
+      clause saying it was made against an older version and saving will
+      ask to resolve (Q3(a)); orphans add "(K no longer match a task)";
+      canDraft false -> text says ticks on this tip are preview-only,
+      nothing is saved. Plain strings only.
+
+    isStale(draftRevision, panelRevision) -> true only when both are
+      non-empty strings and differ (a keyless tip is never stale: no
+      revision, nothing to be stale against).
+
+    tabLabel(baseLabel, pendingCount) -> baseLabel for 0, `${baseLabel}
+      (N)` otherwise (Q5(a): each tip's tab shows its OWN pending count).
+
+    needsUnloadPrompt(counts) -> true iff any tip has pending > 0. counts
+      is tick-drafts' counts() object -- NULL-PROTOTYPE, so a naive
+      for-in/hasOwnProperty-free walk over a plain object is the bug this
+      pins against.
+
     discardPlan(rows) -> {rows: [{taskId, checked}]}
+      the checked state every row returns to on discard: the RENDERED state
+      (Q8(a): what the file says -- the draft never wrote a byte).
 
-Pinned plain strings (4c-1b renders these verbatim -- Q8's indicator wording
-is a header sentence, and the pane says plainly when there is no save):
-
-    PANEL_PREVIEW_REASON = "This tip has no key/revision -- ticks here are
-                            preview-only."
-    NO_ID_REASON         = "This task has no id -- it cannot be saved."
-    INDICATOR_PREVIEW    = "Ticks on this tip are preview-only -- nothing
-                            is saved."
-    indicator count text  "1 unsaved tick" / "N unsaved ticks" (Q8's
-                            ratified "3 unsaved ticks" header)
-    indicator stale suffix " -- this draft was made against an older
-                            version; saving will ask to resolve." (Q3(a):
-                            the save will land on a Conflict, not a merge)
-    indicator orphan suffix " (K no longer match a task)"
-
-What the server's own markup says about a DROPPED row (verified by running
-`task_pane._ticks_for` -- see test_the_server_renders_a_dropped_row_unticked
-below, which pins it): a dropped row renders UNCHECKED (`checked` is emitted
-iff the state is `done`) with `data-refdes-tick-states="open"`. So
-`wantedState(droppedRow, true)` -- ticking a dropped row -- names "open":
-the only tick a dropped row can make is a reopening (Q6(b)), and the FIRST
-target rule gives it for free.
-
-`tests/test_serve_static.py::js_files()` lists `static/*.js` at COLLECTION
-time, so the new file is picked up by that module's inline-handler /
-dynamic-code / balance checks automatically the moment it lands; the last
-test here pins the same rules (and the file's presence in the served dir).
-
-Development hook: REFDES_TICK_PANE_JS points the harnesses at an alternative
-module path (used to prove these tests can go green before the real module
-exists; CI leaves it unset).
+tests/test_serve_static.py lists `static/*.js` at COLLECTION time, so the
+new module is auto-picked-up by its inline-handler / dynamic-code / balance
+checks the moment it lands; the source pins below mirror the same rules
+(plus the no-globals / imports-nothing contract) for this module alone.
 """
 
 from __future__ import annotations
@@ -78,9 +90,7 @@ import pytest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(REPO_ROOT, "src", "refdes", "serve", "static")
-TICK_PANE_JS = os.environ.get(
-    "REFDES_TICK_PANE_JS", os.path.join(STATIC, "tick-pane.js")
-)
+TICK_PANE_JS = os.path.join(STATIC, "tick-pane.js")
 
 NODE = shutil.which("node")
 
@@ -88,15 +98,16 @@ NODE = shutil.which("node")
 # runner (the timeout note in tests/test_tick_drafts.py).
 NODE_TIMEOUT_S = 120
 
-PANEL_PREVIEW_REASON = (
-    "This tip has no key/revision -- ticks here are preview-only."
-)
-NO_ID_REASON = "This task has no id -- it cannot be saved."
-INDICATOR_PREVIEW = "Ticks on this tip are preview-only -- nothing is saved."
-STALE_CLAUSE = (
-    " -- this draft was made against an older version; saving will ask to resolve."
-)
-
+EXPORT_NAMES = [
+    "applyDraft",
+    "discardPlan",
+    "indicator",
+    "isStale",
+    "needsUnloadPrompt",
+    "panelFromRows",
+    "tabLabel",
+    "wantedState",
+]
 
 # -- the node harness ---------------------------------------------------------
 
@@ -104,16 +115,22 @@ HARNESS = """
 import { pathToFileURL } from 'node:url';
 
 const [panePath, scenario, seedJson] = process.argv.slice(2);
-const input = JSON.parse(seedJson);
+const input = seedJson ? JSON.parse(seedJson) : {};
+
 const mod = await import(pathToFileURL(panePath).href);
 const {
   panelFromRows, wantedState, applyDraft, indicator,
   isStale, tabLabel, needsUnloadPrompt, discardPlan,
 } = mod;
 
+const out = { scenario, exports: Object.keys(mod).sort() };
+
+// The rendered rows, exactly as the W5b.3/4a markup spells them: open/done/
+// dropped rows (checked iff done, targets from TICK_TARGETS) and an id-less
+// row (data-refdes-task is empty there).
 const PANEL = {
   tipKey: 'LOG-001@k-9',
-  revision: 'rev-7',
+  revision: 'r-7',
   rows: [
     { taskId: 'T-1', state: 'open', tickStates: 'done,dropped', checked: false },
     { taskId: 'T-2', state: 'done', tickStates: 'open', checked: true },
@@ -122,138 +139,128 @@ const PANEL = {
   ],
 };
 
-const out = { scenario };
-
 if (scenario === 'panelDraftable') {
   out.panel = panelFromRows(PANEL);
 }
 
-if (scenario === 'panelIdentity') {
-  out.panel = panelFromRows(input.panel);
+if (scenario === 'panelKeyless') {
+  out.noKey = panelFromRows({ tipKey: '', revision: 'r-7', rows: PANEL.rows });
+  out.noRevision = panelFromRows({ tipKey: 'k-9', revision: '', rows: PANEL.rows });
+  out.missing = panelFromRows({ rows: PANEL.rows });
+  out.nullish = panelFromRows({ tipKey: null, revision: null, rows: PANEL.rows });
+}
+
+if (scenario === 'panelIdLess') {
+  const p = panelFromRows(PANEL);
+  out.idLess = p.rows.find((r) => r.taskId === '');
 }
 
 if (scenario === 'targetsParse') {
-  out.panels = input.states.map((tickStates) => panelFromRows({
-    tipKey: 'LOG-001@k-9', revision: 'rev-7',
-    rows: [{ taskId: 'T-1', state: 'open', tickStates, checked: false }],
-  }).rows[0]);
+  out.rows = panelFromRows({
+    tipKey: 'k-9', revision: 'r-7',
+    rows: [
+      { taskId: 'T-1', state: 'open', tickStates: 'done, dropped', checked: false },
+      { taskId: 'T-2', state: 'open', tickStates: 'open,,', checked: false },
+      { taskId: 'T-3', state: 'open', tickStates: ' ', checked: false },
+      { taskId: 'T-4', state: 'open', tickStates: '', checked: false },
+    ],
+  }).rows;
 }
 
 if (scenario === 'wantedStates') {
-  const ROW_OPEN = { state: 'open', tickStates: 'done,dropped', checked: false };
-  const ROW_DONE = { state: 'done', tickStates: 'open', checked: true };
-  const ROW_DROPPED = { state: 'dropped', tickStates: 'open', checked: false };
-  out.openTick = wantedState(ROW_OPEN, true);
-  out.openUntick = wantedState(ROW_OPEN, false);
-  out.doneUntick = wantedState(ROW_DONE, false);
-  out.doneRecheck = wantedState(ROW_DONE, true);
-  out.droppedTick = wantedState(ROW_DROPPED, true);
-  out.droppedUntick = wantedState(ROW_DROPPED, false);
+  const [open, done, dropped] = PANEL.rows;
+  out.openTicked = wantedState(open, true);
+  out.openUnticked = wantedState(open, false);
+  out.doneUnticked = wantedState(done, false);
+  out.doneReticked = wantedState(done, true);
+  out.droppedTicked = wantedState(dropped, true);
+  out.droppedUnticked = wantedState(dropped, false);
 }
 
 if (scenario === 'applyDraft') {
-  out.result = applyDraft(PANEL.rows, input.pending);
+  out.result = applyDraft(PANEL.rows, [['T-1', 'done'], ['T-2', 'open']]);
+}
+
+if (scenario === 'applyDraftOrphan') {
+  out.result = applyDraft(PANEL.rows, [['T-404', 'done']]);
 }
 
 if (scenario === 'applyDraftHostile') {
   const rows = [
     { taskId: '__proto__', state: 'open', tickStates: 'done,dropped', checked: false },
-    { taskId: 'constructor', state: 'open', tickStates: 'done,dropped', checked: false },
-    { taskId: '', state: 'open', tickStates: 'done,dropped', checked: false },
+    { taskId: 'constructor', state: 'done', tickStates: 'open', checked: true },
+    { taskId: 'T-1', state: 'open', tickStates: 'done,dropped', checked: false },
   ];
-  const before = JSON.stringify(rows);
-  out.result = applyDraft(rows, input.pending);
-  out.rowsUntouched = JSON.stringify(rows) === before;
-  out.probe = {
-    protoIntact: ({}).__proto__ === Object.prototype,
-    ctorIntact: Object.prototype.constructor === Object,
-    noDoneKey: !('done' in {}),
-    noCheckedKey: !('checked' in {}),
-  };
+  out.result = applyDraft(rows, [
+    ['__proto__', 'done'], ['constructor', 'open'], ['', 'done'], ['T-1', 'dropped'],
+  ]);
+  out.protoClean =
+    ({}).checked === undefined && ({}).pending === undefined &&
+    ({}).done === undefined && ({}).dropped === undefined;
 }
 
-if (scenario === 'applyDraftNoMutate') {
-  const rows = JSON.parse(JSON.stringify(PANEL.rows));
-  const before = JSON.stringify(rows);
-  applyDraft(rows, input.pending);
-  out.rowsUntouched = JSON.stringify(rows) === before;
+if (scenario === 'applyDraftDuplicates') {
+  out.result = applyDraft(PANEL.rows, [['T-1', 'done'], ['T-1', 'dropped']]);
 }
 
-if (scenario === 'indicatorMatrix') {
+if (scenario === 'indicator') {
   out.zero = indicator({ pending: 0, stale: false, orphans: 0, canDraft: true });
   out.one = indicator({ pending: 1, stale: false, orphans: 0, canDraft: true });
   out.many = indicator({ pending: 3, stale: false, orphans: 0, canDraft: true });
-  out.staleOne = indicator({ pending: 1, stale: true, orphans: 0, canDraft: true });
-  out.withOrphans = indicator({ pending: 2, stale: false, orphans: 1, canDraft: true });
-  out.staleAndOrphans = indicator({ pending: 2, stale: true, orphans: 3, canDraft: true });
-  out.onlyOrphans = indicator({ pending: 0, stale: false, orphans: 2, canDraft: true });
-  out.preview = indicator({ pending: 5, stale: true, orphans: 2, canDraft: false });
+  out.stale = indicator({ pending: 1, stale: true, orphans: 0, canDraft: true });
+  out.orphans = indicator({ pending: 2, stale: false, orphans: 2, canDraft: true });
+  out.orphanOnly = indicator({ pending: 0, stale: false, orphans: 1, canDraft: true });
+  out.preview = indicator({ pending: 3, stale: true, orphans: 2, canDraft: false });
 }
 
-if (scenario === 'staleAndLabels') {
-  out.stale = {
-    diff: isStale('r1', 'r2'),
-    same: isStale('r1', 'r1'),
-    emptyDraft: isStale('', 'r2'),
-    emptyPanel: isStale('r1', ''),
-    nullDraft: isStale(null, 'r2'),
-    nullPanel: isStale('r1', null),
-    numbers: isStale(5, 6),
-  };
-  out.labels = {
-    zero: tabLabel('LOG-001@k-9', 0),
-    one: tabLabel('LOG-001@k-9', 1),
-    many: tabLabel('LOG-001@k-9', 12),
-  };
-  out.unload = {
-    empty: needsUnloadPrompt({}),
-    zeros: needsUnloadPrompt({ 'a@1': 0, 'b@1': 0 }),
-    one: needsUnloadPrompt({ 'a@1': 0, 'b@1': 2 }),
-    nullish: needsUnloadPrompt(null),
-  };
-  const nullProto = Object.create(null);
-  out.unload.nullProtoEmpty = needsUnloadPrompt(nullProto);
-  nullProto['LOG-001@k-9'] = 1;
-  out.unload.nullProto = needsUnloadPrompt(nullProto);
-  const hostile = Object.create(null);
-  hostile['__proto__'] = 3;
-  out.unload.protoKeyCount = needsUnloadPrompt(hostile);
+if (scenario === 'stale') {
+  out.diff = isStale('r-7', 'r-8');
+  out.same = isStale('r-7', 'r-7');
+  out.emptyDraft = isStale('', 'r-8');
+  out.emptyPanel = isStale('r-7', '');
+  out.nullDraft = isStale(null, 'r-8');
+  out.nullPanel = isStale('r-7', null);
+  out.bothNull = isStale(null, null);
+  out.undef = isStale(undefined, 'r-8');
 }
 
-if (scenario === 'discardRoundtrip') {
-  out.applied = applyDraft(PANEL.rows, [['T-1', 'done'], ['T-2', 'open'], ['T-3', 'open']]).rows;
+if (scenario === 'tabLabel') {
+  out.zero = tabLabel('LOG-001@k-9', 0);
+  out.one = tabLabel('LOG-001@k-9', 1);
+  out.many = tabLabel('LOG-002@k-9', 4);
+}
+
+if (scenario === 'unload') {
+  out.empty = needsUnloadPrompt({});
+  const np = Object.create(null);
+  out.npEmpty = needsUnloadPrompt(np);
+  np['LOG-001@k-9'] = 0;
+  out.npZero = needsUnloadPrompt(np);
+  np['LOG-002@k-9'] = 2;
+  out.npDirty = needsUnloadPrompt(np);
+  out.plainZero = needsUnloadPrompt({ a: 0, b: 0 });
+  out.plainDirty = needsUnloadPrompt({ a: 0, b: 1 });
+}
+
+if (scenario === 'discard') {
   out.plan = discardPlan(PANEL.rows);
-}
-
-if (scenario === 'exports') {
-  out.types = {
-    panelFromRows: typeof panelFromRows,
-    wantedState: typeof wantedState,
-    applyDraft: typeof applyDraft,
-    indicator: typeof indicator,
-    isStale: typeof isStale,
-    tabLabel: typeof tabLabel,
-    needsUnloadPrompt: typeof needsUnloadPrompt,
-    discardPlan: typeof discardPlan,
-  };
 }
 
 process.stdout.write(JSON.stringify(out));
 """
 
 
-def _run(tmp_path, scenario: str, seed: dict | None = None) -> dict:
+def _run(tmp_path, scenario: str) -> dict:
     if NODE is None:
         pytest.skip("no node on PATH to run the tick pane module")
     harness = tmp_path / "harness.mjs"
     harness.write_text(HARNESS, encoding="utf-8", newline="")
     proc = subprocess.run(
-        [NODE, str(harness), TICK_PANE_JS, scenario, json.dumps(seed or {})],
+        [NODE, str(harness), TICK_PANE_JS, scenario],
         capture_output=True,
         text=True,
         # node speaks UTF-8; a Windows runner's locale is cp1252 and would
-        # mojibake non-ASCII (the middle dot in the indicator's em-dash prose)
-        # on the way back in.
+        # mojibake non-ASCII (an em dash in a reason string) on the way back.
         encoding="utf-8",
         timeout=NODE_TIMEOUT_S,
         check=False,
@@ -262,281 +269,264 @@ def _run(tmp_path, scenario: str, seed: dict | None = None) -> dict:
     return json.loads(proc.stdout)
 
 
-# -- panelFromRows: can this pane draft, and which rows can? ------------------
+# -- the module's identity: exports and purity --------------------------------
 
 
-def test_panel_from_rows_marks_every_row_its_draftability(tmp_path):
+def test_the_module_exists_and_is_served(tmp_path):
+    assert os.path.isfile(TICK_PANE_JS)
+
+
+def test_the_exports_are_exactly_the_pinned_names(tmp_path):
+    r = _run(tmp_path, "exports")
+    assert r["exports"] == EXPORT_NAMES
+
+
+# -- panelFromRows: can this panel draft at all? -------------------------------
+
+
+def test_a_keyed_panel_drafts_and_marks_every_row_its_draftability(tmp_path):
     r = _run(tmp_path, "panelDraftable")
     panel = r["panel"]
     assert panel["canDraft"] is True
     assert panel["reason"] == ""
-    assert [row["taskId"] for row in panel["rows"]] == ["T-1", "T-2", "T-3", ""]
-    by_id = {row["taskId"]: row for row in panel["rows"]}
+    rows = panel["rows"]
+    assert [row["taskId"] for row in rows] == ["T-1", "T-2", "T-3", ""]
+    assert all(set(row) == {"taskId", "draftable", "reason", "targets"} for row in rows)
+    by_id = {row["taskId"]: row for row in rows}
     assert by_id["T-1"]["draftable"] is True and by_id["T-1"]["reason"] == ""
     assert by_id["T-1"]["targets"] == ["done", "dropped"]
     assert by_id["T-2"]["draftable"] is True and by_id["T-2"]["targets"] == ["open"]
-    # the dropped row IS draftable: Q6(b) gives it the reopening tick
+    # a dropped row IS draftable: Q6(b) gives it the reopening tick
     assert by_id["T-3"]["draftable"] is True and by_id["T-3"]["targets"] == ["open"]
-    # an id-less row (data-refdes-task is empty in the markup) cannot be saved
-    assert by_id[""]["draftable"] is False
-    assert by_id[""]["reason"] == NO_ID_REASON
-    assert by_id[""]["targets"] == ["done", "dropped"], (
-        "targets are the parsed tickStates even on a non-draftable row"
-    )
-    assert all(set(row) == {"taskId", "draftable", "reason", "targets"} for row in panel["rows"])
 
 
-@pytest.mark.parametrize(
-    "panel",
-    [
-        {"rows": [{"taskId": "T-1", "state": "open", "tickStates": "done,dropped", "checked": False}]},
-        {"tipKey": "", "revision": "rev-7", "rows": []},
-        {"tipKey": None, "revision": "rev-7", "rows": []},
-        {"tipKey": "LOG-001@k-9", "rows": []},
-        {"tipKey": "LOG-001@k-9", "revision": "", "rows": []},
-        {"tipKey": "LOG-001@k-9", "revision": None, "rows": []},
-    ],
-    ids=["no-tip-key", "empty-key", "null-key", "no-revision", "empty-revision", "null-revision"],
-)
-def test_a_panel_without_key_or_revision_is_preview_only(tmp_path, panel):
-    """The keyless tip (the panel has no data-refdes-tip-key / data-refdes-
-    revision at all -- the W5b.4a markup omits both): ticks here are
-    preview-only, exactly the W5b.3 note's promise, and NO row is draftable."""
-    r = _run(tmp_path, "panelIdentity", {"panel": panel})
-    out = r["panel"]
-    assert out["canDraft"] is False
-    assert out["reason"] == PANEL_PREVIEW_REASON
-    for row in out["rows"]:
-        assert row["draftable"] is False
-        assert isinstance(row["reason"], str) and row["reason"]
+def test_a_panel_without_key_or_revision_is_preview_only(tmp_path):
+    r = _run(tmp_path, "panelKeyless")
+    for name in ("noKey", "noRevision", "missing", "nullish"):
+        panel = r[name]
+        assert panel["canDraft"] is False, f"{name}: the panel may not draft"
+        assert isinstance(panel["reason"], str) and panel["reason"], f"{name}: no reason string"
+        assert "preview-only" in panel["reason"].lower(), f"{name}: {panel['reason']!r}"
+        assert all(row["draftable"] is False for row in panel["rows"])
+
+
+def test_an_id_less_row_cannot_be_saved(tmp_path):
+    r = _run(tmp_path, "panelIdLess")
+    row = r["idLess"]
+    assert row["draftable"] is False
+    assert isinstance(row["reason"], str) and row["reason"]
+    assert "no id" in row["reason"].lower(), row["reason"]
+    assert "saved" in row["reason"].lower(), row["reason"]
 
 
 def test_targets_are_split_trimmed_and_empties_dropped(tmp_path):
-    r = _run(tmp_path, "targetsParse", {"states": ["done, dropped", "open,", ",done,open,", "  ", "", "open"]})
-    assert [panel["targets"] for panel in r["panels"]] == [
-        ["done", "dropped"],
-        ["open"],
-        ["done", "open"],
-        [],
-        [],
-        ["open"],
-    ]
-    # a row with no targets is not draftable (the pane has no verb for it)
-    assert [panel["draftable"] for panel in r["panels"]] == [True, True, True, False, False, True]
+    r = _run(tmp_path, "targetsParse")
+    by_id = {row["taskId"]: row for row in r["rows"]}
+    assert by_id["T-1"]["targets"] == ["done", "dropped"]
+    assert by_id["T-1"]["draftable"] is True
+    assert by_id["T-2"]["targets"] == ["open"]
+    assert by_id["T-3"]["targets"] == [] and by_id["T-3"]["draftable"] is False
+    assert by_id["T-4"]["targets"] == [] and by_id["T-4"]["draftable"] is False
 
 
-# -- wantedState: what does a click name? -------------------------------------
+# -- wantedState: the state a click names --------------------------------------
 
 
-def test_wanted_state_names_the_first_target_on_a_change_and_the_rendered_state_on_the_way_back(tmp_path):
-    """Q6(b) ratified: open->done and open->dropped, un-tick (done->open) and
-    dropped->open. A click that lands the checkbox back on its RENDERED state
-    names that rendered state (the un-tick back to the original); any other
-    click names the FIRST of the row's targets."""
-    r = _run(tmp_path, "wantedStates")
-    assert r["openTick"] == "done"        # first target of "done,dropped"
-    assert r["openUntick"] == "open"      # back to rendered: the row's own state
-    assert r["doneUntick"] == "open"
-    assert r["doneRecheck"] == "done"     # re-ticking a rendered-done row names done
-    assert r["droppedTick"] == "open"     # the reopening tick (see the markup pin)
-    assert r["droppedUntick"] == "dropped"
-
-
-def test_the_server_renders_a_dropped_row_unticked_with_open_as_the_only_target():
-    """The markup fact wantedState's dropped case rests on, pinned from the
-    server's own code (`task_pane._ticks_for`, the model behind
-    `pane.html.j2`'s checkbox): a dropped row gets `checked` False (the
+def test_the_markup_renders_a_dropped_row_unticked_with_open_only():
+    """The fact wantedState's dropped case rests on, pinned from the SERVER's
+    own model (task_pane._ticks_for): a dropped row gets `checked` False (the
     template emits `checked` iff the state is `done`) and
-    `data-refdes-tick-states="open"`. So ticking a dropped row names "open"
-    -- a dropped row's only tick is a reopening, and the first-target rule
-    gives it for free."""
+    data-refdes-tick-states="open". So ticking a dropped row (nowChecked
+    true != rendered false) names its first -- only -- target, "open": the
+    row reopens. wantedState must agree (next test)."""
     from refdes.task_pane import TICK_TARGETS, _ticks_for
 
     ticks = _ticks_for(
-        [{"id": "T-1", "state": "open"}, {"id": "T-2", "state": "done"}, {"id": "T-3", "state": "dropped"}],
+        [
+            {"id": "T-1", "state": "open"},
+            {"id": "T-2", "state": "done"},
+            {"id": "T-3", "state": "dropped"},
+        ],
         "LOG-001",
     )
+    assert TICK_TARGETS == {"open": "done,dropped", "done": "open", "dropped": "open"}
     assert [tick["targets"] for tick in ticks] == ["done,dropped", "open", "open"]
     assert [tick["checked"] for tick in ticks] == [False, True, False]
-    assert TICK_TARGETS == {"open": "done,dropped", "done": "open", "dropped": "open"}
+
+
+def test_a_click_names_its_first_target_and_an_untick_names_the_rendered_state(tmp_path):
+    """Q6(b) ratified: open->done, open->dropped, un-tick (done->open),
+    dropped->open. A click landing the checkbox on its RENDERED state names
+    that rendered state (the un-tick back to the original -- draft-free);
+    any other click names the FIRST target of the row's tickStates."""
+    r = _run(tmp_path, "wantedStates")
+    assert r["openTicked"] == "done"      # first target of "done,dropped"
+    assert r["openUnticked"] == "open"    # back to rendered: no change
+    assert r["doneUnticked"] == "open"
+    assert r["doneReticked"] == "done"    # back to rendered: no change
+    assert r["droppedTicked"] == "open"   # the reopening tick (see the markup pin)
+    assert r["droppedUnticked"] == "dropped"
 
 
 # -- applyDraft: the draft over the rendered rows ------------------------------
 
 
-def test_apply_draft_marks_pending_rows_and_keeps_the_rest(tmp_path):
-    r = _run(tmp_path, "applyDraft", {"pending": [["T-1", "done"], ["T-2", "open"], ["T-99", "done"]]})
-    assert r["result"]["rows"] == [
-        {"taskId": "T-1", "checked": True, "pending": True},
-        {"taskId": "T-2", "checked": False, "pending": True},
+def test_a_pending_tick_moves_its_row_and_marks_it(tmp_path):
+    r = _run(tmp_path, "applyDraft")
+    result = r["result"]
+    assert all(set(row) == {"taskId", "checked", "pending"} for row in result["rows"])
+    assert result["rows"] == [
+        {"taskId": "T-1", "checked": True, "pending": True},   # open -> done
+        {"taskId": "T-2", "checked": False, "pending": True},   # done -> open (un-tick)
         {"taskId": "T-3", "checked": False, "pending": False},
         {"taskId": "", "checked": False, "pending": False},
-    ], "checked is (wanted state == 'done'); unmatched rows keep their rendered checked"
+    ]
+    assert result["orphans"] == []
 
 
-def test_a_draft_entry_with_no_matching_row_is_an_orphan_and_stays_in_the_draft(tmp_path):
-    """An entry whose taskId matches no row is an ORPHAN: returned in input
-    order, not applied, not silently dropped -- it stays in the draft (the
-    indicator says so; the save sends what the draft holds)."""
-    r = _run(tmp_path, "applyDraft", {"pending": [["T-99", "done"], ["T-1", "done"], ["T-98", "dropped"]]})
-    assert r["result"]["orphans"] == [["T-99", "done"], ["T-98", "dropped"]]
+def test_a_draft_entry_with_no_row_is_an_orphan_not_a_drop(tmp_path):
+    """The tip moved under the draft (Q3's pane-side notice, Q1's reload with
+    a row gone): the entry is RETURNED as an orphan and NOT applied -- the
+    rows stay as rendered; nothing is silently dropped, the indicator counts
+    it, the save sends what the draft holds."""
+    r = _run(tmp_path, "applyDraftOrphan")
+    result = r["result"]
+    assert result["orphans"] == [["T-404", "done"]]
+    assert result["rows"] == [
+        {"taskId": "T-1", "checked": False, "pending": False},
+        {"taskId": "T-2", "checked": True, "pending": False},
+        {"taskId": "T-3", "checked": False, "pending": False},
+        {"taskId": "", "checked": False, "pending": False},
+    ]
 
 
-def test_hostile_task_ids_neither_pollute_nor_crash_the_module(tmp_path):
-    """Task ids are user data: `__proto__` and `constructor` are ordinary
-    ids (a row with one IS draftable and IS matched by its draft entry --
-    Map/null-prototype lookup, not a plain-object dictionary), `` is not
-    (its entry is an orphan). Nothing lands on Object.prototype."""
-    r = _run(
-        tmp_path,
-        "applyDraftHostile",
-        {"pending": [["__proto__", "done"], ["constructor", "done"], ["", "open"], ["ghost", "open"]]},
-    )
-    assert r["result"]["rows"] == [
+def test_hostile_task_ids_are_data_never_code(tmp_path):
+    """A task id is user data (an authored id lands in data-refdes-task):
+    `__proto__` and `constructor` are ordinary ids -- the rows carrying them
+    take their ticks, an entry with the EMPTY taskId matches nothing and is
+    an orphan, and Object.prototype stays clean (Map / null-prototype, not a
+    naive object literal)."""
+    r = _run(tmp_path, "applyDraftHostile")
+    result = r["result"]
+    assert result["rows"] == [
         {"taskId": "__proto__", "checked": True, "pending": True},
-        {"taskId": "constructor", "checked": True, "pending": True},
-        {"taskId": "", "checked": False, "pending": False},
+        {"taskId": "constructor", "checked": False, "pending": True},
+        {"taskId": "T-1", "checked": False, "pending": True},
     ]
-    assert r["result"]["orphans"] == [["", "open"], ["ghost", "open"]]
-    assert r["rowsUntouched"] is True, "applyDraft mutated the rows it was given"
-    assert r["probe"] == {
-        "protoIntact": True,
-        "ctorIntact": True,
-        "noDoneKey": True,
-        "noCheckedKey": True,
-    }, "a task id reached Object.prototype"
+    assert result["orphans"] == [["", "done"]]
+    assert r["protoClean"] is True, "Object.prototype was polluted by a task id"
 
 
-def test_apply_draft_does_not_mutate_the_rows_it_is_given(tmp_path):
-    r = _run(tmp_path, "applyDraftNoMutate", {"pending": [["T-1", "done"], ["T-2", "open"]]})
-    assert r["rowsUntouched"] is True
+def test_a_duplicate_entry_wins_by_last_write(tmp_path):
+    """Conservative pin: pendingTicks is insertion-ordered (tick-drafts.js
+    documents it), and a draft holds ONE entry per id -- a duplicate pair in
+    a hand-built list resolves to the LAST entry, the way Map.set does."""
+    r = _run(tmp_path, "applyDraftDuplicates")
+    assert r["result"]["rows"][0] == {"taskId": "T-1", "checked": False, "pending": True}
+    assert r["result"]["orphans"] == []
 
 
-# -- indicator: Q8's header sentence -------------------------------------------
+# -- indicator: Q8's "N unsaved ticks" header ----------------------------------
 
 
-def test_the_indicator_is_invisible_with_nothing_pending(tmp_path):
-    r = _run(tmp_path, "indicatorMatrix")
+def test_the_indicator_counts_pending_ticks_in_words(tmp_path):
+    r = _run(tmp_path, "indicator")
     assert r["zero"] == {"text": "", "hidden": True}
+    assert r["one"]["hidden"] is False
+    assert r["one"]["text"] == "1 unsaved tick"
+    assert r["many"]["hidden"] is False
+    assert r["many"]["text"] == "3 unsaved ticks"
 
 
-def test_the_indicator_counts_unsaved_ticks_in_plain_words(tmp_path):
-    """Q8 ratified: the pane's header shows the pending count ("3 unsaved
-    ticks") -- a badge the size of the editor's is easy to miss over a
-    document."""
-    r = _run(tmp_path, "indicatorMatrix")
-    assert r["one"] == {"text": "1 unsaved tick", "hidden": False}
-    assert r["many"] == {"text": "3 unsaved ticks", "hidden": False}
+def test_a_stale_draft_says_saving_will_ask_to_resolve(tmp_path):
+    r = _run(tmp_path, "indicator")
+    text = r["stale"]["text"]
+    assert r["stale"]["hidden"] is False
+    assert "1 unsaved tick" in text
+    assert "older version" in text.lower(), text
+    assert "resolve" in text.lower(), text
 
 
-def test_the_indicator_adds_the_stale_and_orphan_clauses(tmp_path):
-    r = _run(tmp_path, "indicatorMatrix")
-    assert r["staleOne"] == {"text": f"1 unsaved tick{STALE_CLAUSE}", "hidden": False}
-    assert r["withOrphans"] == {"text": "2 unsaved ticks (1 no longer match a task)", "hidden": False}
-    assert r["onlyOrphans"] == {
-        "text": "0 unsaved ticks (2 no longer match a task)",
-        "hidden": False,
-    }, "orphans keep the indicator visible with nothing pending"
-    assert r["staleAndOrphans"] == {
-        "text": f"2 unsaved ticks{STALE_CLAUSE} (3 no longer match a task)",
-        "hidden": False,
-    }
+def test_orphans_say_the_tasks_they_no_longer_match(tmp_path):
+    r = _run(tmp_path, "indicator")
+    assert r["orphans"]["hidden"] is False
+    assert "2 unsaved ticks" in r["orphans"]["text"]
+    assert "(2 no longer match a task)" in r["orphans"]["text"], r["orphans"]["text"]
+    # pending 0 with an orphan keeps the indicator VISIBLE (it is not "" /
+    # hidden: the rule is 0 pending AND no orphans)
+    assert r["orphanOnly"]["hidden"] is False
+    assert "(1 no longer match a task)" in r["orphanOnly"]["text"], r["orphanOnly"]["text"]
 
 
-def test_a_keyless_tip_says_ticks_are_preview_only(tmp_path):
-    r = _run(tmp_path, "indicatorMatrix")
-    assert r["preview"] == {"text": INDICATOR_PREVIEW, "hidden": False}
+def test_a_keyless_panel_says_ticks_are_preview_only(tmp_path):
+    r = _run(tmp_path, "indicator")
+    preview = r["preview"]
+    assert preview["hidden"] is False
+    assert "preview-only" in preview["text"].lower(), preview["text"]
 
 
-# -- isStale / tabLabel / needsUnloadPrompt ------------------------------------
+# -- isStale / tabLabel / needsUnloadPrompt / discardPlan -----------------------
 
 
-def test_is_stale_needs_two_different_non_empty_strings(tmp_path):
-    """Q3(a): the pane notices the tip moved (the reload probe re-renders) --
-    an absent side (a keyless tip, a draft with no stamp: tick-drafts drops
-    the stamp with its last tick) is not staleness, it is the absence of an
-    opening."""
-    r = _run(tmp_path, "staleAndLabels")
-    assert r["stale"] == {
-        "diff": True,
-        "same": False,
-        "emptyDraft": False,
-        "emptyPanel": False,
-        "nullDraft": False,
-        "nullPanel": False,
-        "numbers": False,
-    }
+def test_staleness_needs_two_revisions_that_differ(tmp_path):
+    """Q3(a) is a revision compare: a keyless tip (no revision to stamp --
+    tick-drafts drops the stamp with the last tick) is NEVER stale; two
+    non-empty strings that differ are."""
+    r = _run(tmp_path, "stale")
+    assert r["diff"] is True
+    assert r["same"] is False
+    assert r["emptyDraft"] is False
+    assert r["emptyPanel"] is False
+    assert r["nullDraft"] is False
+    assert r["nullPanel"] is False
+    assert r["bothNull"] is False
+    assert r["undef"] is False
 
 
-def test_the_tab_label_carries_each_tip_s_own_pending_count(tmp_path):
-    """Q5(a): tab-switch UI shows each tip's own pending count, and a clean
-    tip's tab says only its label."""
-    r = _run(tmp_path, "staleAndLabels")
-    assert r["labels"] == {
-        "zero": "LOG-001@k-9",
-        "one": "LOG-001@k-9 (1)",
-        "many": "LOG-001@k-9 (12)",
-    }
+def test_each_tip_tab_carries_its_own_pending_count(tmp_path):
+    """Q5(a) ratified: the tab-switch UI shows each tip's OWN pending count;
+    a clean tab carries no count at all."""
+    r = _run(tmp_path, "tabLabel")
+    assert r["zero"] == "LOG-001@k-9"
+    assert r["one"] == "LOG-001@k-9 (1)"
+    assert r["many"] == "LOG-002@k-9 (4)"
 
 
-def test_the_unload_prompt_fires_for_any_tip_with_pending_ticks(tmp_path):
-    """needsUnloadPrompt counts across TIPS (Q5: drafts coexist per tip in
-    one tab; one prompt for the whole page), reading tick-drafts' counts()
-    -- which is null-prototype (Object.create(null)) and omits empty tips,
-    so a for-in over Object.keys, not prototype-chained properties."""
-    r = _run(tmp_path, "staleAndLabels")
-    assert r["unload"] == {
-        "empty": False,
-        "zeros": False,
-        "one": True,
-        "nullish": False,
-        "nullProtoEmpty": False,
-        "nullProto": True,
-        "protoKeyCount": True,
-    }
+def test_the_unload_prompt_fires_for_any_tip_with_a_pending_tick(tmp_path):
+    """counts() is the null-prototype object tick-drafts.js returns (Q1(b):
+    the per-tab mirror, Q5(a): one draft per tip). The prompt is per-PAGE:
+    true iff ANY tip has pending > 0 -- and it must read a null-prototype
+    object as ordinary data (a hasOwnProperty call on it is a TypeError)."""
+    r = _run(tmp_path, "unload")
+    assert r["empty"] is False
+    assert r["npEmpty"] is False
+    assert r["npZero"] is False
+    assert r["npDirty"] is True
+    assert r["plainZero"] is False
+    assert r["plainDirty"] is True
 
 
-# -- discardPlan: Q8's reset-to-the-file ---------------------------------------
-
-
-def test_discard_returns_every_row_to_the_state_the_file_says(tmp_path):
-    """Q8(a) ratified (the editor's rules): Discard is the explicit release.
-    Every row returns to the state the pane RENDERED from the file -- not the
-    draft's state, not the opposite of the draft -- so the checkbox rows and
-    discardPlan agree with a page reload (which shows the file, since the
-    draft never wrote it)."""
-    r = _run(tmp_path, "discardRoundtrip")
-    assert r["applied"] == [
-        {"taskId": "T-1", "checked": True, "pending": True},   # open -> done
-        {"taskId": "T-2", "checked": False, "pending": True},   # done -> open
-        {"taskId": "T-3", "checked": False, "pending": True},   # dropped -> open
-        {"taskId": "", "checked": False, "pending": False},
-    ]
-    assert r["plan"]["rows"] == [
+def test_discard_returns_every_row_to_the_rendered_state(tmp_path):
+    """Q8(a) ratified: Discard is the explicit release -- every row returns
+    to what the FILE says (the rendered checked), the draft's ticks are
+    gone; a done row stays checked, an open row stays unchecked."""
+    r = _run(tmp_path, "discard")
+    plan = r["plan"]
+    assert set(plan) == {"rows"}
+    assert plan["rows"] == [
         {"taskId": "T-1", "checked": False},
         {"taskId": "T-2", "checked": True},
         {"taskId": "T-3", "checked": False},
         {"taskId": "", "checked": False},
-    ], "discard must undo the draft, not invert it"
-    assert all(set(row) == {"taskId", "checked"} for row in r["plan"]["rows"])
+    ]
+    assert all(set(row) == {"taskId", "checked"} for row in plan["rows"])
 
 
-# -- source pins: the module is pure, self-contained, and served-clean ---------
+# -- source pins: pure, self-contained, served-clean ----------------------------
 
 INLINE_HANDLER = re.compile(r"""\son[a-z]+\s*[:=]""", re.IGNORECASE)
 DYNAMIC_CODE = re.compile(r"\b(eval|new\s+Function|setTimeout\s*\(\s*['\"]|setInterval\s*\(\s*['\"])")
 JS_IMPORT = re.compile(r"""(?:from|import)\s*\(?\s*['"]([^'"]+)['"]""")
-
-EXPORT_NAMES = (
-    "panelFromRows",
-    "wantedState",
-    "applyDraft",
-    "indicator",
-    "isStale",
-    "tabLabel",
-    "needsUnloadPrompt",
-    "discardPlan",
-)
 
 
 def _strip_js_comments(text: str) -> str:
@@ -584,12 +574,10 @@ def _pane_code() -> str:
 
 
 def test_the_module_is_pure_no_dom_no_network_no_storage(tmp_path):
-    """4c-1a is the pure half: the DOM glue (4c-1b) builds the plain objects
-    and owns every page touch. The harnesses above prove the same fact by
-    running the module in a node process with no document/window/localStorage/
-    sessionStorage globals; this scan pins it for fetch/XMLHttpRequest/eval/
-    innerHTML too (fetch exists in modern node, so the runtime proof cannot
-    cover it)."""
+    """4c-1a is the pure half: the DOM glue (4c-1b) owns every page touch.
+    The harnesses above prove the same fact by running the module with NO
+    document/window/fetch/sessionStorage globals defined (node has none of
+    them); this pins it for the whole list."""
     code = _pane_code()
     for forbidden in (
         "document",
@@ -606,28 +594,25 @@ def test_the_module_is_pure_no_dom_no_network_no_storage(tmp_path):
 
 
 def test_the_module_imports_nothing(tmp_path):
-    """ONE self-contained module: no import graph, and every export is a
-    function named exactly as pinned (the runtime scenario proves the
-    typeofs; this pins the spelling of the surface)."""
     code = _pane_code()
-    assert JS_IMPORT.findall(code) == [], "tick-pane.js must import nothing"
-    for name in EXPORT_NAMES:
-        assert re.search(rf"\bexport function {name}\b", code), f"missing export: {name}"
+    assert JS_IMPORT.findall(code) == [], "tick-pane.js must be self-contained"
+    assert "tick-drafts.js" not in code, "pure module: not even a reference to the store"
 
 
 def test_the_module_passes_the_served_js_rules(tmp_path):
     """test_serve_static.py's js_files() lists static/*.js at collection
-    time, so tick-pane.js is picked up by that module's inline-handler /
-    dynamic-code / balance checks automatically the moment it lands; this
-    pins the same checks (and the file's presence in the served dir) here."""
+    time, so the new file is picked up by its inline-handler / dynamic-code /
+    ES2020 balance checks automatically the moment it lands; this pins the
+    same checks (and the file's presence in the served dir) here."""
     listing = [n for n in os.listdir(STATIC) if n.endswith(".js")]
     assert "tick-pane.js" in listing, "the file is not in the served static dir"
     code = _pane_code()
     assert not INLINE_HANDLER.search(code), "an inline event handler is a CSP violation"
     assert not DYNAMIC_CODE.search(code), "no eval/new Function in the editor"
     assert "javascript:" not in code
-    stack = []
+    # the ES2020 balance check from test_serve_static.py, mirrored
     depth = {"(": ")", "[": "]", "{": "}"}
+    stack = []
     in_string = None
     escaped = False
     for ch in code:
