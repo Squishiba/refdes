@@ -16,6 +16,6 @@
   with the fix, because the editor fetches nothing over the network. Reads are
   bounded by named caps (32 MiB per PDF, 200 candidates per page, 1000 text
   runs per page) enforced where the file is read, and no PDF byte and no
-  absolute server path ever leaves the process. Read-only: picking and
-  accepting a datasheet value are not here yet. Uses the existing optional
-  `refdes[pdf]` extra — no new dependency.
+  absolute server path ever leaves the process. Read-only in this slice:
+  picking and accepting a datasheet value ship in the same release. Uses the
+  existing optional `refdes[pdf]` extra — no new dependency.

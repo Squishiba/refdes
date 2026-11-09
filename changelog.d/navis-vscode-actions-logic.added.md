@@ -2,5 +2,5 @@
   archive/restore/mint write actions (`navisActions.js`: the result mapping
   for every answer the write routes give, the rows' disabled states with the
   shipped panels' keyless/orphan wordings, and the session write-lock a
-  `--no-write` refusal flips). Nothing is wired to a command or menu yet —
-  the commands come in the next slice.
+  `--no-write` refusal flips). The commands and menus that wire them ship in
+  this same release.

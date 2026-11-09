@@ -3,7 +3,7 @@
 Task: red-first fix from the N6.3 review (#469). The plan promises the
 read-only status bar's tooltip names `--no-write`; `applyNavisLockStatus`
 re-applied only the lock TEXT after an index repaint, so a
-`refdes.navisRefreshIndex` (the index face repaints the shared status
+`refdes.refreshIndex` (the index face repaints the shared status
 bar) erased the tooltip until the next refusal. Fix = remember the lock's
 tooltip next to the lock's text and re-apply it with the lock's lifetime.
 

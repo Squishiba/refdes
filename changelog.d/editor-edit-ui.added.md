@@ -13,5 +13,6 @@
   lives in the browser (mirrored to sessionStorage, with a leave-page guard),
   the save button says *unsaved* until it is not, and a conflict offers
   keep-mine, keep-theirs or copy-by-hand — never a merge. Read-only fields say
-  why where they sit. Link editing, item creation and id/key editing are still
-  later slices. (docs/design/browser-editor.md, part 3b-ii.)
+  why where they sit. Link editing and item creation ship in this same
+  release; id/key editing does not. (docs/design/browser-editor.md, part
+  3b-ii.)

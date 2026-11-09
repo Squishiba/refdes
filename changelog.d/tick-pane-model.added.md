@@ -1,1 +1,1 @@
-- The preview task pane gained the pure decision logic for its unsaved-tick UI (which rows can draft, what a click names, how a draft paints, what the header says). It is not wired to the page yet; nothing visible yet.
+- The preview task pane gained the pure decision logic for its unsaved-tick UI (which rows can draft, what a click names, how a draft paints, what the header says). The pane UI that wires it ships in this same release.

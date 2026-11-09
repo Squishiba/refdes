@@ -41,9 +41,8 @@
   follow checkbox, the focused block is selected and scrolled into view; a
   manual click wins until the next posted focus; a page opened for another
   doc is never moved.
-  (Extended in the DC-4a review follow-up, while this fragment is still
-  unreleased: the viewer answers requests on one thread per connection, and
+  (The viewer answers requests on one thread per connection, and
   the focus POST made the analysis cache a second concurrent writer, so the
-  cache hit-check, eviction and store now run under one lock — two threads
+  cache hit-check, eviction and store run under one lock — two threads
   evicting at the 32-key cap used to race the eviction — while the analysis
   itself stays outside the lock.)
