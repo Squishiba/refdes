@@ -43,40 +43,47 @@ touched.
 - Untouched tree: `pytest tests/test_vscode_navis_commands.py` -> 26 red
   (5 failed pins + 21 errors, navisCommands.js missing) — matches the
   author's log.
-- After the change: 25 passed, 1 failed. The one failure is
-  test_package_json_context_menus_gate_on_the_context_value_words, which is
-  unsatisfiable as written (see Findings). node --check clean on
-  navisCommands.js/extension.js; package.json parses.
+- After the implementation: 25/26 (the one failure was the unsatisfiable
+  pin, below); after the owner-authorised test fix: 26/26 green, ruff clean
+  on the file. node --check clean on navisCommands.js/extension.js;
+  package.json parses.
 - Neighbours (navis_actions, navis_tree, extension, extension_http_client,
   adapter_contract, crossplatform_lint, docs_focus): all green (141 passed
-  with the new file, 76 s). Full suite: see below.
+  with the new file, 76 s). Full suite at the implementation head: 6262
+  passed, 2 skipped, 1 failed — the sole failure was exactly the pin the
+  owner then authorised fixing; the final head is gated by CI's full runs.
 
-## Findings (test file, reported not fixed — HARD RULE 1)
+## Review round (owner-authorised, summarised)
 
-- tests/test_vscode_navis_commands.py::
-  test_package_json_context_menus_gate_on_the_context_value_words cannot
-  pass for ANY package.json. Why: its `_when_allows` helper regex-matches
-  only PARENTHESIZED `viewItem =~ /.../` clauses; the pinned RESTORE_WHEN
-  and MINT_ITEM_WHEN constants have an unparenthesized positive matcher, so
-  the helper evaluates them as True for every contextValue, while the
-  visibility table the same test pins demands False for non-matching rows
-  (fails on the first: restore for "refdesNavi"). Second, independent
-  contradiction: the pinned RESTORE_WHEN lacks a keyless negation, so it
-  matches "refdesNavi refdesNaviArchived refdesNaviKeyless", while the
-  table pins restore hidden for archivedKeyless (the panel rule rowActions
-  encodes). Proposed narrow change:
-    RESTORE_WHEN = f"view == {VIEW_ID} && (viewItem =~ /refdesNaviArchived/) && !(viewItem =~ /refdesNaviKeyless/)"
-    MINT_ITEM_WHEN = f"view == {VIEW_ID} && (viewItem =~ /refdesNaviKeyless/)"
-  (ARCHIVE_WHEN passes the table as pinned — its negations decide all four
-  rows — and is shipped verbatim.)
-- Shipped package.json carries the table-correct clauses (restore gated
-  with !(viewItem =~ /refdesNaviKeyless/); the two positive matchers
-  parenthesized — VS Code's `&&` binds looser than `=~`, so the
-  parenthesized form is semantically identical for the real host, and it is
-  the form the test's own evaluator parses). After the proposed test change
-  this test goes green with the shipped JSON unchanged; the only red
-  asserts today are the two verbatim string equalities (restore, mint) and
-  the two table rows the helper cannot evaluate.
+Both reviewers reproduced the disclosed stop point and confirmed the shipped
+package.json is right and the test pin wrong; the owner authorised exactly
+the proposed fix in tests/test_vscode_navis_commands.py ONLY:
+RESTORE_WHEN becomes the shipped clause INCLUDING the keyless exclusion
+(mirrors the panel rule navisActions.js rowActions:
+restoreEnabled = archived && !keyless && !orphan), MINT_ITEM_WHEN the
+shipped parenthesised clause, and `_when_allows` now evaluates bare and
+parenthesised `viewItem =~ /.../` matchers alike (the evaluation table
+unchanged; it already carried the archivedKeyless rows). ARCHIVE_WHEN is
+shipped verbatim as pinned, untouched. Control run: dropping the keyless
+exclusion from the shipped restore `when` turns the corrected test red on
+exactly `when_for("refdes.navisRestore") == RESTORE_WHEN`; restored, 26
+green.
+
+## Known limitation (accepted, documented, not changed)
+
+rowForItem resolves an item to the FIRST payload row whose rendered
+quadruple matches. A key6 collision whose two rows also carry identical
+text renders two visually identical items; the handler posts the first
+row's FULL key, so the write is exact but may land on the sibling row.
+Reversible (archive/restore), astronomically rare, and VS Code offers no
+more identity to recover.
+
+## Deferred (S6.3, per owner triage)
+
+- The "Mint keys (N)" count (mintAvailable.label) is not rendered in the
+  view/title button — the command ships ungated.
+- The read-only status-bar label is overwritten by the next index refresh
+  (the LOCK itself persists; only the copy repaints).
 
 ## Honest limits
 

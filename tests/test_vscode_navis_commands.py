@@ -898,8 +898,11 @@ ARCHIVE_WHEN = (
     f"view == {VIEW_ID} && viewItem =~ /(^| )refdesNavi( |$)/ "
     f"&& !(viewItem =~ /refdesNaviArchived/) && !(viewItem =~ /refdesNaviKeyless/)"
 )
-RESTORE_WHEN = f"view == {VIEW_ID} && viewItem =~ /refdesNaviArchived/"
-MINT_ITEM_WHEN = f"view == {VIEW_ID} && viewItem =~ /refdesNaviKeyless/"
+RESTORE_WHEN = (
+    f"view == {VIEW_ID} && (viewItem =~ /refdesNaviArchived/) "
+    f"&& !(viewItem =~ /refdesNaviKeyless/)"
+)
+MINT_ITEM_WHEN = f"view == {VIEW_ID} && (viewItem =~ /refdesNaviKeyless/)"
 VIEW_TITLE_WHEN = f"view == {VIEW_ID}"
 
 CONTEXT_VALUES = {
@@ -914,7 +917,7 @@ def _when_allows(when: str, context_value: str) -> bool:
     """Evaluate the pinned when-clause shape against a contextValue string."""
     if f"view == {VIEW_ID}" not in when:
         return False
-    for neg, pattern in re.findall(r"(!)?\(viewItem =~ /([^/]+)/\)", when):
+    for neg, pattern in re.findall(r"(!)?\(?\s*viewItem =~ /([^/]+)/\)?", when):
         hit = re.search(pattern, context_value) is not None
         if hit == bool(neg):
             return False
