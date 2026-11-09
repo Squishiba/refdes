@@ -1,0 +1,25 @@
+{
+ "before": {
+  "checked": false,
+  "ss": [
+   [
+    "refdes.tickdraft.v1.8vvt2gse4hf",
+    "{\"revision\":\"e0e3c2e25608d916eec35391d429ea7593b72c562bab4951a230d25037bf240b\",\"ticks\":{\"T-open\":\"open\"}}"
+   ]
+  ]
+ },
+ "after": {
+  "ss": [
+   [
+    "refdes.tickdraft.v1.8vvt2gse4hf",
+    "{\"revision\":\"e0e3c2e25608d916eec35391d429ea7593b72c562bab4951a230d25037bf240b\",\"ticks\":{\"T-open\":\"open\"}}"
+   ]
+  ],
+  "checked": false
+ },
+ "afterOpen": {
+  "checked": false,
+  "status": "1 unsaved tick"
+ },
+ "logs": []
+}

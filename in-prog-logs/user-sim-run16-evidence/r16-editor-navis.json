@@ -1,0 +1,114 @@
+{
+ "toggle": {
+  "found": true,
+  "label": "Navis (5)"
+ },
+ "panelOpen": {
+  "found": false,
+  "body": "\n\n  refdes\n  \n    Items\n    New item\n    Rendered site\n  \n  user-sim-run16 @ 9f15af87484b\n\n\n\n  Free textTypelog5requirement4bound1test1Boardboard-a8board-b2WorkspacenoneCoverage stageopen5Check staten"
+ },
+ "showAll": null,
+ "panelShowAll": {
+  "found": false,
+  "body": "\n\n  refdes\n  \n    Items\n    New item\n    Rendered site\n  \n  user-sim-run16 @ 9f15af87484b\n\n\n\n  Free textTypelog5requirement4bound1test1Boardboard-a8board-b2WorkspacenoneCoverage stageopen5Check staten"
+ },
+ "mintPillNow": [],
+ "draft": {
+  "textarea": true,
+  "statusBefore": "unsaved",
+  "clicked": true,
+  "panelAfterAction": true,
+  "reloadsDelta": 0,
+  "statusAfter": "unsaved",
+  "draftKept": true,
+  "discarded": true
+ },
+ "editorLearned": "Navis (5)",
+ "mintPill": {
+  "label": "Mint keys (1)"
+ },
+ "mintClick": true,
+ "mintStatus": "Minted 1 key(s). Item files were edited: an open unsaved draft will ask you to resolve a conflict when you Save.",
+ "mintPanel": {
+  "found": true,
+  "text": "Minted 1 key(s). Item files were edited: an open unsaved draft will ask you to resolve a conflict when you Save.9a7z15LOG-A-002Model worst-case copper temperature.Archive4n9h37Recheck decoupling near U14.Archive8x9e84LOG-B-001Editor mint probe.Archivecqc7p6LOG-B-001Measure phase-current sense gain.Archiverwtp10LOG-B-001Verify Rds(on) at 125 C.ArchiveShow all (6)9a7z15LOG-A-002Model worst-case copper temperature.4n9h37Recheck decoupling near U14.8x9e84LOG-B-001Editor mint probe.cqc7p6LOG-B-001Measure phase-current sense gain.rwtp10LOG-B-001Verify Rds(on) at 125 C.6xfswxLOG-A-002Check input cap ripple at cold start.[archived]Restore",
+  "buttons": [
+   {
+    "label": "Archive",
+    "disabled": false,
+    "title": "",
+    "cls": "navis-archive"
+   },
+   {
+    "label": "Archive",
+    "disabled": false,
+    "title": "",
+    "cls": "navis-archive"
+   },
+   {
+    "label": "Archive",
+    "disabled": false,
+    "title": "",
+    "cls": "navis-archive"
+   },
+   {
+    "label": "Archive",
+    "disabled": false,
+    "title": "",
+    "cls": "navis-archive"
+   },
+   {
+    "label": "Archive",
+    "disabled": false,
+    "title": "",
+    "cls": "navis-archive"
+   },
+   {
+    "label": "Restore",
+    "disabled": false,
+    "title": "Restore this Navi",
+    "cls": "navis-restore"
+   }
+  ],
+  "links": [
+   {
+    "href": "#/items/LOG-A-002",
+    "text": "LOG-A-002"
+   },
+   {
+    "href": "#/items/LOG-B-001",
+    "text": "LOG-B-001"
+   },
+   {
+    "href": "#/items/LOG-B-001",
+    "text": "LOG-B-001"
+   },
+   {
+    "href": "#/items/LOG-B-001",
+    "text": "LOG-B-001"
+   },
+   {
+    "href": "#/items/LOG-A-002",
+    "text": "LOG-A-002"
+   },
+   {
+    "href": "#/items/LOG-B-001",
+    "text": "LOG-B-001"
+   },
+   {
+    "href": "#/items/LOG-B-001",
+    "text": "LOG-B-001"
+   },
+   {
+    "href": "#/items/LOG-B-001",
+    "text": "LOG-B-001"
+   },
+   {
+    "href": "#/items/LOG-A-002",
+    "text": "LOG-A-002"
+   }
+  ]
+ },
+ "mintFileDiff": false,
+ "mintReloadsDelta": 0
+}

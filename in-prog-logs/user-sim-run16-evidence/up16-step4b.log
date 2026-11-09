@@ -1,0 +1,4 @@
+rewrote 2 calc line(s) in 1 file(s):
+  items/decisions/dec-pwr-001-regulator.md:16  P_diss          : W      = V_out * I_load * (1/eff - 1) -> P_diss                   = V_out * I_load * (1/eff - 1) | W
+  items/decisions/dec-pwr-001-regulator.md:17  P_dens          : W/in^2 = P_diss / A_board -> P_dens                   = P_diss / A_board | W/in^2
+baselines carried forward: probe-base

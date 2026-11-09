@@ -1,0 +1,67 @@
+$ git rev-parse --short origin/main
+a70e7ba3
+
+$ git diff --stat 9f15af87 origin/main -- src/refdes/serve/static/
+ src/refdes/serve/static/taskpane-save.js  | 265 ++++++++++++++++++++++++++++++
+ src/refdes/serve/static/taskpane-ticks.js |  11 +-
+ src/refdes/serve/static/tick-save.js      | 236 ++++++++++++++++++++++++++
+ 3 files changed, 510 insertions(+), 2 deletions(-)
+
+$ git diff 9f15af87 origin/main -- src/refdes/serve/static/taskpane-ticks.js
+diff --git a/src/refdes/serve/static/taskpane-ticks.js b/src/refdes/serve/static/taskpane-ticks.js
+index e7d53b77..cb9b5f24 100644
+--- a/src/refdes/serve/static/taskpane-ticks.js
++++ b/src/refdes/serve/static/taskpane-ticks.js
+@@ -9,13 +9,15 @@
+    asks before leaving. This file decides nothing of its own: it reads the
+    rows, answers a change, restores a stored draft on load, shows the
+    header count, offers Discard, and asks `beforeunload`. It records
+-   nothing to the project: the save is W5b.4c-2, so there is no request
+-   here. A storage that throws (blocked, private mode, full) costs
++   nothing to the project and posts nothing itself: the Save is W5b.4c-2, so
++   it lives in its own module, and this file only hands that module its
++   panels. A storage that throws (blocked, private mode, full) costs
+    persistence, never the pane. The pane's W5b.3 sentence under the title
+    stays: the control is preview chrome, and it says so. Everything renders
+    through textContent; no markup is ever pasted. */
+ 
+ import { createTickDrafts } from './tick-drafts.js';
++import { initSave } from './taskpane-save.js';
+ import {
+   panelFromRows,
+   wantedState,
+@@ -63,6 +65,7 @@ function attr(node, name) {
+ }
+ 
+ const tabs = [];
++const panels = [];
+ 
+ function refreshTabs() {
+   // Q5a (ratified): a tab carries its OWN tip's pending count, never a
+@@ -153,12 +156,14 @@ for (const panelEl of document.querySelectorAll('.refdes-taskpane-panel')) {
+     tipKey: attr(panelEl, 'data-refdes-tip-key'),
+     revision: attr(panelEl, 'data-refdes-revision'),
+     canDraft: model.canDraft,
++    panelEl,
+     model,
+     rows: rawRows,
+     boxes,
+     status,
+     discard,
+   };
++  panels.push(entry);
+   boxes.forEach((box, at) => {
+     const row = model.rows[at];
+     if (model.canDraft && !row.draftable) {
+@@ -189,6 +194,8 @@ for (const panelEl of document.querySelectorAll('.refdes-taskpane-panel')) {
+   refreshPanel(entry); // restore: a draft stored by this tab takes over the rows
+ }
+ 
++initSave({ drafts, panels, refreshPanel });
++
+ window.addEventListener('beforeunload', (event) => {
+   // Q8 (ratified (a)): ONE prompt, its condition read at event time from
+   // the store's live counts -- the standard preventDefault + returnValue
+
+$ git diff --stat 9f15af87 origin/main -- src/refdes/serve/static/tick-pane.js src/refdes/serve/static/tick-drafts.js
+(empty above = 0-diff)

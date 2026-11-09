@@ -1,0 +1,3 @@
+WARNING <project> — .refdes/schema.json was older than refdes-project.yaml -- refreshed. If your editor's completion looked stale, it should catch up now.
+WARNING items/requirements/components.yaml:5 [CMP-PWR-001] — status is 'selected' but nothing selects it -- no item declares selects: pointing at this one. Author selects: on the item that makes it so, or move this item off 'selected'.
+7 items, 0 errors, 2 warnings

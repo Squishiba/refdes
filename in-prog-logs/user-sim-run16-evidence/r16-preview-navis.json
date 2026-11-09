@@ -1,0 +1,294 @@
+{
+ "cookieUrl": "http://127.0.0.1:8760/preview/",
+ "A": {
+  "present": true,
+  "open": false,
+  "summary": "Navis (5)",
+  "rows": [
+   {
+    "text": "6xfswx LOG-A-002 Check input cap ripple at cold start. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   },
+   {
+    "text": "9a7z15 LOG-A-002 Model worst-case copper temperature. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   },
+   {
+    "text": "4n9h37 Recheck decoupling near U14. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   },
+   {
+    "text": "LOG-B-001 Measure phase-current sense gain.",
+    "buttons": [],
+    "keyTitle": "No key yet -- use Mint keys"
+   },
+   {
+    "text": "rwtp10 LOG-B-001 Verify Rds(on) at 125 C. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   }
+  ],
+  "pillText": [
+   "Navis (5)",
+   "Mint keys (1)"
+  ]
+ },
+ "A_open": {
+  "present": true,
+  "open": true,
+  "summary": "Navis (5)",
+  "rows": [
+   {
+    "text": "6xfswx LOG-A-002 Check input cap ripple at cold start. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   },
+   {
+    "text": "9a7z15 LOG-A-002 Model worst-case copper temperature. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   },
+   {
+    "text": "4n9h37 Recheck decoupling near U14. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   },
+   {
+    "text": "LOG-B-001 Measure phase-current sense gain.",
+    "buttons": [],
+    "keyTitle": "No key yet -- use Mint keys"
+   },
+   {
+    "text": "rwtp10 LOG-B-001 Verify Rds(on) at 125 C. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   }
+  ],
+  "pillText": [
+   "Navis (5)",
+   "Mint keys (1)"
+  ]
+ },
+ "B": {
+  "found": false
+ },
+ "B_state": {
+  "present": true,
+  "open": true,
+  "summary": "Navis (5)",
+  "rows": [
+   {
+    "text": "6xfswx LOG-A-002 Check input cap ripple at cold start. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   },
+   {
+    "text": "9a7z15 LOG-A-002 Model worst-case copper temperature. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   },
+   {
+    "text": "4n9h37 Recheck decoupling near U14. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   },
+   {
+    "text": "LOG-B-001 Measure phase-current sense gain.",
+    "buttons": [],
+    "keyTitle": "No key yet -- use Mint keys"
+   },
+   {
+    "text": "rwtp10 LOG-B-001 Verify Rds(on) at 125 C. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   }
+  ],
+  "pillText": [
+   "Navis (5)",
+   "Mint keys (1)"
+  ]
+ },
+ "C_keyless": {
+  "found": true,
+  "buttons": [],
+  "titles": [
+   "No key yet -- use Mint keys"
+  ],
+  "mintPill": [
+   "Mint keys (1)"
+  ]
+ },
+ "D_click": {
+  "found": true,
+  "label": "Mint keys (1)"
+ },
+ "D_status": "Minted 1 key(s).",
+ "D_fileDiff": {
+  "motorKeySplice": "---\nid: LOG-B-001\nkey: ct18d6yca5g\ntype: log\nprefix: LOG-B\nsummary: Gate driver selection\ndate: 2026-08-31\n---\n\nChose the driver.\n\n<!--navi:KEY Measure phase-current sense gain.-->\n\n```calc\nI_phase = 2 A\nV_ds = I_phase * 0.008 ohm\nP_sw = V_ds * I_phase | W\n```\n\n<!--navi:rwtp100fssp Verify Rds(on) at 125 C.-->\n",
+  "preNormalized": "---\nid: LOG-B-001\nkey: ct18d6yca5g\ntype: log\nprefix: LOG-B\nsummary: Gate driver selection\ndate: 2026-08-31\n---\n\nChose the driver.\n\n<!--navi: Measure phase-current sense gain.-->\n\n```calc\nI_phase = 2 A\nV_ds = I_phase * 0.008 ohm\nP_sw = V_ds * I_phase | W\n```\n\n<!--navi:KEY Verify Rds(on) at 125 C.-->\n"
+ },
+ "D_panelAfter": {
+  "present": true,
+  "open": true,
+  "summary": "Navis (5)",
+  "rows": [
+   {
+    "text": "6xfswx LOG-A-002 Check input cap ripple at cold start. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   },
+   {
+    "text": "9a7z15 LOG-A-002 Model worst-case copper temperature. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   },
+   {
+    "text": "4n9h37 Recheck decoupling near U14. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   },
+   {
+    "text": "cqc7p6 LOG-B-001 Measure phase-current sense gain. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   },
+   {
+    "text": "rwtp10 LOG-B-001 Verify Rds(on) at 125 C. Archive",
+    "buttons": [
+     {
+      "label": "Archive",
+      "disabled": false,
+      "title": ""
+     }
+    ],
+    "keyTitle": null
+   }
+  ],
+  "pillText": [
+   "Navis (5)"
+  ]
+ },
+ "E_click": {
+  "found": true,
+  "disabled": true
+ },
+ "E_fileUnchanged": true,
+ "E_store": [
+  "9a7z15emfbz.yaml.gz"
+ ],
+ "E_showAll": true,
+ "E_archived": {
+  "found": true,
+  "text": "9a7z15 LOG-A-002 Model worst-case copper temperature. [archived] Restore",
+  "restore": [
+   {
+    "label": "Restore",
+    "disabled": false,
+    "title": "Restore this Navi"
+   }
+  ]
+ },
+ "F_click": {
+  "found": true
+ },
+ "F_store": []
+}

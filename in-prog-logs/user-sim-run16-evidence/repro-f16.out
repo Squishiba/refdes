@@ -1,0 +1,13 @@
+== refdes check ==
+navis: minted key 5bybvp (5bybvp63534) into  (items/thread.md)
+ERROR   items/listfile.yaml:2 — item has no id — run 'refdes id' to allocate one
+(minted 1 key(s) and minted 1 navi key(s) while loading)
+2 items, 1 errors, 0 warnings
+== refdes navis ls ==
+note: 1 item has no id yet and was not scanned -- run 'refdes id' to allocate it
+1 Navis:
+  1. 5bybvp marker B   (items/thread.md:21)
+== expected ==
+check: ERROR .../listfile.yaml:2 — item has no id — run 'refdes id' to allocate one (entry A excluded from the project, marker A unlisted);
+navis ls: marker B listed on the KEYED id-less THREAD tip with an EMPTY id column (F16-5); the project is red only because of entry A.
+fixture kept at .scratch/tmp.YtRMSLtGUq

@@ -1,0 +1,4 @@
+WARNING <project> — .refdes/schema.json was older than refdes-project.yaml -- refreshed. If your editor's completion looked stale, it should catch up now.
+WARNING items/requirements/components.yaml:5 [CMP-PWR-001] — status is 'selected' but nothing selects it -- no item declares selects: pointing at this one. Author selects: on the item that makes it so, or move this item off 'selected'.
+WARNING items/log/2026-03.md:2 [LOG-PWR-001] — LOG-PWR-001: edited while uncaptured -- the current content no longer matches the hash 5d1f8457ee45e9e8 recorded in .refdes/log-seal.yaml, and nothing in .refdes/history/ holds a snapshot of this entry, so the edit leaves no trace. Run `refdes history capture LOG-PWR-001` to record the current text; an edit after that is reported as edited after captured.
+7 items, 0 errors, 3 warnings

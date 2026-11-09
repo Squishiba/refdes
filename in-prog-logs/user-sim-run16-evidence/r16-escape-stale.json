@@ -1,0 +1,11 @@
+{
+ "toggle0": "Navis (6)",
+ "open1": true,
+ "escapeFocused": true,
+ "closedByToggle": false,
+ "pillShown": [
+  "Mint keys (1)"
+ ],
+ "staleClick": false,
+ "statusAfterStale": null
+}

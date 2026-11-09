@@ -1,0 +1,10 @@
+{
+ "label": "6xfswx LOG-A-002marker not found (items/board-a/log/2026-08.md) Check input cap ripple at cold start. [archived] Restore",
+ "restore": [
+  {
+   "label": "Restore",
+   "disabled": true,
+   "title": "Marker not found -- hand-restore the marker, then it re-links by key"
+  }
+ ]
+}

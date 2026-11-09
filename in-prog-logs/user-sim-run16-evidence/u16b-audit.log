@@ -1,0 +1,82 @@
+Schema fields not tracked as 'invalidate':
+  bound
+    last_reviewed    ignore
+    note             timeline
+    owner            timeline
+    source           timeline
+    tags             ignore
+  component
+    last_reviewed    ignore
+    note             timeline
+    owner            timeline
+    refdes           timeline
+    source           timeline
+    tags             ignore
+  group
+    last_reviewed    ignore
+    note             timeline
+    owner            timeline
+    source           timeline
+    tags             ignore
+    title            timeline
+  log
+    note             timeline
+    source           timeline
+    tags             ignore
+    tasks            timeline
+  requirement
+    last_reviewed    ignore
+    note             timeline
+    owner            timeline
+    source           timeline
+    tags             ignore
+  test
+    last_reviewed    ignore
+    note             timeline
+    owner            timeline
+    source           timeline
+    tags             ignore
+
+Item-level overrides:
+  LOG-PWR-001    whole item -> timeline  — NO REASON GIVEN
+
+Append-only entries edited after sealing:
+  LOG-PWR-001  (legacy seal: recorded hash only; original content was not captured)
+
+Entries edited after captured:
+  (none)
+
+Accepted append-only reseals (durable history):
+  (none)
+
+Ledger entries with no live item and no former_ids: explaining them:
+  (none)
+
+Baselines:
+  most recent stamp:   post-upgrade (revision, 2026-11-09T08:37:40Z)
+  most recent release: (none stamped yet)
+
+Since last revision (post-upgrade, 2026-11-09T08:37:40Z):
+  changed   0
+  added     0
+  removed   0
+  relabelled 0
+  (7 unchanged)
+
+Since last release: (no release stamped yet)
+
+Older baseline keys no current item declares:
+  (none)
+
+Blocked chains:
+  (none)
+
+Citations:
+  http://127.0.0.1:8799/tps.txt
+    ok              kept       cited by CMP-PWR-001
+
+Parts:
+  TPS62913       used by CMP-PWR-001 (component)
+  TPS62914       used by CMP-PWR-002 (component)
+
+7 items audited (7 local)

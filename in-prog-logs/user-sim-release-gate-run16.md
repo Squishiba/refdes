@@ -1,0 +1,375 @@
+# User-simulation release gate, run 16
+
+Run date 2026-11-09. Base `9f15af87` — the tip of `origin/main` at run
+time (branch `user-sim-run16`, ff-merged from `origin/main`, includes
+#463), so the stated range `d9719a9..origin/main` (~60 commits) is
+exactly what I ran against; main has since advanced through
+#468/#469/#470 (the review-round claims below were re-checked against
+`10a4a701`). In-scope: the Navis panel in editor and
+preview (W5b surfaces, #410, #418), item rows linking to the item view
+(#450), the unsaved-draft revision conflict (#429), the preview task-pane
+ticks (#456) and unsaved-tick draft (#463), `POST /api/item/<ref>/continue`
+(#453), `refdes fetch`'s pruned-values report (#449), the VS Code tree
+claims (docs only), the 0.5.0→current upgrade path (`docs/upgrading.md`
+followed verbatim), and the README test command.
+
+Driven as a user: real Chromium (puppeteer-core) and real Firefox
+(playwright-core) against `refdes serve --port 8760` (writable) and
+`--no-write --port 8761` on a scratch multi-board project (18 items,
+forked design-log thread with two tips, keyless/id-less markers, a
+calc fence, a CSV citation with `source()` spans); CLI directly; curl for
+the documented API shapes; a real `refdes` 0.5.0 wheel (PyPI) + its
+`init`-built project for the upgrade. Evidence under
+`in-prog-logs/user-sim-run16-evidence/` (tokens embedded in captured
+pages replaced with `REDACTED`).
+
+## Findings
+
+| # | Sev | Surface | One-line summary |
+|---|-----|---------|------------------|
+| F16-1 | Low (fixed in #476) | navis verbs | on the docs' own pre-`refdes id` shape (yaml list-file entry, marker in the body, no `id:`), `check` is loud (`item has no id — run 'refdes id'`, exit 1) **but at my base the navis verbs answered "no Navis: no `<!--navi: text-->` marker in any item body", exit 0, no hint** that the entry carrying the marker was skipped — #476 (merged 2db6e98f) added the note ("1 item has no id yet and was not scanned — run 'refdes id'"), and #475 the docs sentence. First write-up over-claimed the mechanism (section records the imprecision) |
+| F16-2 | Medium (fixed in #473) | task pane / continue endpoint | a **keyed, id-less thread tip** (a markdown thread entry with a `key:` and no `id:`) is refused by `/api/item/<ref>/continue` (" carries no artifact key" — note the empty subject) while the pane hands the browser exactly the save context (`data-refdes-tip-key` + revision) for that tip; no shipped doc says a tip needs an `id:` — #473 (merged 10a4a701) made the pane gate require both halves |
+| F16-3 | Low (Unconfirmed) | task pane / Firefox | a Firefox "tick double-step" observed mid-run **did not reproduce** on a clean re-run with plain `page.click` on the input: Firefox and Chromium are identical (checked true/false/true/false; mirror `{T:done}/{ }/{T:done}/{ }`, matching the reviewer's numbers). The original observation was self-inflicted: my continuation-endpoint test had appended a new tip that flipped the row's file state open→done between probe phases, and I read the row's static `data-refdes-task-state` attribute (the file state, never updated by a tick) as the live state — re-filed Unconfirmed, evidence kept |
+| F16-4 | Low (fixed in #475) | docs/upgrading.md | the item-level `history:`→`on_change:` hard error (which the docs' own probe class — a v2 entry sealed via item `history: log` — hits on the first current load) is absent from the step-2 quote and no step performs it, so the docs-ordered `calc-rewrite` (step 4) refuses until an off-menu hand-rename; and the design-debate "declare the four types yourself" remedy needs two more renames inside the copied overlay (`on_change: log`→`timeline`, `resolved_by: [decision]`→`[log]`) |
+| F16-5 | Cosmetic | navis / task pane CLI-render | id-less items render with an empty id column in `navis ls`/mint announcements and as an empty-text anchor row in the preview Navis panel |
+| F16-6 | Cosmetic (fixed in #475) | docs/cli-reference.md | the serve section still describes the task pane as computing and writing nothing with no control on it; the pane now ships preview-only tick checkboxes, a per-tab draft, Discard, and a leave prompt (only the changelog fragments say so) |
+
+Counts by severity: 1 Medium (F16-2, fixed in #473), 3 Low (F16-1 fixed in #476, F16-3 unconfirmed, F16-4 fixed in #475), 2 Cosmetic (F16-5, F16-6 fixed in #475).
+
+## F16-1 (Low, docs/UX) — an empty `navis ls` claims "no marker in any body" when the marker's entry was skipped for having no id
+
+My first write-up of this finding was imprecise in two ways, recorded
+here so the history is visible: (a) it cited "`docs/navis.md`
+§how-it-works: the scan 'reads every body'" — there is no such section;
+the line is `docs/markdown.md:77` ("scans every body into one
+project-wide list", with the `index` `navis` key in the same sentence);
+(b) it said markers in id-less items are "invisible to every
+`refdes navis` verb", which is broader than what reproduces. The
+subject is the yaml **list-file** entry with a body and no `id:` —
+exactly the shape `docs/getting-started.md:112-135` teaches ("No IDs
+yet. Allocate them: `refdes id`"); a **keyed markdown thread entry**
+with no `id:` loads clean and lists normally (the F16-5 cosmetic is its
+whole residue). And the exclusion is loud **on `check`/`build`**:
+every command load reports `ERROR … item has no id — run 'refdes id'
+to allocate one` (`parse.py:2033`), `check` exits 1.
+
+What survives, and is the finding, is **at my base `9f15af87`**: the
+navis verbs themselves were silent. The capture below is that base
+behavior, as I first observed it
+(`evidence/repro-f16-ls.sh`; the regenerated `repro-f16-ls.out` runs
+on current main and shows the fixed output):
+
+```
+$ refdes --no-write check
+ERROR   items/requirements/power.yaml:9 — item has no id — run 'refdes id' to allocate one
+0 items, 1 errors, 0 warnings      # exit 1
+$ refdes --no-write navis ls
+no Navis: no `<!--navi: text-->` marker in any item body    # exit 0
+$ refdes id && refdes --no-write navis ls
+allocated REQ-PWR-001  (items/requirements/power.yaml:9) ...
+1 Navis:
+  1. check the surge rating  REQ-PWR-001 (items/requirements/power.yaml:9)
+```
+
+A user who ran `navis ls` before `check` — the order the docs' own
+flow invites (write bodies, look around, allocate ids later) — got an
+answer that asserted no marker exists in any body, when the true state
+was "the one body carrying a marker was skipped because it has no id".
+**Fixed on main by #476** (merged 2db6e98f, in range before this head
+and after my base): the verbs now print, ahead of the empty-list line,
+
+```
+note: 1 item has no id yet and was not scanned -- run 'refdes id' to allocate it
+```
+
+(visible in the regenerated `repro-f16-ls.out`), and docs PR #475
+(merged 86c0d043) added the matching sentence to `docs/navis.md`.
+Kept in the table with status for the record.
+
+## F16-2 — continuation refused at an id-less tip; pane gate is key-only
+
+The subject is a keyed, id-less **thread tip** — a markdown thread
+entry with `key:` and no `id:` (not a yaml list-file entry, which is a
+load error and never reaches these gates; see F16-1's recorded imprecision). It
+loads clean: `refdes check` on the probe project is green with the tip
+present, and the tip is the page's fold. The pane's save-context gate
+is "a tip with no key … names no context" (server docstring,
+`serve/server.py:_pane_save_context`), so such a tip *with* a key gets
+`data-refdes-tip-key` + `data-refdes-revision`
+and the panel reads `viewing LOG-A-005 · tasks as of tip 4jfd3hhpajc`.
+The endpoint disagrees:
+
+```
+$ curl -X POST -H "X-Refdes-Token: …" -H "Origin: http://127.0.0.1:8760" \
+    -d '{"ticks":[["T-open","done"]],"expected_revision":"<current>"}' \
+    /api/item/LOG-A-005/continue
+422 {"kind":"refused","ok":false,
+ "message":"refused:  carries no artifact key, so no DISPLAY-ID@key
+ composite can be written for it; naming the tip with a bare id would
+ drop the identity the link is for", …}
+```
+
+Three things to fix: the subject slot of the message renders empty
+(the item has no display id, so the interpolation yields ""); the
+pane→endpoint gate pair is inconsistent (pane names a save the endpoint
+refuses — the exact "UI lying" the pane's own comment forbids); and
+`changelog.d/continue-endpoint.added.md` — the endpoint's only shipped
+doc — promises 200 applied for a well-formed body and never lists an
+`id:`-bearing tip among the refusals (it lists forked thread, cleared
+list, which fired correctly in my runs; a sealed-tip 422 is among the
+refusals it names, but I never produced a sealed tip, so that one
+stands untested — see "What I could not test"). Adding the
+tip's `id:` made the same request apply in one call
+(`continuation LOG-A-008 appended … (1 tick)`, composite
+`follows: [LOG-A-007@4jfd3hhpajc]`, ticked-up list, 200; stale revision
+then 409 with `current_text`), so the fix is the pane gate (key AND id),
+the message label, and a doc line.
+
+**Fixed on main by #473** (merged 10a4a701): the pane's save-context
+gate now requires both halves — the `serve/server.py` docstring names
+this finding ("one with no display id … a keyed id-less tip is the
+same unwritable composite … a save context naming it would offer a
+save the endpoint can only refuse"), so the pane no longer offers a
+save context for a keyed id-less tip.
+
+## F16-3 — Unconfirmed: "Firefox double-step" was a fixture race of mine
+
+Mid-run I recorded Firefox tick clicks behaving like double-steps
+(evidence `r16-ff2.json`, `r16-ff3.json`, `r16-ff4.json` — kept). A
+clean re-run on request (`r16-rerun.json`, base `9f15af87`): a
+two-entry thread, id-bearing tip, one open task
+(`data-refdes-tick-states="done,dropped"`), plain `page.click` on the
+INPUT, four clicks, file untouched between clicks:
+
+- Chromium: checked true/false/true/false; mirror
+  `{4jfd3hhpajc:{T-rerun:"done"}}` / `{}` / same / `{}`.
+- Firefox: **identical**, same sequence and mirrors — matching the
+  reviewer's independent numbers exactly.
+
+My first write-up claimed "the tick files are byte-identical between
+that base and current origin/main per `git diff`" — **that was false
+as written**, corrected here, and the diff itself moves (the save-layer
+work landed after round 1), so I record the command, not memory. At
+the time of this round, `git fetch origin && git rev-parse --short
+origin/main` → `a70e7ba3`, and
+`git diff --stat 9f15af87 origin/main -- src/refdes/serve/static/`
+(full output, plus the full `taskpane-ticks.js` diff, in
+`evidence/f16-3-static-diff.txt`) reports:
+
+```
+ src/refdes/serve/static/taskpane-save.js  | 265 ++++++++++++++++++++++++++++++
+ src/refdes/serve/static/taskpane-ticks.js |  11 +-
+ src/refdes/serve/static/tick-save.js      | 236 ++++++++++++++++++++++++++
+ 3 files changed, 510 insertions(+), 2 deletions(-)
+```
+
+— two new save modules (`taskpane-save.js`, `tick-save.js`) and a
++9/−2 `taskpane-ticks.js` whose every hunk is the `initSave` import,
+its call, and panel-collection wiring; the `change` listener that
+performs the tick transition appears in no hunk, and `tick-pane.js`
+and `tick-drafts.js` are 0-diff. (Separately: the row's
+`data-refdes-task-state` is read-only to the client —
+`taskpane-ticks.js:131` reads it, nothing writes it — which is why
+reading it as live state produced my false positive.)
+
+The conclusion the evidence supports, no stronger: the click→transition
+path (the change listener in `taskpane-ticks.js` and the
+`tick-pane`/`tick-drafts` modules) is unchanged between my base and
+main; the lead's own Playwright run on current main (an id'd open row
+clicked four times, Firefox and Chromium: checked
+true/false/true/false, draft mirror `{T:done}`/`{ }`/`{T:done}`/`{ }`)
+shows parity — my base run reproduced the same numbers
+(`r16-rerun.json`); the original double-step is attributed to the
+fixture race described below. The original run differed because my
+continue-endpoint test had
+appended a new tip carrying the ticked-up list, so between probe
+phases the row's **file state flipped open→done**. From a done row,
+click 1 is an untick — `checked=false` with mirror `{T-open:"open"}` —
+which I misread as "stays open"; and I was reading the rows' static
+`data-refdes-task-state` attribute, which is the file state rendered
+once and never updated by a tick, as if it were the live state. The
+live state (checked + mirror + counter) was coherent in every
+Firefox observation I re-checked. No double-step reproduces; I found
+no browser parity gap. Downgraded to Low/Unconfirmed with the
+mechanism of the false positive named: a gate report must freeze the
+fixture it ticks (the pane ticks a tip's fold — a continuation between
+tick probes silently re-bases every row).
+
+## F16-4 — docs/upgrading.md gaps on the v2 seal path
+
+I built the docs' probe with the real 0.5.0 wheel (`init`, hardware@2,
+requirement `text:`, bound `limit:`, test `method:`, decision with a
+colon-unit calc, `url:`+`vendor:` citation fetched from a local server,
+sealed log — sealed by 0.5.0's `refdes build`, `.refdes/log-seal.yaml` —
+baseline stamped by `refdes revision probe-base`), then followed the
+page verbatim with the current build. Steps 1, 2, 3, 4, 5, 6, 7 all
+reproduced **verbatim** — the `refdes.yaml is retired` block (exit 2),
+the three ERROR texts, `minted 7 key(s) and rewrote 2 reference(s)
+while loading`, the calc-rewrite plan shape, the v2→v3 file list +
+`baselines carried forward` + `upgraded to v3.`, the seal follow-up
+warning (hash line differs by content), `captured LOG-PWR-001: manual
+capture`, the audit's `(legacy seal: recorded hash only; original
+content was not captured)` and `Since last revision (post-upgrade, …):
+changed 0`, the `drop_in: CMP-PWR-001@…` composite, the anchored
+`follows: [DEC-PWR-001@…]`. Two gaps:
+
+1. My probe's item-level `history: log` (the very 0.5.0 mechanism that
+   produces the sealed entry the probe is built around) makes the
+   current build red with the `history:`→`on_change:` **hard error**,
+   which the docs' step-2 quote does not list and no step performs;
+   step 4 (`calc-rewrite`) refuses "project has existing build errors"
+   until you rename it by hand. The table (line 176) knows the rename;
+   the ordered steps never reach it.
+2. The table's debate remedy ("declares the four types itself")
+   underestimates the work: copying the 0.5.0 preset into
+   `refdes-schema.yaml` leaves the upgrade refusing twice more — first
+   `on_change: log`→`timeline` inside the copied overlay, then
+   `resolved_by` naming the retired `decision` (must become `[log]`
+   by hand). Four iterations of refuse-and-read, not the one the
+   remedy implies.
+
+**Fixed on main by #475** (merged 86c0d043): `docs/upgrading.md` now
+quotes the item-level `history:`→`on_change:` error verbatim with the
+rename that clears it (noting the v2 pin keeps `log` valid), and the
+decision-retired remedy row names the two extra overlay edits
+(`on_change: log`→`timeline`, `resolved_by: [decision]`→`[log]`).
+
+## F16-5 / F16-6 — cosmetic pair
+
+F16-5, on the same subject as F16-2 (a **keyed, id-less thread entry**
+— a markdown thread entry with `key:` and no `id:`, which loads
+cleanly; see F16-1's recorded imprecision for why this is not a plain list-file
+entry): `refdes navis ls` prints it with an empty id column —
+
+```
+  2. 4n9h37 Recheck decoupling near U14.   (items/board-a/log/2026-08.md:52)
+```
+
+(reproduced on current `origin/main` with `evidence/repro-f16.sh` /
+`repro-f16.out`: `1. xpc5qy marker B   (items/thread.md:21)` — keys
+regenerate per run), the `index` payload's
+`navis` entry carries a null display id, and the preview Navis panel
+renders the row's id anchor with no text (`<a href="2mxm3v1de1t.html">
+</a>`, `r16-panel-raw.json`). Harmless, one root cause (empty display
+id rendered as-is). The mint announcement shows the same empty subject
+slot on current main (`navis: minted key xpc5qy (xpc5qycynwh) into
+ (items/thread.md)`, `repro-f16.out`) — I had dropped that clause in
+the first review round for lack of evidence; the repro script restores
+it.
+
+F16-6: `docs/cli-reference.md`'s serve section keeps calling
+the task pane a read-only display that "computes nothing and writes
+nothing" — true of the built site, no longer true of the preview page,
+which carries tick checkboxes, a per-tab draft, a live counter,
+Discard, and a leave prompt (all of which worked, see below).
+     **Fixed on main by #475** (merged 86c0d043): the serve section now
+     describes the preview-only tick checkboxes, the per-tab draft with
+     count/Discard/leave-prompt, the pane Save, and the `--no-write`
+     gating (checkboxes and module on a server *not* started with
+     `--no-write`) — closing both F16-6 and the `--no-write` datum
+     recorded under the pane bullets.
+
+## What passed (each driven, not read)
+
+- **Navis panel, editor + preview** (Chromium + Firefox): toggle/Escape
+  (the Escape "failures" from an earlier slice were DOM-presence
+  artifacts — the panel closes), rows with key + source link (editor
+  rows link to `#/items/<key>`, verified list + panel), keyless row
+  titled "No key yet -- use Mint keys", `Mint keys (N)` pill →
+  "Minted 1 key(s)." (editor adds the draft-warning sentence, verbatim
+  match), key spliced in place (diff: key line only), Archive → byte-
+  identical item file + gzip record at `.refdes/navis/<key>.yaml.gz`,
+  Restore reactivates, Show-all disclosure appears only once an
+  archived row exists, archived row = snapshot + disabled Restore with
+  the docs' "hand-restore" hint after the marker is deleted (my first
+  enabled-Restore sighting was a rebuild race, not the product), 403
+  lock on `--no-write` servers with every control disabled, unsaved
+  editor draft survives Archive with zero reloads. CLI parity:
+  ls/all/show/archive/restore, all three selector kinds, exit codes,
+  `navis.archived_orphan` warning verbatim.
+- **Serve API matrix** (`docs/navis.md` table): archive ok → 200
+  `changed:true`; archive-again → 200 `changed:false`; restore of an
+  active → 409 `not_archived`; missing/null `navi` → 400 with the full
+  selector sentence; unknown selector → 404 naming the ordinal range;
+  no token → 403; `--no-write` refusals verbatim for archive/restore
+  and mint; GET gated.
+- **Editor item rows → item view** (#450): click navigates
+  `#/items/<key>`, detail pane loads the body.
+- **#429 conflict**: edit in browser → edit the file on disk → Save →
+  "The file changed on disk" with the path, both texts side by side,
+  `Keep mine` / `Keep theirs` / `Discard draft`; Keep mine writes the
+  draft over the disk edit, as documented.
+- **#410 Navi button**: inserts `<!--navi: text-->` with `text`
+  selected; wraps a selection keeping it selected; leaves a selection
+  containing `--` untouched. **#418 fence button**: caret →
+  `\n\n```\n\n``` ` own padded paragraph, caret inside; wraps
+  selection; wraps a selection containing ``` in a 4-backtick fence.
+- **Task pane ticks/draft** (#456/#463, both browsers): checkbox on
+  open/done/dropped rows; panel carries tip key + revision; preview
+  note verbatim; ticking writes nothing (hashes); the count, Discard,
+  per-tab draft (survives reload, fresh tab = file state), and
+  beforeunload prompt all behave; cleared thread renders no checkboxes
+  and no ticks module; project with no `follows:` publishes no pane;
+  built `_site` pages have the toggle + read-only pane, no checkboxes,
+  no ticks module;   `viewing LOG-A-005 · tasks as of tip …` note on
+  older entries including id-less ones. Evidence note:
+  `r16-taskpane.json` captures the tick/draft flow through the
+  forked, id-less, and cleared-thread steps, then **stops early** —
+  its last step read the published pages from the wrong cwd and the
+  capture ends on that ENOENT; it is not a complete run, and the
+  built-site observations above come from the re-run of that step
+  after the cwd fix (stdout transcript of `r16_discard_pub.mjs`) and
+  from the Firefox captures (`r16-ff2.json`–`r16-ff5.json`) and the
+  parity re-run (`r16-rerun.json`).
+- **`--no-write` preview datum (requested at review):** on a
+  `--no-write` server the preview pages of a thread tip carry **no
+  tick checkboxes and no ticks module** — confirmed by inspection of
+  the served page. **Undocumented**: `docs/cli-reference.md` §serve
+  (line 2349) still promises preview and site show "the *same* thing"
+  with no `--no-write` qualification for the pane, the W5b changelog
+  fragments never mention `--no-write`, and `docs/navis.md:246+`
+  gates only the Navis panel's actions. The behavior is deliberate in
+  the code (a write-capable control the server refuses is "the UI
+  lying", `serve/server.py`) and test-pinned; no doc stated it at
+  my base — #475 (merged 86c0d043) added the qualification to
+  `docs/cli-reference.md`.
+- **`POST /api/item/<ref>/continue`** (#453): 200 applied (appends
+  `id:`+`key:`, composite `follows: [ID@key]`, ticked-up task list,
+  full diagnostics payload); 409 conflict with `current_revision` +
+  `current_text` on a stale `expected_revision`; 422 refusals for
+  forked thread, cleared list, unknown task id, state outside the
+  vocabulary, unknown ref; 400 malformed JSON and missing field; 403
+  missing token; 403 missing Origin; `--no-write` refusal
+  "continuations are disabled".
+- **#449 fetch**: hand-added `values:` key pruned with
+  `source: dropped <path>: <key> (no source() span references it any
+  more)` on both plain and `--update`, exit 0, run that prunes nothing
+  prints nothing new; record-level junk gets the "not a mapping"
+  refusal; cross-item citation authorization error is exemplary.
+- **README test command**: `python -m pytest -q -n 4 --dist
+  worksteal` → **6250 passed, 2 skipped in 116.00 s** (exit 0).
+- **Adversarial**: CRLF item file loads; project under a non-ASCII
+  path loads; commands from a subdirectory resolve via marker walk-up;
+  read-only tree degrades to the "(read-only tree?)" hint, check stays
+  green, `--no-write` silences it; two concurrent `refdes id` runs
+  mint safely (both exit 0, ledger green); typo'd refs fail with the
+  "looked up by display id, then surrogate key" sentence; hand-broken
+  lockfile and hand-duplicated mapping keys get precise errors.
+  Duplicate citation ids across items are caught.
+
+## What I could not test
+
+VS Code claims (no VS Code on this box — the `tasksPane` docs section,
+tree views, and the context-menu items are recorded as docs-only,
+unchecked); the 409 `ambiguous` selector path (needs two keys sharing a
+prefix — key algebra, not hand-writable) and the `journal_pending`
+conflict (needs an in-flight editor transaction at request time); the
+422 sealed-tip refusal (hardware@3 `log` no longer seals at build;
+needs a custom sealed type I did not build); Firefox real-mouse
+clicks (playwright synthesizes events — the double-step is
+event-shape-dependent by construction); the 0.5.0→current citation
+**page-count** check (my probe cited a hash-only text file; the `pdf`
+extra path went untested); published pages opened from `file://`
+(served and on-disk `_site` verified instead); and the full
+adversarial matrix against the editor (subdirectory/read-only runs
+were CLI-side).

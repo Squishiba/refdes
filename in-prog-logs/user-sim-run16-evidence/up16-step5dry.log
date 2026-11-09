@@ -1,0 +1,3 @@
+v2 -> v3:
+would refuse:
+  rewritten project no longer loads: preset 'design-debate' does not exist for hardware@3 (available: [])

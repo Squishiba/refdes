@@ -1,0 +1,56 @@
+{
+ "showAllClicked": true,
+ "previewOrphan": {
+  "found": true,
+  "text": "6xfswx LOG-A-002 Check input cap ripple at cold start. [archived] Restore",
+  "restore": [
+   {
+    "label": "Restore",
+    "disabled": false,
+    "title": "Restore this Navi"
+   }
+  ]
+ },
+ "editorPanelLinks": [
+  {
+   "href": "#/",
+   "text": "Items"
+  },
+  {
+   "href": "#/new",
+   "text": "New item"
+  },
+  {
+   "href": "/preview/",
+   "text": "Rendered site"
+  },
+  {
+   "href": "#/items/4gnaefpj7we",
+   "text": "BND-A-THM-002boundboard-aRegulator power dissipationopenitems/board-a/bounds/thermal.yaml:7"
+  },
+  {
+   "href": "#/items/2mxm3v1de1t",
+   "text": "2mxm3v1de1tlogboard-aThermal modelling accepted.items/board-a/log/2026-08.md:38"
+  },
+  {
+   "href": "#/items/s1z83mywkyp",
+   "text": "s1z83mywkyplogboard-aDecoupling fork.items/board-a/log/2026-09-fork.md:2"
+  },
+  {
+   "href": "#/items/sa44qmtbegy",
+   "text": "sa44qmtbegylogboard-aEMC pre-scan finding.items/board-a/log/2026-10-fork2.md:2"
+  },
+  {
+   "href": "#/items/qgz7r742t4g",
+   "text": "LOG-A-002logboard-a3V3 rail regulator topologycheck: passitems/board-a/log/2026-08.md:6"
+  },
+  {
+   "href": "#/items/ct18d6yca5g",
+   "text": "LOG-B-001logboard-bGate driver selectionitems/board-b/log/motor-log.md:2"
+  },
+  {
+   "href": "#/items/54v8amwwfpf",
+   "text": "IFC-SH-001requirementThe CAN transceiver shall tolerate 60 V load dump.openitems/shared/interfaces.yaml:7"
+  }
+ ]
+}

@@ -1,0 +1,31 @@
+{
+ "naviWrap": {
+  "wrapped": true,
+  "sel": "The unit shall operate from an input supply of 9 V to 36 V."
+ },
+ "fenceCaret": {
+  "inserted": "\\n\\n```\\n\\n```",
+  "caretInside": true,
+  "blankPadded": true
+ },
+ "fenceWrapLong": {
+  "longer": false,
+  "sample": ""
+ },
+ "conflict": {
+  "conflictShown": true,
+  "hasDraft": true,
+  "hasDisk": true,
+  "buttons": [
+   "Discard draft",
+   "Keep mine",
+   "Keep theirs"
+  ],
+  "snippet": "addThe file changed on diskconflict: items/board-b/log/motor-log"
+ },
+ "keepMine": true,
+ "afterKeep": {
+  "fileHasDraft": true,
+  "keptDisk": false
+ }
+}

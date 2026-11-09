@@ -1,0 +1,3 @@
+refused:
+  project has existing build errors -- fix those first, so a calc that changes meaning under this rewrite can't hide behind an already-broken build
+  ERROR   items/log/2026-03.md:2 [LOG-PWR-001] — item-level history: was renamed to on_change: -- rename this key in the source file. Its override is used in this build so the change policy is not silently lost.

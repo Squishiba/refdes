@@ -1,0 +1,48 @@
+{
+ "freshLoad": {
+  "buttons": [
+   {
+    "label": "Archive",
+    "cls": "refdes-navis-archive",
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "label": "Archive",
+    "cls": "refdes-navis-archive",
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "label": "Archive",
+    "cls": "refdes-navis-archive",
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "label": "Archive",
+    "cls": "refdes-navis-archive",
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "label": "Archive",
+    "cls": "refdes-navis-archive",
+    "disabled": false,
+    "title": ""
+   }
+  ],
+  "allText": "Navis (5) 6xfswx LOG-A-002 Check input cap ripple at cold start. Archive 9a7z15 LOG-A-002 Model worst-case copper temperature. Archive 4n9h37 Recheck decoupling near U14. Archive cqc7p6 LOG-B-001 Measure phase-current sense gain. Archive rwtp10 LOG-B-001 Verify Rds(on) at 125 C. Archive",
+  "mint": [],
+  "showAll": []
+ },
+ "revision": "{\"revision\":\"7e74b9e9cd9db617fc5e421b831b16be\",\"serial\":4,\"stale\":false,\"load_error\":null,\"git\":{\"available\":true,\"branch\":\"user-sim-run16\",\"head\":\"9f15af87484b\",\"worktree_dirty\":false,\"index_dirty\":false}}",
+ "afterDiskChangeNoReload": {
+  "summary": "Navis (5)"
+ },
+ "afterDiskChangeReloaded": {
+  "summary": "Navis (5)",
+  "rows": 5,
+  "mint": []
+ }
+}
