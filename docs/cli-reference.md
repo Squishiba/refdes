@@ -2347,9 +2347,9 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
   value on it is a string the build already computed — nothing is evaluated
   in the browser.
 - **Item pages of a threaded log carry the task pane** — and here the preview
-  and the published site show the *same* thing (it is rendered in the shared
+  and the published site show the *same* pane (it is rendered in the shared
   item template, not added to the response). A floating **Tasks** button
-  (bottom-right; invisible unless JavaScript runs) opens a read-only pane:
+  (bottom-right; invisible unless JavaScript runs) opens it:
   the thread's open tips as tabs when a fork is open (a fork is
   never merged into one list), the tip's task list — with
   `viewing LOG-007 · tasks as of tip LOG-012` when
@@ -2359,8 +2359,38 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
   kinds belong to `refdes work`). Every task, verdict and derived line is
   `refdes thread`'s own wording and every fact comes from the same headless
   projection that command reads; the `viewing …` note just quoted is the
-  pane's own text, which `refdes thread` never prints. The pane computes
-  nothing and writes nothing. See
+  pane's own text, which `refdes thread` never prints.
+  **The controls are preview-only, on a writable server.** On the preview of
+  a `refdes serve` *not* started with `--no-write`, the tip's task rows
+  carry tick checkboxes and the pane module `taskpane-ticks.js` loads beside
+  them — a response-only decoration like the toolbar. The pane says what
+  the control is: "Preview: ticking a row changes this page only -- nothing
+  is saved." A tick changes only the page's visible state and lives on as a
+  per-tab draft (an unsaved-tick count, a **Discard** button, and a
+  leave-page prompt). While a tip panel has unsaved ticks a **Save** button
+  joins it: one click posts the draft's ticks to `POST /api/item/<ref>/continue`
+  (the tip's key as the ref, the launch token read from the page's meta at
+  save time) as **one new continuation entry** — the tip's declared scalar
+  fields and task list copied into a fresh entry with the ticks applied, an
+  empty body, and a `follows:` to the tip — and the same operation records
+  the predecessor's captured state (a `follows:` edge is the capture event
+  for its predecessor: `docs/design/living-notes.md` §1, landed for the
+  continuation save by W5b.5). On success the draft clears and the page
+  reloads onto the new tip; a refused save shows the server's own message
+  (cleaned and capped), a round trip that never reached the server says so,
+  and the draft is kept for a retry. If the file changed since the page was
+  built, a conflict panel
+  shows the current list against your ticks and offers **Keep mine** /
+  **Keep theirs** / **Copy it out** (a read-only transcript, with the
+  clipboard tried) — nothing merges. A tip with no `id:` or no key offers no
+  Save: the endpoint can write no `follows:` composite without both halves,
+  so the pane names no save context for it and its ticks stay preview-only
+  (the pane says so). The pane computes nothing — every row above is the
+  build's projection, read, not re-derived in the browser. The
+  **built/published** page keeps the read-only pane (no checkboxes, no
+  module), and so does a preview served with `--no-write`: that server ships
+  the pane with no tick controls at all, exactly as the built page has them.
+  See
   [`refdes thread`](#refdes-thread-lt-ref-gt) and
   `docs/design/thread-workbench.md` §7a.
 - **Loading writes nothing.** No key is minted, no link expanded, nothing

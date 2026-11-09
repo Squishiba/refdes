@@ -69,6 +69,24 @@ release — a status/link disagreement check:
 WARNING items/components/pwr.yaml:21 [CMP-PWR-002] — status is 'selected' but nothing selects it -- no item declares selects: pointing at this one. Author selects: on the item that makes it so, or move this item off 'selected'.
 ```
 
+A project whose sealed append-only entry was sealed the 0.5.0 way — an
+item-level `history: log` on the entry — adds a fourth error, quoted from a
+current-build `refdes check` on a hardware@2 project carrying
+`history: log` on a `log` entry (the file and line name your entry):
+
+```
+ERROR   items/log.yaml:4 [LOG-PWR-001] — item-level history: was renamed to on_change: -- rename this key in the source file. Its override is used in this build so the change policy is not silently lost.
+```
+
+**Fix:** rename the key to `on_change:` in the entry's front matter — under
+the v2 pin the `log` mode is still valid, so `history: log` becomes
+`on_change: log` (the mode rename `log` → `timeline` is the v3 row of the
+table). No step below performs this rename, and the build stays red until
+you do it by hand, so `calc-rewrite` (step 4) refuses ahead of it:
+`project has existing build errors -- fix those first, so a calc that
+changes meaning under this rewrite can't hide behind an already-broken
+build`.
+
 ### 3. Fix the citation renames by hand
 
 The `url:` error names `standard upgrade` as the rewriter, but the upgrade
@@ -169,7 +187,7 @@ item off `selected` (the probe's second-source part became
 | Citation `page:` is checked | `page: 0`/`eight` refused at load; a page past the end is a warning naming the citer (error under `build --require-citations`); lockfiles without a count report `pages unchecked` | Write positive integers; `refdes fetch --update` records the count (needs the `refdes[pdf]` extra) |
 | Colon-unit calc retired | `the 'name : unit = expression' spelling was retired`, per line | `refdes calc-rewrite` (sealed entries warn only) |
 | `text:`/`method:` fold into `body:` (requirement/bound `text:`, test `method:`) | under a v3 pin: `text:` is no longer a field of the type — build error | `refdes standard upgrade --to 3` rewrites; an item that already has body prose of its own is refused by name — merge the two texts, re-run |
-| `decision` retired into `log` | under a v3 pin: `type: decision` is not a type; `design-debate` preset load error | `refdes standard upgrade --to 3` (title→summary, records→follows, DEC ids kept via `legacy_prefixes`); a debate project migrates to plain logs or declares the four types itself |
+| `decision` retired into `log` | under a v3 pin: `type: decision` is not a type; `design-debate` preset load error | `refdes standard upgrade --to 3` (title→summary, records→follows, DEC ids kept via `legacy_prefixes`); a debate project migrates to plain logs or declares the four types itself — and the copied overlay refuses twice more under the v3 pin before it loads: a field's `on_change: log` is refused (`on_change mode 'log' was renamed to 'timeline' -- …; rename it`), then `resolved_by: [decision]` is refused (`names target type 'decision', which is not declared`) until it names `[log]` |
 | `equivalent` → `drop_in` | under a v3 pin: unknown-verb error naming `drop_in` (escalated for this verb) | The upgrade rewrites it |
 | `equivalent`→`drop_in`, `records`→`follows` capture side effect | first writable load after the upgrade prints `captured …` lines; migrated `follows:` edges get anchored to thread tips | Expected — history is being recorded; delete the `follows:` lines first if you want the edges inert |
 | `on_change` mode `log` → `timeline` | with a v3 pin (or no pin): load error naming `timeline`, per spelling (config, schema annotations, item overrides) | Rename by hand — `refdes rename` renames keys, not values; v1/@2 pins keep `log` |
