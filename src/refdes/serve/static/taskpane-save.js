@@ -19,7 +19,10 @@
    a role=alert line and KEEP the draft for a retry; conflict re-reads the
    current page -- the 409 carries no task rows -- and offers exactly Keep mine
    / Keep theirs / Copy it out, and nothing that merges. No beforeunload here:
-   the glue owns the page's one prompt (Q8). */
+   the glue owns the page's one prompt (Q8). initSave returns the glue's
+   refreshPanel wrapped with every Save button's redraw -- the pane refreshes
+   on programmatic paths (Discard) that fire no change event, and the button's
+   visibility rule lives in that redraw alone. */
 
 import { buildSaveRequest, planSaveResponse, conflictChoices, describeConflict } from './tick-save.js';
 import { panelFromRows } from './tick-pane.js';
@@ -211,10 +214,26 @@ function wirePanel(panel, drafts, refreshPanel) {
       makeButton('Copy it out', box, () => copyItOut(box, choices.copyOut.text));
       return;
     }
-    for (const row of describeConflict({ pendingTicks, current })) {
-      const theirs = row.theirs === null ? 'gone' : row.theirs;
-      const mine = row.mine === null ? '-' : row.mine;
-      line(box, row.taskId + ': yours ' + mine + ', the file has ' + theirs);
+    // The rows the author must see (run 17, finding 3): a tick whose value
+    // DIFFERS from the file's (a tick equal to the file is not a conflict),
+    // and the current rows the author did not tick (the panel's current-list
+    // context, #468's pin) while at least one tick does differ. When NO
+    // pending tick differs, the rows would be pure noise: the plain line
+    // says so, and the three outcomes stay offered.
+    const rows = describeConflict({ pendingTicks, current });
+    const clashing = rows.filter((row) => row.mine !== null && row.differs);
+    if (clashing.length === 0) {
+      line(
+        box,
+        'the file changed since you opened this page, but none of your pending ticks conflict with it'
+      );
+    } else {
+      for (const row of rows) {
+        if (row.mine !== null && !row.differs) continue; // equal tick: no conflict to list
+        const theirs = row.theirs === null ? 'gone' : row.theirs;
+        const mine = row.mine === null ? '-' : row.mine;
+        line(box, row.taskId + ': yours ' + mine + ', the file has ' + theirs);
+      }
     }
     makeButton('Keep mine', box, () => keepMine(current));
     makeButton('Keep theirs', box, keepTheirs);
@@ -264,15 +283,32 @@ function wirePanel(panel, drafts, refreshPanel) {
     draw();
   });
 
+  // the host's own change event covers the USER's clicks; the returned draw
+  // covers every PROGRAMMATIC refresh (run 17, finding 1: Discard resets the
+  // checkboxes and refreshes the pane, and no change event fires -- without
+  // this the button keeps showing a no-op Save over an empty draft).
   host.addEventListener('change', draw);
   draw();
+  return draw;
 }
 
 export function initSave({ drafts, panels, refreshPanel }) {
+  const redraws = [];
   for (const panel of Array.isArray(panels) ? panels : []) {
     // a tip with no key cannot be named by a save: its ticks stay exactly
     // as the pane's indicator already says -- preview-only.
     if (!panel || !panel.canDraft || !panel.tipKey) continue;
-    wirePanel(panel, drafts, refreshPanel);
+    const draw = wirePanel(panel, drafts, refreshPanel);
+    if (typeof draw === 'function') redraws.push(draw);
   }
+  if (typeof refreshPanel !== 'function') return refreshPanel;
+  // the seam's visibility rule lives in draw() alone, so it must run on
+  // EVERY pane refresh, not only on the change events that reach the host:
+  // hand the glue its refreshPanel back wrapped, and let the glue rebind
+  // (refreshPanel = initSave({...}) || refreshPanel). The refresh's own
+  // semantics are untouched -- the original runs first, the redraw follows.
+  return function (entry) {
+    refreshPanel(entry);
+    for (const draw of redraws) draw();
+  };
 }
