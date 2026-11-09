@@ -139,3 +139,11 @@ checkbox strip is not implemented (STOP point 2).
 
 Status: implementation finished; full suite run; PR opened with the two
 STOP points reported.
+
+CI note: pr-size passes (41/350); ubuntu py3.12+py3.13 fail exactly on
+the two STOP-point tests (6156 passed). windows-latest adds a third
+red in this file at test 5's `disk_pane == built_pane` (a pane-slice
+string-equality whose right side shows `\r\n` -- a Windows newlines
+artifact in the test's own text-mode file reads; not reproducible on
+Linux, mechanism not fully pinned here). The built pane bytes carry no
+new attributes (test 5's build walk is green on all runners).
