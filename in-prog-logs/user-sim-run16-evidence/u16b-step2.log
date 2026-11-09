@@ -1,0 +1,10 @@
+ERROR   items/log/2026-03.md:2 [LOG-PWR-001] — item-level history: was renamed to on_change: -- rename this key in the source file. Its override is used in this build so the change policy is not silently lost.
+ERROR   items/requirements/components.yaml:5 [CMP-PWR-001] — datasheets[0]: citation field url: was renamed to path: -- rename it (refdes standard upgrade does this for hardware@2 -> @3 content)
+ERROR   items/decisions/dec-pwr-001-regulator.md:16 [DEC-PWR-001] — calc 'P_diss': the 'name : unit = expression' spelling was retired -- write `P_diss                   = V_out * I_load * (1/eff - 1) | W`; run 'refdes calc-rewrite' to fix a whole project
+ERROR   items/decisions/dec-pwr-001-regulator.md:17 [DEC-PWR-001] — calc 'P_dens': the 'name : unit = expression' spelling was retired -- write `P_dens                   = P_diss / A_board | W/in^2`; run 'refdes calc-rewrite' to fix a whole project
+ERROR   <project> — the citation lockfile still uses the pre-rename key 'vendored:' for: http://127.0.0.1:8799/tps.txt -- the citation field vendor: was renamed to keep_copy: and its lockfile key to kept_copy:; rename the key in .refdes/citations.yaml or re-pin with 'refdes fetch --update'
+(minted 7 key(s) and rewrote 2 reference(s) while loading)
+WARNING <project> — .refdes/schema.json was older than refdes-project.yaml -- refreshed. If your editor's completion looked stale, it should catch up now.
+WARNING items/requirements/components.yaml:5 [CMP-PWR-001] — status is 'selected' but nothing selects it -- no item declares selects: pointing at this one. Author selects: on the item that makes it so, or move this item off 'selected'.
+WARNING <project> — found a .refdes/vendor/ directory: the local-copy directory was renamed to .refdes/copies/ -- move the blobs across (or re-run 'refdes fetch'); nothing reads .refdes/vendor/ any more
+7 items, 5 errors, 3 warnings

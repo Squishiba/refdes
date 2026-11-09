@@ -1,0 +1,14 @@
+{
+ "paneOpen": true,
+ "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+ "status": "1 unsaved tick",
+ "discardVisible": true,
+ "afterReload": false,
+ "leave": 1,
+ "leavePrompt": [
+  "beforeunload",
+  "beforeunload"
+ ],
+ "naviBtn": 0,
+ "fatal": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByRole('button', { name: 'Navi', exact: true })\n"
+}

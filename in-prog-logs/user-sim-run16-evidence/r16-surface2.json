@@ -1,0 +1,27 @@
+{
+ "row": {
+  "found": true,
+  "href": "#/items/gq03mar7zkv"
+ },
+ "rowNavigated": {
+  "hash": "#/items/gq03mar7zkv",
+  "bodyHas": true,
+  "title": null
+ },
+ "naviButton": {
+  "navi": true,
+  "fence": true,
+  "afterInsert": {
+   "has": true,
+   "sel": "text"
+  }
+ },
+ "naviWrap": {
+  "wrapped": false,
+  "sel": "The unit shall operate from an input supply of 9 V to 36 V.<!--navi: text-->"
+ },
+ "naviDash": {
+  "untouched": true
+ },
+ "fatal": "TypeError: Cannot read properties of null (reading 'value')\n    at evaluate (evaluate at file:///home/jorb/.paseo/worktrees/16msma8v/user-sim-run16/.scratch/pptr/r16_surface2.mjs:74:29, <anonymous>:4:21)\n    at #evaluate (file:///home/jorb/work/refdes/.scratch/pptr388/node_modules/puppeteer-core/lib/puppeteer/cdp/ExecutionContext.js:402:19)\n    at async ExecutionContext.evaluate (file:///home/jorb/work/refdes/.scratch/pptr388/node_modules/puppeteer-core/lib/puppeteer/cdp/ExecutionContext.js:288:16)\n    at async IsolatedWorld.evaluate (file:///home/jorb/work/refdes/.scratch/pptr388/node_modules/puppeteer-core/lib/puppeteer/cdp/IsolatedWorld.js:104:16)\n    at async CdpFrame.evaluate (file:///home/jorb/work/refdes/.scratch/pptr388/node_modules/puppeteer-core/lib/puppeteer/api/Frame.js:364:20)\n    at async CdpPage.evaluate (file:///home/jorb/work/refdes/.scratch/pptr388/node_modules/puppeteer-core/lib/puppeteer/api/Page.js:832:20)\n    at async file:///home/jorb/.paseo/worktrees/16msma8v/user-sim-run16/.scratch/pptr/r16_surface2.mjs:74:18"
+}

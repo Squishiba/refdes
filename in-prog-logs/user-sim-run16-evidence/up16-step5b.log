@@ -1,0 +1,3 @@
+v2 -> v3:
+refused:
+  rewritten project no longer loads: types.debate.fields.chat_id: on_change mode 'log' was renamed to 'timeline' -- the mode marks a change for the future field-level timeline, not the `log` item type; rename it

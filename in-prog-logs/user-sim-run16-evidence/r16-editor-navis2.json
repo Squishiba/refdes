@@ -1,0 +1,103 @@
+{
+ "openPanel": {
+  "text": "refdes Items New item Rendered site user-sim-run16 @ 9f15af87484b Free textTypelog5requirement4bound1test1Boardboard-a8board-b2WorkspacenoneCoverage stageopen5Check statenone10pass1Blockedno11Tagpower2motor1Source fileitems/board-a/log/2026-08.md2items/board-a/requirements/power.yaml2items/board-a/bounds/thermal.yaml1items/board-a/log/2026-09-fork.md1items/board-a/log/2026-10-fork2.md1items/board-a/tests/pwr.yaml1items/board-b/log/motor-log.md1items/board-b/requirements/motor.yaml1items/shared/interfaces.yaml1Links toLinked fromMissing link verbClear all filters 11 itemsBND-A-THM-002boundboard-aRegulator power dissipationopenitems/board-a/bounds/thermal.yaml:72mxm3v1de1tlogboard-aThermal mod",
+  "buttons": [
+   {
+    "l": "Archive",
+    "d": false,
+    "t": ""
+   },
+   {
+    "l": "Archive",
+    "d": false,
+    "t": ""
+   },
+   {
+    "l": "Archive",
+    "d": false,
+    "t": ""
+   },
+   {
+    "l": "Archive",
+    "d": false,
+    "t": ""
+   },
+   {
+    "l": "Archive",
+    "d": false,
+    "t": ""
+   },
+   {
+    "l": "Restore",
+    "d": false,
+    "t": "Restore this Navi"
+   }
+  ],
+  "links": [
+   "#/items/4gnaefpj7we",
+   "#/items/2mxm3v1de1t",
+   "#/items/s1z83mywkyp",
+   "#/items/sa44qmtbegy",
+   "#/items/qgz7r742t4g",
+   "#/items/ct18d6yca5g",
+   "#/items/54v8amwwfpf",
+   "#/items/gq03mar7zkv",
+   "#/items/4peb1r37p6b",
+   "#/items/kvfhsdsxbm3",
+   "#/items/fp7gxfe3fh8",
+   "#/items/LOG-A-002",
+   "#/items/LOG-B-001",
+   "#/items/LOG-B-001",
+   "#/items/LOG-B-001",
+   "#/items/LOG-A-002",
+   "#/items/LOG-B-001",
+   "#/items/LOG-B-001",
+   "#/items/LOG-B-001",
+   "#/items/LOG-A-002"
+  ]
+ },
+ "escape": {
+  "archiveVisibleBefore": true,
+  "archiveVisibleAfter": true
+ },
+ "pillBefore": [
+  "Mint keys (1)"
+ ],
+ "staleClick": true,
+ "staleStatus": null,
+ "nwClickArchive": true,
+ "nwState": {
+  "refusalShown": true,
+  "refusalText": "</p>\n\n\nNavis (6)this server was started with --no-write: navis archive and restore are disabled9a7z15LOG-A-002Model worst-case copper temperature",
+  "buttons": [
+   {
+    "l": "Archive",
+    "d": true
+   },
+   {
+    "l": "Archive",
+    "d": true
+   },
+   {
+    "l": "Archive",
+    "d": true
+   },
+   {
+    "l": "Archive",
+    "d": true
+   },
+   {
+    "l": "Archive",
+    "d": true
+   },
+   {
+    "l": "Archive",
+    "d": true
+   },
+   {
+    "l": "Restore",
+    "d": true
+   }
+  ]
+ }
+}

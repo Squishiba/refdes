@@ -1,0 +1,4 @@
+v2 -> v3:
+refused:
+  rewritten project has parse errors -- rolled back:
+  ERROR   items/log/2026-03.md:2 [LOG-PWR-001] — on_change: mode 'log' was renamed to 'timeline' (vocabulary review P9: the mode names the future field-level timeline, and `log` collided with the `log` item type) -- rename this value in the source file. It is read as 'timeline' in this build so the change policy is not silently lost.

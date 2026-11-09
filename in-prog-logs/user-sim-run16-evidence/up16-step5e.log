@@ -1,0 +1,11 @@
+v2 -> v3:
+changed 6 file(s):
+  items/bounds/thermal.yaml
+  items/decisions/dec-pwr-001-regulator.md
+  items/log/2026-03.md
+  items/requirements/components.yaml
+  items/requirements/power.yaml
+  items/tests/pwr.yaml
+baselines carried forward: probe-base
+
+upgraded to v3.

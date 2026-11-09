@@ -1,0 +1,30 @@
+{
+ "seq": [
+  [
+   "open",
+   "true/done//refdes-taskpane-tick",
+   ""
+  ],
+  [
+   "boxclick1",
+   "false/done//refdes-taskpane-tick refdes-taskpane-tick-pending",
+   "1 unsaved tick"
+  ],
+  [
+   "boxclick2",
+   "true/done//refdes-taskpane-tick",
+   ""
+  ],
+  [
+   "boxclick3",
+   "false/done//refdes-taskpane-tick refdes-taskpane-tick-pending",
+   "1 unsaved tick"
+  ],
+  [
+   "boxclick4",
+   "true/done//refdes-taskpane-tick",
+   ""
+  ]
+ ],
+ "draft": []
+}

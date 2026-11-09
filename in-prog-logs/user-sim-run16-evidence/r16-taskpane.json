@@ -1,0 +1,263 @@
+{
+ "states": {
+  "found": true,
+  "text": "Tasks LOG-A-005 × Preview: ticking a row changes this page only -- nothing is saved. Discard viewing LOG-A-005 · tasks as of tip 4jfd3hhpajc 4jfd3hhpajc 2026-10-05 — Task states sweep at tip. Tasks at tip: 1. T-open An open task. (open since 4jfd3hhpajc, 2026-10-05) 2. T-done A done task. 3. T-dropped A dropped task.",
+  "panels": [
+   {
+    "tip": "4jfd3hhpajc",
+    "rev": "4734ff72efba",
+    "note": "viewing LOG-A-005 · tasks as of tip 4jfd3hhpajc",
+    "rows": [
+     {
+      "task": "T-open",
+      "state": "open",
+      "cycle": "done,dropped",
+      "tip": "4jfd3hhpajc",
+      "checked": false
+     },
+     {
+      "task": "T-done",
+      "state": "done",
+      "cycle": "open",
+      "tip": "4jfd3hhpajc",
+      "checked": true
+     },
+     {
+      "task": "T-dropped",
+      "state": "dropped",
+      "cycle": "open",
+      "tip": "4jfd3hhpajc",
+      "checked": false
+     }
+    ]
+   }
+  ],
+  "discard": [
+   {
+    "t": "Discard",
+    "hidden": true
+   }
+  ],
+  "tickNote": "Preview: ticking a row changes this page only -- nothing is saved."
+ },
+ "cycle": [
+  {
+   "found": true,
+   "state": "open",
+   "checked": true
+  },
+  {
+   "found": true,
+   "state": "open",
+   "checked": false
+  },
+  {
+   "found": true,
+   "state": "open",
+   "checked": true
+  }
+ ],
+ "draftUI": {
+  "statusText": "2 unsaved ticks",
+  "statusHidden": false,
+  "discardHidden": false
+ },
+ "fileUntouchedAfterTicks": true,
+ "afterReload": [
+  {
+   "t": "T-open",
+   "s": "open",
+   "checked": true
+  },
+  {
+   "t": "T-done",
+   "s": "done",
+   "checked": true
+  },
+  {
+   "t": "T-dropped",
+   "s": "dropped",
+   "checked": false
+  }
+ ],
+ "leavePrompt": [
+  ""
+ ],
+ "landedIndex": true,
+ "freshTab": {
+  "found": true,
+  "text": "Tasks LOG-A-005 × Preview: ticking a row changes this page only -- nothing is saved. Discard viewing LOG-A-005 · tasks as of tip 4jfd3hhpajc 4jfd3hhpajc 2026-10-05 — Task states sweep at tip. Tasks at tip: 1. T-open An open task. (open since 4jfd3hhpajc, 2026-10-05) 2. T-done A done task. 3. T-dropped A dropped task.",
+  "panels": [
+   {
+    "tip": "4jfd3hhpajc",
+    "rev": "4734ff72efba",
+    "note": "viewing LOG-A-005 · tasks as of tip 4jfd3hhpajc",
+    "rows": [
+     {
+      "task": "T-open",
+      "state": "open",
+      "cycle": "done,dropped",
+      "tip": "4jfd3hhpajc",
+      "checked": false
+     },
+     {
+      "task": "T-done",
+      "state": "done",
+      "cycle": "open",
+      "tip": "4jfd3hhpajc",
+      "checked": true
+     },
+     {
+      "task": "T-dropped",
+      "state": "dropped",
+      "cycle": "open",
+      "tip": "4jfd3hhpajc",
+      "checked": false
+     }
+    ]
+   }
+  ],
+  "discard": [
+   {
+    "t": "Discard",
+    "hidden": true
+   }
+  ],
+  "tickNote": "Preview: ticking a row changes this page only -- nothing is saved."
+ },
+ "discard": {
+  "pre": [
+   {
+    "t": "T-open",
+    "s": "open"
+   },
+   {
+    "t": "T-done",
+    "s": "done"
+   },
+   {
+    "t": "T-dropped",
+    "s": "dropped"
+   }
+  ],
+  "post": [
+   {
+    "t": "T-open",
+    "s": "open"
+   },
+   {
+    "t": "T-done",
+    "s": "done"
+   },
+   {
+    "t": "T-dropped",
+    "s": "dropped"
+   }
+  ]
+ },
+ "forked": {
+  "found": true,
+  "text": "Tasks LOG-A-002 × Preview: ticking a row changes this page only -- nothing is saved. s1z83mywkyp sa44qmtbegy Discard viewing LOG-A-002 · tasks as of tip s1z83mywkyp s1z83mywkyp 2026-09-03 — Decoupling fork. Tasks at s1z83mywkyp: 1. T-decoupling Recheck decoupling near U14. (open since s1z83mywkyp, 2026-09-03) Discard viewing LOG-A-002 · tasks as of tip sa44qmtbegy sa44qmtbegy 2026-10-01 — EMC pre-scan finding. Tasks at sa44qmtbegy: 1. T-emc Re-run pre-scan with new input filter. (open since sa44qmtbegy, 2026-10-01)",
+  "panels": [
+   {
+    "tip": "s1z83mywkyp",
+    "rev": "0a131e524a65",
+    "note": "viewing LOG-A-002 · tasks as of tip s1z83mywkyp",
+    "rows": [
+     {
+      "task": "T-decoupling",
+      "state": "open",
+      "cycle": "done,dropped",
+      "tip": "s1z83mywkyp",
+      "checked": false
+     }
+    ]
+   },
+   {
+    "tip": "sa44qmtbegy",
+    "rev": "83fe41afc107",
+    "note": "viewing LOG-A-002 · tasks as of tip sa44qmtbegy",
+    "rows": [
+     {
+      "task": "T-emc",
+      "state": "open",
+      "cycle": "done,dropped",
+      "tip": "sa44qmtbegy",
+      "checked": false
+     }
+    ]
+   }
+  ],
+  "discard": [
+   {
+    "t": "Discard",
+    "hidden": true
+   },
+   {
+    "t": "Discard",
+    "hidden": true
+   }
+  ],
+  "tickNote": "Preview: ticking a row changes this page only -- nothing is saved."
+ },
+ "idless": {
+  "found": true,
+  "text": "Tasks LOG-A-002 × Preview: ticking a row changes this page only -- nothing is saved. s1z83mywkyp sa44qmtbegy Discard viewing 2mxm3v1de1t · tasks as of tip s1z83mywkyp s1z83mywkyp 2026-09-03 — Decoupling fork. Tasks at s1z83mywkyp: 1. T-decoupling Recheck decoupling near U14. (open since s1z83mywkyp, 2026-09-03) Discard viewing 2mxm3v1de1t · tasks as of tip sa44qmtbegy sa44qmtbegy 2026-10-01 — EMC pre-scan finding. Tasks at sa44qmtbegy: 1. T-emc Re-run pre-scan with new input filter. (open since sa44qmtbegy, 2026-10-01)",
+  "panels": [
+   {
+    "tip": "s1z83mywkyp",
+    "rev": "0a131e524a65",
+    "note": "viewing 2mxm3v1de1t · tasks as of tip s1z83mywkyp",
+    "rows": [
+     {
+      "task": "T-decoupling",
+      "state": "open",
+      "cycle": "done,dropped",
+      "tip": "s1z83mywkyp",
+      "checked": false
+     }
+    ]
+   },
+   {
+    "tip": "sa44qmtbegy",
+    "rev": "83fe41afc107",
+    "note": "viewing 2mxm3v1de1t · tasks as of tip sa44qmtbegy",
+    "rows": [
+     {
+      "task": "T-emc",
+      "state": "open",
+      "cycle": "done,dropped",
+      "tip": "sa44qmtbegy",
+      "checked": false
+     }
+    ]
+   }
+  ],
+  "discard": [
+   {
+    "t": "Discard",
+    "hidden": true
+   },
+   {
+    "t": "Discard",
+    "hidden": true
+   }
+  ],
+  "tickNote": "Preview: ticking a row changes this page only -- nothing is saved."
+ },
+ "notasks": {
+  "found": true,
+  "text": "Tasks LOG-A-006 × viewing LOG-A-006 · tasks as of tip x8zxedtxx1e x8zxedtxx1e 2026-10-06 — Thread with no tasks at tip. Tasks at tip: none (cleared by x8zxedtxx1e)",
+  "panels": [
+   {
+    "tip": null,
+    "rev": "",
+    "note": "viewing LOG-A-006 · tasks as of tip x8zxedtxx1e",
+    "rows": []
+   }
+  ],
+  "discard": [],
+  "moduleTag": false
+ },
+ "fatal": "Error: ENOENT: no such file or directory, open '/home/jorb/.paseo/worktrees/16msma8v/user-sim-run16/.scratch/pwr16/_site/log-a-005.html'\n    at Object.readFileSync (node:fs:440:20)\n    at file:///home/jorb/.paseo/worktrees/16msma8v/user-sim-run16/.scratch/pptr/r16_taskpane2.mjs:113:19"
+}

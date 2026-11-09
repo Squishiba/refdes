@@ -1,0 +1,35 @@
+== serve navis API matrix (docs/navis.md) ==
+archive ok -> 200 {"kind":"ok","verb":"archive","key":"9a7z15emfbz","changed":true}
+archive again -> 200 changed:false
+restore active -> 409 {"kind":"conflict","reason":"not_archived","error":"this Navi is not archived -- nothing to restore"}
+bad body -> 400 "navi is required: the Navi's full key, a unique key prefix, or its `refdes navis all` ordinal (a JSON string or number)"
+unknown -> 404 "no Navi 'zzzzzzzzzzz': `refdes navis all` numbers them 1..8; a selector is a number, a full key, or a key prefix"
+no token -> 403 missing or invalid launch token
+--no-write archive -> 403 {"kind":"refused","error":"this server was started with --no-write: navis archive and restore are disabled"}
+--no-write mint -> 403 {"kind":"refused","error":"this server was started with --no-write: navis mint is disabled"}
+
+== continue endpoint ==
+200: {"kind":"applied","ok":true,"message":"applied: continuation LOG-A-008 appended to items/board-a/log/2026-10-abc.md (1 tick)","id":"LOG-A-008","handle":"8vvt2gse4hf",...}
+file: id: LOG-A-008 / key: 8vvt2gse4hf / tasks: [T-open state: done, ...] / follows: [LOG-A-007@4jfd3hhpajc]
+409: conflict: ... changed since this edit was planned (expected 3ca686175122, found e0e3c2e25608) + current_text
+422 forked: refused: LOG-A-002's thread is forked across tips s1z83mywkyp, sa44qmtbegy: a continuation names one tip, and this request cannot pick one
+422 cleared: refused: the task list at  is cleared (an explicit tasks: [])...
+422 unknown task: task 'T-nope' is not in the task list at the tip: the fold owns the list, and a continuation invents no rows
+422 bad state: task state 'wonky' is outside the task vocabulary (open, done, dropped)
+400: invalid JSON / expected_revision is required: the file_revision from GET item<ref>
+403: missing token / forbidden (no Origin)
+--no-write: 403 {"kind":"refused","error":"this server was started with --no-write: continuations are disabled"}
+id-less tip 422 (F16-2): refused:  carries no artifact key, so no DISPLAY-ID@key composite can be written for it; naming the tip with a bare id would drop the identity the link is for
+
+== fetch #449 ==
+plain: "source: dropped docs/spec/sense.csv: rds_old (no source() span references it any more)" exit 0, key pruned
+--update: same line, exit 0
+record junk: error: .refdes/citations.yaml:15: the entry for 'extra_key' is a string, not a mapping of the fields `refdes fetch` writes (...), exit 1
+cross-item source(): FAILED ... does not cite ...; add it to this item's citations: (a citation on another item does not authorize this one)
+no reader: no source reader for '.txt' files (readers exist for: .csv, .pdf, .xlsx)
+
+== suite ==
+PYTHONPATH=src ... python -m pytest -q -n 4 --dist worksteal -> 6250 passed, 2 skipped in 116.00s (exit 0)
+
+== navis orphan (CLI) ==
+WARNING .refdes/navis/6xfswxwqtph.yaml.gz:26 - navis.archived_orphan: Navi 6xfswxwqtph is archived with no marker found at its stored source (items/board-a/log/2026-08.md:26) -- the marker was hand-deleted or moved out of scope. Show-all reveals it by snapshot; restore refuses (S9) -- hand-restore the marker to re-pair them by key

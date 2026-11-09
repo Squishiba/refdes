@@ -1,0 +1,4 @@
+ERROR   items/decisions/dec-pwr-001-regulator-topology.md:2 [DEC-PWR-001] — P_dens violates BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
+WARNING <project> — 1 item(s) with no coverage — see coverage.html
+WARNING <project> — 3 requirement(s) satisfied but not verified — see coverage.html
+20 items, 1 errors, 2 warnings
