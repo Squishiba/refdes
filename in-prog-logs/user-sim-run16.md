@@ -19,13 +19,14 @@ command (6250 passed, 2 skipped). Adversarial round: CRLF, non-ASCII
 path, subdirectory, read-only tree, concurrent `refdes id`, typos,
 hand-edged lockfile and duplicate keys.
 
-Findings: 3 Medium (id-less-item navis blindness — pre-existing, base
-confirmed via `git archive` of `d9719a9`; id-less-tip continuation
-refusal + empty-label message with the pane's key-only save-context
-gate; Firefox double-stepping a tick click through the wrapping label),
-1 Low docs (upgrading.md misses the `history:`→`on_change:` step that
-its own probe class hits, and under-describes the debate-overlay
-remedy), 2 Cosmetic.
+Findings, final (as in the report): 1 Medium (F16-2, keyed id-less
+thread tips refused by the continue endpoint with an empty-subject
+message while the pane supplies their save context), 2 Low (F16-1
+docs/UX: `check` is loud about the id-less list-file entry but
+`navis ls` answers "no Navis: no marker in any item body" exit 0;
+F16-4 docs/upgrading.md gaps), 1 Low/Unconfirmed (F16-3, a Firefox
+tick double-step that did not reproduce on a clean re-run), 2 Cosmetic
+(F16-5, F16-6).
 
 Difficulties: the repo dogfoods itself (`refdes-project.yaml` at the
 worktree root), so probe projects under `.scratch/` were swallowed by
@@ -41,30 +42,11 @@ root. Two sed probes damaged `items/board-a/requirements/power.yaml`
 (defaults block) and the citation ids collided; both repaired and
 `refdes check` is green on the probe (18 items, 0 errors).
 
-Review round (pre-merge): F16-3 re-run clean with plain `page.click` on
-the input in both browsers (identical, matching the reviewer) and
-re-filed Low/Unconfirmed — my fixture had advanced the tip between
-phases and I read the static state attribute as live; evidence kept
-plus the re-run (`r16-rerun.json`). Stripped machine-specific absolute
-paths from three evidence files; added the requested `--no-write`
-preview datum (no checkboxes, no ticks module) as undocumented. No
-product fixes made (dispatched to other workers).
-
-Second review round: F16-1 retracted outright — my probe items were
-yaml list-file entries with no `id:`, a loud documented load error
-(`parse.py:2033`), not a silent scan skip; keyed id-less thread tips
-load and list (only F16-5's cosmetic applies), and the scan citation is
-`docs/markdown.md:77`, not navis.md. The false "tick files
-byte-identical" sentence in F16-3 is corrected (only `tick-save.js` is
-in range, +236, new; the click-path files are 0-diff). Added
-`repro-f16.sh`/`repro-f16.out` (run against current-main source
-extracted by `git archive`) — which also reproduced the mint
-announcement's empty subject slot, restoring that F16-5 clause I had
-dropped. Header now reconciles base/range/main-moved in one sentence.
-Third round: F16-1 re-instated as Low (docs/UX) — `check` is loud
-about the id-less list-file entry but `navis ls` answers "no Navis: no
-marker in any item body" with exit 0, so the empty scan lies by
-omission in the docs' own pre-`refdes id` window (`repro-f16-ls.sh`/
-`.out`); docs PR #475 adds the `docs/navis.md` sentence. Captured-page
-tokens replaced with REDACTED (report evidence note added); dropped the
-incomplete Firefox timeout run `r16-ff.json` (uncited).
+Three pre-merge review rounds reconciled the findings to the final
+state above (F16-3 re-run clean and re-filed Unconfirmed; F16-1
+re-filed Low docs/UX with the `check`-loud/`navis`-silent asymmetry
+and corrected citations; machine paths and captured tokens stripped
+from the evidence, the uncited Firefox timeout run dropped, and
+reproduction scripts added, all run against a `git archive` extraction
+of current main), with no product fixes made (dispatched to other
+workers).
