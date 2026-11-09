@@ -19,14 +19,14 @@ command (6250 passed, 2 skipped). Adversarial round: CRLF, non-ASCII
 path, subdirectory, read-only tree, concurrent `refdes id`, typos,
 hand-edged lockfile and duplicate keys.
 
-Findings, final (as in the report): 1 Medium (F16-2, keyed id-less
-thread tips refused by the continue endpoint with an empty-subject
-message while the pane supplies their save context), 2 Low (F16-1
-docs/UX: `check` is loud about the id-less list-file entry but
-`navis ls` answers "no Navis: no marker in any item body" exit 0;
-F16-4 docs/upgrading.md gaps), 1 Low/Unconfirmed (F16-3, a Firefox
-tick double-step that did not reproduce on a clean re-run), 2 Cosmetic
-(F16-5, F16-6).
+Findings, final (matching the report's counts line): 1 Medium (F16-2,
+keyed id-less thread tips refused by the continue endpoint with an
+empty-subject message while the pane supplies their save context),
+3 Low (F16-1 docs/UX: `check` is loud about the id-less list-file
+entry but `navis ls` answers "no Navis: no marker in any item body"
+exit 0; F16-3, unconfirmed — a Firefox tick double-step that did not
+reproduce on a clean re-run; F16-4 docs/upgrading.md gaps),
+2 Cosmetic (F16-5, F16-6).
 
 Difficulties: the repo dogfoods itself (`refdes-project.yaml` at the
 worktree root), so probe projects under `.scratch/` were swallowed by

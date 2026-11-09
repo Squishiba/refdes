@@ -34,6 +34,8 @@ pages replaced with `REDACTED`).
 | F16-5 | Cosmetic | navis / task pane CLI-render | id-less items render with an empty id column in `navis ls`/mint announcements and as an empty-text anchor row in the preview Navis panel |
 | F16-6 | Cosmetic | docs/cli-reference.md | the serve section still describes the task pane as computing and writing nothing with no control on it; the pane now ships preview-only tick checkboxes, a per-tab draft, Discard, and a leave prompt (only the changelog fragments say so) |
 
+Counts by severity: 1 Medium (F16-2), 3 Low (F16-1, F16-3 unconfirmed, F16-4), 2 Cosmetic (F16-5, F16-6).
+
 ## F16-1 (Low, docs/UX) — an empty `navis ls` claims "no marker in any body" when the marker's entry was skipped for having no id
 
 My first write-up of this finding was imprecise in two ways, recorded
