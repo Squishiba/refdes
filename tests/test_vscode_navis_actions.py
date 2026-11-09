@@ -459,7 +459,9 @@ GENERIC_FIXTURES = {
     # the security layer's 403 is text/plain, NOT the JSON kind:"refused" --
     # plan S3 "With a stale token": it is a token problem, NOT the read-only
     # lock; a lockWrites:true here would disable writes on a token hiccup.
-    "security403": {"status": 403, "body": "forbidden: origin not allowed"},
+    # The two bodies are the SHIPPED texts (`_deny`, server.py:727-743).
+    "security403": {"status": 403, "body": "forbidden"},
+    "token403": {"status": 403, "body": "missing or invalid launch token"},
     "html500": {"status": 500, "body": HTML_500},
     "teapot418": {"status": 418, "body": {"kind": "teapot", "error": "I am a teapot, short and stout"}},
     "unknownKind409": {"status": 409, "body": {"kind": "sideways", "error": "SMUGGLED-BODY-MARKER"}},
@@ -490,6 +492,11 @@ def test_plan_result_fails_safely_on_every_result_the_table_does_not_name(tmp_pa
     assert d["lockWrites"] is False, d  # token problem, not the --no-write lock
     assert "403" in d["message"], d
     assert "forbidden" not in d["message"].lower(), d  # raw body not echoed
+
+    d = _decision(results, "token403")
+    assert d["kind"] == "error" and d["lockWrites"] is False, d
+    assert "403" in d["message"], d
+    assert "token" not in d["message"].lower(), d  # raw body not echoed
 
     d = _decision(results, "html500")
     assert d["kind"] == "error" and d["lockWrites"] is False, d
@@ -821,6 +828,185 @@ def test_create_write_lock_locks_and_resets(tmp_path):
     assert lock["afterReset"] is False, lock
     assert lock["otherUnaffected"] is False, lock
     assert lock["resetIsPerInstance"] == [False, True], lock
+
+
+# --------------------------------- 4b. review round 2: the cap, the kind-keys,
+#                                      C1 controls, the missing row, the JSON 500
+
+
+HOSTILE_TEXT = "e" * 5000 + "\x00 hostile tail"
+
+
+def _ambiguous_fixture(count: int, text: str = "") -> dict:
+    """A 409 ambiguous as the server answers it (the live-captured shape),
+    with `count` candidates and an optional (hostile) text on every one."""
+    return {
+        "status": 409,
+        "body": {
+            "kind": "ambiguous",
+            "error": "navi key prefix 'abcd12' is ambiguous: name one of its candidates",
+            "candidates": [
+                {
+                    "key": f"abcd12000{i:02d}",
+                    "text": text if text else f"candidate number {i}",
+                    "file": f"items/note-{i:02d}.md",
+                    "line": i + 1,
+                }
+                for i in range(count)
+            ],
+        },
+    }
+
+
+@skip_no_node
+def test_plan_result_names_every_ambiguous_candidate_beyond_the_message_cap(tmp_path):
+    """The candidate list is composed OUTSIDE the 300-char message cap (the
+    cap stays on the server's own intro text): every candidate of a 4-way
+    collision is named; of 25 candidates the first 20 keys all appear and a
+    `(+N more)` tail names the rest; a 5000-char hostile candidate text is
+    capped at 80 chars (control-stripped, `...` marker) and the whole message
+    stays one inert plain string."""
+    fixtures = {
+        "ambig4": _ambiguous_fixture(4),
+        "ambig25": _ambiguous_fixture(25),
+        "ambigHostile": _ambiguous_fixture(2, HOSTILE_TEXT),
+    }
+    results = _run_plan(tmp_path, fixtures)
+
+    d = _decision(results, "ambig4")
+    assert d["kind"] == "warn" and d["refresh"] is False, d
+    for cand in fixtures["ambig4"]["body"]["candidates"]:
+        assert cand["key"] in d["message"], (cand, d)
+        assert f"{cand['file']}:{cand['line']}" in d["message"], (cand, d)
+        assert cand["text"] in d["message"], (cand, d)
+
+    d = _decision(results, "ambig25")
+    for cand in fixtures["ambig25"]["body"]["candidates"][:20]:
+        assert cand["key"] in d["message"], cand
+    assert "+5 more" in d["message"], d["message"][-60:]
+    assert len(d["message"]) > 300, "the candidate list lives outside the 300 cap"
+    assert not re.search(r"[\x00-\x1f\x7f\x80-\x9f]", d["message"]), repr(d["message"])
+
+    d = _decision(results, "ambigHostile")
+    assert HOSTILE_TEXT[:80] in d["message"], d
+    assert HOSTILE_TEXT[:81] not in d["message"], d
+    assert d["message"].count(HOSTILE_TEXT[:80]) == 2, d
+    assert "..." in d["message"], d
+    assert not re.search(r"[\x00-\x1f\x7f\x80-\x9f]", d["message"]), repr(d["message"])
+
+
+KIND_FIXTURES = {
+    # the plan S4 rows, fed the NAMED kind/reason with NO `error` text: the
+    # behavioral flags key on kind/reason (the table), the message falls back
+    # to a safe generic -- a missing text never degrades a lock to a warn.
+    "refusedNoError": {"status": 403, "body": {"kind": "refused"}},
+    "badRequestNoError": {"status": 400, "body": {"kind": "bad_request"}},
+    "notFoundNoError": {"status": 404, "body": {"kind": "not_found"}},
+    "ambiguousNoIntro": {
+        "status": 409,
+        "body": {
+            "kind": "ambiguous",
+            "candidates": [
+                {"key": "abcd1200000", "text": "one", "file": "items/note-a.md", "line": 6}
+            ],
+        },
+    },
+    "conflictNotArchivedNoError": {"status": 409, "body": {"kind": "conflict", "reason": "not_archived"}},
+    "conflictKeylessNoError": {"status": 409, "body": {"kind": "conflict", "reason": "keyless"}},
+    "json500NoError": {"status": 500, "body": {"kind": "error"}},
+}
+
+
+@skip_no_node
+def test_plan_result_keys_the_table_rows_on_kind_and_reason_not_on_text(tmp_path):
+    """Every named row of plan S4's table keys on `kind`/`reason`, not on the
+    presence of `error`: a 403 `refused` without text is still the LOCK
+    (naming `--no-write` in its fallback), a `not_archived` conflict without
+    text still refreshes, a `keyless` one does not, a `not_found` one does;
+    400/500 fall back to a generic naming the status; an `ambiguous` without
+    the intro text still names its candidates."""
+    results = _run_plan(tmp_path, KIND_FIXTURES)
+
+    d = _decision(results, "refusedNoError")
+    assert d["kind"] == "lock" and d["lockWrites"] is True and d["refresh"] is False, d
+    assert "--no-write" in d["message"], d
+
+    d = _decision(results, "conflictNotArchivedNoError")
+    assert d["kind"] == "warn" and d["refresh"] is True and d["lockWrites"] is False, d
+    assert d["message"], d
+
+    d = _decision(results, "conflictKeylessNoError")
+    assert d["kind"] == "warn" and d["refresh"] is False, d
+    assert d["message"], d
+
+    d = _decision(results, "notFoundNoError")
+    assert d["kind"] == "warn" and d["refresh"] is True, d
+    assert d["message"], d
+
+    d = _decision(results, "badRequestNoError")
+    assert d["kind"] == "error" and d["refresh"] is False and d["lockWrites"] is False, d
+    assert "400" in d["message"], d
+
+    d = _decision(results, "ambiguousNoIntro")
+    assert d["kind"] == "warn" and d["refresh"] is False, d
+    assert "abcd1200000" in d["message"], d
+
+    d = _decision(results, "json500NoError")
+    assert d["kind"] == "error" and d["refresh"] is False, d
+    assert "500" in d["message"], d
+
+
+@skip_no_node
+def test_plan_result_passes_the_json_500_error_text(tmp_path):
+    """Plan S4's `500` row as REAL behavior (it was docstring-pinned only):
+    the JSON 500 body's `error` passes through verbatim as a kind:"error",
+    no refresh, no lock."""
+    fixtures = {
+        "json500": {
+            "status": 500,
+            "body": {"kind": "error", "error": "navis archive: the store exploded"},
+        }
+    }
+    d = _decision(_run_plan(tmp_path, fixtures), "json500")
+    assert d == {
+        "kind": "error",
+        "refresh": False,
+        "lockWrites": False,
+        "message": "navis archive: the store exploded",
+    }, d
+
+
+@skip_no_node
+def test_plan_result_strips_c1_controls_from_the_servers_text(tmp_path):
+    """The sanitiser strips C1 controls (U+0080-U+009F, e.g. NEL) as well as
+    C0 -- the module's docstring claims it, and a U+0085 inside the server's
+    text must not reach a UI string."""
+    fixtures = {
+        "c1": {"status": 500, "body": {"kind": "error", "error": "boom\u0085next\u009fend"}}
+    }
+    d = _decision(_run_plan(tmp_path, fixtures), "c1")
+    assert d["message"] == "boomnextend", repr(d["message"])
+    assert not re.search(r"[\u0080-\u009f]", d["message"]), repr(d["message"])
+
+
+@skip_no_node
+def test_row_actions_survive_a_missing_row(tmp_path):
+    """rowActions(null) -- the defensive floor for a call the UI should never
+    make (the tree disables every action of a row it cannot resolve): every
+    action disabled with a generic tooltip, no throw; a locked session keeps
+    its `--no-write` reason."""
+    out = _run_driver(
+        tmp_path,
+        ROWS_DRIVER,
+        {"module": NAVIS_ACTIONS_JS, "rows": {"missing": None}, "states": MATRIX_STATES},
+        "row-missing-driver.js",
+    )
+    v = _actions(out, "missing/open")
+    assert v["archive"]["enabled"] is False and v["restore"]["enabled"] is False, v
+    assert v["archive"]["tooltip"] and v["restore"]["tooltip"], v
+    v = _actions(out, "missing/locked")
+    assert "--no-write" in v["archive"]["tooltip"], v
+    assert "--no-write" in v["restore"]["tooltip"], v
 
 
 # ------------------------------------------------------------- 5. source pins

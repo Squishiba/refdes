@@ -23,10 +23,22 @@
 
 "use strict";
 
-/** The server's text is passed through, capped and stripped of control
- * characters (plan §4: a hostile 5000-char `error` must not flood a toast,
- * and control bytes have no business in a UI string). */
+/** The server's text is passed through, stripped of control characters
+ * (C0, DEL and C1 -- the C1 range includes NEL, U+0085, which has no
+ * business in a UI string) and capped at 300 by default: a hostile
+ * 5000-char `error` must not flood a toast. */
 const MESSAGE_LIMIT = 300;
+
+/** A candidate's text is capped at this many characters (with a `...`
+ * marker) INSIDE the composed 409-ambiguous message -- the message itself
+ * is not capped, so a collision with many candidates loses none of them
+ * (the author must be able to pick one). */
+const CANDIDATE_TEXT_LIMIT = 80;
+
+/** At most this many candidates are named; the rest are counted in a
+ * `(+N more)` tail. A real 409 is a key6 collision (a handful); the bound
+ * keeps a fabricated payload from composing an unbounded string. */
+const CANDIDATE_LIMIT = 20;
 
 /** The shipped panels' disabled-state wordings, verbatim (plan §4: each
  * mirrors a shipped panel, docs/navis.md "The served preview panel"). The
@@ -56,20 +68,20 @@ function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Pass the server's text through, stripped of control characters and
- * capped at MESSAGE_LIMIT. Applied to every message this module emits. */
-function sanitize(text) {
-  const stripped = String(text == null ? "" : text).replace(
-    /[\u0000-\u001f\u007f]/g,
-    ""
-  );
-  return stripped.length > MESSAGE_LIMIT
-    ? stripped.slice(0, MESSAGE_LIMIT)
-    : stripped;
+/** Control characters (C0, DEL, C1) have no business in a UI string. */
+function stripControls(text) {
+  return String(text == null ? "" : text).replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
+}
+
+/** Pass the server's text through: stripped of control characters, capped
+ * at `limit`. Applied to every message this module emits. */
+function sanitize(text, limit = MESSAGE_LIMIT) {
+  const stripped = stripControls(text);
+  return stripped.length > limit ? stripped.slice(0, limit) : stripped;
 }
 
 function decision(kind, refresh, lockWrites, message) {
-  return { kind, refresh, lockWrites, message: sanitize(message) };
+  return { kind, refresh, lockWrites, message };
 }
 
 /** The safe-by-default answer for any result the plan §4 table does not
@@ -81,26 +93,94 @@ function unhandled(status) {
     "error",
     false,
     false,
-    `refdes serve answered ${status} with a response this client does not recognise`
+    sanitize(
+      `refdes serve answered ${status} with a response this client does not recognise`
+    )
   );
 }
 
-/** The server's own `error` text when a named shape carries one. */
+/** The server's own `error` text when a body carries one. */
 function serverText(body) {
   return typeof body.error === "string" ? body.error : null;
 }
 
-/** A 409 `ambiguous`: the message names every candidate -- key, its
+/**
+ * The plan §4 table keyed the way the table is written: on `kind`/`reason`
+ * (and the status that scopes them), NOT on the presence of an `error`
+ * string. A named row answers with its behavioral flags even when its text
+ * is missing (the message falls back to a safe generic) -- a lock never
+ * degrades to a warn because a server forgot to phrase its refusal. null
+ * for every result the table does not name.
+ */
+function tableRow(status, body) {
+  if (!isPlainObject(body)) return null;
+  if (status === 200) {
+    // Any 200 with an object body is a success; `changed:false` is a SILENT
+    // one (a re-archive is a no-op, and a toast per double-click is spam).
+    // The 200's fields (verb/key/changed, or mint's minted[]) are the
+    // caller's business -- planResult must not read them: mint's 200
+    // carries no verb/key at all.
+    return { kind: "refresh", refresh: true, lockWrites: false };
+  }
+  if (status === 400 && body.kind === "bad_request") {
+    // A bug in the client -- loud per plan §3.2's rule, with the server's text.
+    return { kind: "error", refresh: false, lockWrites: false };
+  }
+  if (status === 403 && body.kind === "refused") {
+    // The --no-write refusal (gate-first, JSON body): lock writes for the
+    // session. A 403 WITHOUT the JSON `kind:"refused"` is the security
+    // layer's plain-text refusal -- a launch-secret problem, NOT the
+    // read-only lock -- and falls through to the generic error below,
+    // never a lock (plan §3's stale-secret case).
+    return { kind: "lock", refresh: false, lockWrites: true };
+  }
+  if (status === 404 && body.kind === "not_found") {
+    // The row set moved under us (ordinals); refresh, the number may be
+    // valid now.
+    return { kind: "warn", refresh: true, lockWrites: false };
+  }
+  if (status === 409 && body.kind === "ambiguous") {
+    return { kind: "warn", refresh: false, lockWrites: false };
+  }
+  if (
+    status === 409 &&
+    body.kind === "conflict" &&
+    Object.prototype.hasOwnProperty.call(CONFLICT_REFRESH, body.reason)
+  ) {
+    return { kind: "warn", refresh: CONFLICT_REFRESH[body.reason], lockWrites: false };
+  }
+  if (status === 500) {
+    // The server's own failure text, when it has one; never a silent one.
+    return { kind: "error", refresh: false, lockWrites: false };
+  }
+  return null;
+}
+
+/**
+ * A 409 `ambiguous`: the message names EVERY candidate -- key, its
  * `file:line`, and its text (plan §4; the author picks one and retries
- * with the full key). */
-function ambiguousText(body) {
+ * with the full key). Composed OUTSIDE the 300-char message cap (each
+ * candidate's text capped at CANDIDATE_TEXT_LIMIT, at most CANDIDATE_LIMIT
+ * named, the rest counted) so a collision with many candidates loses
+ * none.
+ */
+function ambiguousMessage(body) {
   const parts = [];
   const intro = serverText(body);
-  if (intro) parts.push(intro);
+  if (intro) parts.push(sanitize(intro));
   const candidates = Array.isArray(body.candidates) ? body.candidates : [];
-  for (const cand of candidates) {
-    if (isPlainObject(cand)) parts.push(`${cand.key} (${cand.file}:${cand.line}) ${cand.text}`);
+  const named = candidates.slice(0, CANDIDATE_LIMIT);
+  for (const cand of named) {
+    if (!isPlainObject(cand)) continue;
+    const text = sanitize(cand.text, CANDIDATE_TEXT_LIMIT);
+    const shown =
+      stripControls(cand.text).length > CANDIDATE_TEXT_LIMIT
+        ? `${text}...`
+        : text;
+    parts.push(`${cand.key} (${cand.file}:${cand.line}) ${shown}`);
   }
+  const rest = candidates.length - named.length;
+  if (rest > 0) parts.push(`(+${rest} more)`);
   return parts.join(" -- ");
 }
 
@@ -108,8 +188,9 @@ function ambiguousText(body) {
  * One `ServeClient.post()` result -> a plain decision object per plan §4's
  * Result-mapping table. `result` is `{status, body}` (the body JSON-parsed
  * for every status, raw text when a non-200 body is not JSON) or `{error}`
- * for a request that got no response at all. The decision is
- * `{kind, refresh, lockWrites, message}` with kind one of
+ * for a request that got no response at all -- which for post() also
+ * covers a 200 whose body will not parse (its message omits the body).
+ * The decision is `{kind, refresh, lockWrites, message}` with kind one of
  * "refresh" | "error" | "warn" | "lock"; the caller renders it (toast /
  * status bar / tree refresh) and never sees a body object.
  */
@@ -118,68 +199,31 @@ function planResult(result) {
   if (typeof result.error === "string" && result.status === undefined) {
     // The transport case: the request itself failed. Loud error, no lock
     // (a dead server is not a read-only server), no refresh (nothing moved).
-    return decision("error", false, false, result.error);
+    return decision("error", false, false, sanitize(result.error));
   }
   const status = Number(result.status);
   const body = result.body;
-
-  if (status === 200) {
-    // Any 200 with an object body is a success; `changed:false` is a SILENT
-    // one (a re-archive is a no-op, and a toast per double-click is spam).
-    // The 200's fields (verb/key/changed, or mint's minted[]) are the
-    // caller's business -- planResult must not read them: mint's 200
-    // carries no verb/key at all.
-    if (isPlainObject(body)) return decision("refresh", true, false, "");
-    return unhandled(status);
+  const row = tableRow(status, body);
+  if (!row) return unhandled(status);
+  if (row.kind === "refresh") return decision("refresh", true, false, "");
+  const text = serverText(body);
+  let message;
+  if (row.kind === "warn" && body.kind === "ambiguous") {
+    // The candidates are the message (the intro text is optional): name
+    // every one, outside the 300-char cap.
+    message = ambiguousMessage(body);
+  } else if (text !== null) {
+    message = sanitize(text);
+  } else if (row.kind === "lock") {
+    // A `refused` without text is still the lock; say why in the shipped
+    // wording (it names --no-write).
+    message = LOCKED_HINT;
+  } else {
+    message = sanitize(
+      `refdes serve answered ${status} (${body.kind}) without a message`
+    );
   }
-
-  if (status === 400 && isPlainObject(body) && body.kind === "bad_request") {
-    // A bug in the client -- loud per plan §3.2's rule, with the server's text.
-    const text = serverText(body);
-    return text === null ? unhandled(status) : decision("error", false, false, text);
-  }
-
-  if (status === 403 && isPlainObject(body) && body.kind === "refused") {
-    // The --no-write refusal (gate-first, JSON body): lock writes for the
-    // session. A 403 WITHOUT the JSON `kind:"refused"` is the security
-    // layer's plain-text refusal -- a launch-secret problem, NOT the
-    // read-only lock -- and falls through to the generic error below,
-    // never a lock (plan §3's stale-secret case).
-    const text = serverText(body);
-    return text === null
-      ? unhandled(status)
-      : decision("lock", false, true, text);
-  }
-
-  if (status === 404 && isPlainObject(body) && body.kind === "not_found") {
-    // The row set moved under us (ordinals); refresh, the number may be
-    // valid now.
-    const text = serverText(body);
-    return text === null ? unhandled(status) : decision("warn", true, false, text);
-  }
-
-  if (status === 409 && isPlainObject(body)) {
-    if (body.kind === "ambiguous") {
-      return decision("warn", false, false, ambiguousText(body));
-    }
-    if (
-      body.kind === "conflict" &&
-      Object.prototype.hasOwnProperty.call(CONFLICT_REFRESH, body.reason)
-    ) {
-      const text = serverText(body);
-      return text === null
-        ? unhandled(status)
-        : decision("warn", CONFLICT_REFRESH[body.reason], false, text);
-    }
-  }
-
-  if (status === 500 && isPlainObject(body)) {
-    // The server's own failure text, when it has one; never a silent one.
-    const text = serverText(body);
-    return text === null ? unhandled(status) : decision("error", false, false, text);
-  }
-
-  return unhandled(status);
+  return decision(row.kind, row.refresh, row.lockWrites, message);
 }
 
 /**
@@ -191,7 +235,8 @@ function planResult(result) {
  * invention -- each disabled state mirrors a shipped panel. The impossible
  * keyless-archived row (the projection never archives a keyless marker)
  * must not crash and keeps Archive disabled; it lands on the keyless
- * branch first, which disables both.
+ * branch first, which disables both. A missing row (null/undefined -- a
+ * call the UI must never make) disables everything with a generic reason.
  */
 function rowActions(row, state) {
   const locked = Boolean(state && state.writesLocked);
@@ -199,6 +244,13 @@ function rowActions(row, state) {
     return {
       archive: { enabled: false, tooltip: LOCKED_HINT },
       restore: { enabled: false, tooltip: LOCKED_HINT },
+    };
+  }
+  if (!isPlainObject(row)) {
+    const reason = "No Navis row to act on";
+    return {
+      archive: { enabled: false, tooltip: reason },
+      restore: { enabled: false, tooltip: reason },
     };
   }
   const keyless = !row.key;

@@ -102,7 +102,8 @@ plan-generic, row-matrix, api).
 
 - No changelog.d fragment: tests-only PR, nothing user-visible (the S6.2b-2
   implementer ships the feature fragment).
-- No PR opened (task: push the branch only).
+- No PR opened (task: push the branch only) — superseded: the implementer
+  opened the PR carrying the branch.
 - No real VS Code window exists anywhere in this slice: it pins the pure
   decision logic only; commands, menus, toasts and the real vscode API are
   S6.2b-2 (plan §7: "Cannot prove: any VS Code UI behavior").
@@ -114,32 +115,31 @@ plan-generic, row-matrix, api).
 # n62b1-impl — `editors/vscode/navisActions.js` (implementer, 2026-11-08)
 
 Slice IMPLEMENTER N6.2b-1-impl. Created `editors/vscode/navisActions.js`
-(pure CommonJS, five exports exactly as pinned; no navisTree.js change, no
-extension.js/package.json/commands/UI — those are S6.2b-2). Status: DONE.
+(pure CommonJS, five exports as pinned; no navisTree.js change, no
+extension.js/package.json/commands/UI — S6.2b-2). Status: DONE.
 
-- Red before the module: 9 failed. Green after: 9 passed. Neighbours green:
-  test_vscode_navis_tree.py + test_vscode_extension_http_client.py +
-  test_vscode_extension.py + test_crossplatform_lint.py = 67 passed.
-  Full suite: run once before push (see PR).
-- No .py source touched → nothing for ruff; `node --check` clean on the JS.
-- Wording constants: the task said "import, do not copy strings", but the
-  test author's source pin demands `KEYLESS_HINT` and `ORPHAN_HINT` appear
-  as literals INSIDE navisActions.js (a pure require of navisTree.js cannot
-  satisfy `KEYLESS_HINT in actions`). The tests are the unmodifiable
-  contract, so the two literals live in navisActions.js (navisTree.js
-  untouched — its own pin keeps the tree string); the docstring's
-  "reuse the constant or pin equality" is the test author's own
-  acknowledgement of this fork. Runtime equality holds.
-- The comment ban caught one word: a comment quoting plan §3's "stale
-  token" heading tripped the case-insensitive `token` substring ban;
-  reworded. Deliberate design, as the test log predicted.
-- 200 branch reads no body fields (mint's 200 has no verb/key — captured
-  fixture `mintOk` proves it); any plain-object 200 is a refresh.
-- Generic (unhandled) messages name the status, never the body; sanitiser
-  strips C0+DEL and caps at 300 (long400 prefix pin, hostile400 verbatim
-  pin both green).
-- No changelog.d fragment: internal module, nothing user-visible until
-  S6.2b-2 wires the commands (per this log's earlier "Not done" note).
-- No real VS Code window available anywhere in this slice: pure decision
-  logic under bare node only (plan §7: "Cannot prove: any VS Code UI
-  behavior").
+- Red: 9 failed (module absent). Green: 9 passed. Neighbours (navis_tree,
+  extension_http_client, extension, crossplatform_lint): 67 passed. Full
+  suite: run once before push. No .py source touched → ruff n/a; JS
+  `node --check` clean.
+- Wording constants: the source pins demand `KEYLESS_HINT`/`ORPHAN_HINT`
+  verbatim INSIDE navisActions.js — a require cannot satisfy that — so the
+  literals live here (navisTree.js untouched; runtime equality holds; the
+  tests docstring's "reuse the constant or pin equality" fork).
+- 200 branch reads no body fields (mintOk fixture); generic fallbacks name
+  the status, never the body; sanitiser caps at 300.
+- No changelog.d fragment: nothing user-visible until S6.2b-2 (per the
+  "Not done" note above). No real VS Code window exists in this slice:
+  pure logic under bare node (plan §7).
+
+## Review round 2 (same day, owner-triaged reviewer findings)
+
+Red-first, then green: the ambiguous message composes its candidate list
+OUTSIDE the 300 cap (per-text 80 cap + `...`, 20 named, `(+N more)`);
+table flags key on `kind`/`reason`, a missing `error` falls back safely
+(a lock stays a lock, naming --no-write); C1 controls stripped too; a
+null row disables all; the `{error}` docstring covers post()'s
+unparseable-200. Authorized test edits: real security-403 fixture texts
+(`forbidden`, the launch-token denial) + a JSON-500 passthrough pin.
+In-file 14 passed, neighbours 67; `node --check` + ruff clean; suite and
+CI re-run (see PR).
