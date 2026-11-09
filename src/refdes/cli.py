@@ -3052,6 +3052,30 @@ def _navis_write_verb(args, project, rows: list[dict], load_errors) -> int:
     return 1 if load_errors else 0
 
 
+def _navis_idless_note(project) -> str | None:
+    """One line naming the items this run's navis scan could not see: an
+    item with no `id:` yet sits in `project.pending`, outside the scan
+    (the project is red until `refdes id`), so a marker written in its
+    body is invisible to every verb -- and a listing that says "no
+    Navis" while markers sit on disk reads as a tool that missed them
+    (run-16 finding F16-1). Counted, not parsed: the skipped bodies
+    are never scanned, so the note counts items, not markers. None
+    when every item has an id, so an all-id'd project's output is
+    byte-identical to before."""
+    n = len(project.pending)
+    if not n:
+        return None
+    if n == 1:
+        return (
+            "note: 1 item has no id yet and was not scanned -- "
+            "run 'refdes id' to allocate it"
+        )
+    return (
+        f"note: {n} items have no id yet and were not scanned -- "
+        "run 'refdes id' to allocate them"
+    )
+
+
 def cmd_navis(args) -> int:
     """The project's Navis -- flying notes (in-prog-logs/navis-design-20261025.md §11).
 
@@ -3148,8 +3172,14 @@ def cmd_navis(args) -> int:
     verb = args.navis_command
     active = [r for r in rows if not r["archived"]]
     archived_rows = [r for r in rows if r["archived"]]
+    # Both the empty answer and the listing below are shaped by items the
+    # scan skipped for having no id; the note rides stderr like every
+    # other notice on this run (stdout owes only the piped answer).
+    idless_note = _navis_idless_note(project)
     if not rows:
         print("no Navis: no `<!--navi: text-->` marker in any item body")
+        if idless_note:
+            print(idless_note, file=sys.stderr)
         return 1 if load_errors else 0
     if verb == "all":
         print(f"{len(active)} Navis (active), {len(archived_rows)} archived:")
@@ -3173,6 +3203,8 @@ def cmd_navis(args) -> int:
         print(f"  {number}. {short}{row['text']}  {where}{tag}")
     if verb == "all" and not archived_rows:
         print("  archived: none")
+    if idless_note:
+        print(idless_note, file=sys.stderr)
     return 1 if load_errors else 0
 
 
