@@ -67,6 +67,14 @@ let navisRoot = null;
  * the next launch may well allow writes. */
 let navisWriteLock = null;
 
+/** The refusal sentence naming `--no-write` (plan §4's 403 row) that the
+ * lock's status-bar TOOLTIP carries. Written by `setNavisWriteStatus`,
+ * re-applied by `applyNavisLockStatus` on every repaint, and cleared
+ * wherever `navisWriteLock` is reset -- the tooltip's lifetime is the
+ * lock's lifetime, so a repaint never erases it and a new session never
+ * shows a stale refusal. */
+let navisLockTooltip = null;
+
 /** The one `refdes serve` handle this window has, or null (§3.1: one per project). */
 let serve = null;
 /** In-flight boot, so two hovers in the same tick spawn one server. */
@@ -394,6 +402,7 @@ async function startServe() {
   // A new serve is a new session: the old one's --no-write lock (plan §4)
   // says nothing about this one.
   if (navisWriteLock) navisWriteLock.reset();
+  navisLockTooltip = null;
   setServeState("starting", `spawning \`refdes serve\` in ${root}`);
 
   serveBoot = client.start();
@@ -619,6 +628,7 @@ function fireNavisChanged() {
  */
 function setNavisWriteStatus(text) {
   if (!statusBar || !text) return;
+  navisLockTooltip = text;
   statusBar.text = "$(lock) Refdes: read-only";
   statusBar.tooltip = text;
   statusBar.show();
@@ -637,6 +647,7 @@ function setNavisWriteStatus(text) {
 function applyNavisLockStatus() {
   if (!statusBar || !navisWriteLock || !navisWriteLock.locked()) return;
   statusBar.text = "$(lock) Refdes: read-only";
+  if (navisLockTooltip) statusBar.tooltip = navisLockTooltip;
   statusBar.show();
 }
 
@@ -1097,6 +1108,7 @@ async function commandAttachServer() {
   serve = ServeClient.attach(parsed, { onLog: logServe });
   // The attached launch is a new session -- same lock reset as a boot.
   if (navisWriteLock) navisWriteLock.reset();
+  navisLockTooltip = null;
   logServe(
     `attached to ${parsed.base}` +
       (parsed.normalizedFromLocalhost
