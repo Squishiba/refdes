@@ -116,3 +116,34 @@ Test-author slice complete: 11 tests, 7 red / 4 declared-green guards,
 red shown against the untouched src. Branch feat/w5b4c1b-tick-pane-ui,
 tests only — the 4c-1b implementer writes the glue against this pinned
 surface.
+
+## Implementer pass (W5b.4c-1b-impl)
+
+Glue landed in `taskpane-ticks.js` (rewritten as an ES module): imports
+./tick-drafts.js + ./tick-pane.js; per-panel descriptors read from
+`.refdes-taskpane-panel` (+ tip-key/revision attrs) and the row's
+data-attrs; `storageMirror()` touches sessionStorage only inside a
+try/catch, a throw degrades to a page-memory mirror; change ->
+wantedState -> setTick -> setRevision -> refreshPanel; per-panel
+indicator (role=status, aria-live=polite, textContent-only, hidden per
+indicator()); pending class on `box.closest('label')`; Discard button
+visible iff the panel's pendingCount > 0, click = discard +
+discardPlan (boxes return to the captured-at-load rendered states);
+tab labels via aria-controls -> panel -> tipKey with tabLabel; exactly
+one window beforeunload listener reading counts() at event time;
+non-draftable rows (id-less, target-less) disabled with the model's
+reason in title; keyless panels: native toggle, nothing drafted,
+indicator says preview-only. W5b.3's note sentence kept. CSS: three
+rules added inside the marked preview block only.
+
+Red re-shown before any src change (7 failed / 4 passed, same names);
+after: 11/11 green. Touched files: taskpane-ticks.py set (11 + 191
+tests) green, `node --check` (ESM) clean, pr_size vs origin/main: 217
+src lines added. Author's log kept under 150 lines; no src file other
+than the two named ones touched.
+
+Unverified (no real browser here): the 11 browser-only behaviours above
+(in-prog-logs list 1-11) — restore repaint, reload/tab lifetimes,
+in-page prompt firing, disabled-row clicks, throwing-storage session.
+Verified only by the source pins, the pure modules' own tests, and
+node --check.
