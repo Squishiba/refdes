@@ -6,7 +6,8 @@ A Navi is one flying note: a hand-authored single-line
 scan into `Item.navis`, malformed-marker warning diagnostics, the top-level
 `navis` key of the `index` payload (absent-key convention), and the
 read-only `refdes navis ls|all|show` CLI. Keys are minted, archived, and
-surfaced in site panels by later slices; nothing here writes a key.
+surfaced in site panels by the slices that land after this one, in this same
+release; nothing here writes a key.
 
 Markers are consumed from published item HTML (their bytes never appear in
 the rendered page), and inert occurrences — inside fenced code, indented

@@ -35,5 +35,5 @@
   of the body, not a text match. Sealed, imported and `--no-write` refusals
   are the ones the edit route already gave, unchanged and with their existing
   wording. A successful accept answers with what it pinned
-  (`{path, key, reader, value}`), so the panel can repeat the number back. The
-  editor panel itself is the next slice.
+  (`{path, key, reader, value}`), so the panel can repeat the number back.
+  The picker panel that offers it ships in this same release.

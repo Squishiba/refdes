@@ -29,4 +29,4 @@
   that belongs there is Accept's, because Accept is a body write. Nothing here
   writes anything, and the unit field has no default — with no `unit` the
   proposal returns no line at all. Accept (which writes the lockfile) and the
-  editor panel are later slices.
+  picker panel ship in this same release.
