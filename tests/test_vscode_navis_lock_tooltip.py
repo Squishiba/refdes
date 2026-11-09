@@ -28,11 +28,13 @@ Harness: the whole-extension node drive of tests/test_vscode_docs_focus.py
 (``Module._load`` hooks ``require("vscode")`` to the fake surface; the real
 ``editors/vscode/extension.js`` is activated), with a faked CLI answering
 ``index --compact`` (fixture JSON) and a faked ``./serveClient`` answering
-every navis POST with the scripted 403 ``refused``. The lock phases run
-through the SHIPPED wiring: ``refdes.navisArchive`` for the scripted row
-(boot A), then ``refdes.navisMint`` after a second boot (boot B, whose
-``startServe`` runs the shipped lock reset). node missing -> skip, as the
-neighbours do.
+every navis POST with a scripted answer. The lock phases run through the
+SHIPPED wiring: a fresh activation's visibility gesture boots serve A,
+``refdes.navisArchive`` posts the scripted keyless row's refusal (boot A
+locks), the index repaint runs, a fresh activation boots serve B --
+``startServe`` runs the shipped lock reset -- and the repaint after it
+shows the plain index face; a second refusal (boot B) then re-names the
+lock. node missing -> skip, as the neighbours do.
 
 Cross-platform (tests/test_crossplatform_lint.py): the node subprocess reads
 with ``encoding="utf-8"`` (a Windows runner's cp1252 locale would mojibake
@@ -78,15 +80,12 @@ REFUSAL_B = {
     },
 }
 
-MINT_OK = {
-    "status": 200,
-    "body": {
-        "kind": "ok",
-        "changed": True,
-        "minted": [{"key": "5kk2m4ppqrs", "key6": "5kk2m4", "item": "NOTE-0001", "file": "items/a.md"}],
-        "still_keyless": 0,
-    },
-}
+# The scenario's payloads: one keyless row (the mint offers it -- the
+# archive on it would be disabled) and one keyed row (archive/restore act
+# on it). Phase A locks with the MINT refusal (POST on the keyless row);
+# the second refusal -- phase B's ARCHIVE on the keyed row -- carries the
+# mint's --no-write sentence, a DIFFERENT text: the remembered tooltip is
+# the LAST refusal's.
 
 INDEX_DATA = {
     "items": [{"id": "NOTE-0001", "title": "Alpha"}],
@@ -102,10 +101,10 @@ INDEX_TOOLTIP = "1 items · 1 errors · 1 warnings\n1 not yet verified"
 # updateStatusBar writes this plain string (no MarkdownString exists in
 # editors/vscode/extension.js) -- the repaint's value, pinned from :200-202.
 
-# One KEYLESS row: archive refuses it disabled (never posts), mint offers it.
-# Phase A locks with the ARCHIVE refusal (POST #1) and refreshes the tree
-# (GET /api/navis -- the stub answers it, so the payload is live); phase B's
-# mint posts the MINT refusal (POST #2).
+# One keyless row (the mint offers it -- the archive on it would be
+# disabled) and one keyed row (archive/restore act on it): phase A locks
+# with the MINT refusal, phase B re-locks with the ARCHIVE refusal -- the
+# second refusal text.
 ROW = {
     "key": "",
     "key6": "",
@@ -118,7 +117,19 @@ ROW = {
     "changed": False,
     "orphan": False,
 }
-PAYLOAD = {"navis": [ROW], "counts": {"active": 1, "archived": 0}}
+KEYED_ROW = {
+    "key": "abcd1200000e",
+    "key6": "abcd12",
+    "text": "Beta note.",
+    "item": "NOTE-0002",
+    "href": "note-002.html",
+    "file": "items/b.md",
+    "line": 2,
+    "archived": False,
+    "changed": False,
+    "orphan": False,
+}
+PAYLOAD = {"navis": [ROW, KEYED_ROW], "counts": {"active": 2, "archived": 0}}
 
 
 DRIVER = r"""
@@ -382,10 +393,13 @@ Module._load = function (request) {
   return realLoad.apply(this, arguments);
 };
 
-// The index item: the SHARED item is the first one activate() creates (the
-// serve item is second -- the order of activate's own lines).
+// The index item: each activation creates a fresh pair (index item first,
+// serve item second -- the order of activate's own lines). `itemBase` marks
+// where the CURRENT activation's items start; the driver bumps it when it
+// re-activates the extension.
+let itemBase = 0;
 function indexItem() {
-  return state.statusItems[0];
+  return state.statusItems[itemBase];
 }
 
 // The faked ./serveClient (hooked by the Module._load override above).
@@ -402,10 +416,33 @@ function snapshot(name) {
   };
 }
 
+// The stub resolves every answer as a microtask (the real client's socket
+// latency), so a phase is settled once the extension's own await chain has
+// drained: one real timer turn (macrotask) runs after every pending
+// microtask, which is where each command's render/setStatus lands.
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function settle() {
+  await sleep(0);
+  await sleep(0);
+}
+
+// The badge is the extension's own marker of a landed navis payload
+// (setNavisBadge runs right after the GET 200 stores it; every placeholder
+// erases it). The payload's active count, pinned.
+async function treeReadsPayload() {
+  while (!state.navisView || (state.navisView.badge || {}).value !== 2) await settle();
+}
+
 async function main() {
-  const context = { subscriptions: [], asAbsolutePath: (p) => path.join(cfg.extDir, p) };
+  // The fake's host subscriptions: deactivate() disposes them (stopping the
+  // extension's tree-view listeners), and the driver re-arms them for the
+  // next activation -- a host view can be re-created, a dead window can't.
+  const subscriptions = [];
+  const context = {
+    subscriptions,
+    asAbsolutePath: (p) => path.join(cfg.extDir, p),
+  };
   const ext = require(cfg.ext);
   await ext.activate(context);
   // activate's initial boot runs in the background (the boot-at-activation
@@ -425,9 +462,13 @@ async function main() {
   Serve.__setPayload(cfg.payload);
   Serve.__setScript([cfg.refusalA, cfg.refusalA, cfg.refusalA]);
   await navisView.setVisible(true);
-  // The visibility handler's boot resolves as a microtask chain; give it
-  // its ticks so the mint gate reads the client (and the payload) settled.
-  await sleep(75);
+  // The visibility handler's boot and tree read resolve as microtask
+  // chains (the stub's answers too); setVisible has already run them, and
+  // real-timer turns drain everything the shipped code chains onto them --
+  // the mint gate reads the ready client and the badge marks the landed
+  // payload it posts against.
+  await settle();
+  await treeReadsPayload();
   await state.commands.get("refdes.navisMint")();
   snapshot("locked");
 
@@ -435,49 +476,63 @@ async function main() {
   // -> updateStatusBar, the repaint that erases the lock face today. The
   // text already carries the lock while locked, so the repaint is forced
   // with the refreshIndex command (the same path a save's 250 ms timer
-  // fires) and the wait is on the TOOLTIP leaving the lock's value --
-  // GREEN lands on the repaint's own 25 ms poll, RED on the 15 s deadline.
+  // fires) and settles -- GREEN lands on the repaint's own value, RED on
+  // the stub's untouched index tooltip.
   await state.commands.get("refdes.refreshIndex")();
-  const t0 = Date.now();
-  while (Date.now() - t0 < cfg.repaintDeadline) {
-    await sleep(25);
-    if (indexItem().tooltip !== cfg.refusalA.body.error) break;
-  }
+  await settle();
   snapshot("repaint");
 
-  // A NEW serve boot runs the shipped lock reset: deactivate() is the
-  // shipped stopServe (serve -> null, the client killed) AND disposes the
-  // tree view -- the fake's createTreeView is a getter, so re-disabling
-  // then re-enabling the host view hands activate a fresh navisView. The
-  // visibility gesture re-boots (startServe -- the site of the reset at
-  // l.396). The scripted GET 404s while the payload is disarmed, so the
-  // mint gate reads "no server": the lock is gone and paints nothing --
-  // the index face stands alone.
+  // The shipped stopServe + a fresh activation: the shared status item
+  // carries the LOCKED face across the session boundary. The visibility
+  // gesture boots (startServe -- the site of the reset at the l.396 call)
+  // with the payload disarmed, landing on the shipped dead-server path;
+  // the forced repaint below runs updateStatusBar -> applyNavisLockStatus
+  // against the erased lock: the index face stands, the remembered
+  // refusal paints nothing. (No mint here: any POST's refusal answer
+  // would re-lock the fresh session -- the shipped lock mechanics.)
   ext.deactivate();
   while (Date.now() < cfg.drainDeadline) await sleep(25);
-  vscode.window.createTreeView = () => makeNavisView();
+  subscriptions.length = 0;
+  itemBase = state.statusItems.length;
+  await ext.activate(context);
   Serve.__setBootMode("ok");
   Serve.__setPayload(null);
   Serve.__setScript([]);
   await navisView.setVisible(true);
-  await state.commands.get("refdes.navisMint")();
+  // The visibility handler's boot resolves as a microtask chain; the
+  // real-timer turns drain it -- the shipped dead-server path (the payload
+  // is disarmed) lands.
+  await settle();
+  await state.commands.get("refdes.refreshIndex")();
+  await settle();
   snapshot("resetByBoot");
 
-  // Re-lock: the payload re-arms (the tree re-reads the keyless row, the
-  // mint gate offers), and the mint refusal -- the SECOND refusal text --
-  // writes the lock face again.
+  // The second refusal, on a fresh session: the payload re-arms (the tree
+  // re-reads the rows) and ARCHIVING the keyed row (navisTree.navis* are
+  // the tree's own renderers -- rowForItem's exact match) posts the
+  // ARCHIVE refusal -- the mint refusal on this payload, the SECOND
+  // refusal text -- writing the lock face with it: the remembered tooltip
+  // is the LAST refusal's text. (A mint on a locked session short-circuits
+  // with the lock's warning and never POSTs, so the second refusal comes
+  // from a row action.)
   Serve.__setPayload(cfg.payload);
-  Serve.__setScript([cfg.refusalB, cfg.mintOk, cfg.mintOk]);
-  await state.commands.get("refdes.navisMint")();
+  Serve.__setScript([cfg.refusalB]);
+  // The archive gate and the POST's row selector read the tree's rows --
+  // the tree's own refresh (the visibility handler, boot=false: no re-boot)
+  // carries the re-armed payload in, and the badge poll proves the GET 200
+  // landed in the extension before the archive.
+  state.navisView.badge = undefined;
+  await navisView.setVisible(true);
+  await treeReadsPayload();
+  const keyed = cfg.keyedRow;
+  await state.commands.get("refdes.navisArchive")({
+    label: `${keyed.key6} · ${keyed.text}`,
+    description: "",
+    tooltip: keyed.text,
+    contextValue: "refdesNavi",
+  });
+  await settle();
   snapshot("locked2");
-
-  // The unlocked face: the reset (above) erased the lock, the repaint
-  // paints the plain index face, and the mint gate says "no server" (the
-  // boot above died -- the client is null): the remembered refusal paints
-  // nothing once the lock is gone.
-  await state.commands.get("refdes.refreshIndex")();
-  await state.commands.get("refdes.navisMint")();
-  snapshot("unlocked");
 }
 
 main()
@@ -630,7 +685,7 @@ def run_extension(tmp_path) -> dict:
         "payload": PAYLOAD,
         "refusalA": REFUSAL_A,
         "refusalB": REFUSAL_B,
-        "repaintDeadline": 15000,
+        "keyedRow": KEYED_ROW,
         "drainDeadline": int(time.time() * 1000) + 300,
     }
     proc = subprocess.run(
@@ -689,9 +744,10 @@ def test_the_index_repaint_keeps_the_no_write_tooltip(snapshots):
 
 
 def test_a_second_refusal_refreshes_the_remembered_tooltip(snapshots):
-    """A lock re-named by a later refusal (the mint refusal on a fresh
-    boot): the remembered tooltip is the LAST refusal's text -- the mint
-    refusal naming --no-write too."""
+    """A lock re-named by a later refusal (the mint refusal on the second
+    boot, posted through the shipped archive wiring): the remembered
+    tooltip is the LAST refusal's text -- the mint refusal naming
+    --no-write too."""
     locked2 = snapshots["locked2"]
     assert locked2["text"] == LOCK_TEXT, locked2
     assert locked2["tooltip"] == REFUSAL_B["body"]["error"], locked2
@@ -699,14 +755,11 @@ def test_a_second_refusal_refreshes_the_remembered_tooltip(snapshots):
 
 
 def test_the_boot_reset_erases_the_lock_face(snapshots):
-    """The shipped lock reset (a new serve boot) erases the lock: the mint
-    gate says "no server" (the GET 404s, the tree reads server-died) and
-    the index face stands alone -- the remembered refusal paints nothing
-    once the lock is gone."""
+    """The shipped lock reset (a new serve boot -- startServe's reset site)
+    erases the lock: the repaint after the new boot shows the normal index
+    face, text and tooltip -- the remembered refusal paints nothing once
+    the lock is gone."""
     reset = snapshots["resetByBoot"]
     assert reset["text"] == "$(error) Refdes 1", reset
     assert reset["tooltip"] == INDEX_TOOLTIP, reset
-    unlocked = snapshots["unlocked"]
-    assert unlocked["text"] == "$(error) Refdes 1", unlocked
-    assert unlocked["tooltip"] == INDEX_TOOLTIP, unlocked
-    assert "--no-write" not in str(after["tooltip"]), after
+    assert reset["tooltipType"] == "string", reset
