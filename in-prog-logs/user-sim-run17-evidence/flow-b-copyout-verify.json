@@ -1,0 +1,28 @@
+{
+ "what": "Copy-it-out writes nothing (re-run of flow-b step C with real sha256 verification; page log-a-004.html, draft tick T-thermal-model)",
+ "project": ".scratch/proj17co (copy of the flow-b fixture, served writable on 8767)",
+ "X1_tick_status": "1 unsaved tick",
+ "X2_disk_change": {
+  "sha_before": "12055d38ff0ed09d32b7ff9b6679b2e99483714c9495d645c8787a26fc2dc566",
+  "sha_after": "a6fdf4690ccc98eb24f7791976a8375d8514b026f71651504b001d29a659d410",
+  "edit": "flip T-demco state in tip entry (direct file write)"
+ },
+ "X3_reopen": "open",
+ "X3_stale_clause": "1 unsaved tick made against an older version - saving will ask to resolve",
+ "X35_save_state": {
+  "saveInDom": true,
+  "saveVisible": true,
+  "panelHidden": false,
+  "rect": "{\"x\":0,\"y\":0,\"width\":0,\"height\":0,\"top\":0,\"right\":0,\"bottom\":0,\"left\":0}"
+ },
+ "X4_conflict_text": "conflict: items/board-a/log.yaml changed since this edit was planned (expected 12055d38ff0e, found a6fdf4690ccc)T-thermal-model: yours open, the file has doneT-ldo-choice: yours -, the file has openT-demco: yours -, the file has openKeep mineKeep theirsCopy it out",
+ "X5_copyout": {
+  "clicked": "clicked",
+  "sha_file_before_click": "a6fdf4690ccc98eb24f7791976a8375d8514b026f71651504b001d29a659d410",
+  "sha_file_after_click": "a6fdf4690ccc98eb24f7791976a8375d8514b026f71651504b001d29a659d410",
+  "file_unchanged_by_copyout": true,
+  "textarea_readOnly": true,
+  "textarea_value": "Tick draft made at 12055d38ff0ed09d32b7ff9b6679b2e99483714c9495d645c8787a26fc2dc566, the file is now at a6fdf4690ccc98eb24f7791976a8375d8514b026f71651504b001d29a659d410:\nT-thermal-model: open"
+ },
+ "DONE_X": true
+}

@@ -1,0 +1,24 @@
+=== serve-cli-battery ===
+-- 0. launch of the 8762 instance (token redacted):
+refdes serve: http://127.0.0.1:8762/?token=REDACTED
+-- 1. port in use: rc=2
+error: cannot listen on 127.0.0.1:8762: Address already in use; choose another --port, or drop --port to get an ephemeral one
+-- 2. ephemeral launch with --token-file:
+refdes serve: http://127.0.0.1:42167/?token=REDACTED
+token file mode: 0o600; one line: 1; token is 43-char urlsafe base64 (matches [A-Za-z0-9_-]{43}): 1
+after SIGTERM the token file exists: False
+-- 3. --token-file refused over a non-launch file: rc=2
+error: cannot write --token-file <worktree>/.scratch/batt-notlaunch/x.txt: it already exists and is not a refdes serve launch file, so it will not be overwritten -- choose another path, or delete that one first
+-- 4. foreign Host: curl -H 'Host: evil.example' 'http://127.0.0.1:8762/?token=REDACTED' -> 403
+same URL with the default Host: 302
+-- 5. cookie:
+Set-Cookie: refdes_token_8762=REDACTED; Path=/; HttpOnly; SameSite=Strict
+-- 6. GET /api/item/LOG-A-004 with X-Refdes-Token: 200; with a wrong token: 403
+-- 7. early refusals (bodies):
+GET /api/item/LOG-A-004/continue -> 405 {"error":"method not allowed"}
+2 MB JSON body -> request too large [413]
+Content-Type: text/plain -> expected application/json [415]
+POST without the token -> missing or invalid launch token [403]
+-- 8. viewing line on the older entry page:
+viewing LOG-A-001 · tasks as of tip LOG-A-013
+-- 9. _site/log-a-004.html: taskpane nodes: 16; tick checkboxes: 1; viewing: viewing LOG-A-004 · tasks as of tip LOG-A-008; tokens: 0

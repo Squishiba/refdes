@@ -1,0 +1,17 @@
+{
+ "what": "CRLF preservation (re-run): log.yaml converted to all-CRLF (115 CRLF lines, 0 lone LF), one tick saved via the pane; the file stays all-CRLF after the continuation is appended (123 CRLF lines, 0 lone LF). Project .scratch/proj17ff2, writable server 8762",
+ "pre_bytes": {
+  "crlf_lines": 115,
+  "lone_lf": 0
+ },
+ "after_tick": {
+  "status": "1 unsaved tick",
+  "saveVisible": true
+ },
+ "after_save": {},
+ "post_bytes": {
+  "crlf_lines": 123,
+  "lone_lf": 0
+ },
+ "DONE_CRL": true
+}

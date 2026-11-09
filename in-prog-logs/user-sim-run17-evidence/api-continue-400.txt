@@ -1,0 +1,4 @@
+=== api-continue-400: POST /api/item/LOG-A-004/continue without expected_revision ===
+request body sent: {"ticks": [["T-demco", "open"]]} (ticks are [id, state] pairs)
+status 400:
+{"error":"expected_revision is required: the file_revision from GET item<ref>"}

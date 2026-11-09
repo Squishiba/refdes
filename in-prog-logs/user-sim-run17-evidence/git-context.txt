@@ -1,0 +1,16 @@
+=== git context ===
+86c0d043 docs: close three run-16 docs gaps (upgrading, cli-reference, navis) (#475)
+9f15af87 feat(serve): the preview task pane keeps unsaved ticks as a draft (W5b.4c-1b) (#463)
+merge-base with the base: 9f15af87484b7961343314cd36ecd11fea5ca4e5
+changelog.d fragments added/changed in 9f15af87..HEAD:
+changelog.d/continue-capture.changed.md
+changelog.d/continue-idless-tip.changed.md
+changelog.d/docs-run16-gaps.changed.md
+changelog.d/navis-idless-note.changed.md
+changelog.d/navis-polish.added.md
+changelog.d/navis-vscode-actions.added.md
+changelog.d/navis-vscode-panel.added.md
+changelog.d/serve-early-refusal-reset.fixed.md
+changelog.d/tick-save-model.added.md
+changelog.d/tick-save-polish.fixed.md
+changelog.d/tick-save-ui.added.md

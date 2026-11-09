@@ -1,0 +1,25 @@
+=== flow-a-capture-once: refdes thread LOG-A-004 (proj17ff2) + .refdes/history/events ===
+Thread: LOG-A-001 -> LOG-A-002 -> LOG-A-003 -> LOG-A-004 -> LOG-A-005 -> LOG-A-006 -> LOG-A-007 -> LOG-A-008 -> LOG-A-009 -> LOG-A-010 -> LOG-A-011 -> LOG-A-012 -> LOG-A-013  (one tip)
+Snapshot Captured: LOG-A-003 (followed by later entry)
+Snapshot Captured: LOG-A-004 (followed by later entry)
+Snapshot Captured: LOG-A-005 (followed by later entry)
+Snapshot Captured: LOG-A-006 (followed by later entry)
+Snapshot Captured: LOG-A-007 (followed by later entry)
+Snapshot Captured: LOG-A-008 (followed by later entry)
+Snapshot Captured: LOG-A-009 (followed by later entry)
+Snapshot Captured: LOG-A-010 (followed by later entry)
+Snapshot Captured: LOG-A-011 (followed by later entry)
+Snapshot Captured: LOG-A-012 (followed by later entry)
+
+Tip: LOG-A-013  2026-08-09  Buck selected; copper model outstanding.
+Verdict: accepted (LOG-A-013, 2026-08-09), 2 open tasks remaining below
+Tasks at tip:
+  1. [ ] T-thermal-model  Model worst-case copper temperature.  (open since LOG-A-013, 2026-08-09)
+  2. [x] T-ldo-choice  Pick the regulator topology.
+  3. [ ] T-demco  Order decoupling coupons.  (open since LOG-A-013, 2026-08-09)
+
+Derived (auto clears when fixed):
+  (none)
+events dir: 10 file(s); events naming "followed": 10
+followed events: 05de00af-fb14-50d2-be51-351c54cd178c.yaml, 16f010d2-fe3e-5739-b940-d89bbf0b4765.yaml, 2f08fce3-e1e7-5f59-a1ad-ecbd2ac10486.yaml, 3c2a7017-3750-56b2-86d7-2de3dd18d85d.yaml, 772f5890-b6f1-5bf8-b276-5a6208211ff5.yaml, a0c20865-eb86-51e9-aa1b-2650c4a08253.yaml, a6f671c2-84b6-5c69-bf90-91a62f0e5af7.yaml, ac2af54a-1480-5bd9-946f-603786631edd.yaml, cc611e96-8b67-5be1-813f-2ed233624ffc.yaml, f7f4e647-7758-515b-a2f2-1cfd9a4a189d.yaml
+predecessors in the thread (LOG-A-002 and LOG-A-003, each followed by a later entry): exactly one followed event per predecessor -> True

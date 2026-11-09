@@ -1,0 +1,358 @@
+{
+ "B1_open": {
+  "url": "/preview/log-a-004.html",
+  "hasCheckboxes": 3,
+  "panelTipKey": "mhdpx3wdms4",
+  "panelRevision": "39d6480c87396d77cc8083a8aeaef12e5723d830975ab35af2735e5eea91fd54",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "status": null,
+  "saveVisible": false,
+  "discVisible": false,
+  "msg": null,
+  "conflictText": null,
+  "conflictButtons": [],
+  "conflictTextarea": null,
+  "tabs": [],
+  "rows": [
+   {
+    "id": "T-thermal-model",
+    "state": "done",
+    "tickStates": "open",
+    "checked": true,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-ldo-choice",
+    "state": "done",
+    "tickStates": "open",
+    "checked": true,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-demco",
+    "state": "dropped",
+    "tickStates": "open",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   }
+  ],
+  "tip": "LOG-A-004 2026-08-09 \u2014 Buck selected; copper model outstanding."
+ },
+ "B2_ticked": {
+  "url": "/preview/log-a-004.html",
+  "hasCheckboxes": 3,
+  "panelTipKey": "mhdpx3wdms4",
+  "panelRevision": "39d6480c87396d77cc8083a8aeaef12e5723d830975ab35af2735e5eea91fd54",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "status": "1 unsaved tick",
+  "saveVisible": true,
+  "discVisible": true,
+  "msg": null,
+  "conflictText": null,
+  "conflictButtons": [],
+  "conflictTextarea": null,
+  "tabs": [],
+  "rows": [
+   {
+    "id": "T-thermal-model",
+    "state": "done",
+    "tickStates": "open",
+    "checked": true,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-ldo-choice",
+    "state": "done",
+    "tickStates": "open",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-demco",
+    "state": "dropped",
+    "tickStates": "open",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   }
+  ],
+  "tip": "LOG-A-004 2026-08-09 \u2014 Buck selected; copper model outstanding."
+ },
+ "B3_after_disk_change": {
+  "newRev": "6ff5f07d9d447754afa835b399f9b7b6fd676c9587c6f366ccc1a08411a11fe3",
+  "note": "page auto-reloaded"
+ },
+ "B4_draft_survives_reload": {
+  "url": "/preview/log-a-004.html",
+  "hasCheckboxes": 3,
+  "panelTipKey": "mhdpx3wdms4",
+  "panelRevision": "6ff5f07d9d447754afa835b399f9b7b6fd676c9587c6f366ccc1a08411a11fe3",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "status": "1 unsaved tick made against an older version - saving will ask to resolve",
+  "saveVisible": true,
+  "discVisible": true,
+  "msg": null,
+  "conflictText": null,
+  "conflictButtons": [],
+  "conflictTextarea": null,
+  "tabs": [],
+  "rows": [
+   {
+    "id": "T-thermal-model",
+    "state": "done",
+    "tickStates": "open",
+    "checked": true,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-ldo-choice",
+    "state": "done",
+    "tickStates": "open",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-demco",
+    "state": "open",
+    "tickStates": "done,dropped",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   }
+  ],
+  "tip": "LOG-A-004 2026-08-09 \u2014 Buck selected; copper model outstanding."
+ },
+ "B5_conflict_panel": {
+  "url": "/preview/log-a-004.html",
+  "hasCheckboxes": 3,
+  "panelTipKey": "mhdpx3wdms4",
+  "panelRevision": "6ff5f07d9d447754afa835b399f9b7b6fd676c9587c6f366ccc1a08411a11fe3",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "status": "1 unsaved tick made against an older version - saving will ask to resolve",
+  "saveVisible": true,
+  "discVisible": true,
+  "msg": null,
+  "conflictText": "conflict: items/board-a/log.yaml changed since this edit was planned (expected 39d6480c8739, found 6ff5f07d9d44)\n\nT-thermal-model: yours -, the file has done\n\nT-ldo-choice: yours open, the file has done\n\nT-demco: yours -, the file has open\n\nKeep mineKeep theirsCopy it out",
+  "conflictButtons": [
+   "Keep mine",
+   "Keep theirs",
+   "Copy it out"
+  ],
+  "conflictTextarea": null,
+  "tabs": [],
+  "rows": [
+   {
+    "id": "T-thermal-model",
+    "state": "done",
+    "tickStates": "open",
+    "checked": true,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-ldo-choice",
+    "state": "done",
+    "tickStates": "open",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-demco",
+    "state": "open",
+    "tickStates": "done,dropped",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   }
+  ],
+  "tip": "LOG-A-004 2026-08-09 \u2014 Buck selected; copper model outstanding."
+ },
+ "B6_after_keep_mine": {
+  "url": "/preview/log-a-004.html",
+  "hasCheckboxes": 3,
+  "panelTipKey": "mhdpx3wdms4",
+  "panelRevision": "6ff5f07d9d447754afa835b399f9b7b6fd676c9587c6f366ccc1a08411a11fe3",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "status": "1 unsaved tick",
+  "saveVisible": true,
+  "discVisible": true,
+  "msg": null,
+  "conflictText": null,
+  "conflictButtons": [],
+  "conflictTextarea": null,
+  "tabs": [],
+  "rows": [
+   {
+    "id": "T-thermal-model",
+    "state": "done",
+    "tickStates": "open",
+    "checked": true,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-ldo-choice",
+    "state": "done",
+    "tickStates": "open",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-demco",
+    "state": "open",
+    "tickStates": "done,dropped",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   }
+  ],
+  "tip": "LOG-A-004 2026-08-09 \u2014 Buck selected; copper model outstanding.",
+  "fileHas005": false,
+  "revChangedToRev1": true
+ },
+ "B8_saved": {
+  "tipLine": "LOG-A-005 2026-08-09 \u2014 Buck selected; copper model outstanding.",
+  "file005": "- id: LOG-A-005\n    key: 3ga05jha4f9\n    author: J. Bin\n    date: 2026-08-09\n    summary: Buck selected; copper model outstanding.\n    status: accepted\n    tasks: [{id: T-thermal-model, text: Model worst-case copper temperature., state: done}, {id: T-ldo-choice, text: Pick the regulator topology., state: open}, {id: T-demco, text: Order decoupling coupons., state: open}]\n    follows: [LOG-A-004@mhdpx3wdms4]"
+ },
+ "B9a_open005": {
+  "url": "/preview/log-a-005.html",
+  "hasCheckboxes": 3,
+  "panelTipKey": "3ga05jha4f9",
+  "panelRevision": "e4ee80944dc48f0e7b8a25717e82e4b94001b5632d5a4788e9ada7f52b8e119c",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "status": null,
+  "saveVisible": false,
+  "discVisible": false,
+  "msg": null,
+  "conflictText": null,
+  "conflictButtons": [],
+  "conflictTextarea": null,
+  "tabs": [],
+  "rows": [
+   {
+    "id": "T-thermal-model",
+    "state": "done",
+    "tickStates": "open",
+    "checked": true,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-ldo-choice",
+    "state": "open",
+    "tickStates": "done,dropped",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-demco",
+    "state": "open",
+    "tickStates": "done,dropped",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   }
+  ],
+  "tip": "LOG-A-005 2026-08-09 \u2014 Buck selected; copper model outstanding."
+ },
+ "B9b_conflict2": {
+  "url": "/preview/log-a-005.html",
+  "hasCheckboxes": 3,
+  "panelTipKey": "3ga05jha4f9",
+  "panelRevision": "97fd1b28bd8090f3d77e322280aa389ea01e627703e8a77a68b96ec45425d99f",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "status": "1 unsaved tick made against an older version - saving will ask to resolve",
+  "saveVisible": true,
+  "discVisible": true,
+  "msg": null,
+  "conflictText": "conflict: items/board-a/log.yaml changed since this edit was planned (expected e4ee80944dc4, found 97fd1b28bd80)\n\nT-thermal-model: yours open, the file has open\n\nT-ldo-choice: yours -, the file has open\n\nT-demco: yours -, the file has open\n\nKeep mineKeep theirsCopy it out",
+  "conflictButtons": [
+   "Keep mine",
+   "Keep theirs",
+   "Copy it out"
+  ],
+  "conflictTextarea": null,
+  "tabs": [],
+  "rows": [
+   {
+    "id": "T-thermal-model",
+    "state": "open",
+    "tickStates": "done,dropped",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-ldo-choice",
+    "state": "open",
+    "tickStates": "done,dropped",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-demco",
+    "state": "open",
+    "tickStates": "done,dropped",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   }
+  ],
+  "tip": "LOG-A-005 2026-08-09 \u2014 Buck selected; copper model outstanding."
+ },
+ "B9c_after_keep_theirs": {
+  "url": "/preview/log-a-005.html",
+  "hasCheckboxes": 3,
+  "panelTipKey": "3ga05jha4f9",
+  "panelRevision": "97fd1b28bd8090f3d77e322280aa389ea01e627703e8a77a68b96ec45425d99f",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "status": null,
+  "saveVisible": false,
+  "discVisible": false,
+  "msg": null,
+  "conflictText": null,
+  "conflictButtons": [],
+  "conflictTextarea": null,
+  "tabs": [],
+  "rows": [
+   {
+    "id": "T-thermal-model",
+    "state": "open",
+    "tickStates": "done,dropped",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-ldo-choice",
+    "state": "open",
+    "tickStates": "done,dropped",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   },
+   {
+    "id": "T-demco",
+    "state": "open",
+    "tickStates": "done,dropped",
+    "checked": false,
+    "disabled": false,
+    "title": ""
+   }
+  ],
+  "tip": "LOG-A-005 2026-08-09 \u2014 Buck selected; copper model outstanding.",
+  "hasSave": false,
+  "fileHas006": false
+ }
+}

@@ -1,0 +1,42 @@
+# Full transcript: id-less, keyless markers (project .scratch/proj17navi2: two items,
+# ids stripped, <!--navi: text--> marker keyless).
+=== PRE-id check (keyless, id-less markers):
+ERROR   items/board-b/markers.yaml:6 — item has no id — run 'refdes id' to allocate one
+ERROR   items/board-b/markers.yaml:11 — item has no id — run 'refdes id' to allocate one
+(minted 2 key(s) while loading)
+0 items, 2 errors, 0 warnings
+=== PRE-id navis ls:
+note: 2 items have no id yet and were not scanned -- run 'refdes id' to allocate them
+no Navis: no `<!--navi: text-->` marker in any item body
+rc=0
+=== PRE-id navis show 1:
+no Navi '1': `refdes navis all` numbers them 1..0; a selector is a number, a full key, or a key prefix
+rc=2
+=== refdes id:
+allocated REQ-MECH-003  (items/board-b/markers.yaml:6) Bracket mounts to the chassis rail.
+allocated REQ-MECH-004  (items/board-b/markers.yaml:11) Recheck decoupling near U14 after layout spin.
+allocated 2 id(s)
+=== POST-id navis show 1 (marker keyless):
+navis: minted key ggwewv (ggwewv1xttm) into REQ-MECH-004 (items/board-b/markers.yaml)
+(minted 1 navi key(s) while loading)
+Navi: Recheck decoupling near U14.
+  key: ggwewv1xttm
+  source: REQ-MECH-004 (items/board-b/markers.yaml:12)
+rc=0
+=== next writable command (navis archive 1) mints the key:
+navis archive: archived Navi ggwewv (ggwewv1xttm): 'Recheck decoupling near U14.'  REQ-MECH-004 (items/board-b/markers.yaml:12)
+rc=0
+=== markers.yaml key line:
+7:    key: arcekph5zv2
+13:    key: j58pvkv98af
+=== POST-id check:
+2 items, 0 errors, 0 warnings
+=== POST-id navis show 99:
+no Navi '99': `refdes navis all` numbers them 1..1; a selector is a number, a full key, or a key prefix
+rc=2
+=== POST-id navis ls (after archive):
+0 Navis:
+rc=0
+=== navis restore 1:
+navis restore: restored Navi ggwewv (ggwewv1xttm) -- the marker at items/board-b/markers.yaml:12 is active again, showing its current text
+rc=0

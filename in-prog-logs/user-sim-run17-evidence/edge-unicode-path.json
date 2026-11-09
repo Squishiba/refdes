@@ -1,0 +1,38 @@
+{
+ "what": "non-ASCII project path: project dir renamed to .scratch/proj17ünïcodé (real non-ASCII chars in the path), served on 8765; pane render, tick, Save applied on that path",
+ "project_dir": ".scratch/proj17ünïcodé",
+ "pane": {
+  "tipKey": "tqnks9s5f38",
+  "checkboxes": 3,
+  "rows": [
+   [
+    "T-thermal-model",
+    "done",
+    true
+   ],
+   [
+    "T-ldo-choice",
+    "open",
+    false
+   ],
+   [
+    "T-demco",
+    "open",
+    false
+   ]
+  ]
+ },
+ "after_tick": {
+  "status": "1 unsaved tick",
+  "saveInDom": true,
+  "saveVisible": true,
+  "checked": []
+ },
+ "after_save": {
+  "url": "/preview/log-a-004.html",
+  "h1": "LOG-A-004"
+ },
+ "log_yaml_entries_now": 11,
+ "last_entry_tail": "id: LOG-A-011 ... follows: [LOG-A-010@tqnks9s5f38] (continuation appended by the Save applied in this probe; the ticked task state in it differs from the tip)",
+ "check_now": "20 items, 0 errors, 0 warnings"
+}

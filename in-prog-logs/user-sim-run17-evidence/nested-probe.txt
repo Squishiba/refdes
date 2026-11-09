@@ -1,0 +1,12 @@
+=== nested probe (finding 2): a dir carrying only refdes.yaml (no marker of its own), inside the repo checkout:
+$ ls .scratch/proj17nested
+refdes.yaml
+$ cd .scratch/proj17nested && refdes --no-write check   (today's CLI)
+ERROR   items/decisions/dec-pwr-001-regulator-topology.md:2 [DEC-PWR-001] — P_dens violates BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
+WARNING <project> — 1 item(s) with no coverage — see coverage.html
+WARNING <project> — 3 requirement(s) satisfied but not verified — see coverage.html
+20 items, 1 errors, 2 warnings
+rc=1
+same footer as the repo (ancestor) project's own check -- the dir loaded the ANCESTOR project; the doc's legacy error did not fire:
+20 items, 1 errors, 2 warnings
+=== standalone (no ancestor project): fires the legacy error -- covered by tests/test_config_split.py (see code-quote.txt), not runnable inside this checkout (any dir here walks up to the repo project)

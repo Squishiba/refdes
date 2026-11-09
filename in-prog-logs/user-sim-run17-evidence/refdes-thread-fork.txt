@@ -1,0 +1,13 @@
+=== refdes thread LOG-F-001 (proj17ff2) ===
+Thread: LOG-F-001  (forked: tips LOG-F-002, LOG-F-003)
+
+Tip: LOG-F-002  Star ground on the analog island.
+Tasks at LOG-F-002:
+  1. [ ] T-ground-sim  Simulate the star ground.  (open since LOG-F-002)
+
+Tip: LOG-F-003  Single-point ground at the connector.
+Tasks at LOG-F-003:
+  1. [ ] T-splice-count  Count the splice points.  (open since LOG-F-003)
+
+Derived (auto clears when fixed):
+  (none)

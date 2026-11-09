@@ -1,0 +1,43 @@
+=== code quotes (finding 2) ===
+54:# Retired. A project still carrying it gets LEGACY_CONFIG_ERROR, never a
+90:LEGACY_CONFIG_ERROR = (
+104:    return SchemaError(LEGACY_CONFIG_ERROR)
+A project that still carries `refdes.yaml` no longer loads:
+
+```
+configuration error: refdes.yaml is retired. Split it into the two files
+it became: move every project setting (site:, id:, boards:, workspaces:,
+units:, on_change:, standard:, equations:, imports:, and the process
+122:    assert "refdes.yaml is retired" in message
+135:    with pytest.raises(SchemaError, match="refdes.yaml is retired"):
+138:    with pytest.raises(SchemaError, match="refdes.yaml is retired"):
+103:def test_a_legacy_refdes_yaml_is_rejected_naming_both_replacements(tmp_path, monkeypatch):
+129:def test_a_legacy_refdes_yaml_beside_a_marker_is_also_rejected(tmp_path):
+4150:        print(f"configuration error: {exc}", file=sys.stderr)
+return args.func(args)
+    except SchemaError as exc:
+        print(f"configuration error: {exc}", file=sys.stderr)
+        return 2
+    except LockUnavailable as exc:
+=== supplementary code quotes (run 17 fix round) ===
+123:    tipKey: panelEl ? attr(panelEl, 'data-refdes-tip-key') : '',
+139:    tipKey: attr(panelEl, 'data-refdes-tip-key'),
+static modules: preview.js taskpane-ticks.js 
+_site/log-a-004.html: data-refdes-task strings: 0; <input elements: 0
+editors/vscode/navisActions.js:52:/** A locked session's reason: the server answers 403 `kind:"refused"`
+editors/vscode/navisActions.js:279: * hand-restore hint), and a locked session (`--no-write`
+=== supplementary code quotes (run 17 fix round) ===
+397:        raising WinError 10053/10054 in place of the 4xx (the recurring
+123:    tipKey: panelEl ? attr(panelEl, 'data-refdes-tip-key') : '',
+140:    revision: attr(panelEl, 'data-refdes-revision'),
+static modules present: navis-preview.js preview.js taskpane-ticks.js 
+probe _site/log-a-004.html (serve-cli-battery 9): taskpane nodes: 16; data-refdes-task strings: 1 (the pane script template); rendered <input>: 0
+108:  /** The shipped locked reason (it names the server's own launch flag),
+110:  function lockedReason() {
+docs/upgrading.md: 134:baselines carried forward: pre-upgrade-baseline
+=== more supplementary quotes (fix round) ===
+src/refdes/schema.py:90:LEGACY_CONFIG_ERROR = (
+src/refdes/cli.py:4150:        print(f"configuration error: {exc}", file=sys.stderr)
+user-sim-run17
+events dir (capture-once writes): .scratch/proj17ff2/.refdes/history/events
+src/refdes/standards/hardware/v3/base.yaml:289:    # markers. Every other type keeps the engine default, `sealing: build`.

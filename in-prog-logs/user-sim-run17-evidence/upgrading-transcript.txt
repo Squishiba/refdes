@@ -1,0 +1,79 @@
+### step 0: 0.5.0 init + v2-era items + build (0.5.0)
+wrote refdes.yaml
+standard: hardware@2
+3 items, 0 errors, 0 warnings
+site written to <worktree>/.scratch/proj17upg3/_site
+
+### step 1 (nested note): refdes.yaml alone under an ancestor project loads the ancestor (see report finding); standalone fires LEGACY_CONFIG_ERROR (tests/test_config_split.py). Splitting per the doc:
+
+### step 2: current check (renames surface)
+ERROR   items/log.yaml:5 [LOG-PWR-001] — item-level history: was renamed to on_change: -- rename this key in the source file. Its override is used in this build so the change policy is not silently lost.
+ERROR   items/dec.md:12 [DEC-PWR-001] — calc 'P_diss': the 'name : unit = expression' spelling was retired -- write `P_diss = 3.3 * 2 * 0.08 | dimensionless`; run 'refdes calc-rewrite' to fix a whole project
+(minted 3 key(s) and rewrote 1 reference(s) while loading)
+WARNING <project> — .refdes/schema.json was older than refdes-project.yaml -- refreshed. If your editor's completion looked stale, it should catch up now.
+3 items, 2 errors, 1 warnings
+check rc=1
+
+### step 4 attempt (build red from history: error) -> calc-rewrite refuses:
+refused:
+  project has existing build errors -- fix those first, so a calc that changes meaning under this rewrite can't hide behind an already-broken build
+  ERROR   items/log.yaml:5 [LOG-PWR-001] — item-level history: was renamed to on_change: -- rename this key in the source file. Its override is used in this build so the change policy is not silently lost.
+rc=1
+note: the refusal block above lists the history: row; the second build error (the retired calc spelling) is in the step 2 block. The refusal footer is the build, not a full error list.
+
+### step 2 fix: rename history: -> on_change: ; then calc-rewrite:
+rewrote 1 calc line(s) in 1 file(s):
+  items/dec.md:12  P_diss : dimensionless = 3.3 * 2 * 0.08 -> P_diss = 3.3 * 2 * 0.08 | dimensionless
+rc=0
+3 items, 0 errors, 0 warnings
+
+### step 5: standard upgrade --to 3 (refuses on mode log; doc row names it):
+v2 -> v3:
+refused:
+  rewritten project has parse errors -- rolled back:
+  ERROR   items/log.yaml:5 [LOG-PWR-001] — on_change: mode 'log' was renamed to 'timeline' (vocabulary review P9: the mode names the future field-level timeline, and `log` collided with the `log` item type) -- rename this value in the source file. It is read as 'timeline' in this build so the change policy is not silently lost.
+rc=1
+v2 -> v3:
+changed 3 file(s):
+  items/dec.md
+  items/log.yaml
+  items/reqs.yaml
+
+upgraded to v3.
+rc=0
+
+### step 6: check -> seal follow-up warning; run the command it names:
+WARNING <project> — .refdes/schema.json was older than refdes-project.yaml -- refreshed. If your editor's completion looked stale, it should catch up now.
+WARNING items/log.yaml:5 [LOG-PWR-001] — LOG-PWR-001: edited while uncaptured -- the current content no longer matches the hash 5d1f8457ee45e9e8 recorded in .refdes/log-seal.yaml, and nothing in .refdes/history/ holds a snapshot of this entry, so the edit leaves no trace. Run `refdes history capture LOG-PWR-001` to record the current text; an edit after that is reported as edited after captured.
+3 items, 0 errors, 2 warnings
+captured LOG-PWR-001: manual capture
+rc=0
+3 items, 0 errors, 0 warnings
+
+### step 7: stamp + audit:
+  .refdes/baselines/post-upgrade.yaml
+Since last revision (post-upgrade, 2026-11-09T13:06:24Z):
+  changed   0
+  added     0
+  removed   0
+
+### post-upgrade state (copy proj17upg4 of the upgraded project; the stamp lands in the copy):
+$ grep -n "standard:" -A2 refdes-project.yaml
+standard:
+  base: hardware
+  version: 3
+$ refdes --no-write check
+3 items, 0 errors, 0 warnings
+$ refdes ls
+DEC-PWR-001  log          Regulator topology
+LOG-PWR-001  log          First rail note.
+REQ-PWR-001  requirement  The rail must supply 3V3 at 2 A.
+$ refdes revision post-upgrade
+3 items, 0 errors, 0 warnings
+
+revision 'post-upgrade' stamped: 3 items.
+  .refdes/baselines/post-upgrade.yaml
+rc=0
+$ refdes standard upgrade --to 3
+configuration error: project is already at hardware@3, not below the requested --to 3
+rc=2

@@ -1,0 +1,203 @@
+{
+ "browser": "firefox",
+ "A1_initial_pane": {
+  "tipKey": "ebv1f8d60fv",
+  "revision": "302102d5325c1174648a9cdecc2c42b949d24f99d21dc76ca2b65454132edf19",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "saveVisible": false,
+  "saveText": "Save",
+  "discVisible": false,
+  "pending": null,
+  "msg": null,
+  "conflict": null,
+  "rows": [
+   {
+    "id": "",
+    "state": "",
+    "tick": false,
+    "tickattr": ""
+   },
+   {
+    "id": "",
+    "state": "",
+    "tick": true,
+    "tickattr": ""
+   },
+   {
+    "id": "",
+    "state": "",
+    "tick": false,
+    "tickattr": ""
+   }
+  ],
+  "viewing": "LOG-A-003 2026-08-09 — Buck selected; copper model outstanding."
+ },
+ "A2_after_ticks": {
+  "tipKey": "ebv1f8d60fv",
+  "revision": "302102d5325c1174648a9cdecc2c42b949d24f99d21dc76ca2b65454132edf19",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "saveVisible": true,
+  "saveText": "Save",
+  "discVisible": true,
+  "pending": " T-thermal-model Model worst-case copper temperature. (open since LOG-A-001, 2026-08-01)",
+  "msg": null,
+  "conflict": null,
+  "rows": [
+   {
+    "id": "",
+    "state": "",
+    "tick": true,
+    "tickattr": ""
+   },
+   {
+    "id": "",
+    "state": "",
+    "tick": false,
+    "tickattr": ""
+   },
+   {
+    "id": "",
+    "state": "",
+    "tick": false,
+    "tickattr": ""
+   }
+  ],
+  "viewing": "LOG-A-003 2026-08-09 — Buck selected; copper model outstanding."
+ },
+ "A3_pane_closed_after_reload": true,
+ "A4_draft_after_reload": {
+  "tipKey": "ebv1f8d60fv",
+  "revision": "302102d5325c1174648a9cdecc2c42b949d24f99d21dc76ca2b65454132edf19",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "saveVisible": true,
+  "saveText": "Save",
+  "discVisible": true,
+  "pending": " T-thermal-model Model worst-case copper temperature. (open since LOG-A-001, 2026-08-01)",
+  "msg": null,
+  "conflict": null,
+  "rows": [
+   {
+    "id": "",
+    "state": "",
+    "tick": true,
+    "tickattr": ""
+   },
+   {
+    "id": "",
+    "state": "",
+    "tick": false,
+    "tickattr": ""
+   },
+   {
+    "id": "",
+    "state": "",
+    "tick": false,
+    "tickattr": ""
+   }
+  ],
+  "viewing": "LOG-A-003 2026-08-09 — Buck selected; copper model outstanding."
+ },
+ "A5_leave_prompt_fired": true,
+ "A6_after_discard": {
+  "tipKey": "ebv1f8d60fv",
+  "revision": "302102d5325c1174648a9cdecc2c42b949d24f99d21dc76ca2b65454132edf19",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "saveVisible": true,
+  "saveText": "Save",
+  "discVisible": false,
+  "pending": null,
+  "msg": null,
+  "conflict": null,
+  "rows": [
+   {
+    "id": "",
+    "state": "",
+    "tick": false,
+    "tickattr": ""
+   },
+   {
+    "id": "",
+    "state": "",
+    "tick": true,
+    "tickattr": ""
+   },
+   {
+    "id": "",
+    "state": "",
+    "tick": false,
+    "tickattr": ""
+   }
+  ],
+  "viewing": "LOG-A-003 2026-08-09 — Buck selected; copper model outstanding."
+ },
+ "A7_before_save": {
+  "tipKey": "ebv1f8d60fv",
+  "revision": "302102d5325c1174648a9cdecc2c42b949d24f99d21dc76ca2b65454132edf19",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "saveVisible": true,
+  "saveText": "Save",
+  "discVisible": true,
+  "pending": " T-thermal-model Model worst-case copper temperature. (open since LOG-A-001, 2026-08-01)",
+  "msg": null,
+  "conflict": null,
+  "rows": [
+   {
+    "id": "",
+    "state": "",
+    "tick": true,
+    "tickattr": ""
+   },
+   {
+    "id": "",
+    "state": "",
+    "tick": true,
+    "tickattr": ""
+   },
+   {
+    "id": "",
+    "state": "",
+    "tick": false,
+    "tickattr": ""
+   }
+  ],
+  "viewing": "LOG-A-003 2026-08-09 — Buck selected; copper model outstanding."
+ },
+ "A8_after_save": {
+  "url": "http://127.0.0.1:8762/preview/log-a-001.html",
+  "h1": "LOG-A-001",
+  "bodySnippet": "Buck selected; copper model outstanding."
+ },
+ "A9_pane_after_save": {
+  "tipKey": "y8b0nvr30bf",
+  "revision": "266189643ddd6ca26beaa99fa1d3ade3b22d5d3541c42f28d4b185d01650cab6",
+  "note": "Preview: ticking a row changes this page only -- nothing is saved.",
+  "saveVisible": false,
+  "saveText": "Save",
+  "discVisible": false,
+  "pending": null,
+  "msg": null,
+  "conflict": null,
+  "rows": [
+   {
+    "id": "",
+    "state": "",
+    "tick": true,
+    "tickattr": ""
+   },
+   {
+    "id": "",
+    "state": "",
+    "tick": true,
+    "tickattr": ""
+   },
+   {
+    "id": "",
+    "state": "",
+    "tick": false,
+    "tickattr": ""
+   }
+  ],
+  "viewing": "LOG-A-004 2026-08-09 — Buck selected; copper model outstanding."
+ },
+ "DONE_A": true
+}

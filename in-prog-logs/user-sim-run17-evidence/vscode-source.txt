@@ -1,0 +1,20 @@
+=== vscode source quotes ===
+40:      { "command": "refdes.navisArchive", "title": "Refdes: Archive Navi", "icon": "$(archive)" },
+41:      { "command": "refdes.navisRestore", "title": "Refdes: Restore Navi", "icon": "$(restore)" },
+42:      { "command": "refdes.navisMint", "title": "Refdes: Mint keys", "icon": "$(key)" },
+43:      { "command": "refdes.refreshNavis", "title": "Refdes: Refresh Navis" },
+44:      { "command": "refdes.navisOpenInEditor", "title": "Refdes: Open Navi in editor", "icon": "$(globe)" }
+53:          "command": "refdes.navisArchive",
+57:          "command": "refdes.navisRestore",
+61:          "command": "refdes.navisMint",
+65:          "command": "refdes.navisOpenInEditor",
+71:          "command": "refdes.navisArchive",
+76:          "command": "refdes.navisRestore",
+81:          "command": "refdes.navisMint",
+5:  "version": "0.2.0",
+editors/vscode/navisTree.js:58:  if (isKeyless(row)) return "No key yet -- use Mint keys";
+editors/vscode/navisTree.js:165:   * S6.3: the `Mint keys (N)` row (plan §4's pill shape, the preview
+editors/vscode/extension.js:599:    // S6.3: the `Mint keys (N)` pill row on top, when there is something to
+editors/vscode/navisCommands.js:44:  "Mint keys writes a key into every keyless Navi marker in this project. " +
+editors/vscode/navisCommands.js:45:  "Mint keys now?";
+editors/vscode/navisCommands.js:46:const MINT_BUTTON = "Mint keys";

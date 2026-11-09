@@ -1,0 +1,14 @@
+{
+ "what": "no-write pane: opens with the viewing line, zero tick checkboxes, no Save; page loads preview.js only (no tick module). Server 8763 (--no-write, project .scratch/proj17c), page log-a-004.html",
+ "W1_no_write_pane": {
+  "noteText": "viewing LOG-A-004 · tasks as of tip LOG-A-011",
+  "checkboxes": 0,
+  "saveInDom": false,
+  "scripts": [
+   "/edit/static/preview.js",
+   "assets/app.js",
+   "assets/taskpane.js"
+  ]
+ },
+ "DONE_W": true
+}
