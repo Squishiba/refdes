@@ -36,13 +36,53 @@
       { "command": "refdes.toggleCalcResults", "title": "Refdes: Toggle inline calc results" },
       { "command": "refdes.attachServer", "title": "Refdes: Attach to running server" },
       { "command": "refdes.openInEditor", "title": "Refdes: Open in editor" },
-      { "command": "refdes.showServerLog", "title": "Refdes: Show server log" }
+      { "command": "refdes.showServerLog", "title": "Refdes: Show server log" },
+      { "command": "refdes.navisArchive", "title": "Refdes: Archive Navi", "icon": "$(archive)" },
+      { "command": "refdes.navisRestore", "title": "Refdes: Restore Navi", "icon": "$(restore)" },
+      { "command": "refdes.navisMint", "title": "Refdes: Mint keys", "icon": "$(key)" }
     ],
     "menus": {
       "commandPalette": [
         {
           "command": "refdes.openInEditor",
           "when": "false"
+        },
+        {
+          "command": "refdes.navisArchive",
+          "when": "false"
+        },
+        {
+          "command": "refdes.navisRestore",
+          "when": "false"
+        },
+        {
+          "command": "refdes.navisMint",
+          "when": "refdes.active"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "refdes.navisArchive",
+          "when": "view == refdes.navisTree && viewItem =~ /(^| )refdesNavi( |$)/ && !(viewItem =~ /refdesNaviArchived/) && !(viewItem =~ /refdesNaviKeyless/)",
+          "group": "1_navisWrite@1"
+        },
+        {
+          "command": "refdes.navisRestore",
+          "when": "view == refdes.navisTree && (viewItem =~ /refdesNaviArchived/) && !(viewItem =~ /refdesNaviKeyless/)",
+          "group": "1_navisWrite@2"
+        },
+        {
+          "command": "refdes.navisMint",
+          "when": "view == refdes.navisTree && (viewItem =~ /refdesNaviKeyless/)",
+          "group": "2_navisMint"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "refdes.navisMint",
+          "when": "view == refdes.navisTree",
+          "group": "navigation",
+          "icon": "$(key)"
         }
       ],
       "editor/title": [
