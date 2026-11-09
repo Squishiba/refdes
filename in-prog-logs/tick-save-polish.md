@@ -56,7 +56,9 @@ Related: test_task_pane_ticks.py + test_tick_save.py +
 test_serve_static.py + test_crossplatform_lint.py = 180 passed.
 `ruff check` on the touched test file: clean (UP032 on my `.format` calls
 fixed by converting to f-strings, inner quotes kept distinct for the 3.11
-floor). Full suite once before push: see below.
+floor). Full suite once before push (ubuntu, `-n 4 --dist worksteal`):
+6415 passed, 2 skipped, exit 0. CI runs ubuntu AND windows; green awaited
+on the PR.
 
 ## Notes
 
