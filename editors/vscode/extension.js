@@ -200,6 +200,9 @@ function updateStatusBar(data) {
     `${data.items.length} items · ${errors} errors · ${warnings} warnings\n` +
     `${open} not yet verified`;
   statusBar.show();
+  // The repaint above is the eraser of the read-only line (S6.2b-2's
+  // deferred item): re-apply the lock right after it, while the lock is held.
+  applyNavisLockStatus();
 }
 
 function publishDiagnostics(root, data) {
@@ -593,7 +596,14 @@ const navisTreeProvider = {
     if (element) return navisTree.childrenOf(element, navisPayload || EMPTY_NAVIS);
     if (navisPlaceholderState) return [navisTree.placeholderFor(navisPlaceholderState)];
     if (!navisPayload) return [navisTree.placeholderFor("no-server")];
-    return navisTree.childrenFor(navisPayload, navisRoot);
+    // S6.3: the `Mint keys (N)` pill row on top, when there is something to
+    // mint and the session is writable (navisTree.mintRow says both by
+    // returning null). childrenFor stays the shipped row list untouched.
+    const items = navisTree.childrenFor(navisPayload, navisRoot);
+    const mint = navisTree.mintRow(navisPayload, {
+      writesLocked: navisWriteLock ? navisWriteLock.locked() : false,
+    });
+    return mint ? [mint, ...items] : items;
   },
 };
 
@@ -603,14 +613,30 @@ function fireNavisChanged() {
 
 /**
  * The status-bar face of the write lock (plan §4's 403 row: the status bar
- * names `--no-write`). The lock text sits on the index item until the next
- * index refresh rebuilds its text -- the lock itself outlives the repaint,
- * and it lives in navisWriteLock, not here.
+ * names `--no-write`). The lock text sits on the shared index item, and the
+ * index repaint re-applies it while the lock is held (applyNavisLockStatus);
+ * the lock itself lives in navisWriteLock, not here.
  */
 function setNavisWriteStatus(text) {
   if (!statusBar || !text) return;
   statusBar.text = "$(lock) Refdes: read-only";
   statusBar.tooltip = text;
+  statusBar.show();
+}
+
+/**
+ * S6.3 (the S6.2b-2 review's deferred item): the read-only line survives the
+ * index repaint. `updateStatusBar` rebuilds the shared item's text on every
+ * index refresh, so the lock -- when the session holds one -- is re-applied
+ * right after that repaint. The lock in `navisWriteLock` is the single source
+ * of truth, not a remembered string: once it is reset (a new serve / an
+ * attach), this paints nothing and the index line stands. Chosen over a
+ * dedicated third status item (plan §2's inventory counts two): a permanent
+ * piece of chrome for a transient state is the larger change.
+ */
+function applyNavisLockStatus() {
+  if (!statusBar || !navisWriteLock || !navisWriteLock.locked()) return;
+  statusBar.text = "$(lock) Refdes: read-only";
   statusBar.show();
 }
 
@@ -1139,6 +1165,10 @@ function activate(context) {
     lock: navisWriteLock,
     setStatus: setNavisWriteStatus,
     log: logServe,
+    // S6.3 "Open in editor": the deep link is the live client's own (V0),
+    // and this is the only place the external browser is reached from.
+    openExternal: (uri) => vscode.env.openExternal(vscode.Uri.parse(uri)),
+    deepLink: (key) => (serve && serve.ready ? serve.deepLink(key) : null),
   });
 
   vscode.commands.executeCommand("setContext", "refdes.active", true);
@@ -1170,6 +1200,18 @@ function activate(context) {
     vscode.commands.registerCommand("refdes.navisArchive", navisCommands.archive),
     vscode.commands.registerCommand("refdes.navisRestore", navisCommands.restore),
     vscode.commands.registerCommand("refdes.navisMint", navisCommands.mint),
+    // S6.3: the manual refresh is the EXISTING path with boot=true semantics
+    // (lazy boot, silent on success, placeholder with no server) -- not a
+    // second implementation; and the row's secondary open is the pure
+    // handler, wired to nothing but its injected deps.
+    vscode.commands.registerCommand(
+      "refdes.refreshNavis",
+      () => refreshNavisTree(true)
+    ),
+    vscode.commands.registerCommand(
+      "refdes.navisOpenInEditor",
+      navisCommands.openInEditor
+    ),
     vscode.languages.registerHoverProvider(selector, hoverProvider),
     vscode.languages.registerCodeLensProvider(selector, codeLensProvider),
     vscode.languages.registerDefinitionProvider(selector, definitionProvider),

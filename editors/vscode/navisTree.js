@@ -24,6 +24,7 @@
 "use strict";
 
 const path = require("path");
+const navisActions = require("./navisActions");
 
 /**
  * Tree labels truncate for display at this many characters (plan §6: the
@@ -160,6 +161,27 @@ function createNavisTree(vscode) {
     return group.rows.map((row) => itemForRow(row, group.root));
   }
 
+  /**
+   * S6.3: the `Mint keys (N)` row (plan §4's pill shape, the preview
+   * panel's) that the wiring prepends at the top of the tree. Its label and
+   * tooltip are `navisActions.mintAvailable`'s own composed strings, so the
+   * count sentence and the menu command can never drift apart -- and they
+   * name only the COUNT, never row text (§6). null when there is nothing to
+   * mint (count 0) and when the session is locked, whose mintAvailable is
+   * disabled. The command carries NO arguments: mint is project-wide. Its
+   * contextValue is the single word `refdesNaviMint`, deliberately distinct
+   * from the row words so no `view/item/context` menu attaches to it.
+   */
+  function mintRow(payload, state) {
+    const availability = navisActions.mintAvailable(payload, state);
+    if (!availability.enabled) return null;
+    const item = new vscode.TreeItem(availability.label);
+    item.tooltip = availability.tooltip;
+    item.contextValue = "refdesNaviMint";
+    item.command = { command: "refdes.navisMint" };
+    return item;
+  }
+
   /** The four states the tree fails loudly with (plan §3/§5, checklist 6,
    * ratified Q7), each a plain-string leaf item. */
   function placeholderFor(state) {
@@ -175,6 +197,7 @@ function createNavisTree(vscode) {
   return {
     itemForRow,
     childrenFor,
+    mintRow,
     childrenOf,
     placeholderFor,
     badgeFor: navisBadge,
