@@ -62,7 +62,6 @@ function attr(node, name) {
   return node.getAttribute(name) || '';
 }
 
-const panels = [];
 const tabs = [];
 
 function refreshTabs() {
@@ -76,7 +75,11 @@ function refreshTabs() {
 
 function refreshPanel(entry) {
   const pendingTicks = entry.canDraft ? drafts.pendingTicks(entry.tipKey) : [];
-  const applied = applyDraft(entry.model.rows, pendingTicks);
+  // applyDraft reads the DESCRIPTOR rows (state + checked + targets), never
+  // the panelFromRows output: the model's rows carry no state and no
+  // checked, and painting its answer from them un-checks every row the
+  // file says is done (real-browser pass, 2026-11-09).
+  const applied = applyDraft(entry.rows, pendingTicks);
   applied.rows.forEach((row, at) => {
     const box = entry.boxes[at];
     box.checked = row.checked;
@@ -144,13 +147,14 @@ for (const panelEl of document.querySelectorAll('.refdes-taskpane-panel')) {
   discard.className = 'refdes-taskpane-discard';
   discard.textContent = 'Discard';
   discard.hidden = true;
-  panelEl.appendChild(status);
-  panelEl.appendChild(discard);
+  panelEl.insertBefore(status, panelEl.firstChild);
+  panelEl.insertBefore(discard, status.nextSibling);
   const entry = {
     tipKey: attr(panelEl, 'data-refdes-tip-key'),
     revision: attr(panelEl, 'data-refdes-revision'),
     canDraft: model.canDraft,
     model,
+    rows: rawRows,
     boxes,
     status,
     discard,
@@ -182,7 +186,6 @@ for (const panelEl of document.querySelectorAll('.refdes-taskpane-panel')) {
     });
     refreshPanel(entry);
   });
-  panels.push(entry);
   refreshPanel(entry); // restore: a draft stored by this tab takes over the rows
 }
 

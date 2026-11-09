@@ -170,9 +170,9 @@
 }
 
 /* W5b.4c-1b (plan §6 Q8): the draft's own chrome -- a label on a row whose
-   tick is pending, the header count line, and the Discard release. Same
-   marked block as the tick row: the build strips it, the response injects
-   it. */
+   tick is pending, the unsaved-count line at the top of its panel, and the
+   Discard release. Same marked block as the tick row: the build strips it,
+   the response injects it. */
 .refdes-taskpane-tick-pending {
   font-weight: var(--weight-semibold);
 }

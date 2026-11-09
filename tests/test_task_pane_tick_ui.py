@@ -68,6 +68,8 @@ Tests named (red/green against the pre-glue module):
   test_the_built_site_ships_none_of_the_glue                    green guard
   test_the_built_stylesheets_strip_the_whole_preview_block      green guard
   test_the_glue_stays_clean_of_network_tokens_markup_and_handlers green guard
+  test_the_glue_feeds_the_pure_modules_the_descriptor_rows            RED
+  test_the_glue_puts_the_indicator_at_the_panel_top                   RED
 """
 
 from __future__ import annotations
@@ -500,3 +502,46 @@ def test_the_glue_stays_clean_of_network_tokens_markup_and_handlers():
     assert not stack, f"unclosed {stack}"
     top = re.findall(r"^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)", code, re.MULTILINE)
     assert len(top) == len(set(top)), "duplicate top-level declaration"
+
+
+def test_the_glue_feeds_the_pure_modules_the_descriptor_rows():
+    """RED today (found in the real-browser pass, 2026-11-09): applyDraft's
+    `rows` argument is the DESCRIPTOR rows -- the {taskId, state, tickStates,
+    checked} shape the model documents -- NEVER the panelFromRows OUTPUT
+    (rows of {taskId, draftable, reason, targets}: no state, no checked, so
+    applyDraft answers every non-pending row with `checked: undefined` and
+    a glue that paints that un-checks every row the file says is done,
+    before a single click). Code-shape pins: the call sites name the
+    descriptor rows (rawRows, and the entry's rows copy of them) and none
+    names model.rows; wantedState and discardPlan are fed the descriptors
+    too. The real guard for behaviour is the Chromium/Firefox pass; these
+    pins keep the fix from drifting back."""
+    code = _glue_code()
+    assert not re.search(r"applyDraft\(\s*[A-Za-z_.]*model\.rows", code), (
+        "applyDraft must receive the descriptor rows, not panelFromRows' "
+        "output: the model's rows carry no state and no checked"
+    )
+    assert re.search(r"applyDraft\(\s*[A-Za-z_.]*rows\b", code), (
+        "applyDraft must be fed the rows (the descriptor list)"
+    )
+    assert re.search(r"discardPlan\(\s*rawRows\b", code), (
+        "discardPlan's checked states are the DESCRIPTOR rows (as rendered)"
+    )
+    assert re.search(r"wantedState\(\s*raw\b", code), (
+        "wantedState reads the descriptor row (state + checked + targets)"
+    )
+
+
+def test_the_glue_puts_the_indicator_at_the_panel_top():
+    """RED today: Q8 (ratified) puts the pending count in the pane's
+    HEADER, not its foot: the status node rides at the TOP of its panel
+    (before the task list, under the tip line) with the Discard button
+    right after it. Code-shape pins: the status and discard nodes are
+    INSERTED, never appended (append = last child = panel's foot), and the
+    discard button rides on the status's next sibling. The visual guard is
+    the browser pass, as always for in-page layout."""
+    code = _glue_code()
+    assert "appendChild(status)" not in code, "the indicator must not be appended at the panel's foot"
+    assert "appendChild(discard)" not in code, "the Discard button must ride with the indicator"
+    assert re.search(r"insertBefore\(\s*status\s*,", code)
+    assert re.search(r"insertBefore\(\s*discard\s*,\s*status\.nextSibling\s*\)", code)
