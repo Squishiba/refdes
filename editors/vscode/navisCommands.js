@@ -1,7 +1,9 @@
 /**
  * The Navis write commands (S6.2b of docs/design/navis-vscode-panel-plan.md):
  * the `refdes.navisArchive` / `refdes.navisRestore` / `refdes.navisMint`
- * handlers behind the Navis tree view's context menu and view title.
+ * handlers behind the Navis tree view's context menu and view title, plus
+ * S6.3's secondary `refdes.navisOpenInEditor` (the deep link to the browser
+ * form) and mint's keyed-file reload note in the log.
  *
  * Plain CommonJS on purpose, the same posture as navisTree.js and
  * serveClient.js: the editor host is INJECTED (`createNavisCommands(deps)`),
@@ -42,6 +44,14 @@ const MINT_CONFIRM =
   "Mint keys writes a key into every keyless Navi marker in this project. " +
   "Mint keys now?";
 const MINT_BUTTON = "Mint keys";
+
+/**
+ * S6.3 "Open in editor": a row with no key has no deep link to open, and
+ * nothing went wrong -- there is simply nothing to open -- so it is an
+ * INFORMATION naming the missing key, not a warning.
+ */
+const NO_KEY_OPEN =
+  "Refdes: this row has no key -- Mint keys first, then open it in the browser form.";
 
 /**
  * The row a handed-out tree item stands for. The item carries no row field,
@@ -85,6 +95,12 @@ function rowForItem(item, payload) {
  *   lock                         a navisActions.createWriteLock() instance
  *   setStatus(text | null)       the status bar's write state
  *   log(line)                    the output-channel sink
+ *   openExternal(uri) -> thenable the host's external browser (S6.3, wired
+ *                                to vscode.env.openExternal by the wiring)
+ *   deepLink(key) -> string|null  the live client's own deep link (S6.3,
+ *                                wired to ServeClient.deepLink -- the URL
+ *                                and its launch secret are the client's,
+ *                                never spelled here)
  */
 function createNavisCommands(deps) {
   const window = deps.vscode.window;
@@ -193,6 +209,16 @@ function createNavisCommands(deps) {
     return Number.isFinite(value) && value > 0 ? value : 0;
   }
 
+  /** The mint 200's `minted` list length -- the count S6.3's log line names
+   * (the ANSWER's, not the pill's: a partial mint says what it did). */
+  function mintCount(result) {
+    const body =
+      result && typeof result.body === "object" && result.body !== null
+        ? result.body
+        : null;
+    return body && Array.isArray(body.minted) ? body.minted.length : 0;
+  }
+
   /**
    * Mint, project-wide: the same refusals as the row writes (locked, no
    * server), then mintAvailable -- nothing to mint is an INFORMATION, not a
@@ -232,6 +258,15 @@ function createNavisCommands(deps) {
       }
       const d = await render(result);
       if (d.kind === "refresh") {
+        // S6.3's deferred item: the mint touched files under the author's
+        // feet (plan §11.1). Clean editors reload from disk; dirty ones get
+        // VS Code's own external-change prompt -- say so on the log, once.
+        const minted = mintCount(result);
+        deps.log(
+          `Refdes: minted ${minted} key${minted === 1 ? "" : "s"} -- open ` +
+            "editors of those files reload from disk; dirty buffers get VS " +
+            "Code's own prompt."
+        );
         const left = mintStillKeyless(result);
         if (left > 0) {
           window.showInformationMessage(
@@ -246,9 +281,42 @@ function createNavisCommands(deps) {
     }
   }
 
+  /**
+   * S6.3 "Open in editor": hand the author to the row's item in the browser
+   * form, through the shipped V0 deep link (plan §5 -- the same
+   * `client.deepLink` the CodeLens command opens, and the same
+   * server-first refusal order as archive/restore: no server -> ServeClient's
+   * own not-running warning, which PRECEDES the keyless refusal). The row is
+   * recovered exactly the way the row writes recover it (rowForItem's first
+   * match, then selectorFor's FULL key -- never key6); a keyless row, a
+   * placeholder and a null arg all land on ONE information naming the
+   * missing key, with no link built. The handler composes no URL and opens
+   * nothing itself: openExternal receives EXACTLY what deepLink returned,
+   * and a throwing deepLink is a plain-string error, never a throw.
+   */
+  async function openInEditor(item) {
+    try {
+      const client = deps.getClient();
+      if (!client || !client.ready) {
+        window.showWarningMessage(NOT_RUNNING);
+        return;
+      }
+      const row = rowForItem(item, deps.getRows());
+      const key = navisActions.selectorFor(row);
+      if (!key) {
+        window.showInformationMessage(NO_KEY_OPEN);
+        return;
+      }
+      await deps.openExternal(deps.deepLink(key));
+    } catch (err) {
+      showError(err);
+    }
+  }
+
   return {
     archive: (item) => write("archive", item),
     restore: (item) => write("restore", item),
+    openInEditor: (item) => openInEditor(item),
     mint,
   };
 }

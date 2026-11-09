@@ -539,10 +539,10 @@ def test_module_exports_the_command_surface(scenarios):
     functions -- and the require succeeded under bare node, so the module
     imports no vscode (the serveClient.js/navisTree.js purity posture)."""
     s = scenarios["arch200"]
-    assert s["api"] == ["archive", "mint", "restore"], s["api"]
+    assert s["api"] == ["archive", "mint", "openInEditor", "restore"], s["api"]
     assert s["handlerType"] == "function", s
     for name in ("arch200", "restore200", "mintConfirm"):
-        assert scenarios[name]["api"] == ["archive", "mint", "restore"], name
+        assert scenarios[name]["api"] == ["archive", "mint", "openInEditor", "restore"], name
 
 
 # ------------------------------------------------ the plan S4 table, rendered
@@ -761,7 +761,7 @@ def test_mint_confirm_posts_mint_and_refreshes_silently(scenarios):
     assert prompts[0]["buttons"] == ["Mint keys"], prompts[0]
     # the prompt precedes the POST; the POST is mint (no selector); 200 ->
     # silent refresh, no toast (changed:true is the mint's business).
-    assert [e["fn"] for e in s["rec"]] == ["warn", "call", "refresh"], s["rec"]
+    assert [e["fn"] for e in s["rec"]] == ["warn", "call", "refresh", "log"], s["rec"]
     assert s["rec"][1]["method"] == "navisMint", s["rec"]
     assert s["rec"][1]["selector"] is None, s["rec"]
     assert not messages(s, "info", "error"), s["rec"]
@@ -774,7 +774,7 @@ def test_mint_200_says_so_when_markers_are_still_keyless(scenarios):
     way, and the author is told the mint was partial."""
     s = scenarios["mintConfirmStillKeyless"]
     assert s["threw"] is None, s["threw"]
-    assert seq(s) == ["warn", "call", "refresh", "info"], s["rec"]
+    assert seq(s) == ["warn", "call", "refresh", "log", "info"], s["rec"]
     m = first(s, "info")["message"]
     assert "2" in m and "keyless" in m.lower(), m
 

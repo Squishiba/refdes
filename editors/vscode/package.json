@@ -39,7 +39,9 @@
       { "command": "refdes.showServerLog", "title": "Refdes: Show server log" },
       { "command": "refdes.navisArchive", "title": "Refdes: Archive Navi", "icon": "$(archive)" },
       { "command": "refdes.navisRestore", "title": "Refdes: Restore Navi", "icon": "$(restore)" },
-      { "command": "refdes.navisMint", "title": "Refdes: Mint keys", "icon": "$(key)" }
+      { "command": "refdes.navisMint", "title": "Refdes: Mint keys", "icon": "$(key)" },
+      { "command": "refdes.refreshNavis", "title": "Refdes: Refresh Navis" },
+      { "command": "refdes.navisOpenInEditor", "title": "Refdes: Navis: Open in editor", "icon": "$(globe)" }
     ],
     "menus": {
       "commandPalette": [
@@ -58,6 +60,10 @@
         {
           "command": "refdes.navisMint",
           "when": "refdes.active"
+        },
+        {
+          "command": "refdes.navisOpenInEditor",
+          "when": "false"
         }
       ],
       "view/item/context": [
@@ -75,6 +81,11 @@
           "command": "refdes.navisMint",
           "when": "view == refdes.navisTree && (viewItem =~ /refdesNaviKeyless/)",
           "group": "2_navisMint"
+        },
+        {
+          "command": "refdes.navisOpenInEditor",
+          "when": "view == refdes.navisTree && viewItem =~ /(^| )refdesNavi( |$)/ && !(viewItem =~ /refdesNaviKeyless/)",
+          "group": "inline"
         }
       ],
       "view/title": [

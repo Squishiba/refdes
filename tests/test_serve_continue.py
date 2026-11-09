@@ -654,9 +654,15 @@ def test_the_id_comes_from_the_destination_files_own_prefix_series(project_root)
         text = fh.read().decode("utf-8")
     assert "LOG-SYS-003" in text
     assert not any(line.strip() == "- LOG-001" for line in text.splitlines())
-    # only the ledger moved; items/ grew by the append alone
+    # only the ledger and the capture's history files moved; items/ grew by
+    # the append alone. W5b.5: the continuation save captures the predecessor
+    # -- one `followed` event + its snapshot object, both under .refdes/history.
     after = tree(project_root, ".refdes")
-    assert set(after) - set(before_ledger) == {".refdes/ids.yaml"}
+    delta = set(after) - set(before_ledger)
+    history_delta = {rel for rel in delta if rel.startswith(".refdes/history/")}
+    assert delta - history_delta == {".refdes/ids.yaml"}
+    assert sum(rel.startswith(".refdes/history/events/") for rel in history_delta) == 1
+    assert sum(rel.startswith(".refdes/history/objects/") for rel in history_delta) == 1
 
 
 def test_a_refused_operation_burns_no_id_and_the_next_save_reuses_the_number(
