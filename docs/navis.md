@@ -109,6 +109,17 @@ $ refdes navis all
   archived: none
 ```
 
+**Items with no `id:` are not scanned.** A marker written in an item that
+has no `id:` yet is invisible to every verb: the scan sees project
+members, and an id-less item is not one until `refdes id` runs. The
+listings say so on stderr (stdout keeps only the answer):
+
+```console
+$ refdes navis ls
+no Navis: no `<!--navi: text-->` marker in any item body
+note: 1 item has no id yet and was not scanned -- run 'refdes id' to allocate it
+```
+
 **Exit codes** (observed on the runs shown here and in
 [Archiving](#archiving-and-restoring)):
 
