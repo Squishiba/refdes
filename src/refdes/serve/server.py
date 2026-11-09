@@ -27,9 +27,11 @@ import mimetypes
 import os
 import re
 import signal
+import socket
 import stat
 import tempfile
 import threading
+import time
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
@@ -43,6 +45,12 @@ from .upload import MAX_ASSET_BYTES
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 MAX_BODY_BYTES = 1024 * 1024
+# The bounds of the lingering close in `_Server.shutdown_request`: after a
+# refusal is sent, the socket's write half is closed (FIN) and the client's
+# still-arriving body is read-and-discarded for at most LINGER_SECONDS and
+# LINGER_BYTES, so the close is clean (FIN) rather than a reset (RST).
+LINGER_SECONDS = 0.25
+LINGER_BYTES = 2 * MAX_BODY_BYTES
 # The upload cap is `MAX_ASSET_BYTES` (imported above, defined in `upload.py`):
 # deliberately its own, larger number than MAX_BODY_BYTES, because a full-page
 # schematic screenshot clears 1 MiB routinely and raising the shared JSON cap for
@@ -372,6 +380,49 @@ class _Server(ThreadingHTTPServer):
     # write_launch_file and sigterm_is_deliverable).
     allow_reuse_address = os.name != "nt"
     app: EditorApp
+
+    def shutdown_request(self, request):
+        """Close the connection the way the stdlib does, minus the reset.
+
+        Every refusal in `_Handler` is decided on the request line and
+        headers -- the 405 for PUT/DELETE/PATCH, the 403 host/origin/token,
+        411, 413, 415 -- so the body is never read, and the response is
+        HTTP/1.0 close-after-response. The stdlib's close then lands while
+        the client is still writing: a socket closed with unread data in
+        its receive buffer sends RST, not FIN, and a Windows client
+        discards the response bytes it had already buffered on the abort,
+        raising WinError 10053/10054 in place of the 4xx (the recurring
+        windows-latest flake; diagnosis in in-prog-logs/winflake-diagnosis.md,
+        mechanism reproducible on Linux in tests/test_serve_early_refusal.py).
+
+        `shutdown_request` runs after `finish()` flushed the response, so
+        saying goodbye here covers every early refusal from one place: FIN
+        first, then let the in-flight body drain, then close as the stdlib
+        would. The bounds keep the documented size gate intact -- at most
+        LINGER_BYTES read-and-discarded for at most LINGER_SECONDS, so a
+        client still cannot make `refdes serve` buffer an oversized request
+        (the 413 gate itself stays where it is, on the header, before any
+        body byte is read).
+        """
+        try:
+            request.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass  # already gone: nothing to flush, close as-is
+        deadline = time.monotonic() + LINGER_SECONDS
+        drained = 0
+        try:
+            while drained < LINGER_BYTES:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                request.settimeout(remaining)
+                chunk = request.recv(65536)
+                if not chunk:
+                    break  # FIN: the client finished writing
+                drained += len(chunk)
+        except OSError:
+            pass  # aborted or timed out mid-drain: a reset here is the client's
+        self.close_request(request)
 
 
 class ServeStartupError(RuntimeError):
