@@ -34,9 +34,15 @@ Page-side: an item page shows exactly one thread entry, so the pane's
 "thread in view" is simply the page's item's thread — `panes_by_entry` keys
 one pane per thread member, which is also the mechanism a hypothetical
 multi-thread page would switch over.
+
+W5b.3 adds the `interactive` flag: only the serve response decoration passes
+it, and it asks the template to render preview-only tick controls. Renderers
+that write bytes leave it False, so no checkbox reaches a published page.
 """
 
 from __future__ import annotations
+
+import re
 
 from . import threads as threads_mod
 from .model import Item, Project
@@ -55,6 +61,55 @@ RENDERED_DERIVED_KINDS = ("coverage", "blocked", "check", "citation")
 #: for: it is said by name, like an unrenderable derived kind (PR #197
 #: review nit), never silently rendered as a `declared` list.
 TASK_BLOCK_STATES = ("ambiguous", "undeclared", "cleared", "declared")
+
+#: W5b.3 / Q6 (ratified (b)): the states a tick on a row in each state may
+#: name, in the order spelled into `data-refdes-tick-states`. A state with no
+#: entry gets the glyph row, not a control; W5b.4's save obeys the markup.
+TICK_TARGETS = {
+    "open": "done,dropped",
+    "done": "open",
+    "dropped": "open",
+}
+
+_SAFE_DOM_ID_RE = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def _tick_id(tip: str, row: dict, index: int, used: set[str]) -> str:
+    raw = row.get("id")
+    usable = isinstance(raw, str) and raw.strip() != ""
+    dom_id = _SAFE_DOM_ID_RE.sub("_", str(f"refdes-taskpane-tick-{tip}-{raw}" if usable else f"refdes-taskpane-tick-{tip}-row{index}"))
+    if not usable or dom_id in used:
+        dom_id = _SAFE_DOM_ID_RE.sub("_", f"refdes-taskpane-tick-{tip}-row{index}")
+        suffix = 2
+        while dom_id in used:
+            dom_id = _SAFE_DOM_ID_RE.sub("_", f"refdes-taskpane-tick-{tip}-row{index}-{suffix}")
+            suffix += 1
+    used.add(dom_id)
+    return dom_id
+
+
+def _ticks_for(rows: list[dict], tip: str) -> list[dict | None]:
+    """One tick per declared row, `None` outside Q6. The DOM id is sanitized
+    and unique, falling back to `<tip>-row<N>`; `task` keeps the authored id."""
+    used: set[str] = set()
+    ticks: list[dict | None] = []
+    for index, row in enumerate(rows, start=1):
+        target = TICK_TARGETS.get(row.get("state"))
+        if target is None:
+            ticks.append(None)
+            continue
+        task_id = row.get("id")
+        ticks.append(
+            {
+                "id": _tick_id(tip, row, index, used),
+                "task": task_id if isinstance(task_id, str) else "",
+                "tip": tip,
+                "state": row.get("state"),
+                "targets": target,
+                "checked": row.get("state") == "done",
+            }
+        )
+    return ticks
 
 
 def _unknown_state_message(state: object) -> str:
@@ -97,34 +152,37 @@ def label(item: Item) -> str:
     return threads_mod.entry_label(item)
 
 
-def panes_by_entry(views: list[dict]) -> dict[str, dict]:
+def panes_by_entry(views: list[dict], *, interactive: bool = False) -> dict[str, dict]:
     """`{entry label: pane model}` for every entry of every thread.
 
     One pane model per entry of the thread (one shared object across that
     thread's entries would be wrong: the `viewing` note names the entry the
     page shows), so a member's pane differs from its tip's only in that
     note.
+
+    `interactive` (W5b.3) is passed only by the serve response decoration.
     """
     panes: dict[str, dict] = {}
     for view in views:
         for entry in view["entries"]:
-            panes[entry] = pane_for(view, entry)
+            panes[entry] = pane_for(view, entry, interactive=interactive)
     return panes
 
 
-def pane_for(view: dict, viewing: str) -> dict:
-    """One thread's pane, as the page of `viewing` shows it."""
+def pane_for(view: dict, viewing: str, *, interactive: bool = False) -> dict:
+    """One thread's pane, as the page of `viewing` shows it. The
+    `interactive` flag reaches the rows rendered with preview tick markup."""
     single_tip = not view["forked"]
     return {
         "ref": view["ref"],
         "forked": view["forked"],
-        "tabs": [_tab(branch, viewing, single_tip) for branch in view["branches"]],
+        "tabs": [_tab(branch, viewing, single_tip, interactive) for branch in view["branches"]],
         "derived": _derived_groups(view["derived"]),
         "derived_heading": threads_mod.DERIVED_HEADING,
     }
 
 
-def _tab(branch: dict, viewing: str, single_tip: bool) -> dict:
+def _tab(branch: dict, viewing: str, single_tip: bool, interactive: bool = False) -> dict:
     tip = branch["tip"]
     tasks = branch["tasks"]
     rows = tasks["rows"]
@@ -142,7 +200,7 @@ def _tab(branch: dict, viewing: str, single_tip: bool) -> dict:
         # there either — no note.
         "note": None if tip == viewing else f"viewing {viewing} · tasks as of tip {tip}",
         "verdict": _verdict_line(branch["verdict"], len(open_rows)),
-        "tasks": _task_block(tasks),
+        "tasks": _task_block(tasks, tip, interactive),
     }
 
 
@@ -156,7 +214,7 @@ def _verdict_line(verdict: dict | None, open_count: int) -> str | None:
     return threads_mod.verdict_line(verdict, open_count)
 
 
-def _task_block(tasks: dict) -> dict:
+def _task_block(tasks: dict, tip: str, interactive: bool) -> dict:
     """The authored list under the CLI's own heading (`Tasks at tip:` /
     `Tasks at <tip>:`), with the fold's distinct postures kept distinct —
     the same four lines `cmd_thread` prints, in `threads`' shared strings.
@@ -164,7 +222,11 @@ def _task_block(tasks: dict) -> dict:
     The malformed count is its own field, never the note that stands where
     the rows go: `refdes thread` prints the count on the heading AND the
     valid rows under it, and a pane that let the count hide the rows made
-    a partly-broken list look like an empty one (PR #197 review B1)."""
+    a partly-broken list look like an empty one (PR #197 review B1).
+
+    `tip`/`interactive` (W5b.3): declared rows carry a `tick` key; interactive
+    rows get control data keyed by the TIP, other rows get `None`.
+    """
     if tasks["state"] == "ambiguous":
         return {
             "state": "ambiguous",
@@ -189,6 +251,8 @@ def _task_block(tasks: dict) -> dict:
     if tasks["state"] != "declared":
         raise ValueError(_unknown_state_message(tasks["state"]))
     malformed = tasks.get("malformed")
+    authored_rows = tasks["rows"] or []
+    ticks = _ticks_for(authored_rows, tip) if interactive else [None] * len(authored_rows)
     rows = [
         {
             "glyph": threads_mod.TASK_GLYPHS.get(row.get("state"), threads_mod.TASK_GLYPH_UNKNOWN),
@@ -201,8 +265,11 @@ def _task_block(tasks: dict) -> dict:
             # CLI's gate (PR #197 review B4): the projection's `dict(row)`
             # carries an authored `open_since:` through on any state.
             "since": _age(row) if row.get("state") == "open" else "",
+            # W5b.3: control data for interactive rows; the read-only template
+            # ignores it, keeping the published pane's bytes unchanged.
+            "tick": tick,
         }
-        for row in (tasks["rows"] or [])
+        for row, tick in zip(authored_rows, ticks, strict=True)
     ]
     return {
         "state": "declared",

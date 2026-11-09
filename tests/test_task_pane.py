@@ -1026,10 +1026,12 @@ def test_the_pane_glyphs_dropped_and_unknown_row_states_as_threads_spell_them():
             "rows": [
                 {"id": "T-a", "text": "First.", "state": "open"},
                 {"id": "T-b", "text": "Second.", "state": "dropped"},
-                {"id": "T-c", "text": "Third.", "state": "wibble"},
-            ],
-        }
-    )
+                    {"id": "T-c", "text": "Third.", "state": "wibble"},
+                ],
+            },
+            "LOG-001",
+            False,
+        )
     assert [row["glyph"] for row in block["rows"]] == [
         threads.TASK_GLYPHS["open"],
         threads.TASK_GLYPHS["dropped"],
@@ -1043,7 +1045,7 @@ def test_an_unknown_task_block_state_is_said_not_rendered_as_declared():
     raises a named error (like an unrenderable derived kind) instead of
     falling through to the `declared` list shape."""
     with pytest.raises(ValueError) as caught:
-        task_pane._task_block({"state": "wibble", "rows": []})
+        task_pane._task_block({"state": "wibble", "rows": []}, "LOG-001", False)
     message = str(caught.value)
     assert "'wibble'" in message
     assert "task pane cannot render task-block state" in message

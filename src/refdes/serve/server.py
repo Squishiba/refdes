@@ -34,7 +34,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 
-from .. import calc
+from .. import calc, render, task_pane
 from ..build import INLINE_VALUE_RE, image_src_from_html
 from . import api, security
 from .preview import PreviewManager
@@ -264,6 +264,62 @@ def _decorate_calc_values(page: str, item) -> str:
     if decorated[0]:
         page = _add_values_toggle(page)
     return page
+
+
+#: W5b.3 (docs/design/thread-workbench-w5b-plan.md §4, gates Q9/Q6/Q4): the
+#: tick module's tag, response-only like the reload probe, and the span of
+#: the pane's own markup (the toggle item.html.j2 emits, through the pane's
+#: `</aside>`), which the decoration replaces wholesale. A preview page's
+#: pane markup has exactly one `</aside>` (no nested asides), so the
+#: non-greedy span is exactly the pane.
+_TICKS_TAG = '<script type="module" src="/edit/static/taskpane-ticks.js"></script>'
+_TICKS_STYLE_START = "<style>"
+_TICKS_STYLE_END = "</style>"
+_HEAD_END_RE = re.compile(r"</head>", re.IGNORECASE)
+_BODY_END_RE = re.compile(r"</body>", re.IGNORECASE)
+_PANE_SPAN_RE = re.compile(
+    r'<button type="button" class="refdes-taskpane-toggle".*?</aside>', re.DOTALL
+)
+
+
+def _decorate_task_ticks(page: str, project, item) -> str:
+    """Thread workbench W5b.3: the pane's tick checkboxes, in the preview
+    response only. The pane model is rebuilt from the projection with
+    `interactive=True` (the pane is a pure client of it -- the same call
+    render.py makes per site, per page here) and, when it has a declared
+    task list to tick, the pane's markup is re-rendered from the pane's own
+    template with that model and swapped into the response; the tag of the
+    module behind the ticks rides to `</head>` beside the probe. The file on
+    disk in the preview generation is the page build wrote -- R3's
+    byte-identical pair, and the read-only site Q9 keeps.
+
+    No pane, no declared list, nothing to tick: the page is returned
+    untouched, module tag and all. An empty checkbox row would name a list
+    the fold refused (tests/test_task_pane_ticks.py), and a write-capable
+    module on a page with no control is code shipping a verb no markup
+    uses."""
+    panes = task_pane.panes_by_entry(task_pane.thread_views(project), interactive=True)
+    pane = panes.get(task_pane.label(item))
+    if pane is None:
+        return page
+    if not any(row["tick"] for tab in pane["tabs"] for row in tab["tasks"]["rows"]):
+        return page
+    swapped, spans = _PANE_SPAN_RE.subn(
+        lambda _match: render.render_taskpane_fragment(pane), page, count=1
+    )
+    if not spans:
+        return page
+    head_extra = (
+        _TICKS_STYLE_START
+        + render.preview_taskpane_css()
+        + _TICKS_STYLE_END
+        + _TICKS_TAG
+    )
+    head_matches = list(_HEAD_END_RE.finditer(swapped))
+    if not head_matches:
+        return swapped + head_extra
+    head_at = head_matches[-1].start()
+    return swapped[:head_at] + head_extra + swapped[head_at:]
 
 
 class _Server(ThreadingHTTPServer):
@@ -765,24 +821,29 @@ class _Handler(BaseHTTPRequestHandler):
         if item is not None:
             page = _decorate_images(page, project, item)
             page = _decorate_calc_values(page, item)
+            # W5b.3: the tick controls are write-capable chrome. `--no-write`
+            # refuses every write ("continuations are disabled", serve/api.py),
+            # so it ships the read-only pane exactly as W5a left it: offering a
+            # control the server refuses is the UI lying (test_task_pane_ticks).
+            if not self.app.read_only:
+                page = _decorate_task_ticks(page, project, item)
         bar = (
             '<div class="refdes-serve-bar"><span>refdes serve &middot; preview</span>'
             + "".join(links)
             + "</div>"
         )
         probe = _reload_probe(self.app.token, self.app.state.snapshot.serial)
-        lower = page.lower()
-        head_at = lower.rfind("</head>")
-        if head_at != -1:
+        head_matches = list(_HEAD_END_RE.finditer(page))
+        if head_matches:
+            head_at = head_matches[-1].start()
             page = page[:head_at] + _BAR_HEAD + probe + page[head_at:]
-            lower = page.lower()
         panel = _diagnostics_panel(project, item) if item is not None else ""
-        body_at = lower.rfind("</body>")
-        page = (
-            page[:body_at] + panel + bar + page[body_at:]
-            if body_at != -1
-            else page + panel + bar
-        )
+        body_matches = list(_BODY_END_RE.finditer(page))
+        if body_matches:
+            body_at = body_matches[-1].start()
+            page = page[:body_at] + panel + bar + page[body_at:]
+        else:
+            page += panel + bar
         return page.encode("utf-8")
 
     # ------------------------------------------------------------------ api

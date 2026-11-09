@@ -8,6 +8,9 @@ published page — pane and all — and these tests read that served HTML for
 the projection's lines and prove the pane's own assets ride along, while
 the project on disk stays untouched: W5a adds no write path (§7's read-only
 boundary) and touches no API.
+
+W5b.3 adds the pane's tick checkboxes to writable previews: they are the single
+allowed control because they only toggle visible state, while saving is W5b.4.
 """
 
 from __future__ import annotations
@@ -25,6 +28,11 @@ from refdes.serve.server import EditorApp
 CONFIG = (
     "site: { title: Pane preview, out: _site }\n"
     "standard: { base: hardware, version: 3 }\n"
+)
+
+W5B3_TICK_INPUT = re.compile(
+    r'<label class="refdes-taskpane-tick"[^>]*>'
+    r'<input type="checkbox"[^>]*data-refdes-task="[^"]*"[^>]*>'
 )
 
 LOG_FILE = (
@@ -200,7 +208,8 @@ def test_the_preview_page_has_no_write_control_or_token(served):
     # Round-5 nit: the scan is case-insensitive -- HTML and JS carry no
     # reason for a write control's spelling to arrive lowercase.
     pane = pane.lower()
-    assert "<input" not in pane
+    scanned = W5B3_TICK_INPUT.sub("", pane)
+    assert "<input" not in scanned
     for needle in ("x-refdes-token", "token", "/api/", "<form", "fetch("):
         assert needle not in pane
 
