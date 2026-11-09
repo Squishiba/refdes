@@ -81,3 +81,36 @@ No real VS Code window exists in CI: tree-item rendering, real menus/when
 clauses, the status bar and vscode.env.openExternal are pinned at
 logic/JSON/source level only; plan S8 acceptance is "checklist 1-6 re-pass"
 — Jared's manual checklist covers the window.
+
+## N6.3-impl (implementer pass)
+
+Merged origin/main into the branch (clean, no conflicts). Implemented all
+five pins in editors/vscode/ only: navisTree.mintRow (pill/tooltip from
+mintAvailable, contextValue refdesNaviMint, bare refdes.navisMint command,
+null on count 0 / lock; the provider's getChildren prepends it, childrenFor
+untouched); navisCommands.openInEditor (server refusal first, rowForItem +
+selectorFor, information naming the missing key, openExternal(deepLink(key))
+passthrough, throw -> plain-string error) with deps openExternal/deepLink;
+the mint success log line (one line, minted-list length + reload-from-disk
+wording); extension.js refreshNavisTree(true) registration, the
+navisOpenInEditor registration, the two deps wired to
+vscode.env.openExternal/serve.deepLink, and applyNavisLockStatus() re-applied
+at the end of updateStatusBar's repaint; package.json: refreshNavis
+(palette-visible) + navisOpenInEditor (palette-hidden, inline keyed-rows
+entry) + the mint-log. Version NOT bumped (S6.4's job). New file: 24/24
+green; node --check clean on the three touched .js.
+
+STOP POINT (no PR opened): three tests in the MERGED
+tests/test_vscode_navis_commands.py pin the pre-S6.3 shapes the new file's
+pins make unsatisfiable together — test_module_exports_the_command_surface
+(api == archive/mint/restore exactly; the new file pins openInEditor as a
+fourth handler) and the two mint-success sequence tests (exact rec sequences
+with no "log" entry; the new file pins exactly one log line on every mint
+success). Proposed narrow fix for the authoriser: grow the api pin to the
+four names; insert "log" after "refresh" in the two sequences. Full suite:
+3 failed (all the above), 6309 passed, 2 skipped. The author's green-proof
+run listed only tree/actions/lint as neighbours (66 passed) — the commands
+file was not in it, so this collision is not a regression against the
+author's own evidence, it is a gap in it. No real VS Code window: menus/
+status bar/openExternal are logic-level only.
+
