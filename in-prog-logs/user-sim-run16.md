@@ -19,14 +19,14 @@ command (6250 passed, 2 skipped). Adversarial round: CRLF, non-ASCII
 path, subdirectory, read-only tree, concurrent `refdes id`, typos,
 hand-edged lockfile and duplicate keys.
 
-Findings, final (matching the report's counts line): 1 Medium (F16-2,
-keyed id-less thread tips refused by the continue endpoint with an
-empty-subject message while the pane supplies their save context),
-3 Low (F16-1 docs/UX: `check` is loud about the id-less list-file
-entry but `navis ls` answers "no Navis: no marker in any item body"
-exit 0; F16-3, unconfirmed — a Firefox tick double-step that did not
-reproduce on a clean re-run; F16-4 docs/upgrading.md gaps),
-2 Cosmetic (F16-5, F16-6).
+Findings, final (matching the report's counts line and table): 1
+Medium (F16-2, keyed id-less thread tip offered a save context the
+continue endpoint refuses — fixed in #473), 3 Low (F16-1, the
+`check`-loud/`navis`-silent asymmetry in the docs' pre-`refdes id`
+window — fixed in #476 by a scan note plus #475's docs sentence;
+F16-3, unconfirmed — a Firefox tick double-step that did not
+reproduce on a clean re-run; F16-4, docs/upgrading.md gaps — fixed in
+#475), 2 Cosmetic (F16-5; F16-6 stale task-pane docs — fixed in #475).
 
 Difficulties: the repo dogfoods itself (`refdes-project.yaml` at the
 worktree root), so probe projects under `.scratch/` were swallowed by
@@ -51,5 +51,7 @@ and corrected citations; machine paths and captured tokens stripped
 from the evidence, the uncited Firefox timeout run dropped, and
 reproduction scripts added, all run against a `git archive` extraction
 of current main; repro fixtures moved under `.scratch/` per project
-rule and the truncated pane capture labelled as such in the report),
-with no product fixes made (dispatched to other workers).
+rule and the truncated pane capture labelled as such in the report,
+and the final round marking the statuses of the merged fixes
+(#473/#475/#476) in the table and counts), with no product fixes made
+by me (dispatched to other workers).

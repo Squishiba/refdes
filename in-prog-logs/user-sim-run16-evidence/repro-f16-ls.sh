@@ -4,6 +4,9 @@
 # with a body carrying a navi marker, NO id), `check` is loud
 # (load ERROR, exit 1) but `navis ls` answers with a plain-empty
 # message that claims no marker exists in any body, exit 0.
+# At the run-16 base (9f15af87) the verbs printed no hint; #476
+# (2db6e98f) added the "has no id yet and was not scanned" note that
+# this capture on current main shows.
 # From the repo checkout root (fixtures are created under the repo .scratch/):
 #   REPO=$PWD PYTHONPATH=$PWD/src bash repro-f16-ls.sh
 # (or REFDES=<installed refdes> bash repro-f16-ls.sh)
@@ -45,6 +48,7 @@ echo "== refdes --no-write navis ls (after id) =="
 RUN --no-write navis ls; echo "exit=$?"
 echo "== expected =="
 echo 'check: ERROR items/requirements/power.yaml:9 — item has no id — run '"'"'refdes id'"'"' to allocate one; 0 items, 1 errors; exit 1.'
-echo 'navis ls BEFORE id: "no Navis: no `<!--navi: text-->` marker in any item body", exit 0 -- no error, no hint'
-echo 'that the entry carrying the marker was skipped for having no id; after `refdes id` the same marker lists.'
+echo 'navis ls BEFORE id, at the run-16 base (9f15af87, pre-#476): "no Navis: no `<!--navi: text-->` marker in any item body", exit 0 -- no error, no hint'
+echo 'that the entry carrying the marker was skipped for having no id. On current main (#476, 2db6e98f) the note'
+echo '"note: 1 item has no id yet and was not scanned -- run '"'"'refdes id'"'"' to allocate it" prints first, as this capture shows; after `refdes id` the same marker lists.'
 echo "fixture kept at ${FIX#"$ROOT"/}"

@@ -17,6 +17,7 @@ exit=0
 exit=0
 == expected ==
 check: ERROR items/requirements/power.yaml:9 — item has no id — run 'refdes id' to allocate one; 0 items, 1 errors; exit 1.
-navis ls BEFORE id: "no Navis: no `<!--navi: text-->` marker in any item body", exit 0 -- no error, no hint
-that the entry carrying the marker was skipped for having no id; after `refdes id` the same marker lists.
-fixture kept at .scratch/tmp.uwU6XGOS6D
+navis ls BEFORE id, at the run-16 base (9f15af87, pre-#476): "no Navis: no `<!--navi: text-->` marker in any item body", exit 0 -- no error, no hint
+that the entry carrying the marker was skipped for having no id. On current main (#476, 2db6e98f) the note
+"note: 1 item has no id yet and was not scanned -- run 'refdes id' to allocate it" prints first, as this capture shows; after `refdes id` the same marker lists.
+fixture kept at .scratch/tmp.lSD9zMvF5j
