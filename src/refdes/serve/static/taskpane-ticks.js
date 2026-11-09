@@ -194,7 +194,13 @@ for (const panelEl of document.querySelectorAll('.refdes-taskpane-panel')) {
   refreshPanel(entry); // restore: a draft stored by this tab takes over the rows
 }
 
-initSave({ drafts, panels, refreshPanel });
+// The seam hands back its refreshPanel wrapped with the Save button's
+// redraw (run 17, finding 1): Discard below resets the rows and refreshes
+// the pane PROGRAMMATICALLY -- no change event fires -- and the button's
+// visibility rule lives in the seam's draw. Rebinding keeps refreshPanel's
+// semantics (the wrapper runs this function first) and keeps this file free
+// of the network: it is the seam's own draw, handed back, not a fetch.
+refreshPanel = initSave({ drafts, panels, refreshPanel }) || refreshPanel;
 
 window.addEventListener('beforeunload', (event) => {
   // Q8 (ratified (a)): ONE prompt, its condition read at event time from
