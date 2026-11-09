@@ -77,3 +77,65 @@ to built pane); keyless tip = glyph rows, no controls, no context;
 - Full suite NOT run (task: no full suite; test-only slice, red by design).
 
 Status: finished. Branch pushed, no PR.
+
+## Implementation (W5b.4a-impl, this slice)
+
+Implemented the server half. src/ additions: 41 lines (pr_size budget 350).
+
+- `serve/server.py`: `_pane_save_context(project, pane)` — called from
+  `_decorate_task_ticks` after the pane model is built, before the
+  has-ticks gate. Maps each tab's tip label to the live item and sets
+  `tip_key` (the item's artifact key) + `tip_revision`
+  (`edit.file_revision(edit._item_path(project, tip))`). A tip with no
+  key, no in-root path, or an unreadable file gets no context.
+- `templates/taskpane/pane.html.j2`: the panel div gains
+  `data-refdes-tip-key` / `data-refdes-revision` only `{% if tab.tip_key %}`
+  — the build model never sets one, so built bytes are untouched;
+  autoescaping is the barrier for authored keys (test 7).
+
+Reuse decision (task asked to say so): `continue_thread` does NOT resolve
+its target file inline — `_continue_locked` calls the existing `_item_path`
+helper (edit.py:992) for the tip and hashes the bytes it read. No helper
+extraction was needed; the decoration reuses that same `_item_path` (plus
+`file_revision`, the same sha256-of-bytes spelling) from server.py, so
+markup and save resolve identically and the revision is read at render
+time (test 3's poll).
+
+Green: new tests 2,3,4,5,6,7 + both twins; W5b.3 suite 24/24; neighbours
+(test_serve_preview_task_pane, test_serve_preview_decorations,
+test_serve_continue, test_serve_continue_http, test_task_pane,
+test_threads_render, test_serve_edit, test_serve_static,
+test_crossplatform_lint) 263/263. Full suite: 2 failed, 6162 passed,
+2 skipped — the 2 are the STOP points below. ruff on server.py: no new
+findings (the UP012 hit at :507 is pre-existing, present on the HEAD copy
+too). No JS, no endpoint change.
+
+## STOP points (HARD RULE 1 — reported, not edited)
+
+1. `test_the_served_panel_names_the_tips_key_and_the_file_revision` :288
+   asserts `TIP_ATTR.findall(panel["slice"]) == ["LOG-002"]`, but
+   `TIP_ATTR` matches the per-checkbox `data-refdes-tip` attr that W5b.3
+   ships on EVERY tickable row (pinned green by
+   test_task_pane_ticks.py::test_every_checkbox_names_the_tip_its_tick_writes_against).
+   The warm ONE_TIP fixture has 2 tickable rows → the list is
+   `["LOG-002", "LOG-002"]` in ANY implementation that keeps W5b.3 green.
+   The file's own fork test (:396) uses the `set(...)` form. Proposed
+   change: `assert set(TIP_ATTR.findall(panel["slice"])) == {"LOG-002"}`.
+2. `test_a_tip_with_no_key_grows_glyph_rows_and_no_context` :520/:522/:524
+   requires a keyless tip on a WRITABLE server to render glyph rows and no
+   checkbox/module. W5b.3 pins the opposite on the same shape: its `served`
+   fixture is a plain write (no `check`, probe: tip.key == '') and ~10 of
+   its green tests demand checkboxes on it. The docstring's premise "W5b.3
+   gave it no checkboxes" is factually false (the log's own red note says
+   the response HAS checkboxes). Unimplementable without editing W5b.3.
+   Proposed change: keep the context-absence assertions (:522-523, :526-527
+   — implemented and passing: keyless tips carry no key/revision attrs);
+   drop the control/module-absence claims for the writable keyless case
+   (the read-only case is already covered by test 6).
+
+Implemented per the compatible reading: keyless tips carry NO context
+(key/revision attrs) — that half of test 8 (:526-527) is green; the
+checkbox strip is not implemented (STOP point 2).
+
+Status: implementation finished; full suite run; PR opened with the two
+STOP points reported.

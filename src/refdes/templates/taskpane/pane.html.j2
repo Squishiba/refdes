@@ -31,7 +31,12 @@
      never re-types it (PR #197 review C1). The tab roles are a fork's:
      with no tablist above, a bare `role="tabpanel"` would name a tab that
      does not exist (PR #197 review C2). #}
-  <div class="refdes-taskpane-panel"{% if pane.forked %} role="tabpanel" aria-labelledby="refdes-taskpane-tab-{{ loop.index }}"{% endif %} id="refdes-taskpane-panel-{{ loop.index }}" data-refdes-panel="{{ loop.index }}"{% if pane.forked and not loop.first %} hidden{% endif %}>
+  {# W5b.4a: the panel's save identity — the tip's key and the revision of
+     the file the save compares — ride on the panel when the pane model
+     names them (the interactive decoration only; the build model never
+     does, so the built page is byte-identical). Autoescaping is the only
+     barrier between an authored key and the attribute. #}
+  <div class="refdes-taskpane-panel"{% if pane.forked %} role="tabpanel" aria-labelledby="refdes-taskpane-tab-{{ loop.index }}"{% endif %} id="refdes-taskpane-panel-{{ loop.index }}" data-refdes-panel="{{ loop.index }}"{% if tab.tip_key %} data-refdes-tip-key="{{ tab.tip_key }}" data-refdes-revision="{{ tab.tip_revision }}"{% endif %}{% if pane.forked and not loop.first %} hidden{% endif %}>
     {% if tab.note %}
     {# §7a sub-decision 1: the tip's list on an older entry, saying so. #}
     <p class="refdes-taskpane-note small">{{ tab.note }}</p>

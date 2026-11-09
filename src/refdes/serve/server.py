@@ -36,7 +36,7 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 
 from .. import calc, render, task_pane
 from ..build import INLINE_VALUE_RE, image_src_from_html
-from . import api, security
+from . import api, edit, security
 from .preview import PreviewManager
 from .state import Poller, ProjectState
 from .upload import MAX_ASSET_BYTES
@@ -282,6 +282,39 @@ _PANE_SPAN_RE = re.compile(
 )
 
 
+def _pane_save_context(project, pane) -> None:
+    """Thread workbench W5b.4a: name each tip panel's save identity, in the
+    interactive (response-only) pane model.
+
+    `tip_key` is the tip item's artifact key (docs/design/keys.md): stable
+    across renames, which the panel's display id (`data-refdes-tip`) is not
+    -- a draft that outlives a reload must name the thread by the key.
+    `tip_revision` is `edit.file_revision` of the tip's source file, read at
+    render time: the same bytes `continue_thread` hashes (its
+    `_continue_locked` compares sha256 of the file `_item_path` gives for
+    the tip), and the endpoint's own resolution + revision spelling are
+    reused here, never recomputed, so markup and save cannot drift.
+
+    A tip with no key (no composite for the save's `follows:`), one whose
+    file escapes the root, or one whose file is unreadable, names no
+    context: a panel naming a save the endpoint refuses is the UI lying.
+    The template renders the attributes only for a tab carrying `tip_key`,
+    and the build's model never sets one -- the built page stays byte-
+    identical (R3/Q9)."""
+    by_label = {}
+    for candidate in project.items.values():
+        by_label.setdefault(task_pane.label(candidate), candidate)
+    for tab in pane["tabs"]:
+        tip = by_label.get(tab["tip"])
+        if tip is None or not tip.key:
+            continue
+        path = edit._item_path(project, tip)
+        revision = edit.file_revision(path) if path is not None else ""
+        if revision:
+            tab["tip_key"] = tip.key
+            tab["tip_revision"] = revision
+
+
 def _decorate_task_ticks(page: str, project, item) -> str:
     """Thread workbench W5b.3: the pane's tick checkboxes, in the preview
     response only. The pane model is rebuilt from the projection with
@@ -302,6 +335,7 @@ def _decorate_task_ticks(page: str, project, item) -> str:
     pane = panes.get(task_pane.label(item))
     if pane is None:
         return page
+    _pane_save_context(project, pane)
     if not any(row["tick"] for tab in pane["tabs"] for row in tab["tasks"]["rows"]):
         return page
     swapped, spans = _PANE_SPAN_RE.subn(
