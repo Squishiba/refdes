@@ -168,6 +168,29 @@
   color: var(--muted);
   margin: var(--space-4) var(--space-0);
 }
+
+/* W5b.4c-1b (plan §6 Q8): the draft's own chrome -- a label on a row whose
+   tick is pending, the unsaved-count line at the top of its panel, and the
+   Discard release. Same marked block as the tick row: the build strips it,
+   the response injects it. */
+.refdes-taskpane-tick-pending {
+  font-weight: var(--weight-semibold);
+}
+
+.refdes-taskpane-tick-status {
+  color: var(--muted);
+  margin: var(--space-4) var(--space-0);
+}
+
+.refdes-taskpane-discard {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--text-xs);
+  padding: var(--space-2) var(--space-10);
+  cursor: pointer;
+}
 /* refdes:preview-css-end */
 .refdes-taskpane-derived {
   border-top: 1px solid var(--line);
