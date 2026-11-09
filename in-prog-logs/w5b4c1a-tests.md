@@ -100,6 +100,33 @@ test-author slice, run once by the implementer/branch owner).
 
 ## Status
 
-Complete. Branch `feat/w5b4c1a-tick-pane-model`, tests only; the 4c-1a
-implementer writes the module against the pinned surface and watches
-`test_the_module_passes_the_served_js_rules` go green on file landing.
+Test-author slice complete. Branch `feat/w5b4c1a-tick-pane-model`, tests
+only; the 4c-1a implementer wrote the module against the pinned surface.
+
+## Implementer pass (4c-1a-impl)
+
+Wrote `src/refdes/serve/static/tick-pane.js` — the pure module, eight named
+exports, imports nothing, no page globals. No test, template, taskpane-ticks
+or tick-drafts edits (the glue is 4c-1b).
+
+- Red first (module missing, as committed): `tests/test_tick_pane.py` ran
+  22 failed, 1 passed (the markup pin, green by construction).
+- Green after the module: the file ran 23 passed; with
+  `tests/test_tick_drafts.py tests/test_serve_static.py
+  tests/test_crossplatform_lint.py` added, 151 passed.
+- `node --input-type=module --check` on the module: clean (a plain
+  `node --check` reads .js as CJS and rejects `export`, so the module form
+  is the right gate).
+- Decisions the pins left open, taken as the author's log stated them:
+  `wantedState` with no targets returns the rendered state; keyless panel
+  rows carry reason `""` (the panel reason governs); the no-id reason names
+  "no id" + "saved"; the stale clause carries "older version" + "resolve";
+  the orphan clause is the exact `(K no longer match a task)`.
+- Hostile ids: `applyDraft` builds a `Map` + `Set` and never indexes an
+  object by id, so `__proto__`/`constructor` match as ordinary keys and
+  `Object.prototype` stays clean (the harness probe passes).
+- Strings are ASCII, hyphens not em dashes (the harness decodes UTF-8, but
+  plain is cheaper); the purity scan's forbidden words never appear in code
+  (comments are stripped first, so the header prose is free to name them).
+- pr_size: see the PR report; changelog fragment
+  `tick-pane-model.added.md`. Full suite: one run before push (see PR).
