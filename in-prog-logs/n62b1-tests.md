@@ -146,5 +146,4 @@ Archive ENABLED for an active keyed orphan row (mirrors navis-panel.js;
 the server's orphan refusal is archived-only), a status-less result
 never prints "NaN", a printable-less 409-ambiguous falls back to the
 generic text; changelog wording pinned to keyless/orphan. In-file 17
-passed, neighbours 67; `node --check` + ruff clean; suite (6213) and CI
-re-run (see PR).
+passed, neighbours 67; `node --check` + ruff clean; suite 6213, CI re-run.
