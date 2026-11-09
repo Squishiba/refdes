@@ -309,6 +309,21 @@ action there reloads the page, an action here keeps the panel open and
 refreshes in place — so an open item draft with unsaved edits outlives the
 action (observed in Chromium and Firefox on 2026-11-05, not a guarantee).
 
+## In VS Code
+
+The VS Code extension is the fourth client: a **Refdes Navis** view in the
+Explorer, with the same actions as the panels above — Archive, Restore, and
+project-wide Mint keys — plus click-through that opens the marker's file at
+its line. It is a client of the same projection and of `refdes serve` in
+particular: the view reads `GET /api/navis` (the API section below), and
+expanding it starts a server when the window has none, so opening a project
+starts nothing and a window with no server has nothing to list — the view
+says so and names *Attach to running server*. The row actions, the
+`--no-write` session lock, and the placeholder states are the extension's own
+surface, documented in
+[the extension's README](https://github.com/Squishiba/refdes/tree/main/editors/vscode#navis-view);
+this guide does not repeat them.
+
 ## The serve API
 
 `refdes serve` exposes the same list to tool builders over its loopback,

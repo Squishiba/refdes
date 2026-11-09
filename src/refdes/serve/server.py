@@ -303,18 +303,21 @@ def _pane_save_context(project, pane) -> None:
     the tip), and the endpoint's own resolution + revision spelling are
     reused here, never recomputed, so markup and save cannot drift.
 
-    A tip with no key (no composite for the save's `follows:`), one whose
-    file escapes the root, or one whose file is unreadable, names no
-    context: a panel naming a save the endpoint refuses is the UI lying.
-    The template renders the attributes only for a tab carrying `tip_key`,
-    and the build's model never sets one -- the built page stays byte-
-    identical (R3/Q9)."""
+    A tip with no key (no composite for the save's `follows:`), one with no
+    display id (F16-2: `links.composite_for` needs BOTH halves, so a keyed
+    id-less tip is the same unwritable composite -- the pane labels it by
+    key, and a save context naming it would offer a save the endpoint can
+    only refuse), one whose file escapes the root, or one whose file is
+    unreadable, names no context: a panel naming a save the endpoint refuses
+    is the UI lying. The template renders the attributes only for a tab
+    carrying `tip_key`, and the build's model never sets one -- the built
+    page stays byte-identical (R3/Q9)."""
     by_label = {}
     for candidate in project.items.values():
         by_label.setdefault(task_pane.label(candidate), candidate)
     for tab in pane["tabs"]:
         tip = by_label.get(tab["tip"])
-        if tip is None or not tip.key:
+        if tip is None or not tip.key or not tip.id:
             continue
         path = edit._item_path(project, tip)
         revision = edit.file_revision(path) if path is not None else ""

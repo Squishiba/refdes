@@ -101,6 +101,8 @@ variables, units, unit assertions, numbers, functions, and tolerances.
 | Refdes: Toggle inline calc results | Show/hide the inline values |
 | Refdes: Attach to running server | Use a `refdes serve` you started yourself |
 | Refdes: Show server log | The output channel behind the snapshot status item |
+| Refdes: Refresh Navis | Re-reads the Navis list (starts the server if needed) |
+| Refdes: Mint keys | Writes a key into every keyless Navi marker — asks first |
 
 A status bar item shows item count and error count; click it to run a check. A
 second one shows the live snapshot — see below.
@@ -149,7 +151,7 @@ the machine. Posts are debounced (~300 ms) and fire-and-forget: failures produce
 most one throttled output-channel line, never a popup, and clearing the setting stops
 posting immediately.
 
-## Navis tree (read-only)
+## Navis view
 
 The Explorer gains a **Refdes Navis** section listing the project's Navis —
 the same rows the site panel and the served preview render, read live from
@@ -160,16 +162,45 @@ starts nothing.
 
 - Active Navis are listed in the projection's order, labelled `key6 · text`
   (long texts truncate; the full text is in the tooltip). Archived ones sit
-  behind a **Show all (N)** group, and a keyless row says *No key yet — use
-  Mint keys*.
+  behind a **Show all (N)** group, a keyless row says *No key yet — use Mint
+  keys*, and an archived row whose marker was hand-deleted says *marker not
+  found*. When keyless rows exist, a **Mint keys (N)** row sits on top of the
+  list; **Refdes: Mint keys** is also in the command palette and on the
+  section's title bar.
 - Clicking a row opens the marker's file at its line; an archived row opens
-  the location its record snapshot saved.
+  the location its record snapshot saved. The row's inline globe action,
+  **Refdes: Open Navi in editor**, hands the row's item to the browser
+  editor's form through the same deep link as the CodeLens. A keyless row has
+  no item form to open, and says so.
+- The row menu carries the writes. **Refdes: Archive Navi** shows on keyed
+  active rows, **Refdes: Restore Navi** on keyed archived rows (an archived
+  row with no marker keeps Restore disabled with the hand-restore hint).
+  Neither touches a body byte: archiving writes one gzip record under
+  `.refdes/navis/`, restoring deletes it, so `git diff` stays empty.
+  **Refdes: Mint keys** is the one action that writes files — it splices a
+  key into every keyless marker in the project — so it asks one modal
+  confirmation first. Clean editors of the touched files reload from disk; a
+  dirty buffer gets VS Code's own external-change prompt (the same note goes
+  to the Refdes output channel). The mint is project-wide and idempotent; if
+  some markers cannot be keyed (a flow-style YAML list body, say), the mint
+  says how many stayed keyless.
 - The section's badge counts the active rows. The list refreshes on save, on
-  **Refdes: Refresh index**, and whenever the snapshot serial moves.
+  **Refdes: Refresh index**, on **Refdes: Refresh Navis**, and whenever the
+  snapshot serial moves.
 
-This view is read-only: Archive, Restore and Mint commands come in the next
-slice. The rows come from the served snapshot, which is disk state, so a row
-can lag an unsaved editor buffer — the same lag the preview panel has.
+The rows come from the served snapshot, which is disk state, so a row can lag
+an unsaved editor buffer — the same lag the preview panel has. A Navi archived
+in a terminal (`refdes navis archive`) shows up on the next refresh, not
+instantly: the archive is read at request time and moves no watched input, so
+nothing pushes.
+
+| Situation | What you get |
+|---|---|
+| No `refdes-project.yaml` found | the view says *No refdes-project.yaml found.* |
+| No server started yet | the view says *No server — hover an item, or run Refdes: Attach to running server*; expanding the view starts one; a write command answered before that says *refdes serve is not running* |
+| Server died, or a stale launch token | the view says *Refdes: server died — run Refdes: Attach to running server*; a stale token goes through the same respawn/re-attach recovery as the hover poll |
+| A project with no Navis | the view says *No Navis in this project* |
+| `refdes --no-write serve` | reads work; the first write shows the server's own refusal, locks Archive, Restore and Mint for the rest of the session, and the status bar shows a lock and *Refdes: read-only* (the refusal as its tooltip) until a new server starts or you attach to one |
 
 ## Settings
 

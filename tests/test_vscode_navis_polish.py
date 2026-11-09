@@ -916,14 +916,16 @@ def test_package_json_contributes_refresh_navis_in_the_palette():
 
 
 def test_package_json_contributes_navis_open_in_editor_hidden_from_palette():
-    """(4): refdes.navisOpenInEditor contributed with a "Refdes: ... Open in
+    """(4): refdes.navisOpenInEditor contributed with a "Refdes: ... in
     editor" title and HIDDEN from the command palette (the
     refdes.openInEditor/refdes.navisArchive pattern -- it acts on a tree
-    item). RED today."""
+    item). RED today. S6.4 restyled the title to the sibling shape
+    ("Refdes: Navis: Open in editor" -> "Refdes: Open Navi in editor"), so
+    the pin is the prefix + the "in editor" suffix, not the old substring."""
     commands = {c["command"]: c.get("title", "") for c in _manifest()["contributes"]["commands"]}
     assert OPEN_ID in commands, f"{OPEN_ID} is not contributed: {sorted(commands)}"
     title = commands[OPEN_ID]
-    assert title.startswith("Refdes: ") and "Open in editor" in title, title
+    assert title.startswith("Refdes: ") and title.endswith("in editor"), title
     palette = {e["command"]: e.get("when") for e in _manifest()["contributes"]["menus"].get("commandPalette", [])}
     assert palette.get(OPEN_ID) == "false", palette
     # S6.3 adds commands, not chrome: no keybindings, activation events

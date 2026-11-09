@@ -378,6 +378,11 @@ no-server table; a "In VS Code" section in `docs/navis.md`;
 *Tests:* `tests/test_docs_anchors.py`, docs-site build
 (`python docs-site/gen_examples.py --check` + `refdes build` in
 `docs-site/`, the docs.yml job).
+*Landed 2026-11-09:* the README "Navis view" section (with the no-server /
+`--no-write` table), the `docs/navis.md` "In VS Code" section, the root
+README feature row, the changelog fragment, and the 0.1.0 → 0.2.0 bump (the
+`refdes.navisOpenInEditor` title restyled to the sibling shape) all shipped
+together; publishing stays Jared's (Q6).
 
 ## 9. Packaging impact
 
