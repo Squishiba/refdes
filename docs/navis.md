@@ -55,7 +55,12 @@ repeat them.
 
 ## The CLI
 
-`refdes navis <verb>` reads the one project-wide list. The verbs:
+`refdes navis <verb>` reads the one project-wide list. The scan walks item
+bodies, and an item is in the scan once it has an `id:` — a marker in the
+body of an item that has no `id:` is listed by none of the verbs below,
+does not appear under `refdes index`'s `navis` key, and is absent from the
+panels, until `refdes id` mints the item's id (that is the command that
+allocates ids). The verbs:
 
 | Verb | Shows / does |
 |---|---|

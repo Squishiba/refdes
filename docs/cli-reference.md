@@ -2347,9 +2347,9 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
   value on it is a string the build already computed — nothing is evaluated
   in the browser.
 - **Item pages of a threaded log carry the task pane** — and here the preview
-  and the published site show the *same* thing (it is rendered in the shared
+  and the published site show the *same* pane (it is rendered in the shared
   item template, not added to the response). A floating **Tasks** button
-  (bottom-right; invisible unless JavaScript runs) opens a read-only pane:
+  (bottom-right; invisible unless JavaScript runs) opens it:
   the thread's open tips as tabs when a fork is open (a fork is
   never merged into one list), the tip's task list — with
   `viewing LOG-007 · tasks as of tip LOG-012` when
@@ -2359,8 +2359,20 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
   kinds belong to `refdes work`). Every task, verdict and derived line is
   `refdes thread`'s own wording and every fact comes from the same headless
   projection that command reads; the `viewing …` note just quoted is the
-  pane's own text, which `refdes thread` never prints. The pane computes
-  nothing and writes nothing. See
+  pane's own text, which `refdes thread` never prints.
+  **The controls are preview-only, on a writable server.** On the preview of
+  a `refdes serve` *not* started with `--no-write`, the tip's task rows
+  carry tick checkboxes and the pane module `taskpane-ticks.js` loads beside
+  them — a response-only decoration like the toolbar. The pane says what
+  the control is: "Preview: ticking a row changes this page only -- nothing
+  is saved." A tick changes only the page's visible state and lives on as a
+  per-tab draft (an unsaved-tick count, a **Discard** button, and a
+  leave-page prompt); nothing is saved to the project from the pane yet.
+  The pane computes nothing — every row above is the build's projection,
+  read, not re-derived in the browser. The **built/published** page keeps
+  the read-only pane (no checkboxes, no module), and so does a preview
+  served with `--no-write`: that server ships the pane with no tick
+  controls at all, exactly as the built page has them. See
   [`refdes thread`](#refdes-thread-lt-ref-gt) and
   `docs/design/thread-workbench.md` §7a.
 - **Loading writes nothing.** No key is minted, no link expanded, nothing

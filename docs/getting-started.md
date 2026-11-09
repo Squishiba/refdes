@@ -143,6 +143,8 @@ allocated 2 id(s)
 ```
 
 The IDs are now written into your file. They will never change. See [IDs](ids.md).
+A `<!--navi: …-->` marker you pin in a body before this step is invisible to
+`refdes navis ls` until the item has its id (see [Navis](navis.md)).
 
 The first line is not noise: loading the project also wrote a `key:` into each
 of the two items — a **surrogate key**, the one identifier that stays with an
