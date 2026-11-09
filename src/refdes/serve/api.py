@@ -1161,14 +1161,17 @@ def _parse_pins(raw) -> tuple[tuple, str]:
     return tuple(pins), ""
 
 
-def _apply_outcome(app, result) -> tuple[int, dict]:
+def _apply_outcome(app, result, *, continuation: bool = False) -> tuple[int, dict]:
     """The shared tail of the write routes that answer with `serve.edit`
     results: Applied 200, Conflict 409 (with the current span text and the
     diff), Refused 422 (a reason), Invalid 422 (the blocking diagnostics).
     Paths are shown project-relative when possible: the browser has no use
     for a server filesystem root, and a path it cannot read is a path it
     cannot leak. Shared by `/edit` and `/continue`; the shapes here are the
-    shapes their tests pin."""
+    shapes their tests pin. `continuation` marks the continue route: its
+    Applied body carries the capture's `announcements` (W5b.5), and the
+    plain `/edit` shape stays byte-identical -- a key every edit response
+    gained would be a wider API change than W5b.5 asked for."""
     project = app.state.snapshot.project
 
     def shown(path):
@@ -1182,7 +1185,7 @@ def _apply_outcome(app, result) -> tuple[int, dict]:
         # come back from the same refresh the file watcher uses, so the next
         # GET and the rendered site both show the saved bytes.
         app.state.refresh()
-        return 200, {
+        body = {
             "kind": "applied",
             "ok": True,
             "message": result.message,
@@ -1198,12 +1201,15 @@ def _apply_outcome(app, result) -> tuple[int, dict]:
             # value the reader read. Empty for an ordinary save, and never a
             # value the client sent.
             "pinned": [dict(entry) for entry in result.pinned],
-            # What the save captured (W5b.5): the `followed` capture lines, the
-            # same strings `Applied.announcements` carries; empty when the save
-            # captured nothing. ADDITIVE -- the keys above are unchanged.
-            "announcements": list(result.announcements),
             "diagnostics": [diag_dict(d) for d in result.diagnostics if d.level != CHECK_VIOLATION],
         }
+        if continuation:
+            # What the save captured (W5b.5): the `followed` capture lines,
+            # the same strings `Applied.announcements` carries; empty when
+            # the save captured nothing. ADDITIVE -- the keys above are
+            # unchanged, and only this route adds the new one.
+            body["announcements"] = list(result.announcements)
+        return 200, body
     if isinstance(result, edit_mod.Conflict):
         return 409, {
             "kind": "conflict",
@@ -1528,7 +1534,7 @@ def _continue_item(app, ref: str, body) -> tuple[int, dict]:
         # not a path rebuilt from the default marker name.
         config_path=app.state.config_path,
     )
-    return _apply_outcome(app, result)
+    return _apply_outcome(app, result, continuation=True)
 
 
 # ---------------------------------------------------------------- image picker

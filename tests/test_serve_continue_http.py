@@ -312,9 +312,14 @@ def test_a_continuation_applies_with_the_new_entry_id_handle_and_revision(served
     after = read_bytes(path)
     assert after.startswith(before)  # pure suffix: the tip bytes unchanged
     assert after.count(b"- id: ") == before.count(b"- id: ") + 1  # exactly one entry
-    # only the thread file and the id ledger moved
+    # only the thread file, the id ledger, and the capture's history files
+    # moved. W5b.5: the continuation save captures the predecessor -- one
+    # `followed` event + its snapshot object, both under .refdes/history.
     moved = {k for k, v in snapshot_tree(root).items() if before_tree.get(k) != v}
-    assert moved == {"items/log.yaml", ".refdes/ids.yaml"}
+    history_moved = {k for k in moved if k.startswith(".refdes/history/")}
+    assert moved - history_moved == {"items/log.yaml", ".refdes/ids.yaml"}
+    assert sum(k.startswith(".refdes/history/events/") for k in history_moved) == 1
+    assert sum(k.startswith(".refdes/history/objects/") for k in history_moved) == 1
 
     # the snapshot refreshed the way a save refreshes (api.py:1234): the new
     # entry is addressable immediately
