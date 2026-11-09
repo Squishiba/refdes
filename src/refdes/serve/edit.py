@@ -2396,6 +2396,16 @@ class ContinueRequest:
     expected_revision: str
 
 
+def _tip_subject(tip) -> str:
+    """The subject a continuation refusal names the tip by: its display id,
+    or -- for a tip carrying a key and no `id:` -- the words "the tip" and
+    its key. A bare `{tip.id}` interpolation renders an EMPTY subject for
+    such a tip (the message opens on a space and names nobody), and the key
+    is the only identity it carries; `links.composite_for` needs both
+    halves, which is why this tip is the one a continuation refuses."""
+    return tip.id if tip.id else f"the tip {tip.key}"
+
+
 @dataclass(frozen=True)
 class _ContinuationPlan:
     new_id: str
@@ -2471,25 +2481,27 @@ def _continue_locked(config: str, request: ContinueRequest):
         return Refused(
             who,
             ref,
-            f"the task list at {tip.id} is ambiguous: equal-distance declarations differ "
-            "(task reconciliation required) -- there is no list to copy",
+            f"the task list at {_tip_subject(tip)} is ambiguous: equal-distance declarations "
+            "differ (task reconciliation required) -- there is no list to copy",
         )
     if fold.rows is None:
         return Refused(
             who,
             ref,
-            f"nothing in {tip.id}'s thread declares tasks: (undeclared) -- there is no "
-            "list, not an empty one, for a tick to change",
+            f"nothing in {_tip_subject(tip)}'s thread declares tasks: (undeclared) -- there "
+            "is no list, not an empty one, for a tick to change",
         )
     if not fold.rows:
         return Refused(
             who,
             ref,
-            f"the task list at {tip.id} is cleared (an explicit tasks: []): ticking a "
-            "row of a cleared list would invent rows the fold says do not exist",
+            f"the task list at {_tip_subject(tip)} is cleared (an explicit tasks: []): "
+            "ticking a row of a cleared list would invent rows the fold says do not exist",
         )
     if tip.external:
-        return Refused(who, ref, f"{tip.id} is an imported entry; imports are read-only here")
+        return Refused(
+            who, ref, f"{_tip_subject(tip)} is an imported entry; imports are read-only here"
+        )
     path = _item_path(before, tip)
     if path is None:
         return Refused(who, ref, f"{ref} resolves outside the project; nothing was written")
@@ -2503,8 +2515,8 @@ def _continue_locked(config: str, request: ContinueRequest):
         return Refused(
             who,
             ref,
-            f"{tip.id} is a sealed append-only entry: a continuation appends a new "
-            "entry, it never rewrites a sealed one",
+            f"{_tip_subject(tip)} is a sealed append-only entry: a continuation appends a "
+            "new entry, it never rewrites a sealed one",
             path=path,
         )
     rows, reason = _planned_rows(fold.rows, request.ticks)
@@ -2537,8 +2549,8 @@ def _continue_locked(config: str, request: ContinueRequest):
         return Refused(
             who,
             ref,
-            f"{tip.id} carries no artifact key, so no DISPLAY-ID@key composite can be "
-            "written for it; naming the tip with a bare id would drop the identity "
+            f"{_tip_subject(tip)} carries no artifact key, so no DISPLAY-ID@key composite "
+            "can be written for it; naming the tip with a bare id would drop the identity "
             "the link is for",
             path=path,
         )
