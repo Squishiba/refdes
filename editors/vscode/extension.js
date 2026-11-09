@@ -26,6 +26,8 @@ const fs = require("fs");
 const { ServeClient, parseLaunchUrl } = require("./serveClient");
 const { createDocsFocusWatcher } = require("./docsFocus");
 const { createNavisTree } = require("./navisTree");
+const { createWriteLock } = require("./navisActions");
+const { createNavisCommands } = require("./navisCommands");
 
 const ID_RE = /\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{1,6}\b/;
 const CALC_FENCE_RE = /^\s*```calc\b/;
@@ -58,6 +60,12 @@ let navisPayload = null;
 let navisPlaceholderState = null;
 /** The project root the last payload was rendered against (click-through). */
 let navisRoot = null;
+
+/** The session write lock of the Navis write commands (S6.2b): the first
+ * 403 `refused` of the session locks writes (plan §4). Constructed in
+ * `activate`; a NEW serve (a boot, a respawn, an attach) resets it, because
+ * the next launch may well allow writes. */
+let navisWriteLock = null;
 
 /** The one `refdes serve` handle this window has, or null (§3.1: one per project). */
 let serve = null;
@@ -380,6 +388,9 @@ async function startServe() {
   serveFailed = false;
   serve = client;
   serveSerial = null;
+  // A new serve is a new session: the old one's --no-write lock (plan §4)
+  // says nothing about this one.
+  if (navisWriteLock) navisWriteLock.reset();
   setServeState("starting", `spawning \`refdes serve\` in ${root}`);
 
   serveBoot = client.start();
@@ -588,6 +599,19 @@ const navisTreeProvider = {
 
 function fireNavisChanged() {
   if (navisChanged) navisChanged.fire();
+}
+
+/**
+ * The status-bar face of the write lock (plan §4's 403 row: the status bar
+ * names `--no-write`). The lock text sits on the index item until the next
+ * index refresh rebuilds its text -- the lock itself outlives the repaint,
+ * and it lives in navisWriteLock, not here.
+ */
+function setNavisWriteStatus(text) {
+  if (!statusBar || !text) return;
+  statusBar.text = "$(lock) Refdes: read-only";
+  statusBar.tooltip = text;
+  statusBar.show();
 }
 
 function showNavisPlaceholder(state) {
@@ -1045,6 +1069,8 @@ async function commandAttachServer() {
   await stopServe();
   serveFailed = false;
   serve = ServeClient.attach(parsed, { onLog: logServe });
+  // The attached launch is a new session -- same lock reset as a boot.
+  if (navisWriteLock) navisWriteLock.reset();
   logServe(
     `attached to ${parsed.base}` +
       (parsed.normalizedFromLocalhost
@@ -1099,6 +1125,22 @@ function activate(context) {
     ];
   }
 
+  // The Navis write commands (S6.2b): the decisions, the row recovery and
+  // the plan §4 rendering all live in the pure ./navisCommands module --
+  // this is the wiring only: one session write lock, the live serve handle,
+  // the tree's own refresh and last payload (never fetched twice), the
+  // status bar, and the log.
+  navisWriteLock = createWriteLock();
+  const navisCommands = createNavisCommands({
+    vscode,
+    getClient: () => serve,
+    refreshTree: () => refreshNavisTree(false),
+    getRows: () => navisPayload,
+    lock: navisWriteLock,
+    setStatus: setNavisWriteStatus,
+    log: logServe,
+  });
+
   vscode.commands.executeCommand("setContext", "refdes.active", true);
 
   const selector = [
@@ -1125,6 +1167,9 @@ function activate(context) {
     vscode.commands.registerCommand("refdes.attachServer", commandAttachServer),
     vscode.commands.registerCommand("refdes.openInEditor", commandOpenInEditor),
     vscode.commands.registerCommand("refdes.showServerLog", commandShowServerLog),
+    vscode.commands.registerCommand("refdes.navisArchive", navisCommands.archive),
+    vscode.commands.registerCommand("refdes.navisRestore", navisCommands.restore),
+    vscode.commands.registerCommand("refdes.navisMint", navisCommands.mint),
     vscode.languages.registerHoverProvider(selector, hoverProvider),
     vscode.languages.registerCodeLensProvider(selector, codeLensProvider),
     vscode.languages.registerDefinitionProvider(selector, definitionProvider),
