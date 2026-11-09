@@ -1,0 +1,59 @@
+{
+ "what": "Forked thread, pane on the shared page (log-f-001.html, tips LOG-F-002/LOG-F-003, project .scratch/proj17ff2 on writable 8762): one tab per open tip; ticking tab 2 counts only tab 2 (tab label LOG-F-003 (1), tab 1 status stays null); the draft is intact on returning to the tab; pressing Save on the tab posts for the tab tip and is REFUSED (thread is forked), draft kept",
+ "tabs": [
+  "LOG-F-002",
+  "LOG-F-003"
+ ],
+ "headings": [
+  "Tasks at LOG-F-002:",
+  "Tasks at LOG-F-003:"
+ ],
+ "tab3_after_tick": {
+  "url": "/preview/log-f-001.html",
+  "tabs": [
+   "LOG-F-002",
+   "LOG-F-003 (1)"
+  ],
+  "tipKey": "rywker3d74h",
+  "headings": [
+   "Tasks at LOG-F-002:",
+   "Tasks at LOG-F-003:"
+  ],
+  "checkboxes": 1,
+  "status": "1 unsaved tick",
+  "saveVisible": true,
+  "msg": null
+ },
+ "tab2_status_while_tab3_ticked": {
+  "url": "/preview/log-f-001.html",
+  "tabs": [
+   "LOG-F-002",
+   "LOG-F-003 (1)"
+  ],
+  "tipKey": "dwz1zj7bxhm",
+  "headings": [
+   "Tasks at LOG-F-002:",
+   "Tasks at LOG-F-003:"
+  ],
+  "checkboxes": 1,
+  "status": null,
+  "saveVisible": false,
+  "msg": null
+ },
+ "after_save_on_tab": {
+  "url": "/preview/log-f-001.html",
+  "tabs": [
+   "LOG-F-002",
+   "LOG-F-003 (1)"
+  ],
+  "tipKey": "rywker3d74h",
+  "headings": [
+   "Tasks at LOG-F-002:",
+   "Tasks at LOG-F-003:"
+  ],
+  "checkboxes": 1,
+  "status": "1 unsaved tick",
+  "saveVisible": true,
+  "msg": "refused: rywker3d74h's thread is forked across tips LOG-F-002, LOG-F-003: a continuation names one tip, and this request cannot pick one"
+ }
+}

@@ -19,6 +19,7 @@ refused:
   project has existing build errors -- fix those first, so a calc that changes meaning under this rewrite can't hide behind an already-broken build
   ERROR   items/log.yaml:5 [LOG-PWR-001] — item-level history: was renamed to on_change: -- rename this key in the source file. Its override is used in this build so the change policy is not silently lost.
 rc=1
+note: the refusal block above lists the history: row; the second build error (the retired calc spelling) is in the step 2 block. The refusal footer is the build, not a full error list.
 
 ### step 2 fix: rename history: -> on_change: ; then calc-rewrite:
 rewrote 1 calc line(s) in 1 file(s):
@@ -55,3 +56,24 @@ Since last revision (post-upgrade, 2026-11-09T13:06:24Z):
   changed   0
   added     0
   removed   0
+
+### post-upgrade state (copy proj17upg4 of the upgraded project; the stamp lands in the copy):
+$ grep -n "standard:" -A2 refdes-project.yaml
+standard:
+  base: hardware
+  version: 3
+$ refdes --no-write check
+3 items, 0 errors, 0 warnings
+$ refdes ls
+DEC-PWR-001  log          Regulator topology
+LOG-PWR-001  log          First rail note.
+REQ-PWR-001  requirement  The rail must supply 3V3 at 2 A.
+$ refdes revision post-upgrade
+3 items, 0 errors, 0 warnings
+
+revision 'post-upgrade' stamped: 3 items.
+  .refdes/baselines/post-upgrade.yaml
+rc=0
+$ refdes standard upgrade --to 3
+configuration error: project is already at hardware@3, not below the requested --to 3
+rc=2

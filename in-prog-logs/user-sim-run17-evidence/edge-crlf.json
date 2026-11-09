@@ -1,14 +1,17 @@
 {
- "K1_first_tick": "1 unsaved tick",
- "K2_conflict_open": true,
- "K3_late_tick_status": "2 unsaved ticks",
- "K4_after_keep_mine": {
-  "status": "2 unsaved ticks",
-  "checked": [
-   "T-thermal-model",
-   "T-ldo-choice",
-   "T-demco"
-  ]
+ "what": "CRLF preservation (re-run): log.yaml converted to all-CRLF (115 CRLF lines, 0 lone LF), one tick saved via the pane; the file stays all-CRLF after the continuation is appended (123 CRLF lines, 0 lone LF). Project .scratch/proj17ff2, writable server 8762",
+ "pre_bytes": {
+  "crlf_lines": 115,
+  "lone_lf": 0
  },
- "DONE_K": true
+ "after_tick": {
+  "status": "1 unsaved tick",
+  "saveVisible": true
+ },
+ "after_save": {},
+ "post_bytes": {
+  "crlf_lines": 123,
+  "lone_lf": 0
+ },
+ "DONE_CRL": true
 }

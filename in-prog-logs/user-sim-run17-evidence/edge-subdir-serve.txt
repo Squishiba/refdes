@@ -1,0 +1,5 @@
+=== subdir serve: launch inside the project (items/) on --no-write ===
+launched with cwd = <worktree>/.scratch/proj17c/items (project subdirectory); discovery walks up to the project:
+launch (token redacted): refdes serve: http://127.0.0.1:38501/?token=REDACTED
+root with token: 302 (302 = token handshake redirect, browser follows); preview index: 302; item page log-a-004.html: 302 (same 302 handshake)
+pane on the served item page: renders (3 tick rows, tip key) -- see edge-idless-nowrite-sealed-subdir.json E10_subdir_pane

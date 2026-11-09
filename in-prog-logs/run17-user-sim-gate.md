@@ -60,3 +60,48 @@ navis id-less note, VS Code Navis view, serve launch surface, upgrading.md.
 
 Task finished: yes. Report:
 `in-prog-logs/user-sim-release-gate-run17.md`.
+
+## Reviewer fix round (head ac7e7b0) — one commit
+
+- Cookie `refdes_token_8762=…` in serve-cli-battery.txt redacted; whole-dir
+  scan for 43-char runs + `refdes_token_` clean (remaining hits are sha256
+  revisions, not tokens).
+- Contradictions: (a) read-only DIRECTORY probe re-run with sha256 before/
+  after — `file_unchanged_dir_readonly: true` (edge-readonly-tree.json),
+  and the 0444 FILE probe got its own file with `file_unchanged_file_0444:
+  false` (edge-file-0444.json, 200 applied); (b) copy-it-out re-run on a
+  copy (proj17co, 8767) with real sha256: `file_unchanged_by_copyout:
+  true` (flow-b-copyout-verify.json), bogus C5 key removed; (c) B7_two_ticks
+  removed from flow-b-conflict.json + flow-c-firefox-conflict.json;
+  (d) sealed tip re-recorded: Save visible after ticking BEFORE pressing
+  Save (S2 saveVisible: true) then refused, draft kept (edge-sealed-save.json);
+  (e) Firefox parity stated precisely: recorded panelRevision equals the new
+  file revision; B6_warn_rev is the runner's stale sentinel string, noted.
+- Claims beyond evidence: claims-check.py greps every backticked span of
+  the report against the evidence (output claims-check.txt: 123 fragments,
+  0 misses). New evidence files fill the known misses: api-navis-actions.txt
+  (ordinal + 403s; the .json renamed away), api-continue-400.txt,
+  flow-a-capture-once.txt, refdes-thread-fork.txt, edge-fork-tab-save.json
+  (fork-tab drafts real, Save REFUSED — the LOG-F-005 claim was fabricated
+  and is gone), edge-subdir-serve.txt, git-context.txt, code-quote.txt,
+  vscode-source.txt, readme-test-cmd.txt, pytest-tail.txt, nested-probe.txt,
+  edge-nowrite-note.json, navis-idless-before-after.txt re-run full (keyless
+  show, minted-key line), upgrading-transcript.txt (stamped block, rc=2
+  refusal, step-4 omission note), edge-unicode-path.json honest current
+  counts (entry count 9→10 and 19-item claims replaced by recorded values:
+  `LOG-A-011` follows + `20 items, 0 errors, 0 warnings`), edge-crlf.json
+  re-run (the original raw record had been clobbered by a same-named probe;
+  115→123 CRLF lines, 0 lone LF).
+- Glyphs: every em-dash inside "verbatim" quotes replaced with the printed
+  `--`/` - ` (note line, stale clause, preview-only line, seal follow-up,
+  calc/history lines, mint keyless lines, restore line); the §6 status
+  claims (`refdes status` never existed) rewritten to the real
+  check/ls/stamp/refusal outputs; hash pair fixed to
+  expected 39d6480c8739 / found 6ff5f07d9d44; `changed 3 file(s)`; schema
+  line 90.
+- Findings 1-4 unchanged and their evidence strengthened (A6 rows,
+  file_unchanged booleans, nested probe, 0444/0555 split).
+
+Task finished: yes (fix round). Report:
+`in-prog-logs/user-sim-release-gate-run17.md`; claims check:
+`in-prog-logs/user-sim-run17-evidence/claims-check.txt`.

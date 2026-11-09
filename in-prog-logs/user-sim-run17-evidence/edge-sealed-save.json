@@ -1,0 +1,26 @@
+{
+ "what": "sealed tip: Save offered after ticking (before pressing Save), refused, draft kept; project .scratch/proj17sealed served on 8764 (writable), page log-a-006.html",
+ "S1_open_pane": {
+  "tipKey": "3thkvje0mdp",
+  "checkboxes": 3,
+  "saveInDom": true,
+  "saveVisibleBeforeAnyTick": false
+ },
+ "S2_after_tick_before_save": {
+  "status": "1 unsaved tick",
+  "saveVisible": true,
+  "checked": [
+   "T-thermal-model",
+   "T-demco"
+  ]
+ },
+ "S3_after_save_click": {
+  "msg": "refused: LOG-A-006 is a sealed append-only entry: a continuation appends a new entry, it never rewrites a sealed one",
+  "status_after": "1 unsaved tick",
+  "checked_after": [
+   "T-thermal-model",
+   "T-demco"
+  ]
+ },
+ "DONE_S": true
+}

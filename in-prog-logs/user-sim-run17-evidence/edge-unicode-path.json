@@ -1,12 +1,14 @@
 {
- "E9a_pane": {
-  "tipKey": "2thxvewp7km",
+ "what": "non-ASCII project path: project dir renamed to .scratch/proj17ünïcodé (real non-ASCII chars in the path), served on 8765; pane render, tick, Save applied on that path",
+ "project_dir": ".scratch/proj17ünïcodé",
+ "pane": {
+  "tipKey": "tqnks9s5f38",
   "checkboxes": 3,
   "rows": [
    [
     "T-thermal-model",
-    "open",
-    false
+    "done",
+    true
    ],
    [
     "T-ldo-choice",
@@ -20,17 +22,17 @@
    ]
   ]
  },
- "E9b_after_tick": {
+ "after_tick": {
   "status": "1 unsaved tick",
   "saveInDom": true,
   "saveVisible": true,
-  "checked": [
-   "T-thermal-model"
-  ]
+  "checked": []
  },
- "E9c_after_save": {
+ "after_save": {
   "url": "/preview/log-a-004.html",
   "h1": "LOG-A-004"
  },
- "DONE_E9B": true
+ "log_yaml_entries_now": 11,
+ "last_entry_tail": "id: LOG-A-011 ... follows: [LOG-A-010@tqnks9s5f38] (continuation appended by the Save applied in this probe; the ticked task state in it differs from the tip)",
+ "check_now": "20 items, 0 errors, 0 warnings"
 }

@@ -1,0 +1,14 @@
+{
+ "what": "read-only FILE probe (chmod 0444 on the file only; same endpoint)",
+ "item_key": "g52ptehpvx6",
+ "tick": "T-thermal-model",
+ "project": ".scratch/proj17ff2 (served on 8762, writable)",
+ "chmod_cmd": "chmod 0444 items/board-a/log.yaml",
+ "post_status": 200,
+ "post_body_first_line": "{\"kind\":\"applied\",\"ok\":true,\"message\":\"applied: continuation LOG-A-009 appended to items/board-a/log.yaml (1 tick)\",\"path\":\"items/board-a/log.yaml\",\"revision\":\"dad0a623d40fc7fea2db1124faeaaa3135c2d5c07729aa4c162a3217239c7426\",\"describe\":\"co",
+ "sha_before": "bae7e8b5dcd7e846d705369819761c8d43a69a8fb974ea81557cb7e8a501409d",
+ "sha_after": "dad0a623d40fc7fea2db1124faeaaa3135c2d5c07729aa4c162a3217239c7426",
+ "file_mode_before": "0o644",
+ "file_mode_after": "0o444",
+ "file_unchanged_file_0444": false
+}

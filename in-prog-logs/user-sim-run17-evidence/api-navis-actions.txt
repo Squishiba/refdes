@@ -1,0 +1,19 @@
+=== api-navis-actions: GET/POST /api/navis* on 8762 (proj17ff2) and --no-write locks on 8763 ===
+== GET /api/navis (status 200):
+{"navis":[{"key":"63q89nmcag0","key6":"63q89n","text":"Recheck decoupling near U14.","item":"REQ-MECH-002","href":"req-mech-002.html","file":"items/board-b/markers.yaml","line":9,"archived":false,"changed":false,"orphan":false}],"counts":{"active":1,"archived":0}}
+== archive by key6 prefix 63q89n (status 200):
+{"kind":"ok","verb":"archive","key":"63q89nmcag0","changed":true}
+== restore by full key 63q89nmcag0 (status 200):
+{"kind":"ok","verb":"restore","key":"63q89nmcag0","changed":true}
+== archive by ordinal 1 (status 200):
+{"kind":"ok","verb":"archive","key":"63q89nmcag0","changed":true}
+== restore by ordinal 1 (status 200):
+{"kind":"ok","verb":"restore","key":"63q89nmcag0","changed":true}
+== mint (status 200):
+{"kind":"ok","changed":false,"minted":[],"still_keyless":0}
+== --no-write archive (status 403):
+{"kind":"refused","error":"this server was started with --no-write: navis archive and restore are disabled"}
+== --no-write restore (status 403):
+{"kind":"refused","error":"this server was started with --no-write: navis archive and restore are disabled"}
+== --no-write mint (status 403):
+{"kind":"refused","error":"this server was started with --no-write: navis mint is disabled"}
