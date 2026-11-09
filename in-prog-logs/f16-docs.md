@@ -58,7 +58,8 @@ Save-UI check for the sentence's wording: `git log origin/main --oneline`
 has W5b.4c-2a (#468, request/response logic, "nothing visible yet") and
 W5b.5 (#470) but NO `save UI` / W5b.4c-2b — so "nothing is saved to the
 project from the pane yet" is true as written; re-check before the PR.
-Not documented: Save button / conflict panel (in review). Not browser-driven
+Not documented: Save button / conflict panel (in review) — superseded by the
+follow-up section below once #474 merged. Not browser-driven
 this session: the draft/Discard/prompt claims come from the shipped JS the
 server served (grep of `taskpane-ticks.js` above), not from a click.
 
@@ -98,6 +99,29 @@ sentence at the `refdes id` step.
   stands.
 - Servers stopped by the PIDs started (8891/8892 and 8893/8894; token files
   removed on clean stop).
+
+## Follow-up — the Save UI merged after the PR opened (W5b.4c-2b, #474)
+
+The passage's "nothing is saved to the project from the pane yet" became
+false on main: merged origin/main (plain, no conflict) and rewrote that part
+from the code, not the browser (same limit as above): `taskpane-save.js`
+(`initSave` wires a Save per draftable panel, shown while the draft has
+pending ticks, token from the page's meta at save time, into
+`X-Refdes-Token`); `tick-save.js` (`saved` discards+reloads; refused /
+invalid / forbidden / transport-error show the cleaned+capped server text
+and keep the draft; 409 conflict → re-reads the page, offers exactly
+Keep mine / Keep theirs / Copy it out, "nothing merges");
+`serve/edit.py::_continuation_lines` (the new entry copies the tip's scalar
+declared fields + the whole `tasks:` list, body empty, plus the generated
+`follows:`); the W5b.5 capture rides in the same locked op
+(`capture_followed`, announced once) per `docs/design/living-notes.md` §1.
+The id-less/key-less gate is server-side (`_pane_save_context` names no
+context without key+id → panel can't draft → pane says
+"ticks on this tip are preview-only - nothing is saved").
+Re-ran after the rewrite: `gen_examples.py --check` up to date;
+`test_docs_anchors` + `test_crossplatform_lint` → 28 passed; docs-site
+`refdes build` → 0 errors. Full suite after this merge: 6413 passed,
+2 skipped.
 
 ## Not verified
 
