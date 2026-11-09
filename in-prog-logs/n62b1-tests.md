@@ -110,3 +110,36 @@ plan-generic, row-matrix, api).
   `Origin`, case-insensitive `token`) — an implementer who names the launch
   secret or header policy in a comment hits them; that is deliberate (same
   form as test_vscode_navis_tree.py's token pin).
+
+# n62b1-impl — `editors/vscode/navisActions.js` (implementer, 2026-11-08)
+
+Slice IMPLEMENTER N6.2b-1-impl. Created `editors/vscode/navisActions.js`
+(pure CommonJS, five exports exactly as pinned; no navisTree.js change, no
+extension.js/package.json/commands/UI — those are S6.2b-2). Status: DONE.
+
+- Red before the module: 9 failed. Green after: 9 passed. Neighbours green:
+  test_vscode_navis_tree.py + test_vscode_extension_http_client.py +
+  test_vscode_extension.py + test_crossplatform_lint.py = 67 passed.
+  Full suite: run once before push (see PR).
+- No .py source touched → nothing for ruff; `node --check` clean on the JS.
+- Wording constants: the task said "import, do not copy strings", but the
+  test author's source pin demands `KEYLESS_HINT` and `ORPHAN_HINT` appear
+  as literals INSIDE navisActions.js (a pure require of navisTree.js cannot
+  satisfy `KEYLESS_HINT in actions`). The tests are the unmodifiable
+  contract, so the two literals live in navisActions.js (navisTree.js
+  untouched — its own pin keeps the tree string); the docstring's
+  "reuse the constant or pin equality" is the test author's own
+  acknowledgement of this fork. Runtime equality holds.
+- The comment ban caught one word: a comment quoting plan §3's "stale
+  token" heading tripped the case-insensitive `token` substring ban;
+  reworded. Deliberate design, as the test log predicted.
+- 200 branch reads no body fields (mint's 200 has no verb/key — captured
+  fixture `mintOk` proves it); any plain-object 200 is a refresh.
+- Generic (unhandled) messages name the status, never the body; sanitiser
+  strips C0+DEL and caps at 300 (long400 prefix pin, hostile400 verbatim
+  pin both green).
+- No changelog.d fragment: internal module, nothing user-visible until
+  S6.2b-2 wires the commands (per this log's earlier "Not done" note).
+- No real VS Code window available anywhere in this slice: pure decision
+  logic under bare node only (plan §7: "Cannot prove: any VS Code UI
+  behavior").
