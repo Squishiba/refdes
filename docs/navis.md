@@ -56,11 +56,11 @@ repeat them.
 ## The CLI
 
 `refdes navis <verb>` reads the one project-wide list. The scan walks item
-bodies, and an item is in the scan once it has an `id:` — a marker in the
-body of an item that has no `id:` is listed by none of the verbs below,
-does not appear under `refdes index`'s `navis` key, and is absent from the
-panels, until `refdes id` mints the item's id (that is the command that
-allocates ids). The verbs:
+bodies, and items without an `id:` are skipped (those are the items
+`refdes id` allocates) — a marker in a skipped item is listed by none of the
+verbs below, does not appear under `refdes index`'s `navis` key, and is
+absent from the panels, until `refdes id` mints the item's id; the listings
+say so on stderr, with an example further down this section. The verbs:
 
 | Verb | Shows / does |
 |---|---|
@@ -109,10 +109,9 @@ $ refdes navis all
   archived: none
 ```
 
-**Items with no `id:` are not scanned.** A marker written in an item that
-has no `id:` yet is invisible to every verb: the scan sees project
-members, and an id-less item is not one until `refdes id` runs. The
-listings say so on stderr (stdout keeps only the answer):
+**Items with no `id:` are not scanned.** Items without an `id:` are skipped
+(those are the items `refdes id` allocates — the rule is stated at the top of
+this section); the listings say so on stderr (stdout keeps only the answer):
 
 ```console
 $ refdes navis ls
