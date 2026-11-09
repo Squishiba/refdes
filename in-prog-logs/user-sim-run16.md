@@ -49,3 +49,15 @@ plus the re-run (`r16-rerun.json`). Stripped machine-specific absolute
 paths from three evidence files; added the requested `--no-write`
 preview datum (no checkboxes, no ticks module) as undocumented. No
 product fixes made (dispatched to other workers).
+
+Second review round: F16-1 retracted outright — my probe items were
+yaml list-file entries with no `id:`, a loud documented load error
+(`parse.py:2033`), not a silent scan skip; keyed id-less thread tips
+load and list (only F16-5's cosmetic applies), and the scan citation is
+`docs/markdown.md:77`, not navis.md. The false "tick files
+byte-identical" sentence in F16-3 is corrected (only `tick-save.js` is
+in range, +236, new; the click-path files are 0-diff). Added
+`repro-f16.sh`/`repro-f16.out` (run against current-main source
+extracted by `git archive`) — which also reproduced the mint
+announcement's empty subject slot, restoring that F16-5 clause I had
+dropped. Header now reconciles base/range/main-moved in one sentence.
