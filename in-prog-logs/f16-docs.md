@@ -85,8 +85,18 @@ sentence at the `refdes id` step.
 - `refdes build` in docs-site → 0 errors, site written.
 - `pytest tests/test_docs_anchors.py tests/test_crossplatform_lint.py` →
   28 passed.
-- Full suite: see below (run once).
-- Servers stopped by the PIDs started (8891/8892 killed; token files
+- Full suite before the merge: 6385 passed, 2 skipped. After merging
+  origin/main (which had taken #472's navis.md "In VS Code" section and
+  #473's id-less-tip gate — no conflict with the CLI-section edit; both
+  sections verified present in the merge) → 6388 passed, 2 skipped.
+- No Python touched, so no ruff run applies.
+- Post-merge the serve pair was re-run on ports 8893/8894: writable preview
+  tick-checkboxes=8 / module=1, `--no-write` checkboxes=0 / module=0 (pane
+  toggle present on both) — the passage's claims hold at the merge.
+- Save-UI wording re-checked at the final origin/main tip (10a4a701): no
+  save-UI merge, so "nothing is saved to the project from the pane yet"
+  stands.
+- Servers stopped by the PIDs started (8891/8892 and 8893/8894; token files
   removed on clean stop).
 
 ## Not verified
