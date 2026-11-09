@@ -42,7 +42,15 @@ refdes.yaml: nothing is read from it any more, so a key left behind there
 is a setting that silently stops applying.
 ```
 
-Exit 2. **Fix:** move every setting into `refdes-project.yaml` (for the
+Exit 2 — with one precondition: the marker is searched for by walking up
+from the current directory, so a probe directory nested inside another
+refdes project (a scratch directory inside a refdes checkout, say) loads
+that ancestor's project and exits 0 with `refdes.yaml` never read —
+`refdes ls` there lists the ancestor's items, not the probe's. Test this
+step in isolation by copying the probe outside every project directory,
+or by naming the old file: `refdes -c refdes.yaml check` prints the
+message above and exits 2 from a nested directory. **Fix:** move every
+setting into `refdes-project.yaml` (for the
 probe project this was a rename), move any `types:`/`link_types:`/
 `field_sets:` into `refdes-schema.yaml` — renaming `field_sets:` to
 `sets:` while you are there (the old key is a hard error naming the
@@ -180,7 +188,7 @@ item off `selected` (the probe's second-source part became
 
 | Change | What you see | Fix |
 |---|---|---|
-| `refdes.yaml` retired; config is two files | `configuration error: refdes.yaml is retired…`, exit 2, on every command | Split by top-level key: settings → `refdes-project.yaml` (the marker), `types:`/`link_types:`/`sets:` → `refdes-schema.yaml`; remove the old file (`refdes revise` can't do config layout) |
+| `refdes.yaml` retired; config is two files | `configuration error: refdes.yaml is retired…`, exit 2, on every command — when no ancestor directory carries the marker (step 1) | Split by top-level key: settings → `refdes-project.yaml` (the marker), `types:`/`link_types:`/`sets:` → `refdes-schema.yaml`; remove the old file (`refdes revise` can't do config layout) |
 | `field_sets:` → `sets:` | load error naming the rename | Rename the key in `refdes-schema.yaml`; entries unchanged |
 | `url:` → `path:` in citations | `citation field url: was renamed to path:` | Rename in each item (keep the `http(s)://` value); `refdes standard upgrade --to 3` rewrites it with the build green |
 | `vendor:` → `keep_copy:`; `vendored:` → `kept_copy:` | lockfile error naming the keys; `.refdes/vendor/` warning | Rename in items and `.refdes/citations.yaml`, `mv .refdes/vendor .refdes/copies`, or `refdes fetch --update`; a project configuring the renamed release-gate rule must rename `missing_vendored_copies:` → `missing_kept_copies:` |
