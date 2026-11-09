@@ -30,10 +30,13 @@ as a spelling check.
 
 The seam stays serve-response-only, the W5b.3 rule (R3/Q9): `refdes build`
 and the preview generation on disk carry neither attribute, and the pane on
-disk stays byte-identical to what build wrote. A tip with no key renders the
-read-only glyph rows -- W5b.3 gave it no checkboxes, so there is no save
-context to name. `--no-write` is pinned conservative exactly as W5b.3 pinned
-it: no controls, and so no context, while its writable twin ships all three.
+disk stays byte-identical to what build wrote. A tip with no key keeps
+W5b.3's checkboxes exactly and names NO key and NO revision -- a panel
+without them is one W5b.4c's save UI must refuse to draft against (the
+tip has no artifact key, so the endpoint can write no `follows:`
+composite for its continuation). `--no-write` is pinned conservative
+exactly as W5b.3 pinned it: no controls, and so no context, while its
+writable twin ships all three.
 """
 
 from __future__ import annotations
