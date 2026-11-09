@@ -1,6 +1,6 @@
 # n62b1-tests — contract tests for `editors/vscode/navisActions.js` (S6.2 decision logic)
 
-Slice: TEST AUTHOR ONLY, N6.2b-1-tests. Delivered `tests/test_vscode_navis_actions.py` (9 tests at authoring, 15
+Slice: TEST AUTHOR ONLY, N6.2b-1-tests. Delivered `tests/test_vscode_navis_actions.py` (9 tests at authoring, 17
 after the review rounds) pinning the module the implementer builds.
 Branch base: main at the N6.2a merge (post-#402 size gate); fast-forward confirmed,
 tree clean before starting.
@@ -132,18 +132,19 @@ extension.js/package.json/commands/UI — S6.2b-2). Status: DONE.
   (`changelog.d/navis-vscode-actions-logic.added.md`). No real VS Code
   window exists in this slice: pure logic under bare node (plan §7).
 
-## Review rounds 2-3 (same day, owner-triaged reviewer findings)
+## Review rounds 2-4 (same day, owner-triaged reviewer findings)
 
-Round 2 (red-first, then green): the ambiguous message composes its
+All red-first, additions only. Round 2: the ambiguous message composes its
 candidate list OUTSIDE the 300 cap (per-text 80 cap + `...`, 20 named,
 `(+N more)`); table flags key on `kind`/`reason`, a missing `error` falls
 back safely (a lock stays a lock, naming --no-write); C1 controls
-stripped; a null row disables all; the `{error}` docstring covers
-post()'s unparseable-200. Authorized test edits: real security-403
-fixture texts + a JSON-500 passthrough pin. Round 3 (pins only, no
-functional defect found): no-`undefined` fallbacks -- a non-object result
-says "no usable response", a kind-less JSON 500 gets the generic text, a
-partial candidate prints only the fields it has (field-less: skipped into
-the `(+N more)` tail). Stale claims fixed above (test count, changelog,
-scratch paths). In-file 15 passed, neighbours 67; `node --check` + ruff
-clean; suite and CI re-run (see PR).
+stripped; a null row disables all; `{error}` docstring covers the
+unparseable-200. Authorized test edits: real security-403 fixture texts
++ a JSON-500 passthrough pin. Round 3: no-`undefined` fallbacks
+(non-object result, kind-less 500, partial candidates). Round 4 (last):
+Archive ENABLED for an active keyed orphan row (mirrors navis-panel.js;
+the server's orphan refusal is archived-only), a status-less result
+never prints "NaN", a printable-less 409-ambiguous falls back to the
+generic text; changelog wording pinned to keyless/orphan. In-file 17
+passed, neighbours 67; `node --check` + ruff clean; suite (6213) and CI
+re-run (see PR).

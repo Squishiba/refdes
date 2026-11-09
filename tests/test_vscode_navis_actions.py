@@ -1062,6 +1062,57 @@ def test_plan_result_never_prints_undefined_in_its_fallbacks(tmp_path):
     assert "+1 more" in m, m  # the field-less candidate lands in the tail
 
 
+@skip_no_node
+def test_row_actions_enable_archive_for_an_active_keyed_orphan_row(tmp_path):
+    """Round 4: plan §4 bans client-side rule invention -- the shipped panel
+    enables Archive for ANY active keyed row (navis-panel.js's active branch
+    has no orphan check) and the server's `reason:orphan` refusal is
+    archived-only. The matrix cell the author's five rows did not cover:
+    active + keyed + orphan -> Archive ENABLED, Restore disabled; a locked
+    session keeps both off with the `--no-write` reason."""
+    out = _run_driver(
+        tmp_path,
+        ROWS_DRIVER,
+        {
+            "module": NAVIS_ACTIONS_JS,
+            "rows": {"activeKeyedOrphan": _row(KEY_A, ALPHA_TEXT, orphan=True)},
+            "states": MATRIX_STATES,
+        },
+        "row-active-orphan-driver.js",
+    )
+    v = _actions(out, "activeKeyedOrphan/open")
+    assert v["archive"]["enabled"] is True, v
+    assert v["restore"]["enabled"] is False, v
+    v = _actions(out, "activeKeyedOrphan/locked")
+    assert v["archive"]["enabled"] is False and v["restore"]["enabled"] is False, v
+    assert "--no-write" in v["archive"]["tooltip"], v
+    assert "--no-write" in v["restore"]["tooltip"], v
+
+
+@skip_no_node
+def test_plan_result_fallbacks_never_print_nan_or_carry_no_text(tmp_path):
+    """Round 4: a result object with neither `status` nor `error` says
+    `refdes serve returned no usable response` (never "answered NaN"); a
+    409 `ambiguous` with no intro text and no printable candidates falls
+    back to the generic status-naming text (never an empty warn)."""
+    fixtures = {
+        "noStatusNoError": {"nothing": "here"},
+        "ambiguousEmptyCands": {"status": 409, "body": {"kind": "ambiguous", "candidates": []}},
+        "ambiguousNoCands": {"status": 409, "body": {"kind": "ambiguous"}},
+    }
+    results = _run_plan(tmp_path, fixtures)
+
+    d = _decision(results, "noStatusNoError")
+    assert d["kind"] == "error" and d["refresh"] is False and d["lockWrites"] is False, d
+    assert d["message"] == "refdes serve returned no usable response", d
+
+    for name in ("ambiguousEmptyCands", "ambiguousNoCands"):
+        d = _decision(results, name)
+        assert d["kind"] == "warn" and d["refresh"] is False, (name, d)
+        assert d["message"], (name, d)
+        assert "409" in d["message"], (name, d)
+
+
 # ------------------------------------------------------------- 5. source pins
 
 

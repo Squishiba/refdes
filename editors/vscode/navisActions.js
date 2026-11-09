@@ -232,6 +232,11 @@ function planResult(result) {
     return decision("error", false, false, sanitize(result.error));
   }
   const status = Number(result.status);
+  if (!Number.isFinite(status)) {
+    // Neither a status nor an error: there is nothing to name, and the
+    // generic sentence would print "answered NaN".
+    return decision("error", false, false, NO_USABLE_RESPONSE);
+  }
   const body = result.body;
   const row = tableRow(status, body);
   if (!row) return unhandled(status);
@@ -239,9 +244,13 @@ function planResult(result) {
   const text = serverText(body);
   let message;
   if (row.kind === "warn" && body.kind === "ambiguous") {
-    // The candidates are the message (the intro text is optional): name
-    // every one, outside the 300-char cap.
     message = ambiguousMessage(body);
+    if (!message) {
+      // No intro text and no printable candidate: never an empty warn.
+      message = sanitize(
+        `refdes serve answered ${status} (ambiguous) without a message`
+      );
+    }
   } else if (text !== null) {
     message = sanitize(text);
   } else if (row.kind === "lock") {
@@ -263,9 +272,11 @@ function planResult(result) {
 
 /**
  * The Archive/Restore enabled state of one row (plan §4 "Disabled states,
- * computed from the row"): a keyed active row archives, an archived keyed
- * row restores, a keyless row has no Archive (the Mint hint), an orphan has
- * no Restore (the hand-restore hint), and a locked session (`--no-write`
+ * computed from the row"): a keyed active row archives (an ACTIVE orphan
+ * archives too -- the panel's rule; the server's orphan refusal is
+ * archived-only), an archived keyed row restores, a keyless row has no
+ * Archive (the Mint hint), an archived orphan has no Restore (the
+ * hand-restore hint), and a locked session (`--no-write`
  * seen as a 403) disables everything with the reason. No client-side rule
  * invention -- each disabled state mirrors a shipped panel. The impossible
  * keyless-archived row (the projection never archives a keyless marker)
@@ -292,12 +303,17 @@ function rowActions(row, state) {
   const archived = Boolean(row.archived);
   const orphan = Boolean(row.orphan);
 
-  const archiveEnabled = !keyless && !archived && !orphan;
+  // Archive is disabled for keyless rows and rows that are already
+  // archived -- and for a locked session, handled above. NOT for an
+  // orphan: the shipped panel enables Archive for any active keyed row
+  // (navis-panel.js's active branch has no orphan check) and the server's
+  // `reason:orphan` refusal is archived-only (plan §4: no client-side
+  // rule invention).
+  const archiveEnabled = !keyless && !archived;
   let archiveTooltip = "";
   if (!archiveEnabled) {
     if (keyless) archiveTooltip = KEYLESS_HINT;
-    else if (archived) archiveTooltip = "Already archived";
-    else archiveTooltip = ORPHAN_HINT;
+    else archiveTooltip = "Already archived";
   }
 
   const restoreEnabled = archived && !keyless && !orphan;
