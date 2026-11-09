@@ -1,0 +1,19 @@
+== 1. port in use:
+error: cannot listen on 127.0.0.1:8762: Address already in use; choose another --port, or drop --port to get an ephemeral one
+rc=2
+== 2. token file stat + one line:
+600
+1
+== 3. token shape:
+1
+== 4. Host refusal:
+403
+== 5. api/revision with/without token:
+with:200 without:403
+== 6. cookie attributes:
+Set-Cookie: refdes_token_8762=dR3WMp4W6DaUy5w672osEXry0KTfp4x55C57mtdQEfQ; Path=/; HttpOnly; SameSite=Strict
+== 7. fork tabs in served pane (log-f-002):
+== 8. viewing line on older entry page:
+viewing LOG-A-001 · tasks as of tip LOG-A-008
+== 9. _site untouched:
+0

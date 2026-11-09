@@ -1,0 +1,14 @@
+{
+ "K1_first_tick": "1 unsaved tick",
+ "K2_conflict_open": true,
+ "K3_late_tick_status": "2 unsaved ticks",
+ "K4_after_keep_mine": {
+  "status": "2 unsaved ticks",
+  "checked": [
+   "T-thermal-model",
+   "T-ldo-choice",
+   "T-demco"
+  ]
+ },
+ "DONE_K": true
+}

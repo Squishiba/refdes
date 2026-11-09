@@ -1,0 +1,83 @@
+{
+ "E1a_pane": {
+  "url": "/preview/log-g-001.html",
+  "checkboxes": 1,
+  "tipKey": null,
+  "revision": "",
+  "tabs": [],
+  "status": "ticks on this tip are preview-only - nothing is saved",
+  "saveInDom": false,
+  "saveVisible": false,
+  "msg": null,
+  "conflict": null,
+  "rowTitle": null,
+  "rowDisabled": false
+ },
+ "E1b_after_tick": {
+  "url": "/preview/log-g-001.html",
+  "checkboxes": 1,
+  "tipKey": null,
+  "revision": "",
+  "tabs": [],
+  "status": "ticks on this tip are preview-only - nothing is saved",
+  "saveInDom": false,
+  "saveVisible": false,
+  "msg": null,
+  "conflict": null,
+  "rowTitle": null,
+  "rowDisabled": false
+ },
+ "E3_no_write_pane": {
+  "url": "/preview/log-a-006.html",
+  "checkboxes": 0,
+  "tipKey": null,
+  "revision": "",
+  "tabs": [],
+  "status": null,
+  "saveInDom": false,
+  "saveVisible": false,
+  "msg": null,
+  "conflict": null,
+  "rowTitle": null,
+  "rowDisabled": null
+ },
+ "E3_modules": [
+  "http://127.0.0.1:8763/edit/static/preview.js"
+ ],
+ "E5a_sealed_pane": {
+  "url": "/preview/log-a-006.html",
+  "checkboxes": 3,
+  "tipKey": "3thkvje0mdp",
+  "revision": "4b73ac03b4dd",
+  "tabs": [],
+  "status": null,
+  "saveInDom": true,
+  "saveVisible": false,
+  "msg": null,
+  "conflict": null,
+  "rowTitle": null,
+  "rowDisabled": false
+ },
+ "E5b_sealed_save": {
+  "url": "/preview/log-a-006.html",
+  "checkboxes": 3,
+  "tipKey": "3thkvje0mdp",
+  "revision": "4b73ac03b4dd",
+  "tabs": [],
+  "status": "1 unsaved tick",
+  "saveInDom": true,
+  "saveVisible": true,
+  "msg": "refused: LOG-A-006 is a sealed append-only entry: a continuation appends a new entry, it never rewrites a sealed one",
+  "conflict": null,
+  "rowTitle": null,
+  "rowDisabled": false
+ },
+ "E10_subdir_pane": {
+  "url": "/preview/log-a-006.html",
+  "h1": "LOG-A-006",
+  "checkboxes": 3,
+  "status": null,
+  "msg": null,
+  "conflict": null
+ }
+}

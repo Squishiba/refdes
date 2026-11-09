@@ -1,0 +1,41 @@
+{
+ "F1_pane": {
+  "tabs": [
+   "LOG-F-002",
+   "LOG-F-003"
+  ],
+  "panels": [
+   {
+    "tipKey": null,
+    "hidden": false,
+    "checkboxes": 0
+   },
+   {
+    "tipKey": null,
+    "hidden": true,
+    "checkboxes": 0
+   }
+  ],
+  "headings": [
+   "Tasks at LOG-F-002: none (never declared)",
+   "Tasks at LOG-F-003: none (never declared)"
+  ],
+  "tipLines": [
+   "LOG-F-002 — Star ground on the analog island.",
+   "LOG-F-003 — Single-point ground at the connector."
+  ],
+  "viewing": null
+ },
+ "F2_tick_tab2": "tab2 has no tick rows",
+ "F3_status": {
+  "status": [],
+  "saveVisible": []
+ },
+ "F4_posts": [],
+ "F5_after": {
+  "msg": null,
+  "conflict": null,
+  "status": null
+ },
+ "DONE_F": true
+}

@@ -1,0 +1,33 @@
+=== PRE-id check (keyless markers):
+ERROR   items/board-b/markers.yaml:6 — item has no id — run 'refdes id' to allocate one
+ERROR   items/board-b/markers.yaml:11 — item has no id — run 'refdes id' to allocate one
+0 items, 2 errors, 0 warnings
+=== PRE-id navis ls:
+note: 2 items have no id yet and were not scanned -- run 'refdes id' to allocate them
+no Navis: no `<!--navi: text-->` marker in any item body
+rc=0
+=== PRE-id navis all:
+note: 2 items have no id yet and were not scanned -- run 'refdes id' to allocate them
+no Navis: no `<!--navi: text-->` marker in any item body
+rc=0
+=== PRE-id navis show 1:
+no Navi '1': `refdes navis all` numbers them 1..0; a selector is a number, a full key, or a key prefix
+rc=2
+=== refdes id:
+allocated REQ-MECH-001  (items/board-b/markers.yaml:6) Bracket mounts to the chassis rail.
+allocated REQ-MECH-002  (items/board-b/markers.yaml:11) Recheck decoupling near U14 after layout spin.
+allocated 2 id(s)
+=== POST-id navis ls:
+1 Navis:
+  1. d2zvg3 Recheck decoupling near U14.  REQ-MECH-002 (items/board-b/markers.yaml:12)
+rc=0
+=== POST-id navis show 1:
+Navi: Recheck decoupling near U14.
+  key: d2zvg318q5a
+  source: REQ-MECH-002 (items/board-b/markers.yaml:12)
+rc=0
+=== POST-id navis show 99:
+no Navi '99': `refdes navis all` numbers them 1..1; a selector is a number, a full key, or a key prefix
+rc=2
+=== POST-id check:
+2 items, 0 errors, 0 warnings

@@ -1,0 +1,176 @@
+{
+ "E1a_pane": {
+  "url": "/preview/log-g-001.html",
+  "checkboxes": 1,
+  "tipKey": null,
+  "revision": "",
+  "tabs": [],
+  "status": "ticks on this tip are preview-only - nothing is saved",
+  "saveInDom": false,
+  "saveVisible": false,
+  "msg": null,
+  "conflict": null,
+  "rowTitle": null,
+  "rowDisabled": false
+ },
+ "E1b_after_tick": {
+  "url": "/preview/log-g-001.html",
+  "checkboxes": 1,
+  "tipKey": null,
+  "revision": "",
+  "tabs": [],
+  "status": "ticks on this tip are preview-only - nothing is saved",
+  "saveInDom": false,
+  "saveVisible": false,
+  "msg": null,
+  "conflict": null,
+  "rowTitle": null,
+  "rowDisabled": false
+ },
+ "E2a_fork_pane": {
+  "url": "/preview/log-f-001.html",
+  "checkboxes": 0,
+  "tipKey": null,
+  "revision": "",
+  "tabs": [],
+  "status": null,
+  "saveInDom": false,
+  "saveVisible": false,
+  "msg": null,
+  "conflict": null,
+  "rowTitle": null,
+  "rowDisabled": null
+ },
+ "E3_no_write_pane": {
+  "url": "/preview/log-a-006.html",
+  "checkboxes": 0,
+  "tipKey": null,
+  "revision": "",
+  "tabs": [],
+  "status": null,
+  "saveInDom": false,
+  "saveVisible": false,
+  "msg": null,
+  "conflict": null,
+  "rowTitle": null,
+  "rowDisabled": null
+ },
+ "E3_modules": [
+  "http://127.0.0.1:8763/edit/static/preview.js"
+ ],
+ "E5a_sealed_pane": {
+  "url": "/preview/log-a-006.html",
+  "checkboxes": 3,
+  "tipKey": "3thkvje0mdp",
+  "revision": "4b73ac03b4dd",
+  "tabs": [],
+  "status": null,
+  "saveInDom": true,
+  "saveVisible": false,
+  "msg": null,
+  "conflict": null,
+  "rowTitle": null,
+  "rowDisabled": false
+ },
+ "E5b_sealed_save": {
+  "url": "/preview/log-a-006.html",
+  "checkboxes": 3,
+  "tipKey": "3thkvje0mdp",
+  "revision": "4b73ac03b4dd",
+  "tabs": [],
+  "status": "1 unsaved tick",
+  "saveInDom": true,
+  "saveVisible": true,
+  "msg": "refused: LOG-A-006 is a sealed append-only entry: a continuation appends a new entry, it never rewrites a sealed one",
+  "conflict": null,
+  "rowTitle": null,
+  "rowDisabled": false
+ },
+ "E2b_fork_tip_page": {
+  "tabs": [],
+  "checkboxes": 0,
+  "tipLines": [
+   "LOG-F-003 — Single-point ground at the connector."
+  ],
+  "panelKeys": [
+   null
+  ]
+ },
+ "E10_subdir_pane": {
+  "url": "/preview/log-a-006.html",
+  "h1": "LOG-A-006",
+  "checkboxes": 3,
+  "status": null,
+  "msg": null,
+  "conflict": null
+ },
+ "LAST_CASE": "E7",
+ "E9_error": {
+  "message": "Waiting for selector `#refdes-taskpane-toggle` failed",
+  "log": [
+   "log-a-009.html:console:Failed to load resource: the server responded with a status of 404 (Not Found)",
+   "log-a-009.html:console:Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ]
+ },
+ "E7_error": {
+  "message": "Waiting for selector `#refdes-taskpane-toggle` failed",
+  "log": [
+   "log-a-009.html:console:Failed to load resource: the server responded with a status of 404 (Not Found)",
+   "log-a-009.html:console:Failed to load resource: the server responded with a status of 404 (Not Found)",
+   "log-a-009.html:console:Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ]
+ },
+ "E6_error": {
+  "message": "Protocol error (Runtime.callFunctionOn): Target closed",
+  "log": []
+ },
+ "E9_unicode_path": {
+  "url": "/preview/log-a-006.html",
+  "h1": "LOG-A-006",
+  "checkboxes": 3,
+  "status": null,
+  "msg": null,
+  "conflict": null
+ },
+ "E9_log": [
+  "log-a-006.html:console:Failed to load resource: the server responded with a status of 404 (Not Found)"
+ ],
+ "E7_readonly_save": {
+  "url": "/preview/log-a-004.html",
+  "h1": "LOG-A-004",
+  "checkboxes": 3,
+  "status": null,
+  "msg": null,
+  "conflict": null
+ },
+ "E6a_after_A_save": {
+  "url": "/preview/log-a-006.html",
+  "h1": "LOG-A-006",
+  "checkboxes": 3,
+  "status": null,
+  "msg": null,
+  "conflict": null
+ },
+ "E6a_log": [
+  "log-a-006.html:console:Failed to load resource: the server responded with a status of 404 (Not Found)"
+ ],
+ "E6b_before": {
+  "url": "/preview/log-a-006.html",
+  "h1": "LOG-A-006",
+  "checkboxes": 3,
+  "status": "1 unsaved tick",
+  "msg": null,
+  "conflict": null
+ },
+ "E6b_B_after_save": {
+  "url": "/preview/log-a-006.html",
+  "h1": "LOG-A-006",
+  "checkboxes": 3,
+  "status": null,
+  "msg": null,
+  "conflict": null
+ },
+ "E6b_log": [
+  "log-a-006.html:console:Failed to load resource: the server responded with a status of 404 (Not Found)"
+ ]
+}

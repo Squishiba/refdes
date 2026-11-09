@@ -1,0 +1,14 @@
+{
+ "C1_after_tick": {
+  "checked": false,
+  "state": "dropped",
+  "status": "1 unsaved tick"
+ },
+ "C2_draft_survived": "1 unsaved tick made against an older version - saving will ask to resolve",
+ "C3_conflict": "conflict: items/board-a/log.yaml changed since this edit was planned (expected e3f4468c40a1, found 4b73ac03b4dd)\n\nT-thermal-model: yours -, the file has done\n\nT-ldo-choice: yours -, the file has open\n\nT-demco: yours open, the file has open\n\nKeep mineKeep theirsCopy it out",
+ "C4_copyout": {
+  "readOnly": true,
+  "value": "Tick draft made at e3f4468c40a1fc63218d2b1c684149eab74be2294f99f4d8e5bc6b387e30356a, the file is now at 4b73ac03b4dd2af24402cc92dae051f4e39ca571dba3f06b94f7bf393e080d84:\nT-demco: open"
+ },
+ "C5_file_unchanged": "wrote"
+}

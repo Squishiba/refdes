@@ -1,0 +1,17 @@
+{
+ "tick_status": "1 unsaved tick",
+ "posts": [
+  {
+   "url": "item/g52ptehpvx6/continue",
+   "status": 422,
+   "body": "{\"kind\":\"refused\",\"ok\":false,\"message\":\"refused: the write failed ([Errno 13] Permission denied: 'items/board-a/.log.yaml.refdes-tmp-p8q75jsx'); items/board-a/log.yaml still holds its original bytes\",\"reason\":\"the write failed ([Errno 13] Permission denied: 'items/board-a/.log.yaml.refdes-tmp-p8q75j"
+  }
+ ],
+ "after_save": {
+  "url": "/preview/log-a-004.html",
+  "h1": "LOG-A-004",
+  "msg": "refused: the write failed ([Errno 13] Permission denied: 'items/board-a/.log.yaml.refdes-tmp-p8q75jsx'); items/board-a/log.yaml still holds its original bytes",
+  "status": "1 unsaved tick"
+ },
+ "file_unchanged": false
+}
