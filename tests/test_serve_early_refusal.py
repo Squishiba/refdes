@@ -107,7 +107,22 @@ def _one_refusal(app, method, path, headers, body_len, chunk):
         if writer.is_alive():
             return None, send_errors, "error:writer-stuck"
         if head:
-            status = int(head.split(b"\r\n", 1)[0].split(b" ")[1])
+            head_text, _, rest = head.partition(b"\r\n\r\n")
+            status = int(head_text.split(b"\r\n", 1)[0].split(b" ")[1])
+            # Read the response body too: the close is only observable after
+            # the whole reply is consumed, and it is the reply the client
+            # must get in full.
+            length = 0
+            for line in head_text.split(b"\r\n")[1:]:
+                name, _, value = line.partition(b":")
+                if name.strip().lower() == b"content-length":
+                    length = int(value.strip())
+            body = rest
+            while len(body) < length:
+                piece = sock.recv(65536)
+                if not piece:
+                    break
+                body += piece
         try:
             close = "fin" if sock.recv(1) == b"" else "open"
         except (ConnectionResetError, ConnectionAbortedError):
