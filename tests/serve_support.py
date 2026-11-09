@@ -317,7 +317,15 @@ class Client:
         token: bool = False,
         host: str | None = None,
     ):
-        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        # 30 s, not 10: a POST that saves runs the rebuild and the preview
+        # render synchronously inside the request (state.refresh -> _build +
+        # render), and on a loaded Windows runner -- 4-way xdist, Defender
+        # scanning every rewritten preview file -- a ~0.5 s request on this
+        # box has measured over the 10 s cap (the diagnosis in
+        # in-prog-logs/winflake-diagnosis.md, case 2). The real fix is to
+        # stop rendering the whole site inside the request; that is its own
+        # slice, and this line only stops the client flaking on it.
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
         try:
             hdrs = {"Host": host or f"127.0.0.1:{self.port}"}
             if cookie:
