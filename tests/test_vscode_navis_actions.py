@@ -1009,6 +1009,59 @@ def test_row_actions_survive_a_missing_row(tmp_path):
     assert "--no-write" in v["restore"]["tooltip"], v
 
 
+@skip_no_node
+def test_plan_result_never_prints_undefined_in_its_fallbacks(tmp_path):
+    """Round 3 pins: a non-object result says `refdes serve returned no
+    usable response` (not the generic sentence with a nonsense status); a
+    JSON 500 whose body carries no `kind` falls back to the GENERIC text
+    naming the status, never `(undefined)`; and a candidate missing
+    key/file/line/text prints only the fields it HAS -- a candidate with
+    none is skipped and counted in the `(+N more)` tail. JS interpolates
+    `undefined` into a template literally; these are the shapes where that
+    would leak into a toast."""
+    fixtures = {
+        "nullResult": None,
+        "stringResult": "not an object",
+        "noKind500": {"status": 500, "body": {}},
+        "partialCands": {
+            "status": 409,
+            "body": {
+                "kind": "ambiguous",
+                "error": "navi key prefix 'abcd12' is ambiguous: name one of its candidates",
+                "candidates": [
+                    {"key": "abcd1200000"},
+                    {"file": "items/note-00.md", "line": 6},
+                    {"text": "text only"},
+                    {},
+                ],
+            },
+        },
+    }
+    results = _run_plan(tmp_path, fixtures)
+
+    for name in ("nullResult", "stringResult"):
+        d = _decision(results, name)
+        assert d["kind"] == "error" and d["refresh"] is False and d["lockWrites"] is False, (
+            name,
+            d,
+        )
+        assert d["message"] == "refdes serve returned no usable response", (name, d)
+
+    d = _decision(results, "noKind500")
+    assert d["kind"] == "error" and d["refresh"] is False and d["lockWrites"] is False, d
+    assert "500" in d["message"], d
+    assert "undefined" not in d["message"], d
+
+    d = _decision(results, "partialCands")
+    assert d["kind"] == "warn" and d["refresh"] is False, d
+    m = d["message"]
+    assert "undefined" not in m, m
+    assert "abcd1200000" in m, m
+    assert "items/note-00.md:6" in m, m
+    assert "text only" in m, m
+    assert "+1 more" in m, m  # the field-less candidate lands in the tail
+
+
 # ------------------------------------------------------------- 5. source pins
 
 

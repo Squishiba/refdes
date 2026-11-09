@@ -64,6 +64,11 @@ const CONFLICT_REFRESH = {
   journal_pending: false,
 };
 
+/** What a result that is not an object at all says -- there is no status
+ * to name, and JS would interpolate "no response" into the generic
+ * sentence as a nonsense status. */
+const NO_USABLE_RESPONSE = "refdes serve returned no usable response";
+
 function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -164,22 +169,45 @@ function tableRow(status, body) {
  * named, the rest counted) so a collision with many candidates loses
  * none.
  */
+/**
+ * One candidate as the message names it: ONLY the fields it has (JS
+ * interpolates `undefined` into a template literally -- a fabricated
+ * candidate must not leak that word into a toast). A candidate with no
+ * fields at all has no line; the caller counts it in the tail.
+ */
+function candidateLine(cand) {
+  const parts = [];
+  if (typeof cand.key === "string" && cand.key) parts.push(cand.key);
+  if (typeof cand.file === "string" && cand.file) {
+    parts.push(cand.line == null ? cand.file : `${cand.file}:${cand.line}`);
+  }
+  const text = typeof cand.text === "string" ? stripControls(cand.text) : "";
+  if (text) {
+    parts.push(
+      text.length > CANDIDATE_TEXT_LIMIT
+        ? `${text.slice(0, CANDIDATE_TEXT_LIMIT)}...`
+        : text
+    );
+  }
+  return parts.join(" ");
+}
+
 function ambiguousMessage(body) {
   const parts = [];
   const intro = serverText(body);
   if (intro) parts.push(sanitize(intro));
   const candidates = Array.isArray(body.candidates) ? body.candidates : [];
-  const named = candidates.slice(0, CANDIDATE_LIMIT);
-  for (const cand of named) {
-    if (!isPlainObject(cand)) continue;
-    const text = sanitize(cand.text, CANDIDATE_TEXT_LIMIT);
-    const shown =
-      stripControls(cand.text).length > CANDIDATE_TEXT_LIMIT
-        ? `${text}...`
-        : text;
-    parts.push(`${cand.key} (${cand.file}:${cand.line}) ${shown}`);
+  let named = 0;
+  let rest = 0;
+  for (const cand of candidates) {
+    const line = isPlainObject(cand) ? candidateLine(cand) : "";
+    if (!line || named >= CANDIDATE_LIMIT) {
+      rest += 1;
+      continue;
+    }
+    parts.push(line);
+    named += 1;
   }
-  const rest = candidates.length - named.length;
   if (rest > 0) parts.push(`(+${rest} more)`);
   return parts.join(" -- ");
 }
@@ -195,7 +223,9 @@ function ambiguousMessage(body) {
  * status bar / tree refresh) and never sees a body object.
  */
 function planResult(result) {
-  if (!isPlainObject(result)) return unhandled("no response");
+  if (!isPlainObject(result)) {
+    return decision("error", false, false, NO_USABLE_RESPONSE);
+  }
   if (typeof result.error === "string" && result.status === undefined) {
     // The transport case: the request itself failed. Loud error, no lock
     // (a dead server is not a read-only server), no refresh (nothing moved).
@@ -219,8 +249,13 @@ function planResult(result) {
     // wording (it names --no-write).
     message = LOCKED_HINT;
   } else {
+    // A named row without text: name the kind when the body has one (JS
+    // interpolates `undefined` literally -- a kind-less body gets the
+    // generic sentence, not "(undefined)").
     message = sanitize(
-      `refdes serve answered ${status} (${body.kind}) without a message`
+      typeof body.kind === "string" && body.kind
+        ? `refdes serve answered ${status} (${body.kind}) without a message`
+        : `refdes serve answered ${status} with a response this client does not recognise`
     );
   }
   return decision(row.kind, row.refresh, row.lockWrites, message);

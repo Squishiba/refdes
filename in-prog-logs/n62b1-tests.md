@@ -1,7 +1,7 @@
 # n62b1-tests — contract tests for `editors/vscode/navisActions.js` (S6.2 decision logic)
 
-Slice: TEST AUTHOR ONLY, N6.2b-1-tests. Delivered `tests/test_vscode_navis_actions.py`
-(9 tests) pinning the module the implementer builds; the module is not written here.
+Slice: TEST AUTHOR ONLY, N6.2b-1-tests. Delivered `tests/test_vscode_navis_actions.py` (9 tests at authoring, 15
+after the review rounds) pinning the module the implementer builds.
 Branch base: main at the N6.2a merge (post-#402 size gate); fast-forward confirmed,
 tree clean before starting.
 
@@ -44,7 +44,7 @@ nothing token-like in output, exports exactly five functions (node-verified):
 ## Real server shapes (run, not recalled)
 
 Probed once against live `EditorApp`s (`.scratch/n62b1-probe/`, shapes.json
-kept there) and re-captured in-test: the test builds its fixtures by POSTing
+kept there — per-worktree scratch, not part of the repo) and re-captured in-test: the test builds its fixtures by POSTing
 the real routes (4 short-lived EditorApps, port 0), per the task's
 cheap-fixture rule — the fixtures ARE the server's JSON. Findings vs the plan:
 
@@ -79,9 +79,9 @@ cheap-fixture rule — the fixtures ARE the server's JSON. Findings vs the plan:
   asserts nothing, so no test is green-by-construction (unlike the N6.1
   neighbours, the task demanded all-red).
 - Green proof without committing a module: a reference implementation at
-  `.scratch/n62b1-ref/navisActions.js` (NOT committed) passes all 9 via the
-  documented `REFDES_NAVIS_ACTIONS_JS` module-path override; the override
-  defaults to the real path, so CI is unaffected.
+  `.scratch/n62b1-ref/navisActions.js` (NOT committed; per-worktree scratch,
+  not in the repo) passes all 9 via the `REFDES_NAVIS_ACTIONS_JS` override;
+  the override defaults to the real path, so CI is unaffected.
 - No node on PATH: 7 node tests skip, 2 source pins run (verified with an
   empty PATH).
 - Neighbours green with the new file present: test_vscode_navis_tree.py,
@@ -100,8 +100,8 @@ plan-generic, row-matrix, api).
 
 ## Not done / notes
 
-- No changelog.d fragment: tests-only PR, nothing user-visible (the S6.2b-2
-  implementer ships the feature fragment).
+- Changelog: the PR ships `changelog.d/navis-vscode-actions-logic.added.md`
+  (added by the implementer; this tests-only PR of its own needed none).
 - No PR opened (task: push the branch only) — superseded: the implementer
   opened the PR carrying the branch.
 - No real VS Code window exists anywhere in this slice: it pins the pure
@@ -128,18 +128,22 @@ extension.js/package.json/commands/UI — S6.2b-2). Status: DONE.
   tests docstring's "reuse the constant or pin equality" fork).
 - 200 branch reads no body fields (mintOk fixture); generic fallbacks name
   the status, never the body; sanitiser caps at 300.
-- No changelog.d fragment: nothing user-visible until S6.2b-2 (per the
-  "Not done" note above). No real VS Code window exists in this slice:
-  pure logic under bare node (plan §7).
+- Changelog fragment shipped by this PR
+  (`changelog.d/navis-vscode-actions-logic.added.md`). No real VS Code
+  window exists in this slice: pure logic under bare node (plan §7).
 
-## Review round 2 (same day, owner-triaged reviewer findings)
+## Review rounds 2-3 (same day, owner-triaged reviewer findings)
 
-Red-first, then green: the ambiguous message composes its candidate list
-OUTSIDE the 300 cap (per-text 80 cap + `...`, 20 named, `(+N more)`);
-table flags key on `kind`/`reason`, a missing `error` falls back safely
-(a lock stays a lock, naming --no-write); C1 controls stripped too; a
-null row disables all; the `{error}` docstring covers post()'s
-unparseable-200. Authorized test edits: real security-403 fixture texts
-(`forbidden`, the launch-token denial) + a JSON-500 passthrough pin.
-In-file 14 passed, neighbours 67; `node --check` + ruff clean; suite and
-CI re-run (see PR).
+Round 2 (red-first, then green): the ambiguous message composes its
+candidate list OUTSIDE the 300 cap (per-text 80 cap + `...`, 20 named,
+`(+N more)`); table flags key on `kind`/`reason`, a missing `error` falls
+back safely (a lock stays a lock, naming --no-write); C1 controls
+stripped; a null row disables all; the `{error}` docstring covers
+post()'s unparseable-200. Authorized test edits: real security-403
+fixture texts + a JSON-500 passthrough pin. Round 3 (pins only, no
+functional defect found): no-`undefined` fallbacks -- a non-object result
+says "no usable response", a kind-less JSON 500 gets the generic text, a
+partial candidate prints only the fields it has (field-less: skipped into
+the `(+N more)` tail). Stale claims fixed above (test count, changelog,
+scratch paths). In-file 15 passed, neighbours 67; `node --check` + ruff
+clean; suite and CI re-run (see PR).
