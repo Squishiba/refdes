@@ -1198,6 +1198,10 @@ def _apply_outcome(app, result) -> tuple[int, dict]:
             # value the reader read. Empty for an ordinary save, and never a
             # value the client sent.
             "pinned": [dict(entry) for entry in result.pinned],
+            # What the save captured (W5b.5): the `followed` capture lines, the
+            # same strings `Applied.announcements` carries; empty when the save
+            # captured nothing. ADDITIVE -- the keys above are unchanged.
+            "announcements": list(result.announcements),
             "diagnostics": [diag_dict(d) for d in result.diagnostics if d.level != CHECK_VIOLATION],
         }
     if isinstance(result, edit_mod.Conflict):
