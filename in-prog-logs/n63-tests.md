@@ -100,17 +100,21 @@ at the end of updateStatusBar's repaint; package.json: refreshNavis
 entry) + the mint-log. Version NOT bumped (S6.4's job). New file: 24/24
 green; node --check clean on the three touched .js.
 
-STOP POINT (no PR opened): three tests in the MERGED
-tests/test_vscode_navis_commands.py pin the pre-S6.3 shapes the new file's
-pins make unsatisfiable together — test_module_exports_the_command_surface
-(api == archive/mint/restore exactly; the new file pins openInEditor as a
-fourth handler) and the two mint-success sequence tests (exact rec sequences
-with no "log" entry; the new file pins exactly one log line on every mint
-success). Proposed narrow fix for the authoriser: grow the api pin to the
-four names; insert "log" after "refresh" in the two sequences. Full suite:
-3 failed (all the above), 6309 passed, 2 skipped. The author's green-proof
-run listed only tree/actions/lint as neighbours (66 passed) — the commands
-file was not in it, so this collision is not a regression against the
-author's own evidence, it is a gap in it. No real VS Code window: menus/
+STOP POINT -> RESOLVED (no PR opened at the stop): three tests in the
+MERGED tests/test_vscode_navis_commands.py pin the pre-S6.3 shapes the new
+file's pins make unsatisfiable together —
+test_module_exports_the_command_surface (api == archive/mint/restore
+exactly; the new file pins openInEditor as a fourth handler) and the two
+mint-success sequence tests (exact rec sequences with no "log" entry; the
+new file pins exactly one log line on every mint success). Reported; the
+authoriser approved the narrow fix as proposed: S6.3 deliberately changes
+those pre-S6.3 shapes, so the api pin grows to the four names and "log"
+lands after "refresh" in the two sequences (nothing else in the file
+touched). Full suite at the stop: 3 failed (all the above), 6309 passed, 2
+skipped; after the fix all tests/test_vscode*.py + the crossplatform lint
+re-ran green (174 passed). The author's green-proof run listed only
+tree/actions/lint as neighbours (66 passed) — the commands file was not in
+it, so this collision is not a regression against the author's own
+evidence, it is a gap in it. No real VS Code window: menus/
 status bar/openExternal are logic-level only.
 
