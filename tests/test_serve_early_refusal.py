@@ -103,26 +103,36 @@ def _one_refusal(app, method, path, headers, body_len, chunk):
             return None, send_errors, "rst"
         except OSError as exc:  # a timed-out read leaves the head unread
             return None, send_errors, "timeout" if isinstance(exc, TimeoutError) else f"error:{type(exc).__name__}"
-        writer.join(timeout=JOIN_TIMEOUT)
-        if writer.is_alive():
-            return None, send_errors, "error:writer-stuck"
         if head:
             head_text, _, rest = head.partition(b"\r\n\r\n")
             status = int(head_text.split(b"\r\n", 1)[0].split(b" ")[1])
-            # Read the response body too: the close is only observable after
-            # the whole reply is consumed, and it is the reply the client
-            # must get in full.
+            # Read the response body too -- and read it NOW, before joining
+            # the writer: the reply left the server complete (head and body
+            # in one send), and on a loaded runner a `writer.join` that runs
+            # first can push this read past the server's linger window, so
+            # the abort a late close produces lands here, in a test that is
+            # reading a reply that was already sent in full.
             length = 0
             for line in head_text.split(b"\r\n")[1:]:
                 name, _, value = line.partition(b":")
                 if name.strip().lower() == b"content-length":
                     length = int(value.strip())
             body = rest
-            while len(body) < length:
-                piece = sock.recv(65536)
-                if not piece:
-                    break
-                body += piece
+            try:
+                while len(body) < length:
+                    piece = sock.recv(65536)
+                    if not piece:
+                        break
+                    body += piece
+            except (ConnectionResetError, ConnectionAbortedError):
+                # Same handling as the head loop above: a late abort is a
+                # data point ("rst") for the assertions, not a traceback --
+                # assertion (c) reports the closes list, naming this entry,
+                # and the status the client did read is kept.
+                return status, send_errors, "rst"
+        writer.join(timeout=JOIN_TIMEOUT)
+        if writer.is_alive():
+            return None, send_errors, "error:writer-stuck"
         try:
             close = "fin" if sock.recv(1) == b"" else "open"
         except (ConnectionResetError, ConnectionAbortedError):
