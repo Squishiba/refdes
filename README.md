@@ -47,8 +47,10 @@ including `new`, `schema`, `fetch`, `revision`, `release`, `stub-tests`,
 ## Editor support
 
 A VS Code extension lives in [`editors/vscode/`](editors/vscode/README.md) —
-inline calc results, live diagnostics, ID completion, hover previews, and
-go-to-definition. Open that folder and press <kbd>F5</kbd>; there is no build step.
+inline calc results, live diagnostics, ID completion, hover previews,
+go-to-definition, and a **Refdes Navis** view of the project's flying notes
+with Archive / Restore / Mint keys from the Explorer. Open that folder and
+press <kbd>F5</kbd>; there is no build step.
 
 For squiggles without installing anything, [`.vscode/tasks.json`](.vscode/tasks.json)
 carries problem matchers that work out of the box.
