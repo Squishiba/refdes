@@ -102,7 +102,19 @@ import yaml
 
 from .. import build as build_mod
 from .. import citations as citations_mod
-from .. import dates, editor_journal, ids, keys, links, loader, patcher, scaffold, seal, textio
+from .. import (
+    dates,
+    editor_journal,
+    history,
+    ids,
+    keys,
+    links,
+    loader,
+    patcher,
+    scaffold,
+    seal,
+    textio,
+)
 from ..model import (
     CHECK_VIOLATION,
     ERROR,
@@ -205,6 +217,11 @@ class Applied:
     # `refdes recover` clears it (by rolling this save back).
     journal_warning: str = ""
     ok: bool = True
+    # What this save captured (W5b.5): the `followed` capture announcements, in
+    # capture order, in history.capture_followed's own wording -- the same
+    # strings the writable-load path prints. Empty for a save that captured
+    # nothing (every edit op, and a continue whose edge was already captured).
+    announcements: tuple = ()
 
     @property
     def message(self) -> str:
@@ -233,6 +250,9 @@ class Conflict:
     ok: bool = False
     kind: str = "conflict"
     journal_warning: str = ""
+    # Always empty (W5b.5): a conflict writes nothing, so it captures nothing
+    # and announces nothing -- the absence is a positive, testable value.
+    announcements: tuple = ()
 
     @property
     def message(self) -> str:
@@ -255,6 +275,9 @@ class Refused:
     path: str | None = None
     ok: bool = False
     kind: str = "refused"
+    # Always empty (W5b.5): nothing was written, so there is no capture to
+    # announce -- refusal lines never carry one.
+    announcements: tuple = ()
 
     @property
     def message(self) -> str:
@@ -271,6 +294,9 @@ class Invalid:
     path: str | None = None
     ok: bool = False
     kind: str = "invalid"
+    # Always empty (W5b.5): the gate blocked the write, so nothing was
+    # captured and there is nothing to announce.
+    announcements: tuple = ()
 
     @property
     def message(self) -> str:
@@ -2278,6 +2304,16 @@ def _journal_clear_after_failure(
     return _journal_kept_warning(rel)
 
 
+def _read_existing(path: str) -> bytes | None:
+    """The file's current bytes, or None when it does not exist -- the exact
+    shape `_rollback` restores from, so snapshot-then-rollback pairs up."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except FileNotFoundError:
+        return None
+
+
 def _rollback(path: str, original: bytes | None) -> bool:
     """Undo a completed write when a later step failed: restore the previous
     bytes, or remove the file that did not exist before. Returns True when
@@ -2579,6 +2615,12 @@ def _continue_locked(config: str, request: ContinueRequest):
         return Refused(
             who, new_id, failure if warning is None else f"{failure}; {warning}", path=path
         )
+    # W5b.5 (plan Q2 ratified (a)): the capture rides in this same locked
+    # operation, after the entry is on disk and the id is reserved. The ledger
+    # bytes are snapshotted first so a capture failure can un-reserve as part
+    # of rolling the entry back -- entry + event, or neither.
+    ledger_file = ids.ledger_path(before)
+    ledger_before = _read_existing(ledger_file)
     try:
         ids.reserve_id(before, new_id)
     except OSError as exc:
@@ -2598,6 +2640,30 @@ def _continue_locked(config: str, request: ContinueRequest):
             f"and {rel} could not be restored: run 'refdes recover' to restore the file",
             path=path,
         )
+    try:
+        capture = history.capture_followed(before.root, tip, after.item_by_id(new_id))
+    except (history.HistoryError, OSError) as exc:
+        ledger_restored = _rollback(ledger_file, ledger_before)
+        if _rollback(path, raw):
+            warning = _journal_clear(before.root)
+            reason = (
+                f"the predecessor's followed capture failed ({exc}); {rel} was rolled "
+                f"back and {new_id} was not reserved"
+            )
+            if not ledger_restored:
+                reason += f"; the id ledger at {ledger_file} could not be restored"
+            return Refused(
+                who, new_id, reason if warning is None else f"{reason}; {warning}", path=path
+            )
+        return Refused(
+            who,
+            new_id,
+            f"the predecessor's followed capture failed ({exc}); {new_id} was not "
+            f"reserved, and {rel} could not be restored: run 'refdes recover' to "
+            "restore the file",
+            path=path,
+        )
+    announcements = (capture.announcement,) if capture.announcement else ()
     journal_warning = _journal_clear(before.root)
     return Applied(
         who=who,
@@ -2609,6 +2675,7 @@ def _continue_locked(config: str, request: ContinueRequest):
         item_id=new_id,
         handle=key,
         journal_warning=journal_warning,
+        announcements=announcements,
     )
 
 
