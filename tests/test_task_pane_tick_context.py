@@ -122,6 +122,36 @@ HOSTILE_KEY = (
     "      - {id: T-thermal-model, text: Model the copper temperature., state: open}\n"
 )
 
+# A fork with one AUTHORED-KEY tip and one keyless tip, served cold (no
+# writable load, so bare `follows:` stays unfrozen and the fork stands):
+# the pane decorates the keyed tip's panel and names nothing on the
+# keyless one, in the SAME response.
+KEYED_TIP_KEY = "abc123keyed"
+KEYED_TIP = (
+    "defaults: { type: log }\n"
+    "items:\n"
+    "  - id: LOG-001\n"
+    "    summary: Power work list.\n"
+    "    date: 2026-08-30\n"
+    "  - id: LOG-002\n"
+    f"    key: {KEYED_TIP_KEY}\n"
+    "    summary: Thermal branch.\n"
+    "    date: 2026-09-02\n"
+    "    follows: LOG-001\n"
+    "    tasks:\n"
+    "      - {id: T-thermal, text: Model the copper temperature., state: open}\n"
+)
+KEYLESS_TIP = (
+    "defaults: { type: log }\n"
+    "items:\n"
+    "  - id: LOG-003\n"
+    "    summary: Decoupling branch.\n"
+    "    date: 2026-09-03\n"
+    "    follows: LOG-001\n"
+    "    tasks:\n"
+    "      - {id: T-decoupling, text: Recheck decoupling near U14., state: open}\n"
+)
+
 PANEL_TAG = re.compile(r'<div class="refdes-taskpane-panel"[^>]*>')
 ATTR_PAIR = re.compile(r'([\w-]+)="([^"]*)"')
 TIP_ATTR = re.compile(r'data-refdes-tip="([^"]*)"')
@@ -285,7 +315,9 @@ def test_the_served_panel_names_the_tips_key_and_the_file_revision(served_warm):
         (panel,) = _panels(pane(_body(client, app, item_id)))
         assert panel["attrs"][TIP_KEY_ATTR] == expected_key
         assert panel["attrs"][REVISION_ATTR] == expected_rev
-        assert TIP_ATTR.findall(panel["slice"]) == ["LOG-002"]  # the panel IS the tip
+        # The attr rides every tickable row's checkbox (W5b.3 pins that), so
+        # the panel IS its tip means: every value names it, and only it.
+        assert set(TIP_ATTR.findall(panel["slice"])) == {"LOG-002"}
     with open(os.path.join(app.preview.current, "log-002.html"), encoding="utf-8") as fh:
         disk = pane(fh.read())
     assert TIP_KEY_ATTR not in disk  # response-only: the disk half of the R3 pair
@@ -428,9 +460,15 @@ def test_the_build_ships_no_context_while_the_served_pair_shows_it(tmp_path):
         assert REVISION_ATTR not in text, rel
         if rel == "log-002.html":
             seen = True
-            built_pane = pane(text)
-            assert built_pane  # the pane is there, plain
     assert seen, "the build wrote no item page: the walk proved nothing"
+    # The W5b.3 pair's reading (test_task_pane_ticks.py, green on Windows):
+    # BOTH sides are text-mode reads, so the pane comparison is immune to
+    # the newline the platform writer chose -- every other byte must match.
+    # (The walk above decodes bytes and is newline-sensitive; it checks
+    # marker ABSENCE, a property the writer's newline choice cannot hide.)
+    with open(os.path.join(out, "log-002.html"), encoding="utf-8") as fh:
+        built_pane = pane(fh.read())
+    assert built_pane  # the pane is there, plain
     app = EditorApp(config, poll_interval=0.05)
     app.start()
     try:
@@ -504,38 +542,42 @@ def test_a_hostile_key_cannot_break_out_of_the_panel_attribute(tmp_path):
         app.stop()
 
 
-def test_a_tip_with_no_key_grows_glyph_rows_and_no_context(tmp_path, tmp_path_factory):
-    """The keyless tip (a project nobody has run a writable load on): W5b.3
-    gives it no checkboxes, so W5b.4a gives it no save context -- no key,
-    no revision, no module, the glyph rows as text. The pair proves the
-    absence is the missing key: the same project warmed on a second server
-    ships controls, key and revision."""
-    config = _write_files(tmp_path, {"log.yaml": ONE_TIP})
+def test_a_tip_with_no_key_keeps_its_boxes_and_names_no_context(tmp_path):
+    """The keyless tip (a project nobody has run a writable load on): the
+    checkboxes stay EXACTLY as W5b.3 renders them -- the control is keyed
+    by the tip's DISPLAY ID, and test_task_pane_ticks.py pins that box on
+    plain-write (keyless) fixtures. W5b.4a names NO save context on its
+    panel: no key, no revision. The tip carries no artifact key, so
+    `continue_thread` can write no `follows:` composite for its
+    continuation (its own refusal says so) -- a panel naming a save that
+    can only 422 is the UI lying, and W5b.4c's save UI must refuse to
+    draft a panel without both attributes. The keyed tip's panel in the
+    SAME response carries both: the absence is the missing key, not a
+    pane that skips its context."""
+    config = _write_files(
+        tmp_path, {"log.yaml": KEYED_TIP, "branch.yaml": KEYLESS_TIP}
+    )
     app = EditorApp(config, poll_interval=0.05)
     app.start()
     try:
-        page = _body(Client(app), app, "LOG-002")
+        page = _body(Client(app), app, "LOG-001")  # the head: both tips' panels
         body = pane(page)
-        assert body
-        assert "[ ]" in body and "[x]" in body  # the read-only glyph rows (W5a)
-        assert "<input" not in body
-        assert TIP_KEY_ATTR not in page
-        assert REVISION_ATTR not in page
-        assert TICK_MODULE not in page
-        (panel,) = _panels(body)  # the pane is there; it carries no context
-        assert TIP_KEY_ATTR not in panel["attrs"]
-        assert REVISION_ATTR not in panel["attrs"]
+        assert body  # the pane is there, and the page is a 200
+        panels = _panels(body)
+        assert len(panels) == 2, [panel["attrs"] for panel in panels]
+        by_tip = {}
+        for panel in panels:
+            (tip,) = set(TIP_ATTR.findall(panel["slice"]))  # the panel IS its tip
+            by_tip[tip] = panel
+        assert set(by_tip) == {"LOG-002", "LOG-003"}
+        for panel in panels:  # W5b.3's boxes, on the keyless tip included
+            assert "<input" in panel["slice"], by_tip
+        keyed = by_tip["LOG-002"]["attrs"]
+        assert keyed[TIP_KEY_ATTR] == KEYED_TIP_KEY
+        log_path = os.path.join(str(tmp_path), "items", "log.yaml")
+        assert keyed[REVISION_ATTR] == _sha(log_path)
+        keyless = by_tip["LOG-003"]["attrs"]
+        assert TIP_KEY_ATTR not in keyless
+        assert REVISION_ATTR not in keyless
     finally:
         app.stop()
-
-    twin = _warm_served(tmp_path_factory.mktemp("keyed-twin"))
-    writable = EditorApp(twin, poll_interval=0.05)
-    writable.start()
-    try:
-        twin_page = _body(Client(writable), writable, "LOG-002")
-        twin_body = pane(twin_page)
-        assert "<input" in twin_body
-        assert TIP_KEY_ATTR in twin_body
-        assert REVISION_ATTR in twin_body
-    finally:
-        writable.stop()

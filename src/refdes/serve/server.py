@@ -335,9 +335,11 @@ def _decorate_task_ticks(page: str, project, item) -> str:
     pane = panes.get(task_pane.label(item))
     if pane is None:
         return page
-    _pane_save_context(project, pane)
     if not any(row["tick"] for tab in pane["tabs"] for row in tab["tasks"]["rows"]):
         return page
+    # W5b.4a: after the gate -- a pane with no tickable row has no save to
+    # name, and pays for no file hashes.
+    _pane_save_context(project, pane)
     swapped, spans = _PANE_SPAN_RE.subn(
         lambda _match: render.render_taskpane_fragment(pane), page, count=1
     )

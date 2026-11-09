@@ -110,40 +110,40 @@ test_crossplatform_lint) 263/263. Full suite: 2 failed, 6162 passed,
 findings (the UP012 hit at :507 is pre-existing, present on the HEAD copy
 too). No JS, no endpoint change.
 
-## STOP points (HARD RULE 1 — reported, not edited)
+## STOP points -> authorisation -> resolution
 
-1. `test_the_served_panel_names_the_tips_key_and_the_file_revision` :288
-   asserts `TIP_ATTR.findall(panel["slice"]) == ["LOG-002"]`, but
-   `TIP_ATTR` matches the per-checkbox `data-refdes-tip` attr that W5b.3
-   ships on EVERY tickable row (pinned green by
-   test_task_pane_ticks.py::test_every_checkbox_names_the_tip_its_tick_writes_against).
-   The warm ONE_TIP fixture has 2 tickable rows → the list is
-   `["LOG-002", "LOG-002"]` in ANY implementation that keeps W5b.3 green.
-   The file's own fork test (:396) uses the `set(...)` form. Proposed
-   change: `assert set(TIP_ATTR.findall(panel["slice"])) == {"LOG-002"}`.
-2. `test_a_tip_with_no_key_grows_glyph_rows_and_no_context` :520/:522/:524
-   requires a keyless tip on a WRITABLE server to render glyph rows and no
-   checkbox/module. W5b.3 pins the opposite on the same shape: its `served`
-   fixture is a plain write (no `check`, probe: tip.key == '') and ~10 of
-   its green tests demand checkboxes on it. The docstring's premise "W5b.3
-   gave it no checkboxes" is factually false (the log's own red note says
-   the response HAS checkboxes). Unimplementable without editing W5b.3.
-   Proposed change: keep the context-absence assertions (:522-523, :526-527
-   — implemented and passing: keyless tips carry no key/revision attrs);
-   drop the control/module-absence claims for the writable keyless case
-   (the read-only case is already covered by test 6).
+The two STOP points (test 1 :288 asserted a one-element list over the
+per-checkbox data-refdes-tip attr, carried by every tickable row; test 8
+asked keyless tips to lose their checkboxes, contradicting W5b.3's green
+suite built on keyless fixtures) were reported; the coordinator
+authorised the exact test-file edits and conceded the keyless spec was
+wrong. Resolution, all in tests/test_task_pane_tick_context.py:
 
-Implemented per the compatible reading: keyless tips carry NO context
-(key/revision attrs) — that half of test 8 (:526-527) is green; the
-checkbox strip is not implemented (STOP point 2).
+1. :288 -> `set(TIP_ATTR.findall(...)) == {"LOG-002"}` (the file's own
+   fork test's form).
+2. Test 8 rewritten as `..._keeps_its_boxes_and_names_no_context`: a cold
+   fork whose keyed tip (authored key) and keyless tip live in separate
+   files; both panels keep W5b.3's checkboxes; the keyed panel carries
+   key+revision (verified against the file sha); the keyless panel
+   carries NEITHER. Implementation unchanged from this slice's start:
+   `_pane_save_context` skips tips with no key before hashing (no glyph/
+   checkbox logic touched). Control: patching `_pane_save_context` to
+   decorate keyless tips turns the new test red; restoring the key guard
+   turns it green.
+3. Windows-only red (test 5's disk-vs-built compare showed \r\n on the
+   built side): the built pane came from `_walk_text`, which decodes
+   bytes WITHOUT newline translation, while the disk side was text-mode
+   -- a real artifact of the test's reading, not of the pane. The built
+   pane is now read text-mode, exactly like test_task_pane_ticks.py's
+   green disk-vs-built pair: both sides normalise newlines on read, so
+   every other byte must match (still byte-identity); the byte-walk
+   stays for marker ABSENCE, which newline choice cannot hide.
+4. Perf nit: `_pane_save_context` now runs after the has-tick-rows
+   early-return in `_decorate_task_ticks` -- panes with nothing to tick
+   pay no file hashes.
 
-Status: implementation finished; full suite run; PR opened with the two
-STOP points reported.
+Final: new file 8/8 green; W5b.3 24/24; preview_task_pane +
+crossplatform_lint green (66/66 across the four files); full suite
+6164 passed, 2 skipped. ruff: only the pre-existing UP012.
 
-CI note: pr-size passes (41/350); ubuntu py3.12+py3.13 fail exactly on
-the two STOP-point tests (6156 passed). windows-latest adds a third
-red in this file at test 5's `disk_pane == built_pane` (a pane-slice
-string-equality whose right side shows `\r\n` -- a Windows newlines
-artifact in the test's own text-mode file reads; not reproducible on
-Linux, mechanism not fully pinned here). The built pane bytes carry no
-new attributes (test 5's build walk is green on all runners).
+Status: finished -- implementation + authorised test fixes; PR opened.
