@@ -81,6 +81,17 @@ BigInt rejection, the not-ready literal, and the clean exit. After the fix:
   overall so no wider run.
 - Full suite once: 6258 passed, 2 skipped.
 
+## After the merge (origin/main had moved to #466)
+
+Merged origin/main (a plain merge, no rebase) and re-verified on the merged
+tree. The merge brought the first real `post()` caller surface,
+`editors/vscode/navisCommands.js` (N6.2b-2): `grep` shows it calls only
+`client.navisArchive(selector)` / `navisRestore(selector)` / `navisMint()`
+(navisCommands.js:173-174, 228) and never `post()` itself, so the fix changes
+nothing it sends. Full vscode set (`tests/test_vscode*.py`, 8 files incl. the
+new `test_vscode_navis_commands.py`): 124 passed. Full suite on the merged
+tree: 6288 passed, 2 skipped.
+
 ## Notes for the reviewer
 
 - `tests/test_vscode_extension_http_client.py`'s module docstring says post()
