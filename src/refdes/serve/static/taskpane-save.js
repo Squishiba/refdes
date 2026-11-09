@@ -82,7 +82,11 @@ function copyItOut(host, text) {
   area.value = text;
   host.appendChild(area);
   try {
-    navigator.clipboard.writeText(text); // a refused clipboard costs the copy, never the pane
+    // a refused clipboard costs the copy, never the pane -- and a refusal
+    // in a real browser is an ASYNC rejection the catch below cannot see:
+    // swallow it too, or the pane leaks an unhandledRejection.
+    const copied = navigator.clipboard.writeText(text);
+    if (copied && typeof copied.catch === 'function') copied.catch(() => {});
   } catch (_) {
     // no permission, no clipboard API on a plain-HTTP origin: the textarea
     // on the page IS the copy, and the pane keeps working.
@@ -161,10 +165,19 @@ function wirePanel(panel, drafts, refreshPanel) {
     location.reload();
   }
 
-  function keepMine(current, choices) {
+  function keepMine(current) {
     // Q3(a) Keep mine: MY ticks on the CURRENT identity -- the current tip
     // key, the revision the page carries now -- on rows that still exist
     // only. A vanished row is dropped, never invented back: nothing merges.
+    // The pairs are read at CLICK time, not frozen when the panel was
+    // shown: the panel stands while the author keeps ticking, and choices
+    // computed at show time would discard the draft and re-store the OLD
+    // pairs, losing every later tick.
+    const choices = conflictChoices({
+      revision: drafts.revision(panel.tipKey) || panel.revision,
+      pendingTicks: drafts.pendingTicks(panel.tipKey),
+      current: current || {},
+    });
     drafts.discard(panel.tipKey);
     for (const pair of choices.keepMine.ticks) {
       const row = current.rows.filter((one) => one.taskId === pair[0])[0];
@@ -203,7 +216,7 @@ function wirePanel(panel, drafts, refreshPanel) {
       const mine = row.mine === null ? '-' : row.mine;
       line(box, row.taskId + ': yours ' + mine + ', the file has ' + theirs);
     }
-    makeButton('Keep mine', box, () => keepMine(current, choices));
+    makeButton('Keep mine', box, () => keepMine(current));
     makeButton('Keep theirs', box, keepTheirs);
     makeButton('Copy it out', box, () => copyItOut(box, choices.copyOut.text));
   }
