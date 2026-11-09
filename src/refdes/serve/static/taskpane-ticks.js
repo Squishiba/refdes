@@ -9,13 +9,15 @@
    asks before leaving. This file decides nothing of its own: it reads the
    rows, answers a change, restores a stored draft on load, shows the
    header count, offers Discard, and asks `beforeunload`. It records
-   nothing to the project: the save is W5b.4c-2, so there is no request
-   here. A storage that throws (blocked, private mode, full) costs
+   nothing to the project and posts nothing itself: the Save is W5b.4c-2, so
+   it lives in its own module, and this file only hands that module its
+   panels. A storage that throws (blocked, private mode, full) costs
    persistence, never the pane. The pane's W5b.3 sentence under the title
    stays: the control is preview chrome, and it says so. Everything renders
    through textContent; no markup is ever pasted. */
 
 import { createTickDrafts } from './tick-drafts.js';
+import { initSave } from './taskpane-save.js';
 import {
   panelFromRows,
   wantedState,
@@ -63,6 +65,7 @@ function attr(node, name) {
 }
 
 const tabs = [];
+const panels = [];
 
 function refreshTabs() {
   // Q5a (ratified): a tab carries its OWN tip's pending count, never a
@@ -153,12 +156,14 @@ for (const panelEl of document.querySelectorAll('.refdes-taskpane-panel')) {
     tipKey: attr(panelEl, 'data-refdes-tip-key'),
     revision: attr(panelEl, 'data-refdes-revision'),
     canDraft: model.canDraft,
+    panelEl,
     model,
     rows: rawRows,
     boxes,
     status,
     discard,
   };
+  panels.push(entry);
   boxes.forEach((box, at) => {
     const row = model.rows[at];
     if (model.canDraft && !row.draftable) {
@@ -188,6 +193,8 @@ for (const panelEl of document.querySelectorAll('.refdes-taskpane-panel')) {
   });
   refreshPanel(entry); // restore: a draft stored by this tab takes over the rows
 }
+
+initSave({ drafts, panels, refreshPanel });
 
 window.addEventListener('beforeunload', (event) => {
   // Q8 (ratified (a)): ONE prompt, its condition read at event time from
