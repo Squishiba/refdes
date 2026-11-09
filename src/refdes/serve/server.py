@@ -755,6 +755,22 @@ class _Handler(BaseHTTPRequestHandler):
         # The request line can carry the launch token; log nothing.
         pass
 
+    def setup(self):
+        super().setup()
+        # Nagle off on the accepted socket. Every response here is written
+        # and the connection closed; with Nagle on, a segment written just
+        # after one the peer has not ACKed waits for that ACK -- up to
+        # ~200 ms on Windows' delayed ACK, longer than the linger in
+        # `_Server.shutdown_request`, so a refused request's close can turn
+        # into an RST that discards the queued response (windows-latest
+        # flake, run 42606063274). The socketserver knob
+        # (`disable_nagle_algorithm`) is off with the unbuffered wfile this
+        # handler keeps, so set the option directly.
+        try:
+            self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass  # a socket that refuses the option still serves; Nagle stays as-is
+
     # ------------------------------------------------------------- plumbing
 
     def _send(
@@ -772,9 +788,22 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header(name, value)
         for name, value in (headers or {}).items():
             self.send_header(name, value)
-        self.end_headers()
+        # One write for the whole response: `end_headers()` flushes the
+        # head, then a body write would be a second send, and with Nagle
+        # and a delayed ACK the head can sit in the client's stack while
+        # `shutdown_request`'s linger expires -- the close becomes an RST
+        # and Windows discards the response (run 42606063274). Appending
+        # the body to the header buffer makes head and body one sendall;
+        # the client that reads the status line gets the body with it.
+        if self.request_version == "HTTP/0.9":
+            self.end_headers()  # 0.9 has no header buffer: the stdlib emits the body raw
+            if self.command != "HEAD":
+                self.wfile.write(body)
+            return
+        self._headers_buffer.append(b"\r\n")
         if self.command != "HEAD":
-            self.wfile.write(body)
+            self._headers_buffer.append(body)
+        self.flush_headers()
 
     def _json(self, status: int, payload) -> None:
         body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str)
