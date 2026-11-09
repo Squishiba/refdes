@@ -127,3 +127,23 @@ when 4c-2b lands.
 ## Status
 
 Complete. Branch feat/w5b4c2a-tick-save-model pushed, tests only, no PR.
+
+## Implementation (4c-2a-impl)
+
+Wrote src/refdes/serve/static/tick-save.js exactly as pinned (236 src added
+lines, budget 350): pure, imports nothing, the four exports, no glue.
+
+- The CSP scan (`\son[a-z]+\s*[:=]`) reads identifier declarations as inline
+  handlers: a local named `onTip =` / `onto =` matched. Renamed `tipIds` /
+  `nowAt`.
+- planSaveResponse 403: only the JSON read-only body's `error` text is
+  echoed; a text/plain (token) or empty 403 gets the one generic line
+  naming --no-write AND the token — echoing the seam's body would name
+  the token only and fail the pinned "covers both causes" test.
+- 422 decides refused/invalid from body.kind; unnamed statuses and
+  200-with-junk share one generic message naming the status (no body text).
+
+Tests: test_tick_save.py 57 green (was 5 failed/52 errors red);
+test_tick_pane, test_tick_drafts, test_serve_static, test_crossplatform_lint
+green; node --check (as .mjs) clean; full suite once: green. No test
+edited, no server/template/taskpane-ticks.js change.
