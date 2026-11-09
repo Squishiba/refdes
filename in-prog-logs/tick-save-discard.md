@@ -63,5 +63,5 @@ exactly this. No STOP was needed: all existing pins pass unedited.
 
 ## Full suite
 
-(Recorded below once the -n 4 worksteal run finishes; the run is the single
-full-suite run required by the rules.)
+`-n 4 --dist worksteal`, absolute PYTHONPATH, on this branch: 6426 passed,
+2 skipped in 126.70 s. The single full-suite run required by the rules.
