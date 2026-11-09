@@ -127,18 +127,41 @@ INPUT, four clicks, file untouched between clicks:
   reviewer's independent numbers exactly.
 
 My first write-up claimed "the tick files are byte-identical between
-that base and current origin/main per `git diff`" — **that was false as
-written**, corrected here: `git diff --stat 9f15af87 origin/main --
-src/refdes/serve/static/` shows exactly one file in range,
-`tick-save.js`, **absent at my base and +236 lines** (#468's new
-tick-save module). `taskpane-ticks.js`, `tick-pane.js` and
-`tick-drafts.js` — the click, pane and draft path my probes drove —
-have 0 diff lines between the two tips. The honest conclusion: the code
-on the click path is the same on my base and on current main, and the
-one new file is the save-request layer, which the click-and-draft probes
-never exercise — so the re-run tested the code the reviewer ran.
+that base and current origin/main per `git diff`" — **that was false
+as written**, corrected here, and the diff itself moves (the save-layer
+work landed after round 1), so I record the command, not memory. At
+the time of this round, `git fetch origin && git rev-parse --short
+origin/main` → `a70e7ba3`, and
+`git diff --stat 9f15af87 origin/main -- src/refdes/serve/static/`
+(full output, plus the full `taskpane-ticks.js` diff, in
+`evidence/f16-3-static-diff.txt`) reports:
 
-What differed in the original run: my continue-endpoint test had
+```
+ src/refdes/serve/static/taskpane-save.js  | 265 ++++++++++++++++++++++++++++++
+ src/refdes/serve/static/taskpane-ticks.js |  11 +-
+ src/refdes/serve/static/tick-save.js      | 236 ++++++++++++++++++++++++++
+ 3 files changed, 510 insertions(+), 2 deletions(-)
+```
+
+— two new save modules (`taskpane-save.js`, `tick-save.js`) and a
++9/−2 `taskpane-ticks.js` whose every hunk is the `initSave` import,
+its call, and panel-collection wiring; the `change` listener that
+performs the tick transition appears in no hunk, and `tick-pane.js`
+and `tick-drafts.js` are 0-diff. (Separately: the row's
+`data-refdes-task-state` is read-only to the client —
+`taskpane-ticks.js:131` reads it, nothing writes it — which is why
+reading it as live state produced my false positive.)
+
+The conclusion the evidence supports, no stronger: the click→transition
+path (the change listener in `taskpane-ticks.js` and the
+`tick-pane`/`tick-drafts` modules) is unchanged between my base and
+main; the lead's own Playwright run on current main (an id'd open row
+clicked four times, Firefox and Chromium: checked
+true/false/true/false, draft mirror `{T:done}`/`{ }`/`{T:done}`/`{ }`)
+shows parity — my base run reproduced the same numbers
+(`r16-rerun.json`); the original double-step is attributed to the
+fixture race described below. The original run differed because my
+continue-endpoint test had
 appended a new tip carrying the ticked-up list, so between probe
 phases the row's **file state flipped open→done**. From a done row,
 click 1 is an untick — `checked=false` with mirror `{T-open:"open"}` —

@@ -42,8 +42,10 @@ root. Two sed probes damaged `items/board-a/requirements/power.yaml`
 (defaults block) and the citation ids collided; both repaired and
 `refdes check` is green on the probe (18 items, 0 errors).
 
-Three pre-merge review rounds reconciled the findings to the final
-state above (F16-3 re-run clean and re-filed Unconfirmed; F16-1
+Four pre-merge review rounds reconciled the findings to the final
+state above (F16-3 re-run clean and re-filed Unconfirmed, its
+base-vs-main record anchored to a recorded command output in the last
+round; F16-1
 re-filed Low docs/UX with the `check`-loud/`navis`-silent asymmetry
 and corrected citations; machine paths and captured tokens stripped
 from the evidence, the uncited Firefox timeout run dropped, and
