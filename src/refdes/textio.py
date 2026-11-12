@@ -79,11 +79,14 @@ def replace_with_retry(
     Any other error -- and every denial once the attempts run out -- is
     the ORIGINAL last exception, re-raised unchanged, so each caller's
     existing OSError handling (the "write failed" refusal, the rollback,
-    the journals) sees exactly what it sees today.
+    the journals) sees exactly what it sees today.  `attempts` is clamped
+    to at least 1: a zero/negative budget still makes the one attempt
+    `os.replace` itself makes.
     """
     if not _IS_WINDOWS:
         os.replace(src, dst)
         return
+    attempts = max(1, attempts)
     last: OSError | None = None
     for attempt in range(attempts):
         try:

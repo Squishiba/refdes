@@ -21,11 +21,11 @@ Evidence: main push CI run 42648833899, job windows-latest
 - Call sites switched: `serve/edit.py` `_atomic_replace` and `_restore`,
   `textio.atomic_write_text`, `navis_archive.archive_record`,
   `editor_journal._atomic_write_bytes` (file replace only; the
-  directory replace at :641 left alone -- no evidence of that race, and
-  a directory rename's sharing semantics differ), `history
-  ._restore_atomically`. `history`/`edit` already imported textio;
-  added imports to `navis_archive` and `editor_journal` (no cycle:
-  textio imports no refdes modules).
+  directory replace in `editor_journal.begin()` left alone -- no
+  evidence of that race, and a directory rename's sharing semantics
+  differ), `history._restore_atomically`. `history`/`edit` already
+  imported textio; added imports to `navis_archive` and
+  `editor_journal` (no cycle: textio imports no refdes modules).
 - `tests/test_replace_retry.py` (8 tests): transient-denial retry
   (counted calls + recorded sleeps), exhaustion re-raises the last
   error, WinError 2 not retried, winerror-less OSError (the shape the
@@ -63,3 +63,30 @@ continued to PR.
 Status: finished. Not verifiable locally: the real Windows effect
 (FILE_SHARE_DELETE semantics) -- it will only show in Windows CI over
 time; the Linux tests prove the control logic, not the OS behavior.
+
+## Review round 2 (2026-11-12)
+
+- `seal.save_seals` switched to `textio.replace_with_retry` (its
+  destination `.refdes/log-seal*.yaml` is a project file a concurrent
+  reader can hold, same race class as the save). Its existing
+  `except OSError -> _record_seal_write` handling is kept -- the
+  exhaustion re-raise lands there unchanged.
+- `replace_with_retry` clamps `attempts` to at least 1: on Windows
+  `attempts <= 0` skipped the loop and hit `raise last` with
+  `last = None` -> TypeError. Test `test_attempts_below_one_is_clamped_
+  to_a_single_attempt` (red first: TypeError; green: WinError-5
+  PermissionError, one call, no sleep).
+- Stale log citation fixed: the excluded directory replace is the
+  rename inside `editor_journal.begin()` (no line number cited).
+
+### All `os.replace(` in src/refdes after round 2 (audit)
+
+| Site | Decision |
+| --- | --- |
+| `textio.replace_with_retry` (both calls) | the helper itself |
+| `editor_journal.begin()` journal-dir rename | excluded: destination is a fresh journal directory, never a project file a poller/editor/AV reader holds open; a directory rename's sharing semantics differ (stated in round 1, unchanged) |
+| `serve/server.write_launch_file` `--token-file` rename | excluded: the destination is the launch credential written at server startup, before the poller and HTTP threads exist; readers are external scripts that open-read-close, not project files |
+
+Round-2 tests: 3 new in `tests/test_replace_retry.py` (2 seal
+integration + 1 clamp), all red-first against the pre-change code, 11
+pass after; full-suite re-run recorded below.

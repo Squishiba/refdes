@@ -23,7 +23,8 @@ import time
 
 import pytest
 
-from refdes import textio
+from refdes import seal, textio
+from refdes.schema import load_project
 from refdes.serve import edit as edit_mod
 
 
@@ -145,6 +146,22 @@ def test_posix_success_is_exactly_one_call(tmp_path, monkeypatch):
         assert fh.read() == b"planned\n"
 
 
+def test_attempts_below_one_is_clamped_to_a_single_attempt(tmp_path, monkeypatch):
+    """`attempts=0` on Windows must not skip the loop entirely: the
+    original code fell through to `raise last` with `last` still `None`
+    and raised TypeError (exceptions must derive from BaseException) --
+    the denial vanished behind a crash. Clamp to one attempt: the
+    WinError surfaces as the original PermissionError, one call, no
+    sleep (no next attempt to delay for)."""
+    src, dst = _pair(tmp_path)
+    calls, sleeps = _harness(monkeypatch, failures=999)
+    with pytest.raises(PermissionError) as excinfo:
+        textio.replace_with_retry(src, dst, attempts=0)
+    assert excinfo.value.winerror == 5
+    assert len(calls) == 1
+    assert sleeps == []
+
+
 # ------------------------------------------------- _atomic_replace integration
 
 
@@ -198,3 +215,55 @@ def test_atomic_replace_refuses_after_exhausting_retries(tmp_path, monkeypatch):
     with open(path, "rb") as fh:
         assert fh.read() == b"original\n"
     assert not [n for n in os.listdir(str(tmp_path)) if "refdes-tmp" in n]
+
+
+# ------------------------------------------------- seal.save_seals integration
+
+
+def test_save_seals_survives_transient_denials(sealed_flat_project, monkeypatch):
+    """`seal.save_seals` replaces `.refdes/log-seal.yaml` -- a project
+    file a concurrent reader can hold, so a transient WinError-5 denial
+    that clears a few ms later must not fall into `_record_seal_write`'s
+    "entries are NOT sealed" diagnostic: the rename retried lands."""
+    real_replace = os.replace
+    calls: list[str] = []
+
+    def flaky(src, dst, *args, **kwargs):
+        calls.append(str(dst))
+        if len(calls) <= 2:
+            raise _win_error(5)
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", flaky)
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(textio, "_IS_WINDOWS", True)
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    project = load_project(config_path=str(sealed_flat_project / "refdes-project.yaml"))
+    assert seal.save_seals(project, {"LOG-001": "0" * 16}) is True
+    with open(seal.seal_path(project), encoding="utf-8") as fh:
+        assert "LOG-001" in fh.read()
+
+
+def test_save_seals_keeps_the_existing_refusal_after_exhausting_retries(
+    sealed_flat_project, monkeypatch
+):
+    """When the denials never clear, `save_seals` keeps the refusal it
+    performs today: returns False and records the blocked write (the
+    build's exit-1 path), the seal file never lands, no temp is left."""
+    calls: list[str] = []
+
+    def always_denied(src, dst, *args, **kwargs):
+        calls.append(str(dst))
+        raise _win_error(5)
+
+    monkeypatch.setattr(os, "replace", always_denied)
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(textio, "_IS_WINDOWS", True)
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    project = load_project(config_path=str(sealed_flat_project / "refdes-project.yaml"))
+    path = seal.seal_path(project)
+    assert seal.save_seals(project, {"LOG-001": "0" * 16}) is False
+    assert len(calls) == 10
+    assert not os.path.exists(path)
+    directory = os.path.dirname(path)
+    assert not [n for n in os.listdir(directory) if n.endswith(".tmp")]

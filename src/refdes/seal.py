@@ -38,7 +38,7 @@ from datetime import datetime, timezone
 import yaml
 
 from . import keys as keys_mod
-from . import model
+from . import model, textio
 from .model import SEALING_BUILD, SEALING_HISTORY, Item, Project, SchemaError
 from .parse import read_store_text, yaml_safe_load
 
@@ -285,7 +285,11 @@ def save_seals(
             # rewrite carries the existing file's mode over instead.
             if os.path.exists(path):
                 os.chmod(temporary, os.stat(path).st_mode & 0o777)
-            os.replace(temporary, path)
+            # Retry the Windows sharing violations (a concurrent reader of
+            # the seal file); the exhaustion re-raise lands in the OSError
+            # handler below, so the refusal path sees exactly what it sees
+            # with a bare `os.replace`.
+            textio.replace_with_retry(temporary, path)
         finally:
             if temporary is not None and os.path.exists(temporary):
                 os.unlink(temporary)
