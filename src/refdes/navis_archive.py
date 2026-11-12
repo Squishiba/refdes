@@ -41,6 +41,7 @@ from datetime import UTC, datetime
 import yaml
 
 from . import keys as keys_mod
+from . import textio
 from .editor_journal import JOURNAL_DIR, pending
 from .model import Diagnostic
 from .write_lock import project_write_lock
@@ -334,7 +335,7 @@ def archive_record(
                 fh.write(payload)
                 fh.flush()
                 os.fsync(fh.fileno())
-            os.replace(tmp, path)
+            textio.replace_with_retry(tmp, path)
         except OSError:
             try:
                 os.unlink(tmp)

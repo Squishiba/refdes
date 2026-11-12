@@ -1144,8 +1144,11 @@ def _removal_fingerprint(removed_digests: list, removed_event_ids: list) -> str:
 
 
 def _restore_atomically(files: list) -> list:
-    """Put back every file a rollback removed, one ``os.replace`` per file;
-    return ``(path, reason)`` for the ones that did not land.
+    """Put back every file a rollback removed, one ``os.replace`` per file
+    (via ``textio.replace_with_retry``: on Windows a destination a
+    concurrent reader holds open is retried, and a denial that persists is
+    raised unchanged into the failure report below); return ``(path,
+    reason)`` for the ones that did not land.
 
     The restore never opens the target for writing: ``open(path, "wb")``
     truncates at open, so a write that faults mid-restore (ENOSPC, EIO) left a
@@ -1170,7 +1173,7 @@ def _restore_atomically(files: list) -> list:
                 fh.write(blob)
                 fh.flush()
                 os.fsync(fh.fileno())
-            os.replace(tmp, path)
+            textio.replace_with_retry(tmp, path)
             tmp = None
         except OSError as exc:
             if tmp is not None:

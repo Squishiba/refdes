@@ -71,6 +71,8 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from . import textio
+
 JOURNAL_DIR = ".refdes/editor-transaction"
 
 _MANIFEST_NAME = "manifest.json"
@@ -346,7 +348,7 @@ def _atomic_write_bytes(path: str, data: bytes) -> None:
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        textio.replace_with_retry(tmp, path)
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
