@@ -1296,7 +1296,11 @@ def _atomic_replace(
             fh.write(payload)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        # Windows: a destination a concurrent reader (the poller, an
+        # editor, antivirus) holds open makes the bare rename fail with
+        # WinError 5/32/33; the retry absorbs that, and a denial that
+        # persists is re-raised unchanged into the refusal below.
+        textio.replace_with_retry(tmp, path)
     except OSError as exc:
         if tmp is not None:
             _discard_tmp(tmp)
@@ -1377,7 +1381,7 @@ def _restore(path: str, original: bytes) -> bool:
             # the WHOLE rewritten file, previous contents included, so
             # their crash windows predate this change)
             os.chmod(tmp, mode)
-        os.replace(tmp, path)
+        textio.replace_with_retry(tmp, path)
         tmp = None  # the swap consumed the temp file
     except OSError:  # the destination is untouched; the caller reports the failure
         if tmp is not None:

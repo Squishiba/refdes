@@ -45,9 +45,60 @@ from __future__ import annotations
 import difflib
 import os
 import secrets
+import time
 
 LF = "\n"
 CRLF = "\r\n"
+
+# Read at CALL time by `replace_with_retry` (not captured as a default), so
+# a test can force the platform by monkeypatching this module attribute.
+_IS_WINDOWS = os.name == "nt"
+
+# The Windows sharing violations a rename of a project file hits when some
+# other handle has the DESTINATION open: 5 ACCESS_DENIED, 32
+# SHARING_VIOLATION, 33 LOCK_VIOLATION. Python's `open()` on Windows does
+# not pass FILE_SHARE_DELETE, so `os.replace` over a destination any other
+# thread/process has open (the server's poller, an editor, antivirus)
+# fails with one of these for as long as the handle lives -- transient,
+# and the rename succeeds milliseconds later.
+_TRANSIENT_REPLACE_WINERRORS = (5, 32, 33)
+
+
+def replace_with_retry(
+    src: str, dst: str, *, attempts: int = 10, delay: float = 0.08
+) -> None:
+    """`os.replace`, retried on Windows against the sharing violations.
+
+    On POSIX this is exactly `os.replace` -- no retry, no behaviour
+    change. On Windows, a destination a concurrent reader holds open
+    makes the rename fail with WinError 5/32/33 (see
+    `_TRANSIENT_REPLACE_WINERRORS`); those are retried up to `attempts`
+    times with a `delay` sleep between (worst case ~0.7 s at the
+    defaults), absorbing the race a Save loses when the poller, an
+    editor, or antivirus has the file open at the moment of the swap.
+    Any other error -- and every denial once the attempts run out -- is
+    the ORIGINAL last exception, re-raised unchanged, so each caller's
+    existing OSError handling (the "write failed" refusal, the rollback,
+    the journals) sees exactly what it sees today.  `attempts` is clamped
+    to at least 1: a zero/negative budget still makes the one attempt
+    `os.replace` itself makes.
+    """
+    if not _IS_WINDOWS:
+        os.replace(src, dst)
+        return
+    attempts = max(1, attempts)
+    last: OSError | None = None
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except OSError as exc:
+            if getattr(exc, "winerror", None) not in _TRANSIENT_REPLACE_WINERRORS:
+                raise
+            last = exc
+            if attempt + 1 < attempts:
+                time.sleep(delay)
+    raise last
 
 # Every character `str.splitlines()` treats as a line break. The list matters:
 # `splitlines()` splits on all of them, so a terminator extractor that only
@@ -331,7 +382,7 @@ def atomic_write_text(path: str, text: str) -> None:
             os.fsync(fh.fileno())
         if os.path.exists(path):
             os.chmod(tmp, os.stat(path).st_mode & 0o777)
-        os.replace(tmp, path)
+        replace_with_retry(tmp, path)
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
