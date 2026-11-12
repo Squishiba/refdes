@@ -131,10 +131,11 @@ The subprocess test reaches the child through a bootstrap the test writes
 var in src. (3) removed the literal `(#task)` from the changelog fragment.
 
 - Stress loop re-run after the fix-round change (`.scratch/sigint/
-  contention.sh` = 20 busy-loops + `stress.py`, same recipe as before): see the
-  PR report for the distribution.
+  contention.sh` = 20 busy-loops + `stress.py`, same recipe as before):
+  `{0: 300}` — 0 signal-kills, 0 credentials left behind (20-way contention).
 - `test_serve_cli.py` + `test_serve_sigint_window.py` +
   `test_serve_launch_ownership.py` + `test_crossplatform_lint.py` green.
+- Full suite: 6445 passed, 2 skipped.
 - Informational (PR body): `EditorApp(..., token_file=...).start()` (background
   thread) no longer writes a launch file — only `serve_forever`/`cmd_serve` arm
   it; `grep -rn "token_file=" src/ tests/ editors/` finds no caller of
