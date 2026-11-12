@@ -92,3 +92,50 @@ fully guarded after the fix). Noted as an unreproduced non-leak anomaly.
   introduced by these edits; left per the repo's not-ruff-clean note.
 
 Full suite run separately (see final report).
+
+## Fix round (whole-PR review, 3 findings)
+
+(1) `arm_launch_file` set `self.token_file = target` *before*
+`write_launch_file`, so a write that refuses/fails after `__init__`'s check (a
+foreign file planted in the check→arm window, ENOSPC on the temp) left a
+`token_file` pointing at a path serve never created — and `cmd_serve`'s
+`finally: app.stop()` then unlinked it, contradicting the `__init__` comment
+and docs/cli-reference.md's "exit 2, no launch, and the path left exactly as it
+was". Fix: write first, claim (`self.token_file = target`) after. The ordering
+that closes the SIGINT window is kept: the handler is still armed before the
+write (cmd_serve's guard), ownership now follows the write. The window the new
+ordering opens — rename landed, flag not set — is handled in the raising frame:
+`except BaseException` calls `_remove_launch_file_if_ours(target, payload)`,
+which unlinks only a regular file (lstat) whose bytes equal *this* launch's URL.
+Token is per-launch and the rename atomic, so matching bytes prove the file is
+ours; a refused target, a stale file (older token → different bytes), a symlink
+or a huge file are never touched. Signal-handler consistency: a SIGINT landing
+anywhere in the write+claim region raises at a bytecode boundary in this frame,
+the cleanup runs here before the re-raise, and `stop()` sees `token_file` None
+and no-ops — one owner, one removal, in either interleaving. Mid-write signals
+leave the target absent (rename never ran) and only a `.refdes-launch-*.tmp`
+(partial URL, 0600) — the documented pre-existing behaviour of
+`write_launch_file`'s kill-window, unchanged.
+RED first (new `tests/test_serve_launch_ownership.py`, in-process, cross-platform):
+foreign file planted after construction + arm refuses → stop() had unlinked it
+(`FileNotFoundError` reading it back); ENOSPC-on-temp over a stale launch file →
+stale file unlinked; signal in the write→claim gap → credential still on disk;
+control (successful arm → stop removes) passed. 3 failed / 1 passed on the head,
+4 passed after the fix.
+
+(2) `REFDES_SERVE_TEST_WINDOW_DELAY` was the only `os.environ` read in
+src/refdes and `float(raw)` raised uncaught on garbage. Replaced with a
+default-off module seam `launch_file_window_delay = 0.0` read at call time.
+The subprocess test reaches the child through a bootstrap the test writes
+(`window-child.py`: set the attribute, then call `refdes.cli.main`) — no env
+var in src. (3) removed the literal `(#task)` from the changelog fragment.
+
+- Stress loop re-run after the fix-round change (`.scratch/sigint/
+  contention.sh` = 20 busy-loops + `stress.py`, same recipe as before): see the
+  PR report for the distribution.
+- `test_serve_cli.py` + `test_serve_sigint_window.py` +
+  `test_serve_launch_ownership.py` + `test_crossplatform_lint.py` green.
+- Informational (PR body): `EditorApp(..., token_file=...).start()` (background
+  thread) no longer writes a launch file — only `serve_forever`/`cmd_serve` arm
+  it; `grep -rn "token_file=" src/ tests/ editors/` finds no caller of
+  `EditorApp(token_file=...)` outside `cli.cmd_serve`, so nothing depended on it.
