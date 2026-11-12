@@ -43,13 +43,31 @@ def _reset_sigint_to_default():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 
-def _start(config, token_file, window_delay: float | None = None):
+# The child's entry point when the window must be widened: set the app's
+# test-only delay, then run the real CLI. The knob lives in the test, not in
+# src -- `refdes.serve.server.launch_file_window_delay` defaults to 0.0 and no
+# production code reads an environment variable to reach it.
+_BOOTSTRAP = (
+    b"import sys\n"
+    b"import refdes.serve.server as server\n"
+    b"server.launch_file_window_delay = float(sys.argv[1])\n"
+    b"from refdes.cli import main\n"
+    b"raise SystemExit(main(sys.argv[2:]))\n"
+)
+
+
+def _start(config, token_file, tmp_path, window_delay: float | None = None):
     env = dict(os.environ, PYTHONPATH=os.path.abspath(SRC), PYTHONIOENCODING="utf-8")
-    if window_delay is not None:
-        env["REFDES_SERVE_TEST_WINDOW_DELAY"] = str(window_delay)
+    if window_delay is None:
+        argv = ["-m", "refdes.cli", "-c", config, "serve", "--no-open",
+                "--token-file", token_file]
+    else:
+        child = tmp_path / "window-child.py"
+        child.write_bytes(_BOOTSTRAP)
+        argv = [str(child), str(window_delay), "-c", config, "serve", "--no-open",
+                "--token-file", token_file]
     return subprocess.Popen(
-        [sys.executable, "-m", "refdes.cli", "-c", config, "serve", "--no-open",
-         "--token-file", token_file],
+        [sys.executable, *argv],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
         preexec_fn=None if os.name == "nt" else _reset_sigint_to_default,  # noqa: PLW1509
     )
@@ -85,16 +103,17 @@ def test_ctrl_c_in_the_window_right_after_the_launch_file_stops_cleanly(tmp_path
     """Ctrl+C (and `kill $pid`) landing the instant the launch file exists must
     stop cleanly -- exit 0, credential removed.
 
-    ``REFDES_SERVE_TEST_WINDOW_DELAY`` widens the gap between the launch file
+    ``launch_file_window_delay`` widens the gap between the launch file
     reaching disk and the accept loop, so the signal is delivered inside the
     stop-handling window deterministically (the real window is microseconds and
     the flake reproduced at ~3%); with the fix that whole span is guarded, so
     the signal is caught. Before the fix the file was written outside the
     KeyboardInterrupt guard, the signal was uncaught, and the launch died by
-    signal (returncode -2 / -15) leaving the credential on disk.
+    signal (returncode -2 / -15) leaving the credential on disk. The child sets
+    the delay from the test's bootstrap, not from an environment variable in src.
     """
     token_file = str(tmp_path / "launch-url.txt")
-    proc = _start(make_project(tmp_path), token_file, window_delay=2.0)
+    proc = _start(make_project(tmp_path), token_file, tmp_path, window_delay=2.0)
     try:
         text = _wait_for_complete_line(token_file, proc)
         assert re.fullmatch(r"http://127\.0\.0\.1:\d+/\?token=\S+\n", text), text

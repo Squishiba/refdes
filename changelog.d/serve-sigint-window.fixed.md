@@ -1,4 +1,4 @@
-- `serve --token-file` Ctrl+C race (#task): the launch file is now written only
+- `serve --token-file` Ctrl+C race: the launch file is now written only
   once a clean stop is armed, so Ctrl+C the instant the file appears stops
   cleanly. `--token-file` is documented as "removed when serve stops cleanly --
   Ctrl+C or SIGTERM", and a scripted client's readiness signal is the file's

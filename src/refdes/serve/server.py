@@ -512,20 +512,44 @@ def _unlink_quietly(path: str) -> None:
         pass
 
 
-def _test_window_pause() -> None:
-    """Optional deterministic delay right after the launch file exists and before
-    the accept loop is entered, for tests that land a SIGINT in the stop-handling
-    window.
+# Test-only seam, default off: seconds for `arm_launch_file` to sleep once the
+# launch file is on disk, widening the window between "the file exists" and
+# "the accept loop runs" so a test can land a SIGINT inside the stop-handling
+# guard deterministically. A real launch never sleeps, and src/refdes reads no
+# environment variable: a test child sets this from a bootstrap script the test
+# writes (tests/test_serve_sigint_window.py), an in-process test with
+# monkeypatch. The name is read at call time, so a set takes effect immediately.
+launch_file_window_delay = 0.0
 
-    Unset by default -- a real launch never sleeps. Set ``REFDES_SERVE_TEST_WINDOW_DELAY``
-    to a number of seconds in a test child to widen the window between "the token
-    file is on disk" and "serve is serving", so a SIGINT is guaranteed to be
-    delivered inside the guard that `arm_launch_file` establishes. Reading it from
-    the environment (not a parameter) keeps the public `EditorApp` API unchanged.
+
+def _remove_launch_file_if_ours(path: str, payload: bytes) -> None:
+    """Unlink `path` only when it is a regular file holding exactly `payload`.
+
+    The handoff between "the launch file is on disk" and "`self.token_file`
+    claims it" is a handful of bytecodes wide, and a signal that lands there
+    raises inside `arm_launch_file`, which cleans up from the raising frame.
+    Bytes equal to this launch's URL can only be this launch's write -- the
+    token is minted per launch and the rename is atomic -- so that file goes
+    with the launch, credential promise honoured. Anything else at the path
+    (a file the arm refused to touch, a stale launch file whose token is
+    older) is left exactly as it is, per the `--token-file` refusal contract.
+    `lstat` + a capped read, so a symlink or a huge file at the path is never
+    followed, written through, or unlinked.
     """
-    raw = os.environ.get("REFDES_SERVE_TEST_WINDOW_DELAY")
-    if raw:
-        time.sleep(float(raw))
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        data = os.read(fd, len(payload) + 1)
+    except OSError:
+        return
+    finally:
+        os.close(fd)
+    if data == payload:
+        _unlink_quietly(path)
 
 
 def check_launch_file_target(path: str) -> None:
@@ -704,18 +728,31 @@ class EditorApp:
         disk. Writing the file here, inside the guard, makes "the file exists"
         mean "Ctrl+C is safe" exactly as documented.
 
-        Ownership (`self.token_file`) is set before the write so a signal that
-        lands mid-write still finds the file to remove; a failed write leaves the
-        target absent, and `_remove_token_file` ignores an absent path.
+        Ownership (`self.token_file`) follows the write, never precedes it: a
+        refused or failed write (the target filled by a foreign writer after
+        `__init__`'s check, ENOSPC mid-write) must not leave a stop() that
+        unlinks a path this launch did not create -- the docs promise a refusal
+        leaves the path exactly as it was. The write and the claim are one
+        short region: a signal landing in the gap between the rename landing
+        and the flag being set is caught here, in the raising frame, and
+        removes the file only if its bytes are exactly this launch's URL
+        (`_remove_launch_file_if_ours`) -- ours to remove, and the credential
+        never outlives the launch.
         """
         target = self._token_file_target
         if target is None:
             return
         if self.token_file is not None:
             return  # already armed (cmd_serve armed it; serve_forever keeps it safe)
-        self.token_file = target
-        write_launch_file(target, self.launch_url)
-        _test_window_pause()
+        payload = f"{self.launch_url}\n".encode()
+        try:
+            write_launch_file(target, self.launch_url)
+            self.token_file = target
+        except BaseException:
+            _remove_launch_file_if_ours(target, payload)
+            raise
+        if launch_file_window_delay:
+            time.sleep(launch_file_window_delay)
 
     def start(self) -> None:
         self.poller.start()
