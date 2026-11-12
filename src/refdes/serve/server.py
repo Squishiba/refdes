@@ -512,6 +512,71 @@ def _unlink_quietly(path: str) -> None:
         pass
 
 
+# Test-only seam, default off: seconds for `arm_launch_file` to sleep once the
+# launch file is on disk, widening the window between "the file exists" and
+# "the accept loop runs" so a test can land a SIGINT inside the stop-handling
+# guard deterministically. A real launch never sleeps, and src/refdes reads no
+# environment variable: a test child sets this from a bootstrap script the test
+# writes (tests/test_serve_sigint_window.py), an in-process test with
+# monkeypatch. The name is read at call time, so a set takes effect immediately.
+launch_file_window_delay = 0.0
+
+
+def _remove_launch_file_if_ours(path: str, payload: bytes) -> None:
+    """Unlink `path` only when it is a regular file holding exactly `payload`.
+
+    The handoff between "the launch file is on disk" and "`self.token_file`
+    claims it" is a handful of bytecodes wide, and a signal that lands there
+    raises inside `arm_launch_file`, which cleans up from the raising frame.
+    Bytes equal to this launch's URL can only be this launch's write -- the
+    token is minted per launch and the rename is atomic -- so that file goes
+    with the launch, credential promise honoured. Anything else at the path
+    (a file the arm refused to touch, a stale launch file whose token is
+    older) is left exactly as it is, per the `--token-file` refusal contract.
+    `lstat` + a capped read, so a symlink or a huge file at the path is never
+    followed, written through, or unlinked.
+    """
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        data = os.read(fd, len(payload) + 1)
+    except OSError:
+        return
+    finally:
+        os.close(fd)
+    if data == payload:
+        _unlink_quietly(path)
+
+
+def check_launch_file_target(path: str) -> None:
+    """Refuse a `--token-file` path we must not touch, before anything is created.
+
+    The refusal half of `write_launch_file`, split out so `EditorApp.__init__` can
+    reject a bad target as a startup refusal (exit 2, no URL printed) *before* the
+    launch reaches the point of writing it. The write itself is deferred to
+    `EditorApp.arm_launch_file`, once the stop signal is armed. The two checks are
+    the symlink and directory cases and the "not a launch file of ours" clobber
+    guard; see `write_launch_file` for the full promise.
+    """
+    if os.path.islink(path):
+        raise ServeStartupError(f"cannot write --token-file {path}: it is a symlink")
+    if os.path.isdir(path):
+        # Checked ahead of the generic refusal, and after the symlink one because
+        # isdir follows links: "choose another path, or delete that one first" is
+        # not advice to give about a directory.
+        raise ServeStartupError(f"cannot write --token-file {path}: it is a directory")
+    if os.path.lexists(path) and not _is_refdes_launch_file(path):
+        raise ServeStartupError(
+            f"cannot write --token-file {path}: it already exists and is not a "
+            "refdes serve launch file, so it will not be overwritten -- choose "
+            "another path, or delete that one first"
+        )
+
+
 def write_launch_file(path: str, url: str) -> None:
     """Write this launch's URL to `path` for scripted clients (`--token-file`).
 
@@ -526,11 +591,11 @@ def write_launch_file(path: str, url: str) -> None:
     * **Never clobbers.** An existing path is overwritten only when it is
       already a refdes launch file. Anything else is a refusal and `serve`
       does not start -- `--token-file refdes-project.yaml` loses nothing. That
-      is a pre-check, not a lock: a writer that swaps a different file in
-      inside the window between the check and the rename would be clobbered --
-      but it already needs write access to that directory, which is the same
-      access that lets it read the token, so the window buys an attacker
-      nothing it did not have.
+      is a pre-check (`check_launch_file_target`), not a lock: a writer that
+      swaps a different file in inside the window between the check and the
+      rename would be clobbered -- but it already needs write access to that
+      directory, which is the same access that lets it read the token, so the
+      window buys an attacker nothing it did not have.
     * **Never follows a symlink.** Refused before anything is created; and
       because the bytes land via `os.replace`, the worst a race could do is
       replace the link itself, never write through it into its target.
@@ -550,19 +615,7 @@ def write_launch_file(path: str, url: str) -> None:
     CI run 36686276948). Windows mode bits are advisory anyway: the file
     inherits the directory's ACLs, which is why the docs say where to put it.
     """
-    if os.path.islink(path):
-        raise ServeStartupError(f"cannot write --token-file {path}: it is a symlink")
-    if os.path.isdir(path):
-        # Checked ahead of the generic refusal, and after the symlink one because
-        # isdir follows links: "choose another path, or delete that one first" is
-        # not advice to give about a directory.
-        raise ServeStartupError(f"cannot write --token-file {path}: it is a directory")
-    if os.path.lexists(path) and not _is_refdes_launch_file(path):
-        raise ServeStartupError(
-            f"cannot write --token-file {path}: it already exists and is not a "
-            "refdes serve launch file, so it will not be overwritten -- choose "
-            "another path, or delete that one first"
-        )
+    check_launch_file_target(path)
     try:
         fd, tmp = tempfile.mkstemp(
             dir=os.path.dirname(os.path.abspath(path)),
@@ -621,8 +674,13 @@ class EditorApp:
         self.token = security.new_token()
         self.read_only = read_only
         # Set only once the file exists, so a failed launch never unlinks a path
-        # it did not create (--token-file pointing at something precious).
+        # it did not create (--token-file pointing at something precious). The
+        # file is created late -- in `arm_launch_file`, once a stop signal is
+        # armed -- so `self.token_file` existing means a clean stop is guaranteed
+        # for it; `self._token_file_target` is the requested path, checked at
+        # construction so a refusal is a startup refusal (exit 2, no URL printed).
         self.token_file: str | None = None
+        self._token_file_target: str | None = None
         self.preview = PreviewManager(temp_dir)
         try:
             self.state = ProjectState(config_path, self.preview)
@@ -636,8 +694,12 @@ class EditorApp:
                 raise ServeStartupError(_bind_failure_message(port, exc)) from exc
             self.port: int = self.httpd.server_address[1]
             if token_file is not None:
-                write_launch_file(token_file, self.launch_url)
-                self.token_file = token_file
+                # Refuse a bad target now (symlink / directory / a file that is
+                # not ours), before the listener is advertised, so a launch that
+                # will not run prints no URL. The write is deferred to
+                # `arm_launch_file`.
+                check_launch_file_target(token_file)
+                self._token_file_target = token_file
         except BaseException:
             self._remove_token_file()
             self.preview.close()
@@ -649,6 +711,48 @@ class EditorApp:
     @property
     def launch_url(self) -> str:
         return f"http://{security.LOOPBACK_ADDRESS}:{self.port}/?{urlencode({'token': self.token})}"
+
+    def arm_launch_file(self) -> None:
+        """Create the `--token-file` now, and claim ownership of it.
+
+        Called from `serve_forever` -- i.e. only once `cmd_serve` has the launch
+        inside its `except KeyboardInterrupt` / `finally: stop()` guard, with the
+        SIGTERM handler installed. That ordering is the whole point: `--token-file`
+        is documented as "removed when serve stops cleanly (Ctrl+C or SIGTERM)",
+        and a scripted client's readiness signal is the file's existence (the docs
+        say `until [ -s file ]`). If the file could appear before the stop signal
+        is armed, a Ctrl+C landing in that window hits interpreter code that is
+        outside the KeyboardInterrupt guard; CPython's top-level behaviour for an
+        uncaught KeyboardInterrupt is to re-raise SIGINT with the default action,
+        so the process dies by signal (returncode -2) and leaves the credential on
+        disk. Writing the file here, inside the guard, makes "the file exists"
+        mean "Ctrl+C is safe" exactly as documented.
+
+        Ownership (`self.token_file`) follows the write, never precedes it: a
+        refused or failed write (the target filled by a foreign writer after
+        `__init__`'s check, ENOSPC mid-write) must not leave a stop() that
+        unlinks a path this launch did not create -- the docs promise a refusal
+        leaves the path exactly as it was. The write and the claim are one
+        short region: a signal landing in the gap between the rename landing
+        and the flag being set is caught here, in the raising frame, and
+        removes the file only if its bytes are exactly this launch's URL
+        (`_remove_launch_file_if_ours`) -- ours to remove, and the credential
+        never outlives the launch.
+        """
+        target = self._token_file_target
+        if target is None:
+            return
+        if self.token_file is not None:
+            return  # already armed (cmd_serve armed it; serve_forever keeps it safe)
+        payload = f"{self.launch_url}\n".encode()
+        try:
+            write_launch_file(target, self.launch_url)
+            self.token_file = target
+        except BaseException:
+            _remove_launch_file_if_ours(target, payload)
+            raise
+        if launch_file_window_delay:
+            time.sleep(launch_file_window_delay)
 
     def start(self) -> None:
         self.poller.start()
@@ -665,6 +769,10 @@ class EditorApp:
         self._thread.start()
 
     def serve_forever(self) -> None:
+        # The launch file is created here -- inside cmd_serve's KeyboardInterrupt
+        # guard with the SIGTERM handler installed -- never in __init__, so the
+        # file's existence always means a clean stop is armed (see arm_launch_file).
+        self.arm_launch_file()
         self.poller.start()
         self.httpd.serve_forever(poll_interval=0.2)
 
