@@ -659,49 +659,66 @@ def cmd_serve(args) -> int:
     (docs/design/browser-editor.md). One project, one process."""
     from .serve.server import EditorApp, ServeStartupError, sigterm_stops_cleanly
 
-    try:
-        app = EditorApp(
-            args.config,
-            read_only=args.no_write,
-            port=args.port or 0,
-            token_file=args.token_file,
-        )
-    except ServeStartupError as exc:
-        # A startup refusal -- busy port, unwritable --token-file -- is a usage
-        # problem, so it gets the house `error:` line and exit 2 (as every other
-        # refusal in this file does), never a traceback out of socket.bind().
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    print(f"refdes serve: {app.launch_url}", flush=True)
-    if app.token_file:
-        print(
-            f"Launch URL written to {app.token_file} (owner-only, removed when this "
-            "stops cleanly -- Ctrl+C or SIGTERM); it is a credential.",
-            flush=True,
-        )
-    print("Listening on 127.0.0.1 only. The token in that URL is this launch's key;")
-    print(
-        "keep it out of screenshots and shared terminals. Ctrl+C to stop; a SIGTERM "
-        "(`kill $pid`) stops it just as cleanly.",
-        flush=True,
-    )
-    if not args.no_open:
-        import webbrowser
-
-        webbrowser.open(app.launch_url)
     # The SIGTERM handler is installed for this launch only, and only where
     # SIGTERM is deliverable at all (see `sigterm_stops_cleanly`): a scripted
     # `kill $pid` takes the very path a Ctrl+C takes, so the launch credential
-    # goes with it. `stop()` is inside the `with` on purpose -- a signal that
-    # lands during teardown is still caught.
+    # goes with it. The handler is entered BEFORE the launch file is written
+    # (arm_launch_file, below) and the whole launch runs inside the
+    # `except KeyboardInterrupt` / `finally: stop()` guard, so a signal landing
+    # at any point after the file exists -- including the instant it appears --
+    # is caught. That is the contract the docs state ("removed when serve stops
+    # cleanly -- Ctrl+C or SIGTERM") and a scripted client relies on (its
+    # readiness signal is the file's existence): the file must never exist while
+    # Ctrl+C can still kill the process by its default action.
     with sigterm_stops_cleanly():
+        app = None
+        status = 0
         try:
+            app = EditorApp(
+                args.config,
+                read_only=args.no_write,
+                port=args.port or 0,
+                token_file=args.token_file,
+            )
+            # `app` is bound from here: construction succeeded (a busy port or a
+            # bad --token-file raised ServeStartupError below, with no URL
+            # printed), so the `finally` can always remove the launch file once
+            # arm_launch_file writes it.
+            app.arm_launch_file()
+            print(f"refdes serve: {app.launch_url}", flush=True)
+            if app.token_file:
+                print(
+                    f"Launch URL written to {app.token_file} (owner-only, removed "
+                    "when this stops cleanly -- Ctrl+C or SIGTERM); it is a credential.",
+                    flush=True,
+                )
+            print("Listening on 127.0.0.1 only. The token in that URL is this launch's key;")
+            print(
+                "keep it out of screenshots and shared terminals. Ctrl+C to stop; a "
+                "SIGTERM (`kill $pid`) stops it just as cleanly.",
+                flush=True,
+            )
+            if not args.no_open:
+                import webbrowser
+
+                webbrowser.open(app.launch_url)
             app.serve_forever()
+        except ServeStartupError as exc:
+            # A startup refusal -- busy port, unwritable --token-file -- is a usage
+            # problem, so it gets the house `error:` line and exit 2 (as every other
+            # refusal in this file does), never a traceback out of socket.bind().
+            print(f"error: {exc}", file=sys.stderr)
+            status = 2
         except KeyboardInterrupt:
-            pass
+            # Ctrl+C (and SIGTERM, whose handler raises it): the documented clean
+            # stop, so exit 0; the `finally` removes the launch file.
+            status = 0
         finally:
-            app.stop()
-    return 0
+            # `stop()` is inside the `with` on purpose -- a signal that lands
+            # during teardown is still caught.
+            if app is not None:
+                app.stop()
+    return status
 
 
 def _print_gate_table(results: list, stream) -> None:
