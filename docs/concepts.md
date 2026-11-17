@@ -123,9 +123,11 @@ Every field declares what a change to it means:
 | `timeline` | yes | no | no |
 | `ignore` | no | no | no |
 
-The last two columns are behaviour today; the timeline column is design
-intent for the parked git-history layer, so `timeline` and `ignore` are currently
-indistinguishable in every observable way. See [change
+The last two columns are behaviour today; the timeline column is design intent
+for the parked git-history layer, so `timeline` and `ignore` are currently
+indistinguishable in every observable way — with one exception: a captured
+history-backed entry (a log entry) digests every field, so a `timeline` change
+on one surfaces as the "edited after captured" warning. See [change
 tracking](change-tracking.md#the-three-modes).
 
 The **content hash** of an item is computed over its `invalidate` fields only. That
@@ -150,4 +152,7 @@ one file](authoring.md#several-items-in-one-file).
   attribute access. Documents cannot run code, so results are deterministic and
   untrusted input is safe.
 - **No database.** Files are the source of truth, git is the history.
-- **No server.** The output is static HTML that works with JavaScript disabled.
+- **No server needed to read it.** The output is static HTML that works with
+  JavaScript disabled. `refdes serve` is an optional local preview and browser
+  editor (see [the browser editor](browser-editor.md)); it is not a runtime
+  dependency of the built site.

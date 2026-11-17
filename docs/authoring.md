@@ -313,10 +313,11 @@ WARNING items/parts/power.yaml:12 [CMP-004] — unknown field 'thermal_model' on
         component.
 ```
 
-Field types are declarative. Today `enum` (checked against `choices`), `limit`
-(parsed as a quantity), and `citations` (checked to be a list of entries each
-with a `path` — see [citing a datasheet](markdown.md#citing-a-datasheet)) are
-enforced; the rest are documentation for readers and for future validation.
+Field types are declarative. Today `enum` (checked against `choices`), `date`,
+`limit` (parsed as a quantity), and the collection types (`list`, `options`,
+`checks`, `citations`, `tasks` — shape, and each entry's own required keys) are
+enforced, along with `required:`/`required_when:`; `text`, `person`, and
+`quantity` are documentation for readers and for future validation.
 
 ### Titles
 
@@ -381,8 +382,9 @@ working unchanged.
 
 ## Folder layout
 
-Everything under `items/` is scanned recursively. Folders carry no meaning — use
-whatever helps you find things:
+Everything under `items/` is scanned recursively. Without a `boards:` registry,
+folders carry no meaning — use whatever helps you find things. Once you register
+boards, the first path segment is the [board](multi-board.md):
 
 ```
 items/
