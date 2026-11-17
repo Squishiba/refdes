@@ -326,8 +326,8 @@ The documents were unshipped when this review was written:
 implementation", and `docs/design/living-notes-plan.md:1-2` "Status:
 Proposed — implementation plan for living notes". That premise is stale
 on current main: the plan landed (`living-notes-plan.md:1` "Implemented
-(H1–H8; optional H9 not landed)" — history store `d84e123` … gate rules
-#193), and the words are in the code — `follows:`/`followed_by` and
+(H1–H9)" — history store `d84e123` … gate rules
+#193, with H9 in #384), and the words are in the code — `follows:`/`followed_by` and
 `tasks:` (`v3/base.yaml:165-166`, `:302`), `refdes thread`/`refdes work`
 (`cli.py:1246`, `:1453`), the store in `history.py`, and thread/tip/
 continuation in `threads.py`. Where plan prose and shipped code disagree
