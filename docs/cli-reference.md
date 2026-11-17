@@ -2392,7 +2392,9 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
   the pane with no tick controls at all, exactly as the built page has them.
   See
   [`refdes thread`](#refdes-thread-lt-ref-gt) and
-  `docs/design/thread-workbench.md` §7a.
+  `docs/design/thread-workbench.md` §7a. For a user-facing walk through the
+  pane's ticks, Save and conflict panel, see [the preview task
+  pane](browser-editor.md#the-preview-task-pane-threads).
 - **Loading writes nothing.** No key is minted, no link expanded, nothing
   sealed, no `.refdes/schema.json` written — the same guarantee as
   `--no-write`, pinned by `tests/test_no_write.py`. Files you edit outside the
