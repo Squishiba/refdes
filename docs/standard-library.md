@@ -289,7 +289,7 @@ the rename is yours to make, in the order you choose:
 $ refdes standard upgrade --to 3
 v2 -> v3:
 refused:
-  rewritten project no longer loads: preset 'design-debate' does not exist for hardware@3 (available: []).
+  rewritten project no longer loads: preset 'design-debate' does not exist for hardware@3 (available: [])
 ```
 
 `refdes standard remove-preset design-debate` first, then upgrade, and both
@@ -333,7 +333,8 @@ completion for `items/**/*.yaml` (see [editor
 support](#editor-support-json-schema-emission) below), and a `.gitignore`
 covering that settings file plus the four gitignored paths —
 `.refdes/copies/`, `.refdes/schema.json`, `.refdes/sealing-optin.json` and
-`.refdes-write.lock`.
+`.refdes-write.lock` (entries an enclosing repository's own ignore files
+already cover are skipped, and an all-covered project gets no new file).
 
 ```bash
 refdes init                            # hardware@<latest>, no presets

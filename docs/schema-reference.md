@@ -25,6 +25,16 @@ imports:     [ ... ]   # other projects to read
 boards:      { ... }   # opt-in board registry
 workspaces:  { ... }   # opt-in workspace registry, one level above boards
 
+# process settings
+sigfigs:      4                  # significant figures in formatted results
+item_layout:  flat               # flat | workspace
+baseline_identity: os_user       # os_user | git_identity
+require_rejection_rationale: true  # the standard's log.rationale toggle
+publish_datasheets: false        # publish kept local citation copies
+lint_own_tags: false             # warn on items with no tags of their own
+release_gate: { ... }            # which readiness rules block release/revision
+cross_workspace_severity: warning  # error | warning | info
+
 # refdes-schema.yaml — optional, only when the project declares its own schema
 sets:  { ... }   # reusable type-spec fragments (fields, links, body), include:d by a type
 link_types:  { ... }   # relationships and their inverses
@@ -211,11 +221,38 @@ is a build error naming the expected format.
 ```yaml
 units:
   preferred: [W, V, A, ohm, F, H, Hz, J, N, Pa, K, s, m, g]
+  aliases:
+    sq: inch**2
 ```
 
-Named units that derived results may collapse into, so `volt*ampere` displays as
-`W`. **Only single-symbol units belong here** — compound entries like `W/m**2` are
-ignored. A unit you write yourself is never rewritten. See [math](math.md).
+`preferred` names units that derived results may collapse into, so
+`volt*ampere` displays as `W`. **Only single-symbol units belong here** —
+compound entries like `W/m**2` are ignored. A unit you write yourself is never
+rewritten.
+
+`aliases` maps a spelling you write to the unit it means (here `sq` becomes
+`inch**2`). It is the project-wide way to add a house unit without changing
+what the item says. See [math](math.md#mil-and-house-units).
+
+---
+
+## `equations`
+
+```yaml
+equations:
+  current_limit:
+    params: [K, V, R]
+    expr: K * V / R
+    note: TPS1H200A datasheet p.22
+```
+
+Named expressions callable from any calc block on the site. `params` is a list
+of parameter names (letters, digits, underscores), `expr` is the non-empty
+expression they bind into, and `note` is provenance nothing at build time
+reads. An equation may call another equation — a cycle is a build error naming
+the path — and it may not shadow a built-in. Units and tolerances come from the
+arguments and propagate through the body. See [math: project
+equations](math.md#project-equations).
 
 ---
 
@@ -373,7 +410,8 @@ types:
 fails to load if it doesn't.
 
 `check_severity` must be `error`, `warning`, or `info`, or a mapping from a
-`status` value to one of those levels (`default:` is then mandatory). It only
+`status` value to one of those levels (the mapping must cover every declared
+status, or declare a `default:`). It only
 changes how a *failing* check is reported — the check still runs, and
 `item.checks` (and the rendered Checks table) still shows pass/fail exactly the
 same way regardless of the setting. See
@@ -557,21 +595,24 @@ The standard's own `log.rationale` uses this
 uses the `links` form (`required_when: {links: alternate}`) — see
 [`alternate`'s required rationale](links.md#part-equivalence-drop-in-and-alternate).
 
-**`enum`, `limit`, `citations`, and `tasks` are enforced today.** `enum` is
-checked against `choices`; `limit` is parsed as a quantity; `citations` is
-checked to be a list of entries that each have at least a `path`; `tasks` is
-checked to be a list of task rows (see below). The rest are
-declarative — they document intent and are where future validation will hook
-in.
+**`enum`, `date`, `limit`, `list`, `options`, `citations`, and `tasks` are
+enforced today.** `enum` is checked against `choices`; `date` is parsed in the
+project's `date_format`; `limit` is parsed as a quantity; `list`, `options`,
+`citations`, and `tasks` are checked for their entry shapes (see below). The
+`text`, `person`, `quantity`, and `checks` *types* are declarative — they
+document intent and are where future validation will hook in — though a field
+literally named `checks` is evaluated as a check list (below).
 
 **A field typed `list`, `options`, `checks`, `citations`, or `tasks` must be
 written as a YAML list.** Anything else is a build error naming the field, its
 type and what it was given:
 
 ```
-ERROR   items/cmp.yaml:3 [CMP-010] — field 'tags' is a list field, but it
+ERROR   items/cmp.yaml:4 [CMP-PWR-010] — field 'tags' is a list field, but it
 was given a string 'power, analog' -- write it as a list, one entry per value
-(tags: [first, second]).
+(tags: [first, second]). A scalar is never split; it is kept as one entry: the
+comma is part of the value, so a search for either of those values matches only
+by substring, and the stored value is never equal to either of them.
 ```
 
 The value is never split on a delimiter for you: `tags: "power, analog"` is
@@ -593,9 +634,12 @@ Four field *names* have behaviour attached regardless of declared type:
 
 `citations` is different: it is keyed off the declared **type**, not a fixed
 field name, so a project can call the field `references`, `sources`,
-anything — the hardware standard calls it `citations`. Any field declared `type: citations` gets a `path` (required — `http`/`https` for a remote document, a project-root-relative file path for a local one), plus
-`rev`, `page`, `section`, `part_number`, `keep_copy`, and an optional `id` per entry, its
-own table on the item page, and an entry in `references.html` — see [citing a
+anything — the hardware standard calls it `citations`. Any field declared
+`type: citations` gets one of `path` or `item` per entry — `path` is an
+`http`/`https` URL or a project-root-relative file, `item` names another item
+in this project — plus optional `rev`, `page`, `section`, `part_number`,
+`keep_copy`, and `id` per entry, its own table on the item page, and an entry
+in `references.html` — see [citing a
 datasheet](markdown.md#citing-a-datasheet), [CLI
 reference](cli-reference.md#refdes-fetch), and [output
 formats](output.md#items-json). A citation's `id`, when given, is what
@@ -865,6 +909,24 @@ the reserved `workspace:` key regardless of layout. See
 A board key and a workspace key must never collide — they share one
 generated-filename namespace (`coverage-<key>.html`); doing so is a hard
 error at project-load time naming both sides.
+
+---
+
+## Process settings
+
+The settings below sit in `refdes-project.yaml` beside the blocks above. They
+are project-wide preferences, not schema.
+
+| Key | Default | Purpose |
+|---|---|---|
+| `sigfigs` | `4` | Significant figures used when formatting computed values; an integer from 1 to 15. See [math](math.md). |
+| `item_layout` | `flat` | Path shape under `items/`: `flat` (`items/<board>/…`) or `workspace` (`items/<workspace>/<board>/…`). See [workspaces](workspaces.md#the-two-level-layout). |
+| `baseline_identity` | `os_user` | Whose identity a stamped baseline records: `os_user` or `git_identity`. See [project lifecycle](lifecycle.md). |
+| `require_rejection_rationale` | `true` | Toggles the standard's `log.rationale` rule (`required_when: {status: rejected}`). Setting it to `false` makes a rejected verdict's rationale optional. |
+| `publish_datasheets` | `false` | Copies kept local citation files into the built site. Off by default: publishing a manufacturer datasheet is a redistribution decision the author makes. See [citing a datasheet](markdown.md#citing-a-datasheet). |
+| `lint_own_tags` | `false` | Warns on items that carry no `tags:` of their own. Off by default because a file's `defaults:` usually supplies them. |
+| `release_gate` | per-rule | Maps a readiness rule to `{ release: bool, revision: bool }`; an omitted key keeps the rule's default. See [the readiness gate](lifecycle.md#the-readiness-gate). |
+| `cross_workspace_severity` | `warning` | Diagnostic level (`error`, `warning`, or `info`) for an authored link crossing into a workspace not marked `shared: true`. See [workspaces](workspaces.md). |
 
 ---
 
