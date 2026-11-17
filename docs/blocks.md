@@ -222,7 +222,8 @@ other refdes diagnostic holds to:
 
 ```
 {{index by="pageno" type="log"}} — type 'log' has no field 'pageno'.
-    Declared fields: date, status, summary.
+    Declared fields: author, checks, citations, date, note, options,
+    rationale, source, status, summary, tags, tasks.
 ```
 
 ```

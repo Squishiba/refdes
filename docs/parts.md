@@ -74,8 +74,8 @@ would ever write down — it's computed fresh, at build time, from field
 values that already exist. Two boards in different workspaces using the
 same microcontroller is a coincidence of the bill of materials, not a
 claimed dependency between them — exactly the coincidence this page exists
-to surface. The [cross-workspace lint](workspaces.md) walks only
-`item.links`, so sharing a `part_number` across workspaces never trips it;
+to surface. The [cross-workspace lint](workspaces.md) walks only authored
+links, so sharing a `part_number` across workspaces never trips it;
 only a [`drop_in`/`alternate`](links.md#part-equivalence-drop-in-and-alternate)
 link — a real authored claim — would.
 
