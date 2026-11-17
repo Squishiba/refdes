@@ -134,10 +134,11 @@ depended on by everyone, so links into it never trip the lint.
 **Never trips on a derived relationship.** Only the links an author actually
 typed are walked — `item.links`, read as `item.resolved_links` so a composite
 `DISPLAY-ID@key` target counts as the item it names — never a computed
-backlink, coverage, or any future aggregate view (a parts index spanning
-workspaces, say). Two boards in different workspaces happening to use the
-same MCU is a coincidence of the bill of materials, not a claimed dependency,
-and this lint has no way to see it even in principle.
+backlink, coverage, or a derived aggregate view (the project-wide
+`parts.html` index spanning workspaces, say). Two boards in different
+workspaces happening to use the same MCU is a coincidence of the bill of
+materials, not a claimed dependency, and this lint has no way to see it even
+in principle.
 
 **Severity is configurable**, in `refdes-project.yaml`:
 
