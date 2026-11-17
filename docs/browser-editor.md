@@ -229,6 +229,70 @@ renders as static text and the item carries a `sealed — read only` badge
 with the reason: *a sealed entry is append-only: a correction is a new
 entry, not this edit.*
 
+## The preview task pane (threads)
+
+The preview of a threaded log entry carries a task pane. A floating **Tasks**
+button at the bottom-right of the page (invisible until JavaScript runs)
+opens it: the thread's open tips as one tab each when the thread has forked,
+the tip's task list, the verdict line, and a collapsed *Derived (auto clears
+when fixed)* section. On an older entry the pane says
+`viewing LOG-007 · tasks as of tip LOG-012`, so you can tell which entry's
+list you are reading. The published site shows the same read-only pane; the
+controls below are the live preview's addition.
+
+### Ticking, and the per-tab draft
+
+On a writable preview the pane's task rows have tick checkboxes. The pane
+says what they do: `Preview: ticking a row changes this page only -- nothing
+is saved.` A tick lives in the browser tab as a draft — the panel gains an
+`N unsaved tick(s)` line and a **Discard** button, and leaving the page while
+a draft is pending raises the browser's leave-page prompt. The draft is per
+tab, not shared between tabs. **Discard** releases it: the rows return to the
+state the page was rendered with, and nothing is written.
+
+### Save
+
+While the current tab has unsaved ticks, a **Save** button joins the panel.
+One click sends the draft's ticks to `POST /api/item/<ref>/continue` (the
+tip's surrogate key as the ref, the launch token from the page) and writes
+**one new continuation entry** at the thread tip. The new entry copies the
+tip's scalar fields and its whole task list with your ticks applied, has an
+empty body, and carries a `follows:` to the tip; the same locked operation
+records the predecessor's captured state (the `followed` event). On success
+the draft clears and the page reloads onto the new tip. A refused save shows
+the server's own message and keeps the draft for a retry.
+
+### The conflict panel
+
+If the tip's file changed after the page was built (someone else saved, or an
+editor rewrote it), Save meets a conflict panel instead of writing. It lists
+your ticks against what the file now says and offers exactly three outcomes:
+
+- **Keep mine** — keeps your ticks, re-stamped onto the revision the file has
+  now (a row that no longer exists is dropped, never re-invented); the page
+  reloads with the draft still pending, ready to Save again.
+- **Keep theirs** — releases your draft onto the current list; nothing is
+  written for you.
+- **Copy it out** — puts your pending ticks in a read-only transcript
+  (copying it to the clipboard where the browser allows).
+
+Nothing is merged automatically: the two lists are shown, and only a choice
+you make moves the draft.
+
+### What the pane will not do
+
+- A built or published page (`_site/`, no `serve`) shows the read-only pane:
+  no checkboxes and no tick module. Only the live preview of a writable
+  `serve` gets the controls.
+- A server started with the global `--no-write` flag ships the same read-only
+  pane: it has no tick controls at all, not merely disabled ones.
+- A tip without an `id:` (or without a surrogate key) has no save context, so
+  no **Save** is offered; its ticks stay preview-only and the pane says so.
+
+The command, its launch URL, and the `--no-write` flag are in the [CLI
+reference](cli-reference.md#refdes-serve); the thread view itself is
+[`refdes thread`](cli-reference.md#refdes-thread-lt-ref-gt).
+
 ## Where it is verified
 
 The committed checks run the real served modules (the same
