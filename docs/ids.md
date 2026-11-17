@@ -108,12 +108,12 @@ Deleting `REQ-PWR-003` does not free `003`. The ledger at `.refdes/ids.yaml`
 records the high-water mark per prefix:
 
 ```yaml
+allocated:
+- REQ-PWR-005
 burned:
   BND-THM: 2
   LOG-PWR: 1
   REQ-PWR: 5
-allocated:
-- REQ-PWR-005
 ```
 
 Someone reading revision B in two years must find that ID meaning what it meant
@@ -279,7 +279,7 @@ place that answers "what is REQ-PWR-001?" answers it:
 
 ```bash
 refdes ls REQ-PWR-001
-NEED-PWR-001  need  The 3V3 rail shall supply 1.2 A continuous. (formerly REQ-PWR-001)
+NEED-PWR-001  requirement  The 3V3 rail shall supply 1.2 A continuous. (formerly REQ-PWR-001)
 ```
 
 `ls`'s free text reaches `former_ids:` under the same substring and case rules

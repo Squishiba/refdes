@@ -331,7 +331,7 @@ something that no longer exists.
 | Show *your* incoming links | Show incoming links from outside the artifact |
 
 They keep the content hash their own project computed, which is what makes
-cross-project suspect links work once the history layer lands. Their artifact
+cross-project suspect links work once the git-history layer lands. Their artifact
 also carries each durable surrogate key: a writable downstream load expands a
 bare link to `DISPLAY-ID@key`, and an upstream display-ID rename refreshes its
 display half while the key keeps the target fixed. Older artifacts with no key

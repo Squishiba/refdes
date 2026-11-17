@@ -4,8 +4,8 @@ stale-result messages (#341), the grammar fixes (#351), and the §2 release gate
 (#345). The §3 hash, dependency-scan, and `source()` discovery changes
 (HASH_FORMAT 6, slice 2 -- span cross-item references entering the content
 hash, the cross-item and `source()` dependency scans, and the composite-key
-refresh; the `calc_hash` probe extension ships with the slice and is not a
-format-gated payload change) land with this PR. The owner
+refresh; the `calc_hash` probe extension shipped with the slice and is not a
+format-gated payload change) landed in #347. The owner
 decided the four open questions on 2026-10-17, and on 2026-10-19 decided the
 hash-format change despite the baseline/seal risk named in section 3; the
 decisions are recorded under each question below.

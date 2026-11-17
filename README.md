@@ -33,6 +33,7 @@ python -m venv .venv && ./.venv/bin/python -m pip install -e .
 refdes init      # write a minimal refdes-project.yaml pointing at the standard library
 refdes build     # render _site/ and items.json
 refdes check     # validate without rendering; non-zero exit on errors
+refdes serve     # preview the site and edit it in a browser, with live calc
 refdes index     # print the resolved project as one JSON document on stdout, for tooling
 refdes id        # allocate IDs for items that have none, writing them back
 refdes audit     # list suppressed fields, resealed entries, board/workspace
@@ -42,7 +43,9 @@ refdes audit     # list suppressed fields, resealed entries, board/workspace
 Those are the everyday ones. `refdes --help` lists every command —
 including `new`, `schema`, `fetch`, `revision`, `release`, `stub-tests`,
 `rename`, `standard`, and `former-ids` — see the
-[CLI reference](docs/cli-reference.md).
+[CLI reference](docs/cli-reference.md). `refdes serve` opens a loopback-only
+browser editor over the built site with live inline calc; see
+[the browser editor guide](docs/browser-editor.md).
 
 ## Editor support
 
@@ -193,12 +196,14 @@ Every field declares what a change to it means:
 | `ignore` | no | no | no |
 
 The timeline column is design intent for the parked git-history layer, so
-`timeline` and `ignore` behave identically today. Set per field in the schema (a
-project's own fields in `refdes-schema.yaml`; the project-wide default in
-`on_change:` in `refdes-project.yaml`), overridable per item (an omitted
-`reason:` on a field override is a warning). The content hash is computed over
-`invalidate` fields only, which is what stops an owner change from marking fifty
-links suspect.
+`timeline` and `ignore` behave identically today — except on a captured
+history-backed log entry, whose digest covers every field, so a `timeline`
+change there surfaces as the "edited after captured" warning. Set per field in
+the schema (a project's own fields in `refdes-schema.yaml`; the project-wide
+default in `on_change:` in `refdes-project.yaml`), overridable per item (an
+omitted `reason:` on a field override is a warning). The content hash is
+computed over `invalidate` fields only, which is what stops an owner change
+from marking fifty links suspect.
 
 `refdes audit` lists everything currently suppressed. Suppression is allowed;
 invisible suppression is not.

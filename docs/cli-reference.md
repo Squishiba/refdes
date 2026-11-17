@@ -9,7 +9,7 @@ usage: refdes [-h] [-V] [-c CONFIG] [--no-write]
 |---|---|
 | `-V`, `--version` | Print one line, `refdes <version>`, naming the `refdes` you are actually holding, and exit `0`. Needs no project, no config, and no subcommand. The number is read from the installed package's own metadata, so it cannot disagree with what `pip show refdes` reports; run from a raw checkout with nothing installed, it prints `refdes (version unknown -- not installed as a package)` rather than raising. |
 | `-c`, `--config PATH` | Use this `refdes-project.yaml`. Default: search upward from the current directory. |
-| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `rename`, `calc-rewrite`, `stub-tests`, `standard upgrade`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` and `keys restore` report the full plan and write nothing; commands that fundamentally write (`fetch`, `init`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`, and `recover` while an editor transaction journal is pending) **refuse to run** under `--no-write` and exit 2 (`recover` on a project with no journal reports "nothing to recover" and exits 0). `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
+| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `rename`, `calc-rewrite`, `stub-tests`, `standard upgrade`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` and `keys restore` report the full plan and write nothing; commands that fundamentally write (`fetch`, `init`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`, `navis archive`, `navis restore`, and `recover` while an editor transaction journal is pending) **refuse to run** under `--no-write` and exit 2 (`recover` on a project with no journal reports "nothing to recover" and exits 0). `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
 
 Exit codes: `0` success, `1` errors found, `2` configuration error (including `--no-write` refusal).
 
@@ -221,7 +221,7 @@ Errors go to stderr, warnings to stdout. Every diagnostic leads with
 
 | Option | Effect |
 |---|---|
-| `--refresh` | Also re-fetch every pinned [citation](markdown.md#citing-a-datasheet) and report drift (network; writes nothing). A pinned citation whose bytes cannot be obtained **fails the run** — see below |
+| `--refresh` | Also re-fetch every pinned remote [citation](markdown.md#citing-a-datasheet) and report drift (network; writes nothing). A pinned citation whose bytes cannot be obtained **fails the run** — see below |
 | `--allow-unreachable` | With `--refresh`, report a citation that could not be re-fetched as a warning instead, so the exit code reflects only real findings |
 | `--board NAME` | Only report diagnostics for one [board](multi-board.md)'s own items |
 | `--workspace NAME` | Only report diagnostics for one [workspace](workspaces.md)'s own items |
@@ -241,8 +241,10 @@ refdes check --workspace product-a
 ```
 
 `--refresh` is the only thing that ever makes `check` touch the network, and
-even then it writes nothing — it re-fetches each pinned citation to a scratch
-buffer, compares hashes, and reports which items cite anything that drifted:
+even then it writes nothing — it re-fetches each pinned remote citation to a
+scratch buffer, compares hashes, and reports which items cite anything that
+drifted (a local citation is already re-hashed against its pin on every run,
+so there is no second upstream to ask):
 
 ```bash
 refdes check --refresh
@@ -343,19 +345,26 @@ refdes release rev-b
 
 release 'rev-b' blocked -- not stamped:
   FAIL     draft_items            REQ-PWR-004, REQ-PWR-005
-  FAIL     uncovered_requirements BND-THM-002
   pass     unpinned_citations
   pass     missing_kept_copies
+  FAIL     uncovered_requirements BND-THM-002
   skipped  unverified_requirements
   skipped  info_check_failures
   pass     unaccepted_board_moves
+  pass     unaccepted_workspace_moves
+  skipped  open_tasks
+  skipped  captured_edits
+  pass     inline_calc_results
 ```
 
-Fix what's listed and run it again. On success, a one-line nudge to record
-the release in the [design log](design-log.md#after-a-release) — printed,
-never auto-written. See [lifecycle](lifecycle.md) for the full readiness
-gate, the baseline file's shape, `stamped_by`, and the diff `refdes audit`
-surfaces against it.
+The list is always all eleven rules, printed in the order above;
+`release_gate:` in `refdes-project.yaml` (see
+[lifecycle](lifecycle.md#the-readiness-gate)) decides which run and which
+print `skipped`. Fix what's listed and run it again. On success, a nudge to
+record the release in the [design log](design-log.md#after-a-release), with a
+starter entry — printed, never auto-written. See [lifecycle](lifecycle.md) for
+the full readiness gate, the baseline file's shape, `stamped_by`, and the diff
+`refdes audit` surfaces against it.
 
 `revision` and `release` both exist to write one file, so if the filesystem
 will not take it they refuse rather than degrade: the run exits `2` naming
@@ -376,9 +385,10 @@ and is still reported: the refusal is about the destination, not the project.
 Print the project's machine-readable payload — items with their fields, links,
 calcs, checks and `file:line`, beside the `coverage`, `types`, `next_ids` and
 `diagnostics` that always go with them (`threads` too, when the project has any
-`follows:`-chained entries, and `boards`/`workspaces` when those registries are
-declared) — as JSON on stdout, which is what the VS Code extension and other
-editor tooling read, without rendering the site. Does everything `check` does,
+`follows:`-chained entries, `navis` too when it has Navis markers, and
+`boards`/`workspaces` when those registries are declared) — as JSON on
+stdout, which is what the VS Code extension and other editor tooling read,
+without rendering the site. Does everything `check` does,
 and emits the export instead of a report.
 
 | Option | Effect |
@@ -926,12 +936,13 @@ Updates `.refdes/ids.yaml`. See [IDs](ids.md).
 
 ## `refdes fetch`
 
-The **only** command that touches the network — and only for remote
-(`http`/`https`) citations. Fetches every path a `citations:` field declares,
-records its sha256 and fetch time in the `.refdes/citations.yaml` lockfile,
-and keeps the bytes in `.refdes/copies/` for any remote citation that
-declares `keep_copy: true`. A local path is read from disk instead, so pinning
-one works with the network down. `build` and `check` never do this themselves
+The command dedicated to fetching and pinning citations — the editor's
+accept can write the same lockfile records too — and it touches the network
+only for remote (`http`/`https`) citations. Fetches every path a `citations:`
+field declares, records its sha256 and fetch time in the
+`.refdes/citations.yaml` lockfile, and keeps the bytes in `.refdes/copies/`
+for any remote citation that declares `keep_copy: true`. A local path is read
+from disk instead, so pinning one works with the network down. `build` and `check` never do this themselves
 — see [citing a datasheet](markdown.md#citing-a-datasheet).
 
 | Option | Effect |
@@ -1396,11 +1407,13 @@ refdes new component --list > items/power/candidates.yaml
 `refdes new decision` answers `unknown type 'decision'.` on stderr and exits 1
 (no did-you-mean — no type is close to it).
 
-An unknown type exits 1 with a did-you-mean suggestion, the same as an
-unknown type anywhere else in the tool. Outside a project it still works,
-falling back to the bundled standard. `refdes new` writes nothing itself —
-most commands that load a project refresh `.refdes/schema.json` (the list is
-in the `refdes schema --json` section below), and this one deliberately does not.
+An unknown type exits 1, with a did-you-mean suggestion when the name is
+close to a real one (`refdes new requiremen` → `Did you mean 'requirement'?`);
+`decision` gets none because no current type is close to it. Outside a
+project it still works, falling back to the bundled standard. `refdes new`
+writes nothing itself — most commands that load a project refresh
+`.refdes/schema.json` (the list is in the `refdes schema --json` section
+below), and this one deliberately does not.
 
 ---
 
@@ -1410,10 +1423,10 @@ Print the project's merged JSON Schema to stdout. `--json` is the default, so
 a bare `refdes schema` prints the same document. The same document is written,
 byte for byte, to `.refdes/schema.json` by most commands that load the
 project in a writable tree — `build`, `check`, `index`, `ls`, `id`, `fetch`,
-`audit`, `thread`, `work`, `revision`, `release`, `stub-tests`, `former-ids`,
-and the `history` subcommands (`capture`, `redact`, `migrate-seals`); this is
-the explicit, standalone form, for
-piping into something else or inspecting directly. See [editor
+`audit`, `thread`, `work`, `navis`, `revision`, `release`, `stub-tests`,
+`former-ids`, and the `history` subcommands (`capture`, `redact`,
+`migrate-seals`); this is the explicit, standalone form, for piping into
+something else or inspecting directly. See [editor
 support](standard-library.md#editor-support-json-schema-emission).
 
 `refdes schema` itself is read-only: it writes nothing, not even the schema
@@ -1941,10 +1954,10 @@ renumbering, a person reviews it, and only the accepted mappings become
 real. A wrong link in a traceability tool is worse than a missing one, so
 inference only ever drafts a suggestion here — the `former_ids:` entry
 `--confirm` writes is what build actually reads afterward, never a fuzzy
-match recomputed on the fly. An id passed to `--confirm` that isn't among
-the currently proposed candidates is refused, not guessed at — re-run
-`propose` without `--confirm` first if the project has changed since. The
-candidate list is printed either way, then the refusal:
+match recomputed on the fly. When the proposal is non-empty, an id passed to
+`--confirm` that isn't among the candidates is refused, not guessed at —
+re-run `propose` without `--confirm` first if the project has changed since.
+The candidate list is printed either way, then the refusal:
 
 ```
 $ refdes former-ids propose --confirm NOPE-999
@@ -1952,6 +1965,10 @@ $ refdes former-ids propose --confirm NOPE-999
   CAN_00 (requirement 'The bus shall recover...') -> REQ-CAN-001 ('The bus shall recover...')  exact match (surrogate key)
 error: not a currently proposed candidate: NOPE-999 -- run 'refdes former-ids propose' again to see current candidates
 ```
+
+With no candidates at all, a clean project prints `no candidate former-id
+mappings found` and exits 0 — there is nothing for `--confirm` to write, so
+a name passed to it is not reported as a refusal.
 
 Picking the baseline is the other way this fails, and both cases exit 1
 without proposing anything:
@@ -2091,10 +2108,11 @@ writes the planned files, then reloads and validates again. A write or reload
 failure restores the original file bytes.
 
 It refuses malformed keys, keys owned by another local or imported item,
-unknown or imported target items, ambiguous source edits, and replacement keys
-already recorded in any baseline, seal, membership manifest, or captured-history
-event. Discarding a recorded replacement key would orphan that history. It also
-refuses a restore whose target the recorded history does not describe: when the
+unknown or imported target items, ambiguous source edits, and a **current**
+key recorded in any baseline, seal, membership manifest, or captured-history
+event. Moving the item off a key its history records would orphan that
+history. It also refuses a restore whose target the recorded history does not
+describe: when the
 most recent baseline recording the key shows a **different title or a different
 content hash** than the item the key is being moved onto, the move would hand
 every reference that names the key to an unrelated item while leaving a clean
@@ -2176,7 +2194,7 @@ it, plus the snapshots no surviving event still references) or a full
 ```bash
 refdes history redact LOG-A-011 --confirm
 # redacted 1 object(s) and 1 event(s)
-# wrote redaction event 6f2a... naming what was removed (by digest and event id only -- its content is not repeated anywhere in this output)
+# wrote redaction event 82a35309-... naming what was removed (by digest and event id only -- its content is not repeated anywhere in this output)
 # Redaction reaches this history store only. It cannot remove data already committed to Git, present in clones, or published in built sites: rewrite Git history and republish (and revoke anything secret) the way you would for any leaked file.
 ```
 
@@ -2470,9 +2488,10 @@ python -m http.server -d _site 8000
 `schema.json`: the record is gitignored, so a fresh clone — CI included — starts
 unannounced and prints the note on its first writable run. `refdes init` puts it
 in the project's `.gitignore` |
-| `.refdes/copies/` | **no, gitignored** | Kept local copies of datasheet bytes, content-addressed by sha256; written only by `refdes fetch --path ...` for a remote citation with `keep_copy: true`. `refdes init` puts it in the project's `.gitignore` |
+| `.refdes/copies/` | **no, gitignored** | Kept local copies of datasheet bytes, content-addressed by sha256; written by `refdes fetch` for a remote citation with `keep_copy: true`. `refdes init` puts it in the project's `.gitignore` |
 | `.refdes-write.lock` | **no, gitignored** | The project's cross-process write lock — at the project root, not inside `.refdes/`. `write_lock.project_write_lock` is taken around any command that writes item or state files, and around each save by `refdes serve`, so neither a CLI writer nor the editor can interleave another's read-modify-write and two serves cannot save over each other. Outside `cli.main`'s hold: `serve` (it takes the lock per save instead), `init` (it writes the project marker before there is a project to lock), `new` and `schema`, and any `--no-write`/`--dry-run` run. Always empty; created by the first writer that takes it, not at startup. `refdes init` puts it in the project's `.gitignore` |
 | `.refdes/history/` | **yes** | Captured-history store: content-addressed snapshot objects and derived-id events; written by the `follows:` capture and by `refdes history capture`/`redact`/`migrate-seals` |
+| `.refdes/navis/` | **yes** | Navi archive store: one gzip YAML record per archived Navi, named by its key; written by `refdes navis archive`/`restore` and by `refdes serve`'s `/api/navis/archive` and `/api/navis/restore` |
 | `_site/` | no | Generated output |
 
 Source files are also rewritten by `refdes id`, which inserts allocated IDs in
