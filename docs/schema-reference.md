@@ -247,9 +247,9 @@ equations:
 ```
 
 Named expressions callable from any calc block on the site. `params` is a list
-of parameter names (letters, digits, underscores), `expr` is the non-empty
-expression they bind into, and `note` is provenance nothing at build time
-reads. An equation may call another equation — a cycle is a build error naming
+of parameter names (letters, digits, and underscores, not starting with a
+digit), `expr` is the non-empty expression they bind into, and `note` is
+provenance nothing at build time reads. An equation may call another equation — a cycle is a build error naming
 the path — and it may not shadow a built-in. Units and tolerances come from the
 arguments and propagate through the body. See [math: project
 equations](math.md#project-equations).
@@ -595,13 +595,15 @@ The standard's own `log.rationale` uses this
 uses the `links` form (`required_when: {links: alternate}`) — see
 [`alternate`'s required rationale](links.md#part-equivalence-drop-in-and-alternate).
 
-**`enum`, `date`, `limit`, `list`, `options`, `citations`, and `tasks` are
-enforced today.** `enum` is checked against `choices`; `date` is parsed in the
-project's `date_format`; `limit` is parsed as a quantity; `list`, `options`,
-`citations`, and `tasks` are checked for their entry shapes (see below). The
-`text`, `person`, `quantity`, and `checks` *types* are declarative — they
-document intent and are where future validation will hook in — though a field
-literally named `checks` is evaluated as a check list (below).
+**`enum`, `date`, `limit`, `list`, `options`, `checks`, `citations`, and
+`tasks` are enforced today.** `enum` is checked against `choices`; `date` is
+parsed in the project's `date_format`; `limit` is parsed as a quantity; the
+collection types (`list`, `options`, `checks`, `citations`, `tasks`) are
+checked for their shape and each entry's own required keys (see below). The
+`text`, `person`, and `quantity` *types* are declarative — they document
+intent and are where future validation will hook in. Separately, a field
+literally *named* `checks` is evaluated as a check list (below), whatever its
+declared type.
 
 **A field typed `list`, `options`, `checks`, `citations`, or `tasks` must be
 written as a YAML list.** Anything else is a build error naming the field, its
@@ -635,10 +637,11 @@ Four field *names* have behaviour attached regardless of declared type:
 `citations` is different: it is keyed off the declared **type**, not a fixed
 field name, so a project can call the field `references`, `sources`,
 anything — the hardware standard calls it `citations`. Any field declared
-`type: citations` gets one of `path` or `item` per entry — `path` is an
-`http`/`https` URL or a project-root-relative file, `item` names another item
-in this project — plus optional `rev`, `page`, `section`, `part_number`,
-`keep_copy`, and `id` per entry, its own table on the item page, and an entry
+`type: citations` names a `path` or another item's `item:` id per entry (at
+least one of the two) — `path` is an `http`/`https` URL or a
+project-root-relative file, `item` names another item in this project — plus
+optional `rev`, `page`, `section`, `part_number`, `keep_copy`, and `id` per
+entry, its own table on the item page, and an entry
 in `references.html` — see [citing a
 datasheet](markdown.md#citing-a-datasheet), [CLI
 reference](cli-reference.md#refdes-fetch), and [output

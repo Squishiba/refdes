@@ -4,8 +4,10 @@
   `lint_own_tags:`, `release_gate:`, `cross_workspace_severity:`), which its
   "every key" claim previously omitted.
 - The schema reference now says a `citations:` entry names a `path` **or**
-  another item's `item:` id, and that `date`, `list`, and `options` fields are
-  enforced alongside `enum`/`limit`, instead of calling them declarative.
+  another item's `item:` id, and that `date` and the collection types (`list`,
+  `options`, `checks`, `citations`, `tasks`) are enforced — matching
+  `docs/authoring.md` — leaving only `text`, `person`, and `quantity`
+  declarative.
 - The schema reference's list-field error example now carries the real
   diagnostic text, and its `check_severity:` mapping rule matches the loader
   (cover every status, or declare `default:`).

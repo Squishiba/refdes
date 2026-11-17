@@ -101,6 +101,41 @@ listproj, boardproj).
 - `docs-site/gen_examples.py --check` and `gen_themes.py --check`: clean.
 - Full suite once before push (see PR).
 
+## Fix round 1
+
+- Corrected the field-type paragraph: `checks` is an enforced collection type
+  (shape only), not declarative. Reproduced with
+  `.scratch/checktype` (`type: checks` + scalar → "field 'probes' is a checks
+  field, but it was given a string…"; same scalar in `type: text` is fine).
+  The enforced set now matches `docs/authoring.md`: enum, date, limit, list,
+  options, checks, citations, tasks; text/person/quantity declarative.
+- Process settings, adversarial pass (`.scratch/probe_settings.py`, each bad
+  value exits 2): `sigfigs: 0`, `item_layout: grid`,
+  `baseline_identity: robot`, `require_rejection_rationale: maybe`,
+  `publish_datasheets: maybe`, `lint_own_tags: maybe`,
+  `cross_workspace_severity: loud`, `release_gate.no_such_rule`,
+  `units.aliases.sq: 42`, empty `equations.e.expr` — each names its allowed
+  values/expected type.
+- `units.aliases`: functional `.scratch/claims/alias_calc` (`sq: inch**2`,
+  calc `2 sq`) loads clean.
+- `equations`: bad param name, cycle (`equation cycle: a -> b -> a`), and
+  shadowing `sqrt` all error as the page now says; `current_limit(…, 0.8 V,
+  3.3 kohm) ± 15% | A` loads clean. `grep` shows nothing reads `Equation.note`.
+- `citations: - item:`: valid item loads clean
+  (`.scratch/claims/citation_item_valid`); a dangling id errors through the
+  `item:` key. Wording now says at least one of `path`/`item`, since both are
+  accepted together.
+- `date` + `date_format`: `MM/DD/YYYY` accepts `01/25/2026` and rejects
+  `2026-01-25` naming the expected format (error prints a Python date repr —
+  code-side, logged, not changed).
+- `check_severity`: missing status without `default` errors; listing every
+  status or adding `default` passes.
+- `require_rejection_rationale` false drops the rejected-rationale error, and
+  `lint_own_tags: true` warns on an untagged item
+  (`.scratch/probe_toggles.py`).
+- `git merge origin/main` was a plain merge (branch 8 commits behind), no
+  conflicts.
+
 ## Notes / not reached
 
 - No code changed. No browser run (not required for these pages).
