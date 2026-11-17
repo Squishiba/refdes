@@ -5,7 +5,12 @@ Measured numbers for `refdes check`, `refdes build`, `refdes ls`, and the
 1500. This page answers the open question in
 [the browser-editor design](design/browser-editor.md): the 1.06-second rebuild
 figure there predates the current revision and described a project of two
-dozen items — these are the fresh numbers, at several sizes.
+dozen items — these are the measured numbers, at several sizes.
+
+These numbers were measured on 2026-10-19 against the source tree as of that
+date and have not been re-measured since; treat them as a historical baseline.
+The machine, corpus generator, and commands are recorded below so the
+measurement can be repeated.
 
 ## How this was measured
 
@@ -105,12 +110,12 @@ once (last column).
 
 For the sizes people are likely to run — up to a few hundred items — a save
 in the browser editor rebuilds in well under a second at 100 items and
-about 2 seconds at 400, and the old 1.06 s figure overstates today's cost on
-the project it described (that project now rebuilds in 0.23 s). At 1500 items
-a full rebuild is ~19 s and a plain `refdes build` writes ~625 MB, roughly
-99% of it the preview payload re-embedded in every page; the cost is in
-rendering every page with the whole project attached to each one, not in
-loading, validating, or evaluating the items.
+about 2 seconds at 400, and the old 1.06 s figure overstated the cost on the
+project it described (that project rebuilt in 0.23 s when these numbers were
+taken). At 1500 items a full rebuild is ~19 s and a plain `refdes build` writes
+~625 MB, roughly 99% of it the preview payload re-embedded in every page; the
+cost is in rendering every page with the whole project attached to each one, not
+in loading, validating, or evaluating the items.
 
 ## Caveats
 
