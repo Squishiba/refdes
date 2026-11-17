@@ -50,6 +50,30 @@ def _project(root) -> str:
     return str(root / "refdes-project.yaml")
 
 
+# A project with one Navis marker: the `navis` key follows the markers the
+# same way `threads` follows the `follows:` graph (render.items_json).
+NAVIS_SCHEMA = (
+    "site: { title: N, out: _site }\n"
+    "types:\n"
+    "  note:\n"
+    "    prefix: NOTE\n"
+    "    fields:\n"
+    "      title: { type: text, required: true }\n"
+    "    body: {}\n"
+)
+
+
+def _navis_project(root) -> str:
+    write_project_config(root, NAVIS_SCHEMA)
+    (root / "items").mkdir()
+    (root / "items" / "note.md").write_text(
+        "---\nid: NOTE-001\ntype: note\ntitle: Power\n---\n"
+        "<!--navi: Model worst-case copper temperature.-->\n",
+        encoding="utf-8",
+    )
+    return str(root / "refdes-project.yaml")
+
+
 def _index_help(capsys) -> str:
     with pytest.raises(SystemExit):
         cli_mod.main(["index", "--help"])
@@ -76,6 +100,25 @@ def test_index_help_names_the_payload_it_prints(capsys):
     assert "when the project declares those registries" in help_text
 
 
+def test_index_help_names_the_navis_key_as_conditional(capsys):
+    """The help lists the conditional keys; `navis` (render.items_json emits
+    it only when the project has Navis markers) must be named like the
+    others -- as conditional, with the condition that gates it."""
+    assert "navis when it has Navis markers" in _index_help(capsys)
+
+
+def test_a_project_with_a_navis_marker_carries_the_navis_key(tmp_path, capsys):
+    """The help names `navis`, so it is checked against a payload that
+    carries it, not only against the payload that lacks it."""
+    config = _navis_project(tmp_path)
+    capsys.readouterr()
+    assert cli_mod.main(["-c", config, "index"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [row["text"] for row in payload["navis"]] == [
+        "Model worst-case copper temperature."
+    ]
+
+
 def test_index_help_no_longer_says_only_that_it_prints_items_json(capsys):
     """The old wording pinned by its own words, so it cannot come back by
     paraphrase: an artifact name plus a negation is not a description."""
@@ -92,3 +135,4 @@ def test_the_named_keys_are_the_ones_a_real_payload_carries(tmp_path, capsys):
     assert set(ALWAYS) <= set(payload)
     assert "boards" not in payload  # this project declares no boards: registry
     assert "threads" not in payload  # and has no follows: anywhere
+    assert "navis" not in payload  # and no Navis markers
