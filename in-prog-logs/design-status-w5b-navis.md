@@ -71,6 +71,32 @@ AGENTS.md notes optional H9 is not landed — out of scope here.
   readable in `package.json`/source.
 - CI on ubuntu + windows is the remaining check.
 
+## Review round: the id-less-tip sentence
+
+Review of #488 asked me to verify that the key-naming refusal is reachable
+over HTTP for a key-only tip, since run 17 recorded `refused: no item
+'k7f3q2x8d0f' in this project`. I built `.scratch/review488/` (an id-less
+`LOG-001` root and a key-only tip with `follows: LOG-001` and tasks),
+started `refdes serve --no-open --port 8791` cold, and POSTed with the launch
+token:
+
+```
+POST /api/item/9jd9gf6bdv6/continue
+{"kind":"refused","message":"refused: the tip 9jd9gf6bdv6 carries no artifact
+key, so no DISPLAY-ID@key composite can be written for it; naming the tip with
+a bare id would drop the identity the link is for","path":"items/log-a.yaml"}
+HTTP 422
+```
+
+So in a fresh scratch project the key-addressed POST does reach #473's
+key-naming refusal; it does not say `no item`. `tests/test_idless_tip_continue.py`
+pins the same outcome and passes. I could not reproduce the run-17
+`no item` answer (a stale key, or a key not present in the read-only load,
+would produce it). I did not write a claim I did not see: the plan now says
+the pane offers no Save for an id-less key-only tip, and that a key-addressed
+hand POST answers 422 naming the key -- with the exact message.
+
 ## Status
 
-Complete locally; PR opened after the full suite, then awaited CI.
+Complete locally; PR opened after the full suite, then awaited CI. A second
+commit rewrites the id-less-tip sentence after the review verification above.

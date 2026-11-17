@@ -6,8 +6,11 @@ token/`Origin` seam (#453); W5b.3's tick checkboxes in the preview response
 leave prompt (#460, #461, #462, #463) plus the Save seam and its
 keep-mine/keep-theirs/copy-it-out conflict panel (#468, #474, with the fixes
 #477, #481 and #485); and W5b.5's predecessor `followed` capture in the same
-locked operation (#470). An id-less tip offers no Save and its refusal names
-the key (#473). Q10's ratified (a) still holds deliberately: there is no
+locked operation (#470). An id-less, key-only tip offers no Save in the pane;
+#473 added the endpoint's own refusal, which names the tip by its key — a hand
+`POST /api/item/<key>/continue` answers 422 `the tip <key> carries no artifact
+key, so no DISPLAY-ID@key composite can be written for it`. Q10's ratified (a)
+still holds deliberately: there is no
 `refdes continue` — `refdes --help` lists no such command — so the pane remains
 the only write route for a continuation. Nothing else the plan lists was left
 unbuilt; §7's non-goals stayed non-goals. The rules this plan implements are
