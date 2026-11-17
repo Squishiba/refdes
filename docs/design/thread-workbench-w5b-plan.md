@@ -1,13 +1,17 @@
-Status: Proposed, and **unblocked**. All ten conservative defaults in §Open
-questions for Jared were ratified by Jared on 2026-11-06, as written, as the
-defaults this plan assumed; every phase below (W5b.1–W5b.5) is now unblocked.
-Each phase names the answers it needs, and §8 tabulates which phases each
-answer gates. The rules this plan implements
-are decided already — `docs/design/thread-workbench.md` §7a — and nothing here
-reopens them. Unlike `docs/design/living-notes-plan.md`, which was written
-after its questions were ratified, this one is written before: the shape of the
-work is stable, the answers are not. The answers have since landed: Jared
-ratified all ten defaults on 2026-11-06.
+Status: **Implemented.** All ten defaults in §6 were ratified by Jared on
+2026-11-06, as written, and all five phases then landed: W5b.1's continuation
+apply-operation (#448); W5b.2's `POST /api/item/<ref>/continue` on the same
+token/`Origin` seam (#453); W5b.3's tick checkboxes in the preview response
+(#456); W5b.4's tip-keyed `sessionStorage` draft, unsaved count, Discard and
+leave prompt (#460, #461, #462, #463) plus the Save seam and its
+keep-mine/keep-theirs/copy-it-out conflict panel (#468, #474, with the fixes
+#477, #481 and #485); and W5b.5's predecessor `followed` capture in the same
+locked operation (#470). An id-less tip offers no Save and its refusal names
+the key (#473). Q10's ratified (a) still holds deliberately: there is no
+`refdes continue` — `refdes --help` lists no such command — so the pane remains
+the only write route for a continuation. Nothing else the plan lists was left
+unbuilt; §7's non-goals stayed non-goals. The rules this plan implements are
+`docs/design/thread-workbench.md` §7a, and nothing here reopened them.
 
 **Citations.** Line numbers are against `main` at `374a4aa`. The read-only task
 pane is on `main`: PR #197 merged as `7c72311`, so `task_pane.py`, the pane
@@ -94,8 +98,9 @@ only for projects that show one (`src/refdes/render.py:997-1023`);
 (`:360`) — "it emits no input that writes"; and
 `templates/taskpane/taskpane.js` "fetches nothing and writes nothing" (its own
 header comment, `:1-14`) — it toggles, switches tabs, and greys. §8 of
-`thread-workbench.md` records W5a **Landed** and W5b **Not started**
-(`docs/design/thread-workbench.md:282-289`).
+`thread-workbench.md` recorded W5a **Landed** and W5b **Not started** at this
+plan's drafting (`docs/design/thread-workbench.md:282-289`); W5b has since
+landed — see the Status line above.
 
 **One write path, and its shape.** `serve/edit.py` is the single mutation entry
 point the permission seam demanded (`src/refdes/serve/edit.py:1-62`; the seam
