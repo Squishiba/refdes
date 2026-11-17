@@ -17,7 +17,8 @@ The decision is taken. This document specs it; it does not relitigate it.
 **Status: Phase 4a implemented.** H6, H7 and H8 have since landed (`tasks:`
 on the merged `log` with its fold, `refdes thread`/`refdes work` and the
 index `threads` projection, and the two off-by-default release-gate rules);
-H9 and the Phase 4b thread panel remain later work.
+H9 has since landed too (#384, baseline snapshot events and the item-page
+history disclosure). The Phase 4b thread panel remains later work.
 
 **Scope note on concurrent work:** this document does not touch, and makes
 no claim about, `standards/hardware/v3/base.yaml`, any file under `docs/`
