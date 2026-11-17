@@ -1,5 +1,11 @@
-=== subdir serve: launch inside the project (items/) on --no-write ===
+=== subdir serve: launch inside the project (items/) on a writable server (no --no-write) ===
 launched with cwd = <worktree>/.scratch/proj17c/items (project subdirectory); discovery walks up to the project:
 launch (token redacted): refdes serve: http://127.0.0.1:38501/?token=REDACTED
 root with token: 302 (302 = token handshake redirect, browser follows); preview index: 302; item page log-a-004.html: 302 (same 302 handshake)
 pane on the served item page: renders (3 tick rows, tip key) -- see edge-idless-nowrite-sealed-subdir.json E10_subdir_pane
+note (added 2026-11-17, nit fix; lines 2-5 captured output untouched): the header's original "--no-write"
+label was wrong for this capture. The pane shape recorded here is the writable-server shape: 3 tick rows
+with a tip key (line 5; E10_subdir_pane: checkboxes 3). A --no-write server renders the same page with
+zero checkboxes and no tip key (E3_no_write_pane in the same json, and edge-nowrite-note.json: checkboxes
+0, page loads preview.js not taskpane-ticks.js). The capture therefore came from the writable subdir
+launch; the report's subdir bullet (section 3) never labels this server --no-write.

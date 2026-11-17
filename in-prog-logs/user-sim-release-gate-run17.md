@@ -1,8 +1,12 @@
 # User-simulation release gate — run 17
 
-Branch `user-sim-run17`, head `86c0d043` (includes #475 docs gaps, #476 navis
-note, #477 save-seam polish, #474 save seam, #473 id-less tip, #472 VS Code
-Navis). Base for "what shipped since": `9f15af87`. Simulated as a plain user:
+Branch `user-sim-run17` (PR #479). The run exercised head `86c0d043` (the
+git-log tip recorded in `git-context.txt`; includes #475 docs gaps, #476
+navis note, #477 save-seam polish, #474 save seam, #473 id-less tip, #472
+VS Code Navis); the PR head `f8a53086` is the reviewer fix round that
+delivered this report, not a build the run exercised (git-context.txt
+records both). Base for "what shipped since": `9f15af87`. Simulated as a
+plain user:
 docs/ pages followed literally, CLI + a real browser (Chromium, Firefox
 parity), probe projects under `.scratch/`. No fixes made. Full suite at base:
 `6419 passed, 2 skipped in 110.46s` (evidence `pytest-tail.txt`).
@@ -48,11 +52,14 @@ token redacted). Evidence: `flow-a-save.json`, `flow-c-firefox-save.json`,
   entries name their tip via the composite form, e.g.
   `follows: [LOG-A-005@y6waecbfk3p]`.
 - After the save, `refdes thread LOG-A-004` announces
-  `Snapshot Captured: LOG-A-003 (followed by later entry)`, and
-  `.refdes/history/events/` holds exactly one event per captured
-  predecessor: `events dir: 10 file(s); events naming "followed": 10`,
-  with the thread's predecessors `LOG-A-003` through `LOG-A-012` (the ten
-  continuations written by the pane) each announcing one (`flow-a-capture-once.txt`).
+  `Snapshot Captured: LOG-A-003 (followed by later entry)` — the thread
+  output carries one such line per captured predecessor, `LOG-A-003`
+  through `LOG-A-012` — and `.refdes/history/events/` counts
+  `events dir: 10 file(s); events naming "followed": 10`. The run's
+  explicit per-predecessor event check names two of the thread's
+  predecessors: `predecessors in the thread (LOG-A-002 and LOG-A-003, each
+  followed by a later entry): exactly one followed event per predecessor
+  -> True` (`flow-a-capture-once.txt`).
 - **Finding 1 (Medium)**: after clicking **Discard** the status indicator
   clears (`pending: null`), and `discVisible: false` — but **Save** stays
   visible (`saveVisible: true`), with one row still `tick: true` in
@@ -163,8 +170,11 @@ Evidence: `edge-idless-nowrite-sealed-subdir.json`,
   on the item's directory refuses — `refused: the write failed ([Errno 13]
   Permission denied: 'items/board-a/.log.yaml.refdes-tmp-rlsxf6sd');
   items/board-a/log.yaml still holds its original bytes` — and it does:
-  `file_unchanged_dir_readonly: true` (sha256 `bae7e8b5dcd7…` identical
-  before/after, `edge-readonly-tree.json`). **Finding 4 (Low
+   `file_unchanged_dir_readonly: true` (sha256 `bae7e8b5dcd7…` identical
+   before/after, `edge-readonly-tree.json`; that file's `project` field
+   lost its `<worktree>` prefix to the redaction pass — repaired
+   2026-11-17 from the paired `edge-file-0444.json` record: same item
+   key, same pre-probe sha). **Finding 4 (Low
   (Unconfirmed))**: `chmod 0444` on the file alone does NOT block the save
   — the atomic write renames a fresh file over it: status 200,
   `applied: continuation LOG-A-009 appended to items/board-a/log.yaml (1

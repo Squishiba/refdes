@@ -1,7 +1,12 @@
 === git context ===
 86c0d043 docs: close three run-16 docs gaps (upgrading, cli-reference, navis) (#475)
 9f15af87 feat(serve): the preview task pane keeps unsaved ticks as a draft (W5b.4c-1b) (#463)
-merge-base with the base: 9f15af87484b7961343314cd36ecd11fea5ca4e5
+scope baseline for "what shipped since" (the 9f15af87..HEAD fragment range below): 9f15af87484b7961343314cd36ecd11fea5ca4e5
+merge-base of the PR head with main: 86c0d0438c68f00895753fbcf3567efb3d753793
+  (corrected 2026-11-17: this line mislabelled the scope baseline 9f15af87 as the merge-base;
+   the run head 86c0d043 is the true merge-base -- verified: $ git merge-base f8a53086 origin/main
+   -> 86c0d0438c68f00895753fbcf3567efb3d753793; f8a53086 = PR head, the reviewer fix round
+   delivering this report, on top of ac7e7b0f (the report) on top of 86c0d043)
 changelog.d fragments added/changed in 9f15af87..HEAD:
 changelog.d/continue-capture.changed.md
 changelog.d/continue-idless-tip.changed.md
