@@ -3,9 +3,9 @@ ratified by Jared on 2026-11-08, as written, and all four slices then landed:
 S6.1's read-only Navis TreeView in the Explorer over `GET /api/navis`, with the
 placeholder states and click-through (#457); S6.2's `ServeClient.post()`
 (#458), the write-action decision logic (#459), and the Archive / Restore /
-Mint keys commands plus the `Mint keys (N)` row, with the `--no-write` session
-lock (#464); S6.3's freshness polish, the `Refdes: Refresh Navis` command,
-Open in editor, and the read-only status tooltip that survives index repaints
+Mint keys commands, with the `--no-write` session lock (#464); S6.3's freshness
+polish, the `Refdes: Refresh Navis` command, the `Mint keys (N)` row, Open in
+editor, and the read-only status tooltip that survives index repaints
 (#469, #482); and S6.4's README/docs plus the 0.1.0 → 0.2.0 bump
 (#472, `editors/vscode/package.json`). The design rules (§2 owner decisions,
 §11's one-projection rule) held unchanged, and the slice-6 data-path deviation

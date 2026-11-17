@@ -96,7 +96,35 @@ would produce it). I did not write a claim I did not see: the plan now says
 the pane offers no Save for an id-less key-only tip, and that a key-addressed
 hand POST answers 422 naming the key -- with the exact message.
 
+## Review round 2: the Mint-row attribution
+
+Round 2 corrected one wrong attribution. The Navis Status credited the
+`Mint keys (N)` row to S6.2/#464; #464's body says it was "Deferred to S6.3",
+and `git log -S"mintRow" -- editors/vscode/navisTree.js` first hits #469, whose
+body adds `navisTree.mintRow(payload, state)`. Moved the row from the
+S6.2/#464 clause to the S6.3/#469 clause. The changelog listed only slice PR
+sets (#458/#459/#464, #469/#482), never the row itself, so it did not repeat
+the error; this log did not cite a PR for the row either.
+
+Re-read every other cited PR body for the feature it is credited with:
+
+- Navis: #457 (read-only tree, placeholders, click-through) OK; #458
+  (`ServeClient.post()`) OK; #459 (decision logic) OK; #464 (Archive/Restore/
+  Mint commands, `--no-write` lock) OK; #469 (freshness, Refresh Navis, Open in
+  editor, Mint row, lock line re-applied) OK; #482 (tooltip survives repaints)
+  OK; #472 (README/docs, 0.1.0 -> 0.2.0) OK.
+- W5b: #448 (apply-operation) OK; #453 (`POST .../continue`) OK; #456 (tick
+  checkboxes) OK; #460/#461/#462/#463 (draft store, tip key+revision, pane
+  model, DOM glue with counts/Discard/leave prompt) OK; #468/#474 (save model,
+  save seam + conflict panel) OK; #477 (clipboard rejection, late ticks on Keep
+  mine) OK; #481 (Discard hides Save, conflict noise) OK; #485 (revision
+  describes the rows' bytes) OK; #470 (predecessor `followed` capture) OK; #473
+  (id-less-tip refusal) OK.
+
+No other mismatch found. Full suite re-run once before pushing.
+
 ## Status
 
 Complete locally; PR opened after the full suite, then awaited CI. A second
-commit rewrites the id-less-tip sentence after the review verification above.
+commit rewrites the id-less-tip sentence after the review verification above;
+a third corrects the Mint-row attribution per round 2.
