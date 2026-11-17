@@ -4,6 +4,11 @@ Live diagnostics, ID completion, hover previews, go-to-definition, and inline ca
 results for [Refdes](https://github.com/Squishiba/refdes) projects — reference
 documentation for hardware design decisions.
 
+> **Beta.** The Navis view — the tree, archive/restore/mint, the Mint keys row, the
+> read-only indicator, and Open in editor — has been verified by automated tests
+> against `refdes serve`, not yet by hand in a VS Code window. Feedback is welcome
+> in the [issue tracker](https://github.com/Squishiba/refdes/issues).
+
 ## Setup
 
 This extension is a thin client over the `refdes` command line tool, so **install

@@ -33,6 +33,9 @@ refused:
   rewritten project has parse errors -- rolled back:
   ERROR   items/log.yaml:5 [LOG-PWR-001] — on_change: mode 'log' was renamed to 'timeline' (vocabulary review P9: the mode names the future field-level timeline, and `log` collided with the `log` item type) -- rename this value in the source file. It is read as 'timeline' in this build so the change policy is not silently lost.
 rc=1
+note (added 2026-11-17, nit fix): the edit between the two runs above was not captured as a diff in
+this transcript; per the report (section 6, step 5, "after renaming the mode") it was: in items/log.yaml,
+on_change mode renamed 'log' -> 'timeline' (the value the refusal above names). The second run is after it.
 v2 -> v3:
 changed 3 file(s):
   items/dec.md
