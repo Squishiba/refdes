@@ -89,24 +89,34 @@ recomputed in the browser. It is pure enhancement: the button and pane start
 `hidden` and only the site's own script reveals the button, so with JavaScript
 disabled neither ever appears and the page reads as before. A project with no
 `follows:` edge anywhere publishes exactly the pages it published before: no
-pane, no pane assets, byte for byte.
+pane, no pane assets, byte for byte. Served through `refdes serve`, the
+preview's pane is writable instead — ticks are drafted per tab, then **Save**
+appends a continuation entry, with a conflict panel for a file that moved
+underneath; see [the browser
+editor](browser-editor.md#the-preview-task-pane-threads).
 
 ### Per-board pages
 
 A project with a `boards:` registry additionally gets `document-<board>.html`,
-`coverage-<board>.html`, `log-<board>.html`, `summary-<board>.html`,
-`references-<board>.html`, and `parts-<board>.html` for each registered
-board, scoped to that board's own items — everything above unaffected. See
+`coverage-<board>.html`, `summary-<board>.html`, and `tree-<board>.html` for
+each registered board that has items to show — its own plus the members of
+groups it `includes:` — plus `log-<board>.html`,
+`references-<board>.html`, and `parts-<board>.html` when that board has the
+matching content (log entries, citations, part numbers respectively) —
+everything above unaffected. A registered board with nothing to show gets
+none. See
 [multiple boards](multi-board.md). With no `boards:` registry, none of these
 are written.
 
 ### Per-workspace pages
 
-The same six pages, `-<workspace>` instead of `-<board>`, for each
-registered [workspace](workspaces.md) — `document-<workspace>.html`,
-`coverage-<workspace>.html`, `log-<workspace>.html`,
-`summary-<workspace>.html`, `references-<workspace>.html`, and
-`parts-<workspace>.html`, scoped to that workspace's own items. A board and
+The same scoped set, `-<workspace>` instead of `-<board>`, for each
+registered [workspace](workspaces.md) that has items of its own —
+`document-<workspace>.html`, `coverage-<workspace>.html`,
+`summary-<workspace>.html`, `tree-<workspace>.html`, and, when the workspace
+has the matching content, `log-<workspace>.html`,
+`references-<workspace>.html`, and `parts-<workspace>.html`, scoped to that
+workspace's own items. A board and
 workspace key never collide (schema.py validates this at load), so the two
 sets of pages coexist without fighting over a filename. With no
 `workspaces:` registry, none of these are written.
@@ -275,11 +285,12 @@ structure — there is nothing to hand-maintain and no `nav:` tree to write.
   collapsible group holding its own pages and its own scoped reports, with
   boards nesting inside the workspace their items resolve into. A group
   renders already open when the page you are reading lives inside it.
-- A scope with no items of its own gets no group and no report pages — a
+- A scope with nothing to show gets no group and no report pages — a
   board can be registered before anything is in it. Within a populated
-  scope, only the reports that have something to show are written and
-  linked: no `log-<board>.html` without log entries, no
-  `references-<board>.html` without citations.
+  scope (a board's items include the members of its `includes:` groups),
+  only the reports that have something to show are written and linked: no
+  `log-<board>.html` without log entries, no `references-<board>.html`
+  without citations.
 - The link to the current page is marked `aria-current="page"`, so screen
   readers and the stylesheet agree on where you are.
 - Below a narrow viewport the whole tree collapses behind a single
@@ -357,7 +368,8 @@ without them rather than present and empty: top-level `boards` and a
 per-item `board` for a [`boards:`](multi-board.md) registry, top-level
 `workspaces` and a per-item `workspace` for a
 [`workspaces:`](workspaces.md) one. Top-level `threads` follows the
-`follows:` graph the same way — see [Threads](#threads) below. Everything
+`follows:` graph and top-level `navis` follows the Navis markers, each the
+same way — see [Threads](#threads) and [`navis`](#navis) below. Everything
 else is always present.
 
 ```json
@@ -598,6 +610,33 @@ The shape is the decision, not the styling of it:
   `blocked_by:` chains, unpinned or cache-missing citations — over the
   thread's own items plus what those items link to. Fix the gap, rebuild,
   the row is gone; there is nothing to tick.
+
+### `navis`
+
+Present only when the project has Navis markers
+(`<!--navi: ... -->` — see [Navis markers](markdown.md#navis-markers)), and
+absent otherwise, so a project with no Navis keeps a byte-identical payload.
+It is the same projection `refdes navis ls`/`all`/`show` read: active notes
+first in (source file, line) order, then archived ones, then archived records
+whose marker was hand-deleted.
+
+```json
+"navis": [
+  { "key": "ebb5dsepdvs", "text": "Model worst-case copper temperature.",
+    "source": { "item": "NOTE-001", "key": "kkyxbyxtxy4",
+                "file": "items/note.md", "line": 8 },
+    "archived": false, "snapshot": null, "text_changed": false }
+]
+```
+
+`key` is `null` for a keyless marker (the next writable load mints one).
+`archived` rows carry `snapshot: { "text": ..., "archived_at": ... }` and
+`text_changed` says the live marker text has moved since it was archived. An
+orphan row — an archive record whose marker was hand-deleted — has
+`source.item: null`, the record's saved `source.file`/`source.line`, and
+`source.marker_found: false`, so it can be told apart from a live marker that
+happens to have no item id. See [Navis](navis.md) for the commands and the
+two panels.
 
 ### What it is good for
 

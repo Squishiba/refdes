@@ -128,7 +128,8 @@ fence in the item's **body** (next to the ` ```calc ` fence) is inert: the fence
 renders as literal text on the page and the check silently never runs. The build
 warns on that shape and names the fix.
 
-`value` must be a variable defined by a `calc` block in the **same item**.
+`value` must be a variable defined by a `calc` block or an
+[inline calc span](math.md#inline-calc) in the **same item**.
 `against` must be an item with a `limit`, and may be
 [imported from another project](multi-board.md).
 

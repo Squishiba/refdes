@@ -56,7 +56,7 @@ picture:
   `status` field at all) — the original behavior. Set, it's an *inclusion*
   list: `coverable_statuses: [active]` means a `draft` item isn't tracked
   either, not just "open" — it doesn't appear in coverage or its warnings at
-  all. The standard sets this on `requirement`/`bound`.
+  all. The standard sets this on `requirement`, and `bound` inherits it.
 
 A type that [`extends:`](schema-reference.md#extends) another inherits both
 flags (and `satisfying_statuses:`/`verifying_statuses:`), so a subtype is
