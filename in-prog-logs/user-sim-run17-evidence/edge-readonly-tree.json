@@ -3,7 +3,7 @@
  "item_key": "g52ptehpvx6",
  "tick": "T-thermal-model",
  "post_body_shape": "{\"expected_revision\": \"<file sha256>\", \"ticks\": [[\"<task-id>\", \"done\"]]}",
- "project": ".scratch/proj17ff2 (served on 8762, writable)",
+ "project": "<worktree>/.scratch/proj17ff2 (served on 8762, writable)",
  "chmod_cmd": "chmod 0555 items/board-a",
  "post_status": 422,
  "post_body_first_line": "{\"kind\":\"refused\",\"ok\":false,\"message\":\"refused: the write failed ([Errno 13] Permission denied: 'items/board-a/.log.yaml.refdes-tmp-rlsxf6sd'); items/board-a/log.yaml still holds its original bytes\",\"reason\":\"the write failed ([Errno 13] P",
