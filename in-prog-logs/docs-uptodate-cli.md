@@ -68,6 +68,45 @@ worktree `src`).
   serve (token file 0600 + one line + newline, SIGTERM exit 0 and removal,
   non-launch-file refusal), files table and recipes.
 
+## Fix round 1 (reviewer: false superlatives)
+
+- (1) "the only one that writes what a fetch learns" -- false. `refdes serve`'s
+  editor accept writes the same records: `citations.stage_source_pins`
+  (`src/refdes/citations.py:2409`), called from `src/refdes/serve/edit.py:829`,
+  and the lockfile header at `citations.py:1396` says both writers. Reworded
+  to name the editor accept, no superlative.
+- (2) `.refdes/navis/` "written and removed only by" the CLI -- false.
+  `src/refdes/serve/navis_write.py` serves `POST /api/navis/archive` and
+  `/api/navis/restore` over the same store. Row now names both writers.
+- (3) "the rule list is the one `release_gate:` enables" -- misleading:
+  `RULE_NAMES` is always all eleven (`src/refdes/lifecycle.py:913`,
+  `evaluate_gate`), and the config only selects skipped vs pass/FAIL. First
+  clause rewritten.
+- (4) `.refdes/copies/` "written only by `refdes fetch --path ...`" -- false.
+  `fetch_all` (`src/refdes/citations.py:2690`) builds `want_keep_copy` from
+  every citation in scope and writes copies at `:3041-3055`; `--path` only
+  narrows scope. Row now says `refdes fetch`.
+
+Superlative audit (`git diff origin/main -- docs/cli-reference.md | grep '^+'
+| grep -i -E '\bonly\b|\bnever\b|\balways\b|\bevery\b|\ball\b'`):
+
+- `--no-write` "Never modify anything under `items/` or `.refdes/`" -- TRUE;
+  write commands refuse, build writes only its site, serve writes its temp
+  preview/token outside the project.
+- `--refresh` "every pinned remote citation" -- TRUE; `citations.refresh`
+  loops every remote citer with a record (`citations.py:3203-3228`).
+- "re-hashed against its pin on every run" -- TRUE; local citations go
+  through `verify()` in build/check.
+- "touches the network only for remote" -- TRUE; local paths are read from
+  disk (`fetch_all`, `classify`).
+- "The list is always all eleven rules" -- TRUE; `RULE_NAMES` length 11.
+- "Fetches every path a `citations:` field declares" -- TRUE unscoped;
+  `--item`/`--path` narrow it, as the flag table says.
+- "With no candidates at all, a clean project ..." -- TRUE; ran it.
+- redaction "by digest and event id only" -- TRUE; copied from the run's
+  own output.
+
+
 ## Could not verify
 
 - `serve` port-in-use and symlinked `--token-file` refusals (no spare listener
@@ -77,10 +116,12 @@ worktree `src`).
   code path read in `src/refdes/citations.py` and page sample left unchanged.
 - `keys restore` success write path and `standard upgrade --dry-run` on a
   v1 project (no fixture made); help/code read only.
+- Plain `refdes fetch` keeping a remote copy (no network run); read
+  `fetch_all` and the `want_keep_copy` write path instead.
 
 ## Tests run
 
 - `pytest tests/test_docs_anchors.py tests/test_docs_examples.py
   tests/test_crossplatform_lint.py` → 34 passed.
 - `python docs-site/gen_examples.py --check` → both pages up to date.
-- Full suite once before pushing.
+- Full suite once before each push (fix round 1: 6456 passed, 2 skipped).

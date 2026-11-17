@@ -357,14 +357,14 @@ release 'rev-b' blocked -- not stamped:
   pass     inline_calc_results
 ```
 
-The rule list is the one `release_gate:` in `refdes-project.yaml` enables (see
-[lifecycle](lifecycle.md#the-readiness-gate)), printed in the order above; a
-disabled rule prints `skipped`. Fix what's listed and run it again. On
-success, a nudge to record the release in the
-[design log](design-log.md#after-a-release), with a starter entry — printed,
-never auto-written. See [lifecycle](lifecycle.md) for the full readiness
-gate, the baseline file's shape, `stamped_by`, and the diff `refdes audit`
-surfaces against it.
+The list is always all eleven rules, printed in the order above;
+`release_gate:` in `refdes-project.yaml` (see
+[lifecycle](lifecycle.md#the-readiness-gate)) decides which run and which
+print `skipped`. Fix what's listed and run it again. On success, a nudge to
+record the release in the [design log](design-log.md#after-a-release), with a
+starter entry — printed, never auto-written. See [lifecycle](lifecycle.md) for
+the full readiness gate, the baseline file's shape, `stamped_by`, and the diff
+`refdes audit` surfaces against it.
 
 `revision` and `release` both exist to write one file, so if the filesystem
 will not take it they refuse rather than degrade: the run exits `2` naming
@@ -935,13 +935,13 @@ Updates `.refdes/ids.yaml`. See [IDs](ids.md).
 
 ## `refdes fetch`
 
-The command that fetches and pins citations — the only one that writes what a
-fetch learns — and it touches the network only for remote
-(`http`/`https`) citations. Fetches every path a `citations:` field declares,
-records its sha256 and fetch time in the `.refdes/citations.yaml` lockfile,
-and keeps the bytes in `.refdes/copies/` for any remote citation that
-declares `keep_copy: true`. A local path is read from disk instead, so pinning
-one works with the network down. `build` and `check` never do this themselves
+The command dedicated to fetching and pinning citations — the editor's
+accept can write the same lockfile records too — and it touches the network
+only for remote (`http`/`https`) citations. Fetches every path a `citations:`
+field declares, records its sha256 and fetch time in the
+`.refdes/citations.yaml` lockfile, and keeps the bytes in `.refdes/copies/`
+for any remote citation that declares `keep_copy: true`. A local path is read
+from disk instead, so pinning one works with the network down. `build` and `check` never do this themselves
 — see [citing a datasheet](markdown.md#citing-a-datasheet).
 
 | Option | Effect |
@@ -2487,10 +2487,10 @@ python -m http.server -d _site 8000
 `schema.json`: the record is gitignored, so a fresh clone — CI included — starts
 unannounced and prints the note on its first writable run. `refdes init` puts it
 in the project's `.gitignore` |
-| `.refdes/copies/` | **no, gitignored** | Kept local copies of datasheet bytes, content-addressed by sha256; written only by `refdes fetch --path ...` for a remote citation with `keep_copy: true`. `refdes init` puts it in the project's `.gitignore` |
+| `.refdes/copies/` | **no, gitignored** | Kept local copies of datasheet bytes, content-addressed by sha256; written by `refdes fetch` for a remote citation with `keep_copy: true`. `refdes init` puts it in the project's `.gitignore` |
 | `.refdes-write.lock` | **no, gitignored** | The project's cross-process write lock — at the project root, not inside `.refdes/`. `write_lock.project_write_lock` is taken around any command that writes item or state files, and around each save by `refdes serve`, so neither a CLI writer nor the editor can interleave another's read-modify-write and two serves cannot save over each other. Outside `cli.main`'s hold: `serve` (it takes the lock per save instead), `init` (it writes the project marker before there is a project to lock), `new` and `schema`, and any `--no-write`/`--dry-run` run. Always empty; created by the first writer that takes it, not at startup. `refdes init` puts it in the project's `.gitignore` |
 | `.refdes/history/` | **yes** | Captured-history store: content-addressed snapshot objects and derived-id events; written by the `follows:` capture and by `refdes history capture`/`redact`/`migrate-seals` |
-| `.refdes/navis/` | **yes** | Navi archive store: one gzip YAML record per archived Navi, named by its key; written and removed only by `refdes navis archive`/`restore` |
+| `.refdes/navis/` | **yes** | Navi archive store: one gzip YAML record per archived Navi, named by its key; written by `refdes navis archive`/`restore` and by `refdes serve`'s `/api/navis/archive` and `/api/navis/restore` |
 | `_site/` | no | Generated output |
 
 Source files are also rewritten by `refdes id`, which inserts allocated IDs in
