@@ -12,8 +12,11 @@ made. Since then **§7a — the floating task pane — is decided (Jared,
 since landed, and §8's **W5 is phased: W5a — the read-only task pane, on
 the preview and on the static site — has landed**, as the record
 `in-prog-logs/workbench-w5a-task-pane.txt` attests; W5b (ticks collected
-into a draft continuation) is not started. Unlike W1–W3 the pane is not a
-response-only decoration: it is rendered in the shared item template
+into a draft continuation) has since landed (W5b.1–W5b.5, #448–#474, with
+fixes through #485; the record is
+`docs/design/thread-workbench-w5b-plan.md`'s Status line). Unlike W1–W3 the
+pane is not a response-only decoration: it is rendered in the shared item
+template
 (§7a's "the same pane" sub-decision), and it computes nothing — the pane is
 a client of the projection it consumes. One half of D1 is deliberately
 **not** shipped — dotted `ITEM.NAME`
@@ -285,8 +288,9 @@ and the index projection). CLI parity (`refdes thread`, `refdes work`) stays.
   with progressive enhancement. **Landed**
   (`in-prog-logs/workbench-w5a-task-pane.txt`) — a client of the H7
   projection, computing nothing itself.
-- **W5b — ticks.** Ticks collected into a draft continuation. **Not
-  started.**
+- **W5b — ticks.** Ticks collected into a draft continuation. **Landed**
+  (W5b.1–W5b.5, #448–#474, with fixes through #485; see
+  `docs/design/thread-workbench-w5b-plan.md`).
 
 Each phase is independently shippable and independently verifiable against the
 contract: for every rendered fact, name the Python mechanism that produced it.

@@ -1,17 +1,17 @@
-Status: **plan, questions ratified** (2026-11-08). It answers the one deferred item of
-the Navis design — `in-prog-logs/navis-design-20261025.md` §13 slice 6
-"(Deferred, see §14) VS Code panel from the `index` payload" (line 424) and
-its §14 question 5 (lines 438-440: "is a VS Code panel wanted, and is it v1
-or later?") — and it is the Navis client of
-`docs/design/editor-vscode-adapter.md` §3.3's shipped route table, whose
-Navis row ("Everything about the project's Navis — `GET /api/navis`", §3.3)
-the adapter doc already reserves. This is a plan, not a spec: the design
-rules (§2 owner decisions, §11's one-projection rule) stand, and the job
-here is to order the work into slice-ready steps, name the mechanism each
-builds on, and put the open questions in front of the owner with a
-recommended default each — the format of
-`docs/design/thread-workbench-w5b-plan.md` §6 (options, trade-offs,
-conservative default; that file lines 395-420).
+Status: **Implemented** in extension 0.2.0. All seven defaults in §12 were
+ratified by Jared on 2026-11-08, as written, and all four slices then landed:
+S6.1's read-only Navis TreeView in the Explorer over `GET /api/navis`, with the
+placeholder states and click-through (#457); S6.2's `ServeClient.post()`
+(#458), the write-action decision logic (#459), and the Archive / Restore /
+Mint keys commands, with the `--no-write` session lock (#464); S6.3's freshness
+polish, the `Refdes: Refresh Navis` command, the `Mint keys (N)` row, Open in
+editor, and the read-only status tooltip that survives index repaints
+(#469, #482); and S6.4's README/docs plus the 0.1.0 → 0.2.0 bump
+(#472, `editors/vscode/package.json`). The design rules (§2 owner decisions,
+§11's one-projection rule) held unchanged, and the slice-6 data-path deviation
+(Q1's `/api/navis` over the `index` payload) is the ratified one. Publishing to
+the marketplace or open-vsx stays Jared's call and was not part of this
+landing (Q6).
 
 **Citations.** Line numbers are against `main` at `b9eba32d` (post-#402, so
 the pr-size gate is live). Every file:line below was opened for this
