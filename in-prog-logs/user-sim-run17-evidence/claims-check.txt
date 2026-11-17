@@ -5,4 +5,4 @@
 # on the ellipsis character.
 
 report: user-sim-release-gate-run17.md; evidence dir: user-sim-run17-evidence
-fragments checked: 123; misses: 0
+fragments checked: 124; misses: 0
