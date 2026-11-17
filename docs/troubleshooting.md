@@ -130,7 +130,13 @@ WARNING items/reqs.yaml:7 [REQ-PWR-001] — body: is empty -- title: is an
 
 The older `missing required field 'text'` message belongs to hardware@2,
 where `requirement`/`bound` had a required `text:` field. Under hardware@3
-writing `text:` gets the rename diagnostic below instead.
+writing `text:` gets the rename diagnostic instead:
+
+**`'requirement.text' is now 'requirement.body' -- rename this key in the source file. Its value is used for 'body' in this build so the rest of it doesn't also report a missing required field.`**
+The `hardware@3` fold of `text:` (and `test`'s `method:`) into `body:`. The
+value is used in that build, so renaming the key leaves the item as it stands;
+`refdes standard upgrade --to 3` rewrites it for you. The same message spells
+`'bound.text'` / `'test.method'` for those types.
 
 **`status: 'in-review' is not one of draft, active, retired`**
 Use one of the declared `choices`, or add yours to the schema.

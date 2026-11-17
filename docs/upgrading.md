@@ -188,7 +188,7 @@ item off `selected` (the probe's second-source part became
 
 | Change | What you see | Fix |
 |---|---|---|
-| `refdes.yaml` retired; config is two files | `configuration error: refdes.yaml is retired…`, exit 2, on every command — when no ancestor directory carries the marker (step 1) | Split by top-level key: settings → `refdes-project.yaml` (the marker), `types:`/`link_types:`/`sets:` → `refdes-schema.yaml`; remove the old file (`refdes revise` can't do config layout) |
+| `refdes.yaml` retired; config is two files | `configuration error: refdes.yaml is retired…`, exit 2, on every command — when no ancestor directory carries the marker (step 1) | Split by top-level key: settings → `refdes-project.yaml` (the marker), `types:`/`link_types:`/`sets:` → `refdes-schema.yaml`; remove the old file (`refdes rename` can't do config layout) |
 | `field_sets:` → `sets:` | load error naming the rename | Rename the key in `refdes-schema.yaml`; entries unchanged |
 | `url:` → `path:` in citations | `citation field url: was renamed to path:` | Rename in each item (keep the `http(s)://` value); `refdes standard upgrade --to 3` rewrites it with the build green |
 | `vendor:` → `keep_copy:`; `vendored:` → `kept_copy:` | lockfile error naming the keys; `.refdes/vendor/` warning | Rename in items and `.refdes/citations.yaml`, `mv .refdes/vendor .refdes/copies`, or `refdes fetch --update`; a project configuring the renamed release-gate rule must rename `missing_vendored_copies:` → `missing_kept_copies:` |
@@ -199,7 +199,7 @@ item off `selected` (the probe's second-source part became
 | `equivalent` → `drop_in` | under a v3 pin: unknown-verb error naming `drop_in` (escalated for this verb) | The upgrade rewrites it |
 | `equivalent`→`drop_in`, `records`→`follows` capture side effect | first writable load after the upgrade prints `captured …` lines; migrated `follows:` edges get anchored to thread tips | Expected — history is being recorded; delete the `follows:` lines first if you want the edges inert |
 | `on_change` mode `log` → `timeline` | with a v3 pin (or no pin): load error naming `timeline`, per spelling (config, schema annotations, item overrides) | Rename by hand — `refdes rename` renames keys, not values; v1/@2 pins keep `log` |
-| project/item setting `history:` → `on_change:` | hard error naming `on_change:` | Rename in `refdes-project.yaml` and item front matter (`refdes revise` can't) |
+| project/item setting `history:` → `on_change:` | hard error naming `on_change:` | Rename in `refdes-project.yaml` and item front matter (`refdes rename` can't) |
 | Duplicate mapping key in an item file | `duplicate key 'id' in one mapping (lines 14 and 17) …` — put the `- ` back on its own line, the fragment remedy | One error per repeated key; the file is not rewritten |
 | Duplicate key in the config files | `configuration error: refdes-project.yaml: duplicate key 'site' … (lines 1 and 14)` | Delete/merge the two blocks |
 | Scalar for a list field | `field 'tags' is a list field, but it was given a string …` | Write a real list — the value is never split on commas |
